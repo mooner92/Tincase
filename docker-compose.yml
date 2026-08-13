@@ -1,0 +1,29 @@
+# OPS — 운영 compose. 반드시 127.0.0.1 바인딩 (OPS-03/AU-01).
+services:
+  app:
+    build: .
+    image: repman:latest
+    container_name: repman
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11111:3000"          # ← 호스트 IP 명시. "11111:3000" 금지 (사내망 노출)
+    environment:
+      NODE_ENV: production
+      TZ: Asia/Seoul                     # OPS-04c — 코드는 이것 없이도 옳다 (WS-07)
+      DATABASE_URL: file:/data/db/worklog.db
+      STORAGE_ROOT: /data
+      CF_ACCESS_TEAM: aidt-kei
+      CF_ACCESS_AUD: ${CF_ACCESS_AUD:?CF_ACCESS_AUD를 .env.production에 설정하세요 (AU-02)}
+    env_file:
+      - .env.production                  # CF_ACCESS_AUD만 담는다 (git 제외)
+    volumes:
+      - /data/worklog:/data              # ST-00 — 22TB 로컬 디스크. 홈·/srv 금지
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "5" }   # OPS-19 — 루트 디스크 보호

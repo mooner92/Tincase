@@ -35,3 +35,4 @@ fixtures/*.hwpx
 # Cloudflare Account/Tunnel ID, 내부 IP 등 실제 값
 docs/private/
 
+.env.production
