@@ -11,6 +11,7 @@
 
 ```
 worklog-app   Next.js standalone + SQLite   127.0.0.1:11111
+데이터: /data/worklog (호스트 바인드)       ← ST-00. 루트 디스크(98% 사용) 금지
 ```
 
 DB 컨테이너를 따로 두지 않는다 ([ADR-0003](../adr/0003-sqlite-prisma.md)).
@@ -85,13 +86,13 @@ services:
     restart: unless-stopped
     ports: ["127.0.0.1:11111:3000"]
     environment:
-      DATABASE_URL: file:/data/worklog.db
+      DATABASE_URL: file:/data/db/worklog.db
       STORAGE_ROOT: /data
       CF_ACCESS_TEAM: aidt-kei
       CF_ACCESS_AUD: ${CF_ACCESS_AUD}
       TZ: Asia/Seoul
     volumes:
-      - /srv/worklog/data:/data
+      - /data/worklog:/data          # ST-00: 22TB 로컬 디스크. /srv·홈 금지
     healthcheck:
       test: ["CMD","node","-e","fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
@@ -122,7 +123,7 @@ services:
 
 | 변수 | 예 | 필수 | 설명 |
 |---|---|---|---|
-| `DATABASE_URL` | `file:/data/worklog.db` | ✔ | |
+| `DATABASE_URL` | `file:/data/db/worklog.db` | ✔ | |
 | `STORAGE_ROOT` | `/data` | ✔ | |
 | `CF_ACCESS_TEAM` | `aidt-kei` | ✔ | |
 | `CF_ACCESS_AUD` | `a1b2…` | ✔ | Access 앱 AUD ([Q-04](../../OPEN-QUESTIONS.md)) |
@@ -153,20 +154,20 @@ production에서 `DEV_IDENTITY`가 설정돼 있으면 **거부**한다.
 ### OPS-07 — SQLite는 `.backup`으로
 
 ```bash
-sqlite3 /srv/worklog/data/worklog.db ".backup '/srv/worklog/backup/db-$(date +%F).db'"
+sqlite3 /data/worklog/db/worklog.db ".backup '/mnt/backup/worklog/db-$(date +%F).db'"
 ```
 
 **`cp` 금지.** WAL 모드에서 복사본이 깨질 수 있다.
 
-### OPS-08 — 백업 주기
+### OPS-08 — 백업 주기와 목적지
 
-| 대상 | 주기 | 보존 |
-|---|---|---|
-| DB | 매일 03:00 | 30일 |
-| `submissions/` | 매주 일 03:30 | 12주 |
-| `merged/` | 매주 | 12주 |
+| 대상 | 주기 | 보존 | 목적지 |
+|---|---|---|---|
+| DB | 매일 03:00 | 30일 | `/mnt/backup/worklog/` (NFS, 실측 227T 여유) |
+| `divisions/**` | 매주 일 03:30 | 12주 | 〃 |
 
-이 서버엔 이미 `~/kei-backups/`가 있다. 관례를 따르되 경로는 분리한다.
+목적지는 **다른 노드의 NFS**(192.168.1.108) — 이 서버 디스크 장애에도 생존.
+NFS에는 백업 파일만 둔다. 라이브 SQLite 상주 금지 (ADR-0003).
 
 ### OPS-09 — 복구 리허설
 
@@ -261,14 +262,14 @@ docker compose up -d --build
 
 ## 8. 용량
 
-| 항목 | 연간 |
-|---|---|
-| DB | < 5 MB |
-| 제출 파일 | 8명 × 52주 × 100 KB × 2(재업로드) ≈ **83 MB** |
-| 병합본 | 52 × 150 KB ≈ 8 MB |
-| **합계** | **~100 MB/년** |
+| 항목 | 연간 (파일럿 1개 부서) | 연간 (전 부서 337명 가정) |
+|---|---|---|
+| DB | < 5 MB | < 50 MB |
+| 제출 파일 | 13명 × 52주 × 100 KB × 2 ≈ 135 MB | ≈ 3.5 GB |
+| 병합본 | ≈ 8 MB | ≈ 250 MB |
 
-10년 운영해도 1 GB. 용량 관리는 사실상 불필요하다.
+`/data` 여유 21TB — 전 부서 가정으로도 수천 년치. 용량 관리는 사실상 불필요하다.
+**단, 루트 디스크(98%)는 별개 문제다 — OPS-19.**
 
 ---
 
@@ -284,9 +285,23 @@ docker compose up -d --build
 
 ### OPS-18 — 최후 수단
 
-시스템이 완전히 죽고 화요일 마감이 임박하면, **이메일 방식으로 되돌린다.**
-`fixtures/master-template.hwp`를 메일로 뿌리면 된다.
+시스템이 완전히 죽고 부서 마감이 임박하면, **그 부서는 이메일 방식으로 되돌린다.**
+부서 양식(`divisions/{slug}/template/active.hwp`)을 메일로 뿌리면 된다.
 
 > 이 시스템은 기존 프로세스를 **대체**하지만 **파괴하지는 않는다.**
-> 언제든 수동으로 되돌아갈 수 있어야 한다. 8명짜리 도구에 HA를 붙이는 것보다
+> 언제든 수동으로 되돌아갈 수 있어야 한다. 사내 도구에 HA를 붙이는 것보다
 > 이 한 줄짜리 대비책이 현실적이다.
+
+### OPS-19 — 루트 디스크 보호 ★ (실측: `/` 98% 사용, 11G 남음)
+
+이 서버의 루트 디스크는 이미 위험 수위다. 이 프로젝트가 지킬 것:
+
+| 수칙 | 이유 |
+|---|---|
+| 데이터·DB·백업 스테이징 전부 `/data` | ST-00 |
+| Docker 빌드는 `docker builder prune` 정기 실행과 함께 | 빌드 캐시가 `/var/lib/docker`(= `/`)에 쌓임 |
+| 이미지 태그 2세대만 유지 | 〃 |
+| 헬스체크에 루트 디스크 여유 감시 추가 — 5G 미만이면 경고 | 다른 서비스가 채워도 우리가 먼저 안다 |
+
+근본 대책(Docker data-root를 `/data`로 이전)은 **다른 서비스에 영향을 주므로 이 프로젝트
+범위 밖** — 운영자 판단 사항으로 기록만 한다 ([Q-17](../../OPEN-QUESTIONS.md)).

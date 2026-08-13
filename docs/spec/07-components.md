@@ -1,6 +1,7 @@
 # S-07. 컴포넌트 스펙
 
 구현: `src/components/**`
+v2: 드로어·규칙 에디터·양식/명단 관리 추가 — [ADR-0005](../adr/0005-multi-division-tenancy.md)
 
 ---
 
@@ -15,10 +16,11 @@
 | Server | (기본) | 상호작용 없음. 데이터 표시 전용 |
 | Client | `'use client'` | 상태·이벤트·타이머 필요 |
 
-**클라이언트 컴포넌트는 최소화한다.** 아래 5개만 클라이언트다.
+**클라이언트 컴포넌트는 최소화한다.** 클라이언트는 아래 9개뿐이다.
 
 ```
-UploadDropzone · DeadlineCountdown · SlotSelector · CopyMissingButton · VersionHistoryPopover
+UploadDropzone · DeadlineCountdown · SlotSelector · CopyMissingButton
+VersionHistoryPopover · FileDrawer · RuleEditor · TemplateManager · RosterEditor
 ```
 
 ### CP-02 — 데이터는 props로 내려받는다
@@ -109,32 +111,31 @@ interface DeadlineCountdownProps {
 
 | ID | 요구사항 |
 |---|---|
-| CP-18 | `GET /api/template` 링크 |
-| CP-19 | 파일명에 주차 포함 안내 (API-20) |
+| CP-18 | `GET /api/template` 링크 — 자기 부서 active 양식 (API-17) |
+| CP-19 | 파일명에 주차·부서명 포함 (API-18) |
 | CP-20 | 잠김 상태에서도 활성 (다음 주 대비 미리 받기 허용) |
 
 ---
 
 ### `<GuideNotice>` · Server
 
-스펙 §3 작성 관례 표시. **하드코딩하지 않고 상수 모듈에서 가져온다.**
+작성 관례 안내. v2: **부서 데이터에서 온다 — 전역 상수 금지** (PG-10).
 
 ```ts
-// src/lib/guide.ts
-export const WRITING_GUIDE = [
-  '항목 순서: AI → 홍보(정간물 포함) → 시스템 → 도서관',
-  '상시 반복 업무는 일자를 공란으로 둡니다',
-  '특정 일자가 있는 업무만 날짜를 적습니다',
-] as const;
+interface GuideNoticeProps {
+  guideLines: string[];   // 부서 설정 (Division.guideText를 줄 단위 분해)
+}
 ```
 
 | ID | 요구사항 |
 |---|---|
-| CP-21 | 문구는 `src/lib/guide.ts` 단일 출처 |
-| CP-22 | 코드로 강제하지 않는다 (스펙 §3) — 안내만 |
+| CP-21 | 문구 출처는 부서 설정. 비어 있으면 섹션 자체를 렌더하지 않음 |
+| CP-22 | 코드로 강제하지 않는다 — 안내만 |
 
-> 이 상수는 Phase 2 병합 정렬 순서(`TEAM_ORDER`)와 **같은 사실**을 표현한다.
-> 두 곳이 어긋나지 않도록 `TEAM_ORDER`에서 문구를 파생시키는 것을 검토한다.
+> AI홍보전략실의 관례("AI → 홍보(정간물) → 시스템 → 도서관", "상시 업무 일자 공란")는
+> **그 부서의 시드 값**으로 들어간다. 다른 부서는 자기 관례를 적는다.
+> 병합 순서와 안내 문구가 어긋나지 않도록, Phase 2에서 규칙 텍스트와 같은
+> 설정 화면(`/manage/settings`)에 둔다.
 
 ---
 
@@ -160,7 +161,7 @@ type UploadState =
 | ID | 요구사항 |
 |---|---|
 | CP-23 | 드래그앤드롭 + 클릭 선택 **둘 다** 지원 |
-| CP-24 | `accept=".hwp,.hwpx"` — 다만 신뢰하지 않고 서버 재검증 (ST-06) |
+| CP-24 | `accept=".hwp"` — 다만 신뢰하지 않고 서버 재검증 (ST-05~06) |
 | CP-25 | 전송 전 클라이언트 1차 검증: 확장자, 20MB. **즉시 피드백용** |
 | CP-26 | 업로드 진행률 표시 (`XMLHttpRequest.upload.onprogress`) |
 | CP-27 | 업로드 중 중복 제출 차단 (버튼 비활성 + 드롭 무시) |
@@ -180,6 +181,7 @@ type UploadState =
 |---|---|
 | `slot_locked` | 마감되어 제출되지 않았습니다. 다음 주차에 제출해 주세요. |
 | `invalid_file` / `not_hwp` | 한글 파일이 아닙니다. 한글에서 저장한 .hwp 파일을 올려주세요. |
+| `invalid_file` / `hwpx_not_allowed` | .hwpx는 받지 않습니다. [다른 이름으로 저장] → [한글 문서(*.hwp)]로 저장 후 올려주세요. |
 | `invalid_file` / `too_large` | 파일이 너무 큽니다 (최대 20MB). |
 | `invalid_file` / `corrupt_structure` | 파일을 읽을 수 없습니다. 한글에서 다시 저장한 뒤 올려주세요. |
 | `not_registered` | 등록되지 않은 사용자입니다. 담당자에게 문의해 주세요. |
@@ -209,15 +211,15 @@ interface SubmissionStatusProps {
 
 ---
 
-## 4. 관리자 화면 컴포넌트
+## 4. 담당자 화면 컴포넌트 (lead)
 
 ### `<SlotSelector>` · **Client**
 
 | ID | 요구사항 |
 |---|---|
 | CP-40 | 최신 26주 목록 |
-| CP-41 | 각 항목에 `8월 2주차 (5/8)` 형태로 제출 수 표시 |
-| CP-42 | 선택 시 `/admin/[isoKey]`로 이동 |
+| CP-41 | 각 항목에 `8월 2주차 (9/12)` 형태로 제출 수 표시 |
+| CP-42 | 선택 시 `/{slug}/manage/[isoKey]`로 이동 |
 | CP-43 | 현재 주차에 `이번 주` 배지 |
 
 ---
@@ -226,7 +228,7 @@ interface SubmissionStatusProps {
 
 | ID | 요구사항 |
 |---|---|
-| CP-44 | `5 / 8 제출` 대형 표시 |
+| CP-44 | `9 / 12 제출` 대형 표시 (분모 = onRoster) |
 | CP-45 | 진행 막대. `aria-valuenow` 등 ARIA 속성 포함 |
 | CP-46 | 마감 상태 배지 |
 | CP-47 | 전원 제출 시 축하 표시(체크) — 상태 확인이 1초에 끝나게 |
@@ -237,16 +239,17 @@ interface SubmissionStatusProps {
 
 ```ts
 interface SubmissionTableProps {
-  members: MemberStatus[];   // 미제출 포함 전원 (API-22)
+  members: MemberStatus[];   // 미제출 포함 onRoster 전원 (API-20)
   locked: boolean;
+  onOpenDrawer: (submissionId: string) => void;   // 열람 열 → FileDrawer
 }
 ```
 
 | ID | 요구사항 |
 |---|---|
-| CP-48 | 열: 이름 / 팀 / 상태 / 버전 / 제출시각 / 받기 |
+| CP-48 | 열: 이름 / 상태 / 버전 / 제출시각 / **열람** / 받기 |
 | CP-49 | 미제출 행: 연한 배경 + `○ 미제출` |
-| CP-50 | `team`이 비어 있어도 정상 렌더 (Phase 1에서 미배정 가능, DM-09) |
+| CP-50 | 열람 버튼은 제출자에게만. 클릭 → `onOpenDrawer(latest.id)` (PG-19) |
 | CP-51 | 버전 ≥2면 `<VersionHistoryPopover>` 노출 |
 | CP-52 | 768px 이하 카드 레이아웃 (PG-32) |
 | CP-53 | `<caption>` + `scope` 속성으로 스크린리더 대응 |
@@ -270,7 +273,7 @@ interface SubmissionTableProps {
 |---|---|
 | CP-58 | `전체 zip 받기 (N개)` — N은 실제 대상 수 |
 | CP-59 | N=0이면 비활성 + 사유 툴팁 |
-| CP-60 | `자동 병합` 버튼 — Phase 1 비활성, `준비 중 (Phase 2)` (PG-26) |
+| CP-60 | `자동 병합` 버튼 — Phase 1 비활성, `준비 중 (Phase 2)` (PG-22) |
 | CP-61 | zip 생성 중 로딩 표시 (대용량 시 수 초) |
 
 ---
@@ -279,12 +282,70 @@ interface SubmissionTableProps {
 
 | ID | 요구사항 |
 |---|---|
-| CP-62 | 미제출자 이름을 `장혜정, 홍길동` 형태로 클립보드 복사 |
+| CP-62 | 미제출자 이름을 `김OO, 이OO` 형태(쉼표 구분)로 클립보드 복사 |
 | CP-63 | 복사 후 2초간 `복사됨` 표시 |
 | CP-64 | 미제출 0명이면 렌더 안 함 |
 | CP-65 | `navigator.clipboard` 미지원 환경 폴백 (`textarea` + `execCommand`) |
 
 > PG-27 참조. 사내망 브라우저가 구형일 수 있으므로 CP-65는 생략하지 말 것.
+
+---
+
+## 4.5 담당자 화면 신규 컴포넌트 (v2)
+
+### `<FileDrawer>` · **Client** ★
+
+제출물 열람 사이드 패널. 담당자 화면의 핵심 (PG-19~21).
+
+```ts
+interface FileDrawerProps {
+  submissionId: string | null;      // null이면 닫힘
+  memberList: { id: string; name: string; latestId: string | null }[];  // ←→ 이동용
+  onClose: () => void;
+  onNavigate: (submissionId: string) => void;
+}
+```
+
+| ID | 요구사항 |
+|---|---|
+| CP-70 | 열릴 때 `GET /api/submissions/:id/preview` 호출, 로딩 스켈레톤 표시 |
+| CP-71 | 표 3개를 **원본 열 구성 그대로** HTML `<table>`로 렌더. 셀 내 줄바꿈(`\n`) 유지 |
+| CP-72 | 빈 3번 표는 `기타 특이사항 없음 (표 삭제됨 — 관례상 정상)` 안내로 표기 |
+| CP-73 | 헤더: 부서원명 · v버전 · 제출시각 · `원본 다운로드` · 버전 드롭다운(구버전 열람) |
+| CP-74 | `←`/`→` 키·버튼으로 이전/다음 **제출자** 이동. 미제출자는 건너뜀 |
+| CP-75 | `role="dialog"` + 포커스 트랩 + Esc 닫기 + 닫힐 때 트리거 행으로 포커스 복귀 |
+| CP-76 | 읽기 전용 — 어떤 편집 UI도 없다 (PG-21) |
+| CP-77 | preview 실패(500) 시: 오류 안내 + `원본 다운로드`는 계속 제공 (열람 실패가 수합을 막지 않게) |
+
+### `<RuleEditor>` · **Client**
+
+부서 병합 규칙 텍스트 편집 (PG-25~27, API-28).
+
+| ID | 요구사항 |
+|---|---|
+| CP-78 | monospace textarea + 저장 버튼. 저장 성공 시 파싱 결과 요약 표시 |
+| CP-79 | 422 응답의 `problems[]`를 행 번호와 함께 표시 |
+| CP-80 | 절대 규칙 안내 패널 상시 노출 (PG-26 문구) |
+| CP-81 | 저장 전 이탈 시 confirm (편집 유실 방지) |
+
+### `<TemplateManager>` · **Client**
+
+부서 양식 관리 (PG-28~30, API-40~41).
+
+| ID | 요구사항 |
+|---|---|
+| CP-82 | 현재 양식 카드(버전·등록일·등록자·다운로드) + 교체 드롭존(UploadDropzone 재사용) |
+| CP-83 | 교체 성공 → 파싱 요약(표·행수) 즉시 표시 (API-41) |
+| CP-84 | 교체 실패 → 기존 양식 유지 명시 (`기존 양식은 그대로입니다`) |
+
+### `<RosterEditor>` · **Client**
+
+제출 대상 관리 (PG-31~32, API-26~27).
+
+| ID | 요구사항 |
+|---|---|
+| CP-85 | 부서원 목록 + onRoster 토글 + 드래그 정렬(또는 ↑↓ 버튼 — 접근성 필수) |
+| CP-86 | 변경은 명시적 `저장` 버튼으로 일괄 반영 (실수 토글 방지), 저장 후 토스트 |
 
 ---
 
@@ -301,10 +362,18 @@ interface SubmissionTableProps {
 | CP-T07 | UploadDropzone | 409 `slot_locked` → 전용 문구 |
 | CP-T08 | UploadDropzone | 파일 2개 드롭 → 첫 번째만, 안내 표시 |
 | CP-T09 | SubmissionTable | 미제출자 행 렌더됨 |
-| CP-T10 | SubmissionTable | `team` 없어도 렌더 |
+| CP-T10 | SubmissionTable | onRoster=false 인원은 본 목록에서 제외 |
 | CP-T11 | CopyMissingButton | 미제출 0명 → 렌더 안 됨 |
-| CP-T12 | StatusSummary | 8/8 → 완료 표시 |
+| CP-T12 | StatusSummary | 12/12 → 완료 표시 |
 | CP-T13 | SubmissionStatus | `null` → 렌더 안 됨 |
+| CP-T14 | FileDrawer | 픽스처 preview 응답 → 표 3개 렌더, 셀 값 일치 |
+| CP-T15 | FileDrawer | 3번 표 없음 → "관례상 정상" 안내 |
+| CP-T16 | FileDrawer | Esc → 닫히고 트리거로 포커스 복귀 |
+| CP-T17 | FileDrawer | `→` 키 → 다음 제출자, 미제출자 건너뜀 |
+| CP-T18 | FileDrawer | preview 500 → 오류 + 다운로드 버튼 유지 |
+| CP-T19 | RuleEditor | 422 problems 행 번호 표시 |
+| CP-T20 | TemplateManager | 교체 실패 → "기존 양식 유지" 문구 |
+| CP-T21 | RosterEditor | 토글 후 저장 전 이탈 → confirm |
 
 ---
 

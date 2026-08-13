@@ -1,13 +1,14 @@
-# S-03. 인증 · 접근제어
+# S-03. 인증 · 인가 · 부서 격리
 
-구현: `src/server/auth.ts`, `src/middleware.ts`
+구현: `src/server/auth.ts`, `src/server/authz.ts`, `src/middleware.ts`
+v2: 역할·부서 격리 추가 — [ADR-0005](../adr/0005-multi-division-tenancy.md)
 
 ---
 
 ## 1. 방침
 
 **앱은 인증(authentication)을 구현하지 않는다.** Cloudflare Access가 신원을 확정하고,
-앱은 그 신원으로 **인가(authorization)** 만 판단한다. (설계 원칙 P3)
+앱은 그 신원으로 **인가(authorization) — 역할과 부서 격리 — 를 판단한다.** (원칙 P3·P5)
 
 ```
 브라우저 ──TLS──► Cloudflare Edge ──► Access 정책 검사 (SSO/OTP)
@@ -95,13 +96,24 @@ it('[AU-T03] production에서는 DEV_IDENTITY가 무시된다', ...)
 Access를 통과했어도 `User` 테이블에 없거나 `isActive=false`면 403.
 
 ```
-403  { error: "not_registered", email: "someone@kei.re.kr" }
+403  { error: "not_registered" }
 ```
 
-화면에는 `등록되지 않은 사용자입니다. 담당자(Sean)에게 문의하세요.` 를 띄운다.
+화면에는 `등록되지 않은 사용자입니다. 운영자에게 문의하세요.` 를 띄운다.
 
 > Access 정책과 DB 시드는 **따로** 관리되므로 어긋날 수 있다.
 > 조용히 통과시키지 말고 명시적으로 거부한다.
+
+### AU-04b — 미온보딩 부서는 "준비 중"
+
+`User`는 있으나 소속 `Division.isActive=false`면 (전 직원이 시드되므로 흔한 상태):
+
+```
+로그인 성공 → 전용 안내 화면
+"OO실 페이지는 아직 준비 중입니다. 도입을 원하시면 운영자에게 문의하세요."
+```
+
+403이 아니라 **온보딩 대기 안내**다 — 미래 사용자를 문전박대하지 않는다.
 
 ### AU-05 — 업로더는 서버가 정한다 ★
 
@@ -119,12 +131,60 @@ const user = await findUser(formData.get('userId'));
 
 이로써 사칭이 구조적으로 불가능해진다. UI의 이름 선택 드롭다운도 사라진다 (DM-01).
 
-### AU-06 — 관리자 판정
+### AU-06 — 역할 매트릭스 (v2) ★
 
-`User.isAdmin === true`. Access 정책이 아니라 **DB**가 정한다.
+역할은 Access 정책이 아니라 **DB**가 정한다: `divisionRole`(member|lead) + `isOperator`.
 
-- 관리자 화면 라우트: `/admin/**`
-- 비관리자 접근 시 **404** 반환 (403이 아님 — 존재 자체를 노출하지 않음)
+| 행위 | member | lead | operator |
+|---|---|---|---|
+| 자기 부서 페이지 접근 | ✔ | ✔ | ✘ (자기 부서원 자격일 때만) |
+| 본인 업로드/재업로드/본인 파일 다운로드 | ✔ | ✔ | — |
+| 부서 제출 현황 (전원) | ✘ | ✔ | ✘ |
+| 타인 제출물 열람(드로어)·다운로드·zip | ✘ | ✔ (자기 부서만) | ✘ |
+| 병합 규칙 편집 / 병합 실행 / 양식 관리 / onRoster 관리 | ✘ | ✔ (자기 부서만) | ✘ |
+| 부서(테넌트) 생성·활성화, 사용자 배정·역할 변경 | ✘ | ✘ | ✔ |
+| 임의 부서의 제출물·현황·병합본 접근 | ✘ | ✘ | **✘ (AU-15)** |
+
+- member는 **자기 제출물만** 본다. 같은 부서원의 제출 여부도 보이지 않는다 —
+  격리 요구("냈는지 안 냈는지 감시 불가")를 부서 안에서도 보수적으로 적용한 기본값.
+  담당자만 현황을 본다. (완화 여부는 [Q-15](../../OPEN-QUESTIONS.md))
+- 권한 없는 라우트는 전부 **404** (403 아님 — 존재를 노출하지 않는다).
+
+### AU-13 — 부서 격리는 쿼리 레벨에서 강제 ★
+
+핸들러마다 if문으로 거르지 않는다. **스코프된 저장소 계층만 존재하게 만든다.**
+
+```ts
+// src/server/authz.ts — 핸들러가 얻을 수 있는 유일한 진입점
+export async function requireDivisionScope(req: Request): Promise<Scope> {
+  const identity = await verifyAccess(req);
+  const user = await requireActiveUser(identity.email);
+  return {
+    user,
+    // 모든 조회가 이 divisionId로 시작한다. 요청의 slug·id는 검증용일 뿐 스코프가 아니다
+    db: scopedRepo(user.divisionId),
+    isLead: user.divisionRole === 'lead',
+  };
+}
+```
+
+- URL의 `slug`가 `user.division.slug`와 다르면 **404** — 리다이렉트하지 않는다
+  (리다이렉트는 "그 부서가 존재한다"를 노출한다)
+- `Submission`·`Template`·`MergeRun` 조회는 예외 없이 `divisionId` 첫 축 (DM-12)
+- 전역(스코프 없는) repo는 `operator` 전용 모듈에만 존재하며, 그 모듈은 테넌시
+  테이블(Division/User)만 다루고 Submission 계열을 import하지 않는다 — AU-15의 코드적 집행
+
+### AU-14 — 격리 회귀 테스트가 릴리스 게이트
+
+격리는 기능이 아니라 **불변식**이므로 전용 테스트 스위트를 둔다 (§5 AU-T12~T17).
+하나라도 깨지면 배포 금지.
+
+### AU-15 — 운영자는 내용에 접근하지 않는다
+
+operator 권한은 테넌시 관리(부서 생성·활성화, 사용자 배정)뿐이다.
+**타 부서의 제출물·현황·병합본·규칙 내용은 운영자에게도 보이지 않는다.**
+서버 관리자로서 디스크를 직접 볼 수 있다는 사실과, 제품이 그것을 화면으로
+제공하는 것은 다른 문제다 — 제품은 제공하지 않는다. (완화 여부는 [Q-14](../../OPEN-QUESTIONS.md))
 
 ### AU-07 — 세션 없음
 
@@ -189,7 +249,7 @@ $ ls ~/.cloudflared/config.yml     → 없음
 |---|---|
 | Application domain | `worklog.excusa.uk` |
 | Session Duration | 24h (권장) |
-| Policy | Allow · Emails = 팀원 8명 |
+| Policy | **파일럿**: Allow · Emails = AI홍보전략실 명단<br>**확산 시**: Allow · `Emails ending in @kei.re.kr` — 개별 나열은 337명 규모에서 유지 불가. 실제 가입 게이트는 앱의 DB(AU-04)가 담당 ([Q-13](../../OPEN-QUESTIONS.md)) |
 
 **③ AUD 태그 복사** → `.env`의 `CF_ACCESS_AUD`
 
@@ -239,8 +299,20 @@ curl -m 5 http://<서버-내부-IP>:11111/          # 실패해야 정상
 | AU-T05 | `aud` 불일치 → 401 |
 | AU-T06 | 유효 JWT + 미등록 이메일 → 403 `not_registered` |
 | AU-T07 | 유효 JWT + `isActive=false` → 403 |
-| AU-T08 | 비관리자 `/admin` 접근 → 404 |
-| AU-T09 | 업로드 시 위조 `userId` 필드 → **무시되고 JWT 신원으로 저장** |
+| AU-T08 | member가 담당자 화면(`/{slug}/manage`) 접근 → 404 |
+| AU-T09 | 업로드 시 위조 `userId`/`divisionId` 필드 → **무시되고 JWT 신원으로 저장** |
 | AU-T10 | `Cf-Access-Authenticated-User-Email`만 있고 JWT 없음 → 401 |
+| AU-T11 | 미온보딩 부서 사용자 → "준비 중" 안내 (AU-04b) |
 
-> AU-T09, AU-T10이 이 스펙의 핵심 회귀 테스트다.
+**격리 스위트 (AU-14 릴리스 게이트)**
+
+| ID | 내용 |
+|---|---|
+| AU-T12 | A부서 member가 B부서 페이지 `GET /{B-slug}` → **404** |
+| AU-T13 | A부서 lead가 B부서 submissionId 다운로드/드로어 → **404** |
+| AU-T14 | A부서 lead가 B부서 zip/현황 API → **404** |
+| AU-T15 | member가 같은 부서 타인 submissionId → **404** (AU-06 기본값) |
+| AU-T16 | operator가 임의 부서 제출물·현황 API → **404** (AU-15) |
+| AU-T17 | 존재하지 않는 slug와 남의 slug의 응답이 **구별 불가능** (동일 404) |
+
+> AU-T09·T10(위조 방어)과 AU-T12~T17(격리)이 이 스펙의 핵심 회귀 테스트다.

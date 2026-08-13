@@ -1,17 +1,20 @@
 # S-01. 도메인 모델
 
 구현: `prisma/schema.prisma` · 접근 계층: `src/server/repo/*.ts`
+v2: 부서(테넌트)·역할 도입 — [ADR-0005](../adr/0005-multi-division-tenancy.md)
 
 ---
 
 ## 1. 엔티티 관계
 
 ```
-User ──1───∞── Submission ──∞───1── WeekSlot
-                    │
-                    └──∞──1── MergeRun (Phase 2, 선택)
+Division ──1───∞── User ──1───∞── Submission ──∞───1── WeekSlot (전역 달력)
+    │                                  │
+    ├──1───∞── Template                └ divisionId (비정규화 — 격리 인덱스)
+    ├──1───∞── MergeRun (Phase 2)
+    └──1───1── 병합 규칙/마감 정책 (Division 컬럼)
 
-AuditLog  (독립, 참조만)
+AuditLog (독립)
 ```
 
 ## 2. Prisma 스키마
@@ -20,83 +23,126 @@ AuditLog  (독립, 참조만)
 datasource db { provider = "sqlite"; url = env("DATABASE_URL") }
 generator client { provider = "prisma-client-js" }
 
-model User {
-  id          String   @id @default(cuid())
-  email       String   @unique          // Cloudflare Access 신원과 대조하는 키
-  name        String                    // "최명헌"
-  team        String?                   // "AI" | "홍보" | "시스템" | "도서관"  ← 병합 정렬용
-  sortOrder   Int      @default(100)    // 병합 시 항목 순서
-  isAdmin     Boolean  @default(false)
-  isActive    Boolean  @default(true)   // 퇴사/전보 시 false. 삭제하지 않음
-  createdAt   DateTime @default(now())
-  submissions Submission[]
+model Division {
+  id            String  @id @default(cuid())
+  slug          String  @unique          // "AI_and_Public_Relations_Division"
+  nameKo        String  @unique          // "AI홍보전략실"
+  nameEn        String                   // "AI and Public Relations Division"
+  isActive      Boolean @default(false)  // 온보딩된 부서만 true
 
-  @@index([isActive, sortOrder])
+  deadlineDow   Int     @default(2)      // 마감 요일 1=월 … 7=일 (기본 화)
+  deadlineTime  String  @default("14:00")// "HH:mm" KST
+  mergeRuleText String  @default("")     // 부서 병합 규칙 (S-08 §6)
+  guideText     String  @default("")     // 업로드 화면 작성 안내 (줄 단위, CP-21)
+
+  createdAt     DateTime @default(now())
+  users         User[]
+  templates     Template[]
+  submissions   Submission[]
+  mergeRuns     MergeRun[]
 }
 
-model WeekSlot {
+model User {
   id           String   @id @default(cuid())
-  isoKey       String   @unique         // "2026-W33"  ← 유일 식별자 (WS-09)
-  label        String                   // "8월 2주차" ← 표시 전용
-  year         Int
-  month        Int                      // 월요일 기준
-  weekOfMonth  Int                      // 1..5
-  opensAt      DateTime                 // 월 00:00 KST (UTC 저장)
-  deadlineAt   DateTime                 // 화 14:00 KST (UTC 저장)
+  email        String   @unique          // Access 신원 대조 키 (소문자)
+  name         String
+  divisionId   String
+  divisionRole String   @default("member") // "member" | "lead"
+  isOperator   Boolean  @default(false)    // 플랫폼 운영. 부서 내용 접근권 아님 (AU-15)
+  isActive     Boolean  @default(true)     // 전출·퇴사 시 false. 삭제 금지
+  onRoster     Boolean  @default(true)     // 이번 주 제출 대상인지 (담당자가 관리)
+  sortOrder    Int      @default(100)      // 병합·현황 정렬
   createdAt    DateTime @default(now())
-  submissions  Submission[]
-  mergeRuns    MergeRun[]
+
+  division    Division @relation(fields: [divisionId], references: [id])
+  submissions Submission[]
+
+  @@index([divisionId, isActive, onRoster, sortOrder])
+}
+
+model WeekSlot {                          // 전역 주 달력 — 부서와 무관한 사실
+  id          String   @id @default(cuid())
+  isoKey      String   @unique            // "2026-W33"
+  label       String                      // "8월 2주차"
+  year        Int
+  month       Int
+  weekOfMonth Int
+  opensAt     DateTime                    // 월 00:00 KST (UTC 저장)
+  createdAt   DateTime @default(now())
+  submissions Submission[]
+  mergeRuns   MergeRun[]
 
   @@index([opensAt])
 }
 
 model Submission {
   id           String   @id @default(cuid())
+  divisionId   String                     // = user.divisionId (DM-12 불변식)
   userId       String
   weekSlotId   String
-  version      Int                      // 1부터. (userId, weekSlotId) 내에서 증가
+  version      Int
   isLatest     Boolean  @default(true)
 
-  filePath     String                   // 저장 루트 기준 상대경로 (S-04)
-  originalName String                   // 업로더가 올린 원래 파일명
+  filePath     String                     // STORAGE_ROOT 기준 상대경로
+  originalName String
   byteSize     Int
-  sha256       String                   // 무결성 + 중복 감지
-  contentKind  String                   // "hwp" | "hwpx"
+  sha256       String
 
   uploadedAt   DateTime @default(now())
-  uploadedFrom String?                  // 감사용 IP
+  uploadedFrom String?
 
-  user     User     @relation(fields: [userId],     references: [id])
+  division Division @relation(fields: [divisionId], references: [id])
+  user     User     @relation(fields: [userId], references: [id])
   weekSlot WeekSlot @relation(fields: [weekSlotId], references: [id])
 
   @@unique([userId, weekSlotId, version])
-  @@index([weekSlotId, isLatest])
-  @@index([weekSlotId, userId])
+  @@index([divisionId, weekSlotId, isLatest])   // 격리 스코프 조회의 기본 축
 }
 
-model MergeRun {                        // Phase 2
+model Template {                          // 부서별 마스터 양식 이력
   id          String   @id @default(cuid())
+  divisionId  String
+  filePath    String
+  sha256      String
+  version     Int                         // 부서 내 1부터 증가
+  isActive    Boolean  @default(true)     // 부서당 active 1개 (DM-14)
+  uploadedBy  String                      // User.id (lead)
+  uploadedAt  DateTime @default(now())
+  division    Division @relation(fields: [divisionId], references: [id])
+
+  @@unique([divisionId, version])
+  @@index([divisionId, isActive])
+}
+
+model MergeRun {                          // Phase 2
+  id          String   @id @default(cuid())
+  divisionId  String
   weekSlotId  String
-  status      String                    // "pending"|"running"|"succeeded"|"failed"
+  status      String                      // "running"|"succeeded"|"failed"
   outputPath  String?
-  sourceIds   String                    // JSON 배열: 사용된 Submission id 목록
-  rowCounts   String?                   // JSON: {"t1":24,"t2":19,"t3":0}
+  sourceIds   String                      // JSON: Submission id[]
+  ruleSnapshot String                     // 실행 시점의 mergeRuleText (재현성)
+  rowCounts   String?
+  warnings    String?                     // JSON: string[]
   errorText   String?
   startedAt   DateTime @default(now())
   finishedAt  DateTime?
-  weekSlot    WeekSlot @relation(fields: [weekSlotId], references: [id])
+  division Division @relation(fields: [divisionId], references: [id])
+  weekSlot WeekSlot @relation(fields: [weekSlotId], references: [id])
 
-  @@index([weekSlotId, startedAt])
+  @@index([divisionId, weekSlotId, startedAt])
 }
 
 model AuditLog {
   id        String   @id @default(cuid())
   at        DateTime @default(now())
-  actor     String                      // 이메일
-  action    String                      // "upload"|"download"|"download_zip"|"merge"|"reject"
+  actor     String                        // 검증된 이메일
+  divisionId String?                      // 격리 감사용
+  action    String                        // upload|download|download_zip|preview|merge|rule_update|template_update|reject
   target    String?
-  detail    String?                     // JSON
+  detail    String?
   @@index([at])
+  @@index([divisionId, at])
 }
 ```
 
@@ -104,118 +150,102 @@ model AuditLog {
 
 ## 3. 요구사항
 
-### DM-01 — `User`는 이메일이 정본
+### DM-01 — 이메일이 신원의 정본
 
-Cloudflare Access가 넘겨주는 이메일이 신원의 유일한 근거다.
-`name`은 표시·파일명 생성용이며 인증에 쓰지 않는다.
+Access가 확인한 이메일(소문자 정규화)로 `User`를 찾는다. 이름은 표시·파일명 전용.
 
-> **스펙 §4.2 대비 개선**: 원 스펙은 "이름을 선택하고 업로드"였다.
-> Access가 이미 신원을 확정하므로 **이름 선택 드롭다운을 없앤다.**
-> 클릭 하나가 줄고, 타인 사칭이 구조적으로 불가능해진다. ([S-03 AU-05](03-auth.md))
+### DM-02 — 시드는 인사자료에서 생성
 
-### DM-02 — `User`는 시드로 관리
+`tools/extract-seed.py` → `docs/private/seed.json`(git 제외) → `prisma/seed.ts`가 읽는다.
+휴대전화·사번 등은 추출 단계에서 이미 배제된다 ([R-002 §6](../research/002-kei-org-and-collection-flow.md)).
 
-8명은 회원가입하지 않는다. `prisma/seed.ts`에 명시하고 배포 시 반영한다.
-인원 변동은 시드 수정 + 재실행. 관리 UI는 만들지 않는다 (8명 규모에 과함).
+- 시드 시점: **전 부서 30개를 `isActive=false`로 넣되**, 파일럿(AI홍보전략실)만 `true`
+- 사용자도 마찬가지 — 미온보딩 부서 사용자는 로그인해도 "준비 중" 안내 (AU-04b)
 
-### DM-03 — 비활성 사용자는 삭제하지 않는다
+### DM-03 — 삭제 금지, 비활성화만
 
-`isActive = false`로만 바꾼다. 과거 제출 이력의 참조 무결성을 지킨다.
-현황 집계는 `isActive = true`인 사람만 대상으로 한다.
+`User.isActive=false` / `Division.isActive=false`. 제출 이력의 참조 무결성 보존.
 
-### DM-04 — `version`은 1부터 단조 증가
+### DM-04 — `onRoster`: 제출 대상 명단은 부서가 관리 ★
 
-`(userId, weekSlotId)` 조합 내에서만 의미를 갖는다.
+인사자료의 부서원(13명)과 실제 제출 대상은 다를 수 있다 (실장 제외, 인턴 포함/제외 등).
+담당자가 관리 화면에서 토글한다. **현황 집계 분모 = `isActive && onRoster`.**
 
-### DM-05 — `isLatest`는 조합당 정확히 하나
+> 원 스펙의 "8명"이 명부상 13명과 달랐던 이유가 이것이다. 숫자를 하드코딩하지 않는다.
 
-```
-∀ (userId, weekSlotId) with ≥1 submission :
-    count(isLatest = true) == 1
-```
+### DM-05 — `isLatest` 불변식 (v1과 동일)
 
-이는 **불변식**이다. 갱신은 반드시 단일 트랜잭션으로:
+`(userId, weekSlotId)`당 `isLatest=true` 정확히 1개. 단일 트랜잭션 + 유니크 제약으로 보증.
 
-```ts
-await prisma.$transaction(async (tx) => {
-  const last = await tx.submission.findFirst({
-    where: { userId, weekSlotId },
-    orderBy: { version: 'desc' },
-  });
-  await tx.submission.updateMany({
-    where: { userId, weekSlotId, isLatest: true },
-    data:  { isLatest: false },
-  });
-  return tx.submission.create({
-    data: { userId, weekSlotId, version: (last?.version ?? 0) + 1, isLatest: true, ... },
-  });
-});
-```
+### DM-06 — 제출물 삭제 없음 (P2)
 
-> `@@unique([userId, weekSlotId, version])`가 경합 시 두 번째 요청을 실패시킨다.
-> 실패하면 한 번 재시도한다. SQLite는 쓰기 직렬화되므로 실무상 충분하다.
+### DM-07 — 동일 sha256 재업로드 허용 + 안내 (v1과 동일)
 
-### DM-06 — 제출은 삭제하지 않는다 (P2)
-
-`Submission` 행도, 파일도 지우지 않는다. 잘못 올렸으면 다시 올리면 된다.
-"삭제" API는 만들지 않는다.
-
-### DM-07 — 동일 파일 재업로드
-
-같은 `sha256`을 다시 올려도 **새 버전을 만든다**. 거절하지 않는다.
-사용자가 재업로드했다는 것 자체가 의도이므로 존중한다. 다만 UI에서
-`이전 버전과 내용이 동일합니다` 안내는 띄운다.
-
-### DM-08 — 제출 현황 파생
-
-`Submission`을 지우지 않으므로 현황은 항상 조회로 계산한다. 별도 상태 컬럼 없음.
+### DM-08 — 현황은 조회로 파생
 
 ```ts
-type MemberStatus = {
-  user: User;
-  latest: Submission | null;   // null이면 미제출
-  versionCount: number;
-};
+type MemberStatus = { user: User; latest: Submission | null; versionCount: number };
+// 분모: division.users.filter(isActive && onRoster)
 ```
 
-### DM-09 — `team` / `sortOrder`는 Phase 2 병합용
+### DM-09 — 정렬
 
-스펙 §3의 항목 순서 `AI → 홍보(정간물 포함) → 시스템 → 도서관`을 코드로 표현하는 자리다.
+부서 내 정렬은 `sortOrder → name`. (v1의 팀 정렬은 부서 병합 규칙으로 이동 — S-08 §6)
 
-```ts
-const TEAM_ORDER = ['AI', '홍보', '시스템', '도서관'] as const;
+### DM-10 — Division 마감 정책
+
+`deadlineDow`(1~7) + `deadlineTime`("HH:mm"). 기본 화 14:00.
+유효 마감 계산은 [S-02 WS-13](02-week-slot.md). 검증: `deadlineDow ∈ 1..7`, 시각 형식, 그리고
+**월 00:00보다 뒤여야 함** (같은 주 안에서 열림→마감 순서 보장).
+
+### DM-11 — WeekSlot은 전역 달력
+
+부서와 무관한 사실(그 주의 월요일)만 담는다. **deadline 컬럼이 없다** — v1에서 변경.
+부서별 마감은 항상 계산값이다. 슬롯 upsert는 v1(WS-11)과 동일하게 지연 생성.
+
+### DM-12 — `Submission.divisionId` 정합 불변식 ★
+
+```
+∀ s: Submission → s.divisionId === s.user.divisionId (업로드 시점)
 ```
 
-Phase 1에서는 **표시 정렬에만** 쓴다. 값이 비어 있어도 Phase 1은 동작해야 한다.
-→ 8명의 팀 배정은 [Q-02](../../OPEN-QUESTIONS.md) 확인 후 시드에 반영.
+업로드 트랜잭션에서 서버가 `user.divisionId`로 채운다. 요청 본문 값은 쓰지 않는다 (AU-05).
+비정규화 이유: 격리 스코프 조회(`WHERE divisionId = ?`)를 모든 목록 쿼리의 첫 축으로 강제.
+
+> 사용자의 부서 이동(전보) 시 과거 제출물은 **이전 부서에 남는다** — 그 주의 보고는
+> 그 부서의 보고였기 때문. 이동은 `divisionId` 변경 + 과거 데이터 불변으로 처리.
+
+### DM-13 — 병합 규칙 스냅샷
+
+`MergeRun.ruleSnapshot`에 실행 시점 규칙 원문을 저장한다. "그때 왜 이 순서로 나왔지"를
+재현 가능하게 — 규칙은 계속 편집되므로 참조가 아니라 복사여야 한다.
+
+### DM-14 — 부서 양식 불변식
+
+부서당 `Template.isActive=true` 정확히 1개 (온보딩 완료 부서 기준).
+교체는 새 버전 insert + 이전 deactivate — 파일도 DB 행도 지우지 않는다 (ST-19).
 
 ---
 
 ## 4. 상태 전이
 
-### 4.1 WeekSlot
+### 4.1 부서 주차 (부서 × WeekSlot)
 
 ```
-     월 00:00                     화 14:00                다음 월 00:00
-        │                            │                          │
-   ─────┼──────── OPEN ──────────────┼──────── LOCKED ──────────┼──── (다음 슬롯 OPEN)
-        │                            │                          │
-   업로드 가능                   업로드 거부                 새 슬롯 생성
-   다운로드 가능                 다운로드 가능              이전 슬롯 영구 LOCKED
-   병합 가능(Phase2)             병합 가능(Phase2)
+월 00:00 (전역 opensAt)      부서 마감 (기본 화 14:00)        다음 월 00:00
+     │                            │                              │
+─────┼──────── OPEN ──────────────┼───────── LOCKED ─────────────┼── 다음 주차
+     업로드/재업로드 가능       업로드 409                      새 슬롯
+     담당자: 현황·열람          담당자: 현황·열람·병합(P2)
 ```
 
-`LOCKED`는 **되돌아가지 않는다**. 마감 후 열리는 일은 없다 (스펙 §4.3).
+`LOCKED`는 되돌아가지 않는다. **예외·대리 업로드 없음 — 사용자 확정 (2026-08-13).**
+놓친 사람은 다음 주차에 낸다. 시스템은 이에 대해 어떤 우회로도 제공하지 않는다.
 
-### 4.2 Submission
+### 4.2 Submission (v1과 동일)
 
 ```
-       업로드            재업로드
-(없음) ───────→ v1 ─────────────→ v2 ─────→ …
-              isLatest=T       isLatest=T
-                  │  isLatest=F ←┘
-                  ↓
-             (영구 보관)
+(없음) ─업로드→ v1(isLatest) ─재업로드→ v2(isLatest, v1은 false) → … 영구 보관
 ```
 
 ---
@@ -224,20 +254,18 @@ Phase 1에서는 **표시 정렬에만** 쓴다. 값이 비어 있어도 Phase 1
 
 | 인덱스 | 쿼리 |
 |---|---|
-| `WeekSlot.isoKey` (unique) | 슬롯 upsert (WS-11) — 가장 빈번 |
-| `Submission(weekSlotId, isLatest)` | 관리자 현황 / zip 대상 조회 |
-| `Submission(weekSlotId, userId)` | 본인 제출 이력 |
-| `Submission(userId, weekSlotId, version)` (unique) | 버전 경합 방어 (DM-05) |
-| `User(isActive, sortOrder)` | 현황 표 정렬 |
+| `Division.slug` (unique) | 페이지 라우팅 |
+| `Submission(divisionId, weekSlotId, isLatest)` | 담당자 현황 / zip / 병합 대상 — **모든 목록 조회의 기본 축** |
+| `Submission(userId, weekSlotId, version)` (unique) | 버전 경합 방어 |
+| `User(divisionId, isActive, onRoster, sortOrder)` | 현황 분모 |
+| `Template(divisionId, isActive)` | 양식 다운로드 |
+| `WeekSlot.isoKey` (unique) | 슬롯 upsert |
 
-## 6. 데이터 규모 전망
+## 6. 규모 전망
 
-8명 × 52주 × (재업로드 감안) 2배 ≈ **연 830행**, 파일 약 100 MB/년.
-SQLite로 10년 이상 여유. ([ADR-0003](../adr/0003-sqlite-prisma.md))
+전 부서 온보딩 가정: 337명 × 52주 × 2(재업로드) ≈ **연 3.5만 행, 파일 ~3.5 GB/년**.
+SQLite로 충분 ([ADR-0003](../adr/0003-sqlite-prisma.md)). `/data` 여유 21TB — 문제 없음.
 
-## 7. 마이그레이션 정책
+## 7. 마이그레이션 정책 (v1과 동일)
 
-- 개발: `prisma migrate dev`
-- 운영: `prisma migrate deploy` — 컨테이너 기동 시 자동 실행
-- **마이그레이션 전 자동 백업** ([S-09 OPS-06](09-deployment-ops.md))
-- 파괴적 변경(컬럼 삭제/타입 변경)은 2단계로: 추가 → 이관 → 다음 릴리스에서 제거
+운영 `prisma migrate deploy`, 마이그레이션 전 자동 백업(OPS-06), 파괴적 변경은 2단계.

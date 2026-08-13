@@ -41,21 +41,37 @@ N = Math.floor((monday.getDate() - 1) / 7) + 1
 
 > 결과적으로 한 달에 4주차 또는 5주차까지 생긴다. 정상이다.
 
-### WS-05 — 슬롯 시각
+### WS-05 — 슬롯 시각 (v2: 마감은 부서 정책)
 
-| 필드 | 값 |
-|---|---|
-| `opens_at` | 그 주 **월요일 00:00:00 KST** |
-| `deadline_at` | 그 주 **화요일 14:00:00 KST** |
+| 필드 | 값 | 소속 |
+|---|---|---|
+| `opens_at` | 그 주 **월요일 00:00:00 KST** | WeekSlot (전역 사실) |
+| 마감 | **부서 정책** `deadlineDow` + `deadlineTime` · 기본 **화 14:00 KST** | Division (DM-10) |
+
+근거: 전사 2단계 마감(취합게시판)이 수 15:00으로 관찰되므로, 부서 내부 마감은
+그보다 앞서기만 하면 되고 부서마다 다를 수 있다 ([R-002 §2](../research/002-kei-org-and-collection-flow.md)).
+
+### WS-13 — 유효 마감 계산 (순수 함수)
+
+```ts
+/** 슬롯(월요일)과 부서 정책으로 이번 주 마감 시각을 계산 */
+export function deadlineFor(slot: {opensAt: Date},
+                            div:  {deadlineDow: number; deadlineTime: string}): Date;
+// 예) opensAt=8/10(월) 00:00, dow=2, "14:00" → 8/11(화) 14:00 KST
+```
+
+- `deadlineDow`: 1=월 … 7=일. 결과는 `opensAt + (dow-1)일 + HH:mm`
+- 검증은 저장 시점에 (DM-10): 계산 결과가 항상 `opensAt`보다 뒤이도록
 
 ### WS-06 — 잠금 판정
 
 ```
-locked  ⟺  now > deadline_at
+locked(division)  ⟺  now > deadlineFor(slot, division)
 ```
 
-`opens_at ≤ now ≤ deadline_at` 인 동안에만 업로드 가능.
-마감 후 다음 주 월요일 00:00까지는 **어떤 경로로도** 업로드 불가 (스펙 §4.3).
+`opens_at ≤ now ≤ deadline` 인 동안에만 업로드 가능.
+마감 후 다음 주 월요일 00:00까지는 **어떤 경로로도** 업로드 불가.
+대리 업로드·예외 경로는 존재하지 않는다 — **사용자 확정 (2026-08-13)**.
 
 ### WS-07 — 시간대
 
@@ -110,11 +126,17 @@ export function describeWeek(monday: Date): WeekDescriptor;
 /** 지금 기준 현재 슬롯 서술자 */
 export function currentWeek(now?: Date): WeekDescriptor;
 
-/** 잠금 여부 */
-export function isLocked(slot: {deadlineAt: Date}, now?: Date): boolean;
+/** 유효 마감 (WS-13) */
+export function deadlineFor(slot: {opensAt: Date},
+                            div:  {deadlineDow: number; deadlineTime: string}): Date;
+
+/** 잠금 여부 — 항상 부서 정책과 함께 판정 */
+export function isLocked(slot: {opensAt: Date},
+                         div:  {deadlineDow: number; deadlineTime: string},
+                         now?: Date): boolean;
 
 /** 남은 시간(ms). 음수면 마감 지남 */
-export function msUntilDeadline(slot: {deadlineAt: Date}, now?: Date): number;
+export function msUntilDeadline(deadline: Date, now?: Date): number;
 
 export interface WeekDescriptor {
   year: number;          // 2026
@@ -123,8 +145,8 @@ export interface WeekDescriptor {
   label: string;         // "8월 2주차"
   isoKey: string;        // "2026-W33"  ← DB 유니크 키
   opensAt: Date;         // 2026-08-10T00:00+09:00
-  deadlineAt: Date;      // 2026-08-11T14:00+09:00
 }
+// deadline은 WeekDescriptor에 없다 — 부서를 알아야 계산된다 (DM-11)
 ```
 
 ### WS-09 — 식별 키는 `isoKey`
@@ -190,7 +212,7 @@ export function mondayOf(t: Date): Date {
 | WS-T10 | 2026-09-02 수 | `8월 5주차` ← 월요일(8/31)이 8월 |
 | WS-T11 | 2026-03-01 일 | `2월 4주차` ← 2/23 주 |
 
-### 5.4 마감 판정
+### 5.4 마감 판정 (기본 정책 dow=2, "14:00" 기준)
 
 | ID | 시각 (KST) | `8월 2주차` 슬롯 | 기대 |
 |---|---|---|---|
@@ -199,6 +221,9 @@ export function mondayOf(t: Date): Date {
 | WS-T14 | 08-11 14:00:00 | 마감 정각 | **열림** (`>` 비교이므로 정각은 허용) |
 | WS-T15 | 08-11 14:00:01 | 1초 후 | **잠김** |
 | WS-T16 | 08-16 23:59:59 | 주 마지막 | **잠김** |
+| WS-T20 | dow=3, "15:00" 부서 · 08-12 14:59 | 수요일 마감 부서 | 열림 |
+| WS-T21 | dow=3, "15:00" 부서 · 08-12 15:00:01 | 〃 | 잠김 |
+| WS-T22 | `deadlineFor` 결과가 항상 `opensAt` 이후 | 속성 테스트 | 성립 |
 
 > WS-T14는 의도적 결정이다. "14:00까지"를 포함으로 해석한다.
 > 반대 해석을 원하면 [OPEN-QUESTIONS Q-06](../../OPEN-QUESTIONS.md) 참조.
@@ -219,7 +244,7 @@ export function mondayOf(t: Date): Date {
 ∀ t : mondayOf(t).getDay() === 1 (KST)
 ∀ t : mondayOf(t) ≤ t < mondayOf(t) + 7일
 ∀ t : 1 ≤ weekOfMonth(mondayOf(t)) ≤ 5
-∀ t : opensAt < deadlineAt < opensAt + 7일
+∀ t, 유효한 부서정책 p : opensAt < deadlineFor(slot, p) < opensAt + 7일
 ```
 
 ---
@@ -241,8 +266,7 @@ async function ensureCurrentSlot(now = new Date()) {
     where:  { isoKey: w.isoKey },
     update: {},
     create: { isoKey: w.isoKey, label: w.label, year: w.year,
-              month: w.month, weekOfMonth: w.weekOfMonth,
-              opensAt: w.opensAt, deadlineAt: w.deadlineAt },
+              month: w.month, weekOfMonth: w.weekOfMonth, opensAt: w.opensAt },
   });
 }
 ```
