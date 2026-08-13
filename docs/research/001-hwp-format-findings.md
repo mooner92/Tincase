@@ -52,7 +52,7 @@ Scripts/DefaultJScript     85 B
 Scripts/JScriptVersion     13 B
 ```
 
-- `FileHeader[32:36]` = `00 01 01 05` → HWP **5.1.0.0**
+- `FileHeader[32:36]` = `00 01 01 05` → HWP **5.1.1.0** (LE: 낮은 바이트가 빌드)
 - `FileHeader[36] & 0x01` = 1 → **본문 스트림 압축됨**
 - 압축은 **raw deflate** (zlib 헤더 없음). Node `zlib.inflateRawSync` / Python `zlib.decompress(data, -15)`
 
