@@ -6,7 +6,9 @@ datasource db {
 }
 
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
+  // slim 이미지의 openssl 부재로 엔진 감지가 1.1.x로 폴백하는 문제 방지 — 명시 고정
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 model Division {

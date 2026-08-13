@@ -26,16 +26,27 @@ touch /mnt/backup/worklog/.probe && rm /mnt/backup/worklog/.probe
 sudo chown -R 10001:10001 /data/worklog
 ```
 
-## 2. 시드 (호스트에서 1회)
+## 2. 스키마 + 시드 (호스트에서, 컨테이너 기동 전) ⚠ 순서 중요
+
+컨테이너는 스키마를 만들지 않는다 — DB가 비어 있으면 fail fast로 죽는다 (entrypoint).
 
 ```bash
 cd ~/repman
+# ① mhchoi 소유로 만들고 (chown을 먼저 하면 시드가 못 쓴다)
+sudo chown -R mhchoi:mhchoi /data/worklog
+
+# ② 스키마 → ③ 시드
+DATABASE_URL=file:/data/worklog/db/worklog.db npx prisma db push --skip-generate
 DATABASE_URL=file:/data/worklog/db/worklog.db \
 STORAGE_ROOT=/data/worklog \
 SEED_TEMPLATE=1 npx tsx prisma/seed.ts
 # 기대 출력: 부서 30 · 사용자 337 · 파일럿 양식 v1 등록
+
+# ④ 컨테이너 uid로 넘긴다
 sudo chown -R 10001:10001 /data/worklog
 ```
+
+스키마 변경이 있는 재배포 때도 같은 절차 (①→②→④, 시드는 불필요).
 
 ## 3. Cloudflare 대시보드 (AU-11)
 
@@ -68,11 +79,13 @@ chmod 600 .env.production
 
 ```bash
 cd ~/repman
-docker compose build                             # 루트 디스크 주의 — 완료 후 5단계에서 prune
-docker compose up -d
+# docker는 sudo 필요 (mhchoi가 docker 그룹 아님). compose 플러그인은
+# /usr/local/lib/docker/cli-plugins에 설치되어 있음 (2026-08-13)
+sudo docker compose build                        # 루트 디스크 주의 — 완료 후 5단계에서 prune
+sudo docker compose up -d
 sleep 15
 curl -fsS http://127.0.0.1:11111/api/health | python3 -m json.tool
-# 기대: ok:true, checks 전부 ok
+# 기대: ok:true, checks 전부 ok  (이미 8/13에 스모크 컨테이너로 검증됨)
 ```
 
 ## 5. 검증 (AU-12) ⚠
@@ -84,8 +97,8 @@ ss -tlnp | grep 11111
 # 2) 사내망 다른 기기(또는 폰 LTE)에서 직접 접근 → 실패해야 정상
 curl -m 5 http://<서버IP>:11111/ ; echo "exit=$? (0이 아니어야 정상)"
 
-# 3) 루트 디스크 보호 (OPS-19)
-docker builder prune -f
+# 3) 루트 디스크 보호 (OPS-19) — 실측: 이 서버는 97~99%를 오간다
+sudo docker builder prune -f && sudo docker image prune -f
 df -h / | tail -1
 ```
 

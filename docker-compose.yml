@@ -13,7 +13,7 @@ services:
       DATABASE_URL: file:/data/db/worklog.db
       STORAGE_ROOT: /data
       CF_ACCESS_TEAM: aidt-kei
-      CF_ACCESS_AUD: ${CF_ACCESS_AUD:?CF_ACCESS_AUD를 .env.production에 설정하세요 (AU-02)}
+      # CF_ACCESS_AUD는 .env.production(env_file)에서. 누락 시 앱 env 가드가 기동 거부 (OPS-06)
     env_file:
       - .env.production                  # CF_ACCESS_AUD만 담는다 (git 제외)
     volumes:

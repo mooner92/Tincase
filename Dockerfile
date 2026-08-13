@@ -25,14 +25,13 @@ RUN groupadd -r app && useradd -r -g app -u 10001 app \
     && apt-get update && apt-get install -y --no-install-recommends sqlite3 tini ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
-# standalone 출력 + prisma 엔진/CLI (migrate deploy용)
+# standalone 출력 (+ Prisma 클라이언트 런타임 — CLI는 포함하지 않는다.
+# 스키마 적용은 배포 절차에서 호스트가 수행: docs/DEPLOY.md §2)
 COPY --from=build --chown=app:app /app/.next/standalone ./
 COPY --from=build --chown=app:app /app/.next/static ./.next/static
 COPY --from=build --chown=app:app /app/public ./public
-COPY --from=build --chown=app:app /app/prisma ./prisma
-COPY --from=build --chown=app:app /app/node_modules/prisma ./node_modules/prisma
-COPY --from=build --chown=app:app /app/node_modules/@prisma ./node_modules/@prisma
-COPY --from=build --chown=app:app /app/node_modules/.bin ./node_modules/.bin
+COPY --from=build --chown=app:app /app/node_modules/.prisma ./node_modules/.prisma
+COPY --from=build --chown=app:app /app/node_modules/@prisma/client ./node_modules/@prisma/client
 COPY --chown=app:app scripts/entrypoint.sh ./scripts/entrypoint.sh
 RUN chmod +x scripts/entrypoint.sh
 

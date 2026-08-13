@@ -1,0 +1,27 @@
+# ⚠ 민감 — 이미지 레이어에 절대 포함 금지
+docs/private
+fixtures
+.env
+.env.*
+*.db
+*.db-journal
+prisma/dev.db*
+prisma/test.db*
+
+# 빌드 산출물·의존성 (스테이지에서 새로 생성)
+node_modules
+.next
+storage
+tmp
+
+# 저장소 메타·문서 (런타임 불필요)
+.git
+.gitignore
+docs
+tools
+tests
+*.md
+.claude
+.dockerignore
+Dockerfile
+docker-compose.yml
