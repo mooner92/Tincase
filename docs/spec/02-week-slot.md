@@ -48,7 +48,7 @@ N = Math.floor((monday.getDate() - 1) / 7) + 1
 | `opens_at` | 그 주 **월요일 00:00:00 KST** | WeekSlot (전역 사실) |
 | 마감 | **부서 정책** `deadlineDow` + `deadlineTime` · 기본 **화 14:00 KST** | Division (DM-10) |
 
-근거: 전사 2단계 마감(취합게시판)이 수 15:00으로 관찰되므로, 부서 내부 마감은
+근거: 전사 2단계 마감(취합게시판)이 목 15:00으로 관찰되므로, 부서 내부 마감은
 그보다 앞서기만 하면 되고 부서마다 다를 수 있다 ([R-002 §2](../research/002-kei-org-and-collection-flow.md)).
 
 ### WS-13 — 유효 마감 계산 (순수 함수)

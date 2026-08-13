@@ -25,7 +25,8 @@ generator client { provider = "prisma-client-js" }
 
 model Division {
   id            String  @id @default(cuid())
-  slug          String  @unique          // "AI_and_Public_Relations_Division"
+  slug          String  @unique          // "AI_and_Public_Relations_Division" (정식)
+  shortSlug     String? @unique          // "aiprd" — 접속 시 정식 슬러그로 redirect (Q-18)
   nameKo        String  @unique          // "AI홍보전략실"
   nameEn        String                   // "AI and Public Relations Division"
   isActive      Boolean @default(false)  // 온보딩된 부서만 true
@@ -48,9 +49,10 @@ model User {
   name         String
   divisionId   String
   divisionRole String   @default("member") // "member" | "lead"
-  isOperator   Boolean  @default(false)    // 플랫폼 운영. 부서 내용 접근권 아님 (AU-15)
+  isOperator   Boolean  @default(false)    // 최종 관리자(Sean). 테넌시·인원 + 전체 열람 (AU-15)
+  isCoordinator Boolean @default(false)    // 전사 총괄(기획조정실). 전 부서 읽기 (AU-16)
   isActive     Boolean  @default(true)     // 전출·퇴사 시 false. 삭제 금지
-  onRoster     Boolean  @default(true)     // 이번 주 제출 대상인지 (담당자가 관리)
+  onRoster     Boolean  @default(true)     // 제출 대상인지 (운영자가 관리 — DM-04)
   sortOrder    Int      @default(100)      // 병합·현황 정렬
   createdAt    DateTime @default(now())
 
@@ -166,10 +168,15 @@ Access가 확인한 이메일(소문자 정규화)로 `User`를 찾는다. 이�
 
 `User.isActive=false` / `Division.isActive=false`. 제출 이력의 참조 무결성 보존.
 
-### DM-04 — `onRoster`: 제출 대상 명단은 부서가 관리 ★
+### DM-04 — `onRoster`: 제출 대상 명단은 **운영자가** 관리 ★
 
-인사자료의 부서원(13명)과 실제 제출 대상은 다를 수 있다 (실장 제외, 인턴 포함/제외 등).
-담당자가 관리 화면에서 토글한다. **현황 집계 분모 = `isActive && onRoster`.**
+인사자료의 부서원과 실제 제출 대상은 다를 수 있다.
+**인원 배치는 운영자(Sean) 소관** — 사용자 확정 (2026-08-13). 담당자는 문서만 다룬다.
+
+- 시드 초기값: **직책이 실장/단장/본부장/센터장/원장급이면 `false`**, 그 외 전원 `true`
+  (Q-12 확정: "팀장(실장) 제외, 나머지는 열어둔다 — 제출하고 싶은 게 있을 수 있다")
+- 미제출은 페널티가 아니다. 현황에 표시될 뿐이다
+- **현황 집계 분모 = `isActive && onRoster`**
 
 > 원 스펙의 "8명"이 명부상 13명과 달랐던 이유가 이것이다. 숫자를 하드코딩하지 않는다.
 

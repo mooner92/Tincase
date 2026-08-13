@@ -20,7 +20,7 @@ v2: 드로어·규칙 에디터·양식/명단 관리 추가 — [ADR-0005](../a
 
 ```
 UploadDropzone · DeadlineCountdown · SlotSelector · CopyMissingButton
-VersionHistoryPopover · FileDrawer · RuleEditor · TemplateManager · RosterEditor
+VersionHistoryPopover · FileDrawer · RuleEditor · TemplateManager · RosterEditor(/ops)
 ```
 
 ### CP-02 — 데이터는 props로 내려받는다
@@ -338,14 +338,22 @@ interface FileDrawerProps {
 | CP-83 | 교체 성공 → 파싱 요약(표·행수) 즉시 표시 (API-41) |
 | CP-84 | 교체 실패 → 기존 양식 유지 명시 (`기존 양식은 그대로입니다`) |
 
-### `<RosterEditor>` · **Client**
+### `<RosterEditor>` · **Client** — `/ops` 전용 (v2.1)
 
-제출 대상 관리 (PG-31~32, API-26~27).
+제출 대상·정렬 관리. **운영자 화면에만 존재** (DM-04). lead 설정 화면에는 읽기 전용 목록만.
 
 | ID | 요구사항 |
 |---|---|
-| CP-85 | 부서원 목록 + onRoster 토글 + 드래그 정렬(또는 ↑↓ 버튼 — 접근성 필수) |
-| CP-86 | 변경은 명시적 `저장` 버튼으로 일괄 반영 (실수 토글 방지), 저장 후 토스트 |
+| CP-85 | 부서 선택 → 부서원 목록 + onRoster 토글 + ↑↓ 정렬 (API-26~27) |
+| CP-86 | 변경은 명시적 `저장` 버튼으로 일괄 반영, 저장 후 토스트 |
+
+### `<DivisionStatusList>` · Server — member용 부서 현황 (v2.1)
+
+| ID | 요구사항 |
+|---|---|
+| CP-87 | 이름 · `● 제출됨(시각)` / `○ 아직` 목록. **파일 링크·버전·크기 없음** (AU-06) |
+| CP-88 | 본인 행 강조. 정렬은 lead 현황과 동일 |
+| CP-89 | 업로드 영역보다 시각적 우선순위 낮게 (업로드가 주인공) |
 
 ---
 

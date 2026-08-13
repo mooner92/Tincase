@@ -131,23 +131,30 @@ const user = await findUser(formData.get('userId'));
 
 이로써 사칭이 구조적으로 불가능해진다. UI의 이름 선택 드롭다운도 사라진다 (DM-01).
 
-### AU-06 — 역할 매트릭스 (v2) ★
+### AU-06 — 역할 매트릭스 (v2.1) ★
 
-역할은 Access 정책이 아니라 **DB**가 정한다: `divisionRole`(member|lead) + `isOperator`.
+역할은 Access 정책이 아니라 **DB**가 정한다:
+`divisionRole`(member|lead) + 전역 플래그 `isCoordinator`, `isOperator`.
 
-| 행위 | member | lead | operator |
-|---|---|---|---|
-| 자기 부서 페이지 접근 | ✔ | ✔ | ✘ (자기 부서원 자격일 때만) |
-| 본인 업로드/재업로드/본인 파일 다운로드 | ✔ | ✔ | — |
-| 부서 제출 현황 (전원) | ✘ | ✔ | ✘ |
-| 타인 제출물 열람(드로어)·다운로드·zip | ✘ | ✔ (자기 부서만) | ✘ |
-| 병합 규칙 편집 / 병합 실행 / 양식 관리 / onRoster 관리 | ✘ | ✔ (자기 부서만) | ✘ |
-| 부서(테넌트) 생성·활성화, 사용자 배정·역할 변경 | ✘ | ✘ | ✔ |
-| 임의 부서의 제출물·현황·병합본 접근 | ✘ | ✘ | **✘ (AU-15)** |
+| 행위 | member | lead | coordinator | operator |
+|---|---|---|---|---|
+| 자기 부서 페이지 · 본인 업로드/다운로드 | ✔ | ✔ | ✔ (자기 부서원으로서) | ✔ |
+| **부서 제출 현황 (이름·제출여부·시각)** | **✔ 자기 부서** | ✔ 자기 부서 | ✔ **전 부서** | ✔ 전 부서 |
+| 타인 제출물 **내용** 열람(드로어)·다운로드·zip | ✘ | ✔ 자기 부서 | ✔ 전 부서 (읽기) | ✔ 전 부서 |
+| 병합 규칙 편집 / 병합 실행 / 양식 관리 | ✘ | ✔ 자기 부서 | ✘ (읽기만) | ✔ |
+| 인원 배치 — 부서 생성·활성화, 사용자 배정·역할·onRoster | ✘ | ✘ | ✘ | ✔ **전용** |
 
-- member는 **자기 제출물만** 본다. 같은 부서원의 제출 여부도 보이지 않는다 —
-  격리 요구("냈는지 안 냈는지 감시 불가")를 부서 안에서도 보수적으로 적용한 기본값.
-  담당자만 현황을 본다. (완화 여부는 [Q-15](../../OPEN-QUESTIONS.md))
+사용자 확정 (2026-08-13):
+
+- **부서 안에서는 서로 보인다** — "지금도 (이메일 참조로) 누가 냈는지 알 수 있다.
+  눈치 안 보고 아무도 안 내는 것을 막으려면 팀끼리는 보여야 한다."
+  단 member가 보는 것은 **현황(이름·제출여부·시각)까지**다. 타인 파일 **내용**은 lead부터.
+- **남의 팀 것은 절대 X** — member·lead 기준 타 부서는 현황·존재까지 404.
+- **coordinator(총괄)**: 전사 취합 실무자(기획조정실). 2단계 병합이 이 사람 일이므로
+  전 부서 읽기 가시성이 필요하다. 쓰기 권한은 없다.
+- **operator(Sean) = 최종 관리자**: 인원 배치 전권 + **구축·안정화 단계 동안 전체 열람**.
+  "안정화되면 (축소할지) 몰라도" — 축소는 미래 결정 사항으로 남긴다 (Q-14 종결).
+- coordinator·operator의 타 부서 열람은 **전부 감사 로그**에 남는다 (AU-09).
 - 권한 없는 라우트는 전부 **404** (403 아님 — 존재를 노출하지 않는다).
 
 ### AU-13 — 부서 격리는 쿼리 레벨에서 강제 ★
@@ -159,32 +166,43 @@ const user = await findUser(formData.get('userId'));
 export async function requireDivisionScope(req: Request): Promise<Scope> {
   const identity = await verifyAccess(req);
   const user = await requireActiveUser(identity.email);
+  const readAll = canReadAllDivisions(user);          // operator || coordinator (AU-15·16)
   return {
     user,
-    // 모든 조회가 이 divisionId로 시작한다. 요청의 slug·id는 검증용일 뿐 스코프가 아니다
-    db: scopedRepo(user.divisionId),
+    // member·lead의 모든 조회는 이 divisionId로 시작한다. slug·id는 검증용일 뿐 스코프가 아니다
+    db: readAll ? crossDivisionReadRepo(user) : scopedRepo(user.divisionId),
     isLead: user.divisionRole === 'lead',
   };
 }
 ```
 
-- URL의 `slug`가 `user.division.slug`와 다르면 **404** — 리다이렉트하지 않는다
-  (리다이렉트는 "그 부서가 존재한다"를 노출한다)
+- (member·lead) URL의 `slug`가 `user.division.slug`·`shortSlug`와 다르면 **404** —
+  리다이렉트하지 않는다 (리다이렉트는 "그 부서가 존재한다"를 노출한다).
+  자기 부서의 `shortSlug`는 정식 슬러그로 302 (Q-18)
 - `Submission`·`Template`·`MergeRun` 조회는 예외 없이 `divisionId` 첫 축 (DM-12)
-- 전역(스코프 없는) repo는 `operator` 전용 모듈에만 존재하며, 그 모듈은 테넌시
-  테이블(Division/User)만 다루고 Submission 계열을 import하지 않는다 — AU-15의 코드적 집행
+- `crossDivisionReadRepo`는 **읽기 메서드만 노출**한다 — coordinator의 쓰기가 타입 수준에서 불가능.
+  operator의 쓰기(인원·테넌시)는 별도 ops 모듈로만
 
 ### AU-14 — 격리 회귀 테스트가 릴리스 게이트
 
 격리는 기능이 아니라 **불변식**이므로 전용 테스트 스위트를 둔다 (§5 AU-T12~T17).
-하나라도 깨지면 배포 금지.
+하나라도 깨지면 배포 금지. (격리의 주체는 member·lead — coordinator·operator는 정의된 예외)
 
-### AU-15 — 운영자는 내용에 접근하지 않는다
+### AU-15 — 운영자 전체 열람 (구축 단계 방침, 사용자 확정)
 
-operator 권한은 테넌시 관리(부서 생성·활성화, 사용자 배정)뿐이다.
-**타 부서의 제출물·현황·병합본·규칙 내용은 운영자에게도 보이지 않는다.**
-서버 관리자로서 디스크를 직접 볼 수 있다는 사실과, 제품이 그것을 화면으로
-제공하는 것은 다른 문제다 — 제품은 제공하지 않는다. (완화 여부는 [Q-14](../../OPEN-QUESTIONS.md))
+operator(Sean)는 최종 관리자로서 **전 부서의 현황·제출물·병합본을 열람할 수 있다.**
+"일단 만들 때는 이렇게. 나중에 시스템 안정화되면 몰라도" — 2026-08-13.
+
+- 모든 타 부서 열람은 감사 로그에 남는다 (투명성)
+- 안정화 후 축소(테넌시 관리만)로 전환할 수 있도록, 열람 권한 판정은
+  `canReadAllDivisions(user)` 단일 함수에 모은다 — 나중에 한 곳만 고치면 되게
+
+### AU-16 — 총괄(coordinator) 읽기 가시성
+
+전사 취합 실무자(기획조정실 1명, 시드 지정)는 **전 부서 읽기 전용** 접근을 갖는다:
+현황·제출물·병합본(Phase 2). 규칙·양식·인원에 대한 쓰기는 없다.
+근거: 2단계(전사) 병합이 이 사람의 실제 업무다 ([R-002 §2](../research/002-kei-org-and-collection-flow.md)).
+UI는 확산 단계(Phase 3)에 제공 — 파일럿 동안은 대상 부서가 1개라 의미가 없다.
 
 ### AU-07 — 세션 없음
 
@@ -249,7 +267,7 @@ $ ls ~/.cloudflared/config.yml     → 없음
 |---|---|
 | Application domain | `worklog.excusa.uk` |
 | Session Duration | 24h (권장) |
-| Policy | **파일럿**: Allow · Emails = AI홍보전략실 명단<br>**확산 시**: Allow · `Emails ending in @kei.re.kr` — 개별 나열은 337명 규모에서 유지 불가. 실제 가입 게이트는 앱의 DB(AU-04)가 담당 ([Q-13](../../OPEN-QUESTIONS.md)) |
+| Policy | Allow · `Emails ending in @kei.re.kr` — **확정 (Q-13)**. 부서 제한은 앱이 담당: 로그인하면 자기 부서 페이지에만 접근(스코프), 미온보딩 부서는 "준비 중"(AU-04b). 실제 가입 게이트는 DB(AU-04) |
 
 **③ AUD 태그 복사** → `.env`의 `CF_ACCESS_AUD`
 
@@ -311,8 +329,9 @@ curl -m 5 http://<서버-내부-IP>:11111/          # 실패해야 정상
 | AU-T12 | A부서 member가 B부서 페이지 `GET /{B-slug}` → **404** |
 | AU-T13 | A부서 lead가 B부서 submissionId 다운로드/드로어 → **404** |
 | AU-T14 | A부서 lead가 B부서 zip/현황 API → **404** |
-| AU-T15 | member가 같은 부서 타인 submissionId → **404** (AU-06 기본값) |
-| AU-T16 | operator가 임의 부서 제출물·현황 API → **404** (AU-15) |
-| AU-T17 | 존재하지 않는 slug와 남의 slug의 응답이 **구별 불가능** (동일 404) |
+| AU-T15 | member가 같은 부서 **현황 조회 → 성공(이름·여부·시각)**, 타인 파일 다운로드/드로어 → **404** |
+| AU-T16 | operator·coordinator의 타 부서 열람 → 성공 + **감사 로그 기록** (AU-15·16) |
+| AU-T17 | (member 기준) 존재하지 않는 slug와 남의 slug의 응답이 **구별 불가능** (동일 404) |
+| AU-T18 | coordinator가 타 부서 규칙/양식 **변경** 시도 → 404 (읽기 전용) |
 
 > AU-T09·T10(위조 방어)과 AU-T12~T17(격리)이 이 스펙의 핵심 회귀 테스트다.

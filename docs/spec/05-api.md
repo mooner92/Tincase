@@ -68,7 +68,7 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 | ID | 요구사항 |
 |---|---|
 | API-07 | 슬롯은 호출 시점 upsert 보장 (WS-11). `deadlineAt`은 부서 정책 계산값 |
-| API-08 | 응답에 **타인 정보 없음** — member 화면은 이 엔드포인트 하나로 그린다 |
+| API-08 | 응답에 타인 정보 없음. member 화면의 부서 현황은 `/api/division/status` 축소판을 따로 쓴다 |
 
 ### `POST /api/submissions` — 업로드
 
@@ -104,14 +104,17 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 
 ---
 
-## 3. 담당자 (lead 전용) — 자기 부서 스코프
+## 3. 부서 스코프 (권한은 엔드포인트별 표기)
 
-lead가 아니면 전부 **404**.
+lead 전용 표기가 있는 엔드포인트는 member에게 **404**.
 
-### `GET /api/division/status`
+### `GET /api/division/status` — **member도 접근 가능 (v2.1)**
+
+member 응답은 축소판: `members[].{user.name, status, uploadedAt}` 만 —
+버전 수·크기·다운로드 링크는 lead부터 (AU-06).
 
 ```jsonc
-// 200 — ?slot=2026-W33 지원 (기본: 현재)
+// 200 (lead 응답) — ?slot=2026-W33 지원 (기본: 현재)
 {
   "slot": { "isoKey","label","deadlineAt","locked" },
   "summary": { "roster": 12, "submitted": 9, "missing": 3 },
@@ -152,7 +155,7 @@ lead가 아니면 전부 **404**.
 | ID | 요구사항 |
 |---|---|
 | API-22 | 파싱은 S-08 reader 재사용. 업로드 시 이미 검증됐으므로 실패는 500 (정합성 이탈로 로그) |
-| API-23 | 권한: lead(자기 부서) 또는 본인. 그 외 404 |
+| API-23 | 권한: 본인 · lead(자기 부서) · coordinator/operator(전 부서, 감사 로그). 그 외 404 |
 | API-24 | 감사 로그 `preview` 기록 |
 | API-25 | 원문 텍스트 그대로 반환 — 요약·가공하지 않는다 (내용 검토가 목적) |
 
@@ -164,17 +167,15 @@ ST-16. `?slot=` 지원, 0건 409, 스트리밍, 감사 로그.
 
 부서 관점 주차 목록 (최신 26개): `{isoKey, label, submitted, roster, locked}`.
 
-### `PUT /api/division/roster` — 제출 대상 관리
+### ~~`PUT /api/division/roster`~~ → **`PUT /api/ops/roster`로 이동 (v2.1)**
 
-```jsonc
-// 요청
-{ "updates": [ {"userId":"c…","onRoster":false}, … ] }
-```
+인원 배치(onRoster·sortOrder·역할)는 **운영자 전용**이다 — 사용자 확정 (DM-04).
+lead에게는 이 엔드포인트가 존재하지 않는다(404).
 
 | ID | 요구사항 |
 |---|---|
-| API-26 | 자기 부서 사용자만 대상. 타 부서 userId 섞이면 전체 409 (부분 적용 없음) |
-| API-27 | `sortOrder` 변경도 동일 엔드포인트. 감사 로그 |
+| API-26 | `PUT /api/ops/roster` — operator만. `{updates:[{userId,onRoster?,sortOrder?}]}` |
+| API-27 | 부분 적용 없음(하나라도 무효면 전체 409) · 감사 로그 |
 
 ### `GET·PUT /api/division/rule` — 병합 규칙 (Phase 2 활성)
 
@@ -218,16 +219,20 @@ ST-16. `?slot=` 지원, 0건 409, 스트리밍, 감사 로그.
 
 ### `GET·POST /api/ops/divisions` · `PUT /api/ops/divisions/:id`
 
-테넌트 목록·생성·활성화·마감정책 변경. **제출 현황·내용은 반환하지 않는다** (AU-15).
+테넌트 목록·생성·활성화·마감정책·별칭(shortSlug) 변경.
 
-### `GET·POST·PUT /api/ops/users`
+### `GET·POST·PUT /api/ops/users` · `PUT /api/ops/roster`
 
-사용자 배정·역할·활성화. 시드 재적용(`POST /api/ops/users/sync-seed`) 포함.
+사용자 배정·역할(lead/coordinator)·활성화·onRoster·정렬. 시드 재적용(`sync-seed`) 포함.
+
+### `GET /api/overview` — coordinator·operator 전용 (Phase 3 UI, 계약만 예약)
+
+전 부서 × 현재 주차: `{division, submitted, roster, locked, mergedFile?}` 목록. 읽기 전용.
 
 | ID | 요구사항 |
 |---|---|
-| API-32 | ops 응답 어디에도 Submission 계열 데이터가 없다 — repo 계층에서 import 자체가 없음 (AU-13) |
-| API-33 | 모든 변경 감사 로그 |
+| API-32 | operator·coordinator의 타 부서 조회는 전부 감사 로그 (AU-15·16) |
+| API-33 | 모든 변경 감사 로그 · coordinator에게 쓰기 엔드포인트는 404 (AU-T18) |
 
 ---
 
@@ -251,10 +256,10 @@ v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노�
 | API-T02 | 마감 후 조회·다운로드는 정상 |
 | API-T03 | 본문 `divisionId` 위조 → JWT 신원의 부서로 저장 (DM-12) |
 | API-T04 | 재업로드 → v2, 이전 `isLatest=false` |
-| API-T05 | member가 `/api/division/*` → 404 |
+| API-T05 | member가 `/api/division/status` → 200 축소판(링크·크기 없음) · zip/preview → 404 |
 | API-T06 | lead 현황에 미제출자 `missing` 포함, `onRoster=false`는 분모 제외 |
 | API-T07 | preview 응답의 rows가 픽스처 실측값과 일치 (`sample-filled-w2` → 실적 9행) |
-| API-T08 | ops API 응답 전체에 submission 필드 부재 (스냅샷 테스트) |
+| API-T08 | coordinator가 PUT 계열 호출 → 404 · GET /api/overview → 200 |
 | API-T09 | 전 엔드포인트 `no-store` · 시각 `+09:00` |
 | API-T10 | health 200/503 + 민감정보 없음 |
 | API-T11 | 규칙 PUT: 절대 규칙 위반 지시 → 422 `invalid_rule` (Phase 2) |
