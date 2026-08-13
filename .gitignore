@@ -1,0 +1,37 @@
+node_modules/
+.next/
+out/
+build/
+dist/
+
+.env
+.env.*
+!.env.example
+
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+prisma/dev.db*
+
+.venv/
+__pycache__/
+*.pyc
+
+data/
+storage/
+tmp/
+
+.DS_Store
+*.log
+npm-debug.log*
+
+# --- 공개 저장소 제외 ---
+# 실제 KEI 내부 업무보고서. 로컬에는 유지하되 공개하지 않는다.
+# 상세: fixtures/README.md
+fixtures/*.hwp
+fixtures/*.hwpx
+
+# Cloudflare Account/Tunnel ID, 내부 IP 등 실제 값
+docs/private/
+
