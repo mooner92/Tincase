@@ -10,8 +10,9 @@ import { readWorklog } from '@/lib/hwp/reader';
 import { openHwp } from '@/lib/hwp/ole';
 import { parseRecords, serializeRecords } from '@/lib/hwp/record';
 import { fillTable, packHwp } from '@/lib/hwp/writer';
-import { parseMergeRule, orderPeople, MergePlan } from './rules';
+import { toPlan, orderPeople } from './rules';
 import { groupDuplicates, MergeRow, GroupingResult } from './model';
+import { classifyRows, sortByCategory, OTHER } from './classify';
 import type { WorklogRow } from '@/lib/hwp/reader';
 
 export interface MergedGroup {
@@ -19,6 +20,8 @@ export interface MergedGroup {
   row: WorklogRow;
   /** 이 묶음에 들어간 작성자들 — 2명 이상이면 합쳐진 것 */
   authors: string[];
+  /** 부서가 정한 분류 (안 쓰면 빈 문자열) */
+  category: string;
   /** 원문들 (검토 화면에서 나란히 보여준다) */
   sources: { who: string; content: string }[];
   reason: string;
@@ -32,6 +35,8 @@ export interface MergeOutcome {
   mergedGroups: MergedGroup[];
   warnings: string[];
   model: { used: boolean; reason: string | null; elapsedMs: number; name: string };
+  /** 분류 정렬 결과 — 안 썼으면 null */
+  categories: { used: boolean; reason: string | null; order: string[] } | null;
   sourceIds: string[];
   missing: string[];
 }
@@ -70,7 +75,7 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
     prisma.weekSlot.findUniqueOrThrow({ where: { id: weekSlotId } }),
   ]);
 
-  const plan = safePlan(division.mergeRuleText);
+  const plan = toPlan(division);
   const warnings: string[] = [];
 
   const template = await prisma.template.findFirst({ where: { divisionId, isActive: true } });
@@ -82,11 +87,8 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
   });
   if (submissions.length === 0) throw new MergeUnavailable('제출된 파일이 없습니다.');
 
-  // 규칙 순서대로 사람을 줄 세운다 (ABS-6: 개인 행 내부 순서는 건드리지 않는다)
-  const ordered = orderPeople(
-    submissions.map((s) => ({ ...s, name: s.user.name, sortOrder: s.user.sortOrder })),
-    plan,
-  );
+  // 제출자 순서 — 명단은 운영자 소관이므로 sortOrder를 그대로 따른다 (TACP-3)
+  const ordered = orderPeople(submissions.map((s) => ({ ...s, name: s.user.name, sortOrder: s.user.sortOrder })));
 
   // ── 1. 수집 — 한 명이 깨져도 나머지로 계속한다 (HM-21) ──
   const rows: Tagged[] = [];
@@ -137,12 +139,41 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
     for (const g of result.groups) {
       const members = g.ids.map((id) => byId.get(id)!).filter(Boolean);
       if (members.length === 0) continue;
+      // 대표 행은 **가장 정보가 많은 것**을 고른다 — 원문 중 하나를 고르는 것이지
+      // 새로 쓰는 게 아니다. "보도자료 배포"와 "보도자료 배포(2건) 8/13"이 묶이면
+      // 후자를 남겨야 읽는 사람이 잃는 게 없다.
+      const best = members.reduce((a, b) => (fillCount(b) > fillCount(a) ? b : a));
       grouped[bucket].push({
-        row: members[0].raw,
+        row: best.raw,
         authors: [...new Set(members.map((m) => m.who))],
+        category: '',
         sources: members.map((m) => ({ who: m.who, content: m.content })),
         reason: members.length > 1 ? g.reason : '',
       });
+    }
+  }
+
+  // ── 2b. 분류 정렬 — 부서가 "AI-홍보-시스템-도서관"을 정했으면 그 순서로 (HM-27) ──
+  let categoryInfo: MergeOutcome['categories'] = null;
+  if (plan.categories.length > 0) {
+    const probes: MergeRow[] = [];
+    for (const bucket of BUCKETS) {
+      grouped[bucket].forEach((g, i) => {
+        probes.push({ id: i * 10 + BUCKETS.indexOf(bucket), who: g.authors[0] ?? '', content: g.row.content, date: '', place: '', attendee: '' });
+      });
+    }
+    const cls = await classifyRows(probes, plan.categories, plan.guidance);
+    categoryInfo = { used: cls.usedModel, reason: cls.fallbackReason, order: [...plan.categories] };
+    if (cls.usedModel) {
+      for (const bucket of BUCKETS) {
+        grouped[bucket].forEach((g, i) => {
+          g.category = cls.assigned.get(i * 10 + BUCKETS.indexOf(bucket)) ?? OTHER;
+        });
+        // 같은 분류 안에서는 원래 순서를 유지한다 (ABS-6)
+        grouped[bucket] = sortByCategory(grouped[bucket], (g) => g.category, plan.categories);
+      }
+    } else {
+      warnings.push(`분류 정렬을 건너뛰었습니다 — ${cls.fallbackReason}. 제출자 순서로 넣었습니다.`);
     }
   }
 
@@ -158,7 +189,6 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
   const tableRows: Record<Bucket, string[][]> = { achievements: [], plans: [], notes: [] };
   BUCKETS.forEach((bucket, tableIdx) => {
     const prefix = tableIdx + 1;
-    const min = plan.minRows[bucket];
     const body = grouped[bucket].map((g, i) => [
       `${prefix}-${i + 1}`, // ABS-5 — 채번은 항상 재생성
       g.row.content,
@@ -166,9 +196,11 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
       g.row.place,
       g.row.attendee,
     ]);
-    while (body.length < min) body.push([`${prefix}-${body.length + 1}`, '', '', '', '']);
     tableRows[bucket] = body;
   });
+
+  // 특이사항이 비면 3번 표를 지운다 — 실제 제출물의 관례 (sample-filled-w1에 3번 표가 없다)
+  if (plan.dropEmptyNotes && grouped.notes.length === 0) tableRows.notes = [];
 
   const tableCount = countTables(recs);
   BUCKETS.forEach((bucket, i) => {
@@ -178,6 +210,7 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
       }
       return;
     }
+    if (tableRows[bucket].length === 0) return; // 표를 그대로 둔다 (빈 양식 그대로)
     fillTable(recs, i, tableRows[bucket]);
   });
 
@@ -212,6 +245,7 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
       elapsedMs: model.elapsedMs,
       name: model.usedModel ? (process.env.MERGE_MODEL ?? '') : '',
     },
+    categories: categoryInfo,
     sourceIds: usedIds,
     missing: roster.filter((u) => !submitted.has(u.id)).map((u) => u.name),
   };
@@ -230,13 +264,9 @@ export class MergeFailed extends Error {
   }
 }
 
-function safePlan(ruleText: string): MergePlan {
-  try {
-    return parseMergeRule(ruleText);
-  } catch {
-    // 규칙이 깨졌다고 병합을 멈추지 않는다 — 저장 시점에 이미 막았어야 할 일이다
-    return parseMergeRule('');
-  }
+/** 채워진 칸 수 — 대표 행 선택 기준 */
+function fillCount(m: { content: string; date: string; place: string; attendee: string }): number {
+  return [m.content, m.date, m.place, m.attendee].filter((x) => x.trim()).length;
 }
 
 function countTables(recs: ReturnType<typeof parseRecords>): number {

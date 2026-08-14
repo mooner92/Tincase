@@ -12,21 +12,26 @@ generator client {
 }
 
 model Division {
-  id            String   @id @default(cuid())
-  slug          String   @unique // "AI_and_Public_Relations_Division" (정식)
-  shortSlug     String?  @unique // "aiprd" — 정식 슬러그로 redirect (Q-18)
-  nameKo        String   @unique
-  nameEn        String
-  isActive      Boolean  @default(false) // 온보딩된 부서만 true
+  id        String  @id @default(cuid())
+  slug      String  @unique // "AI_and_Public_Relations_Division" (정식)
+  shortSlug String? @unique // "aiprd" — 정식 슬러그로 redirect (Q-18)
+  nameKo    String  @unique
+  nameEn    String
+  isActive  Boolean @default(false) // 온보딩된 부서만 true
 
-  deadlineDow   Int      @default(4) // 마감 요일 1=월 … 7=일. 기본 목요일 (전사 마감 목 15:00보다 앞) — DM-10
-  deadlineTime  String   @default("14:00") // "HH:mm" KST
-  mergeRuleText String   @default("") // 부서 병합 규칙 (S-08 §6, Phase 2)
-  guideText     String   @default("") // 업로드 화면 작성 안내 (CP-21)
+  deadlineDow     Int     @default(4) // 마감 요일 1=월 … 7=일. 기본 목요일 (전사 마감 목 15:00보다 앞) — DM-10
+  deadlineTime    String  @default("14:00") // "HH:mm" KST
+  // 병합 규칙 (S-08 §6). 문법 없는 설정 3개 + 자연어 지침 1개.
+  // 문법을 만들지 않는 이유: 실제 부서가 주고받는 규칙은 "순서: AI-홍보-시스템-도서관" 두 줄이었다.
+  mergeCategories String  @default("") // 분류 순서, 쉼표 구분. 비면 제출자 순서
+  mergeDedupe     Boolean @default(true) // 중복 묶기
+  mergeDropNotes  Boolean @default(true) // 특이사항이 비면 3번 표 삭제
+  mergeRuleText   String  @default("") // 담당자가 쓰는 자연어 지침 — 모델에 그대로 전달
+  guideText       String  @default("") // 업로드 화면 작성 안내 (CP-21)
 
   // 취합게시판 제출 이력 (R-002 관찰) — 온보딩 우선순위 판단용. 운영자가 갱신 가능 (DM-15)
-  boardStatus   String   @default("none") // "confirmed" | "unclear" | "none"
-  boardNote     String   @default("") // 관찰 근거 (제출일·특이사항)
+  boardStatus String @default("none") // "confirmed" | "unclear" | "none"
+  boardNote   String @default("") // 관찰 근거 (제출일·특이사항)
 
   createdAt   DateTime     @default(now())
   users       User[]
@@ -36,16 +41,16 @@ model Division {
 }
 
 model User {
-  id            String  @id @default(cuid())
-  email         String  @unique // Access 신원 대조 키. 소문자 (DM-01)
+  id            String   @id @default(cuid())
+  email         String   @unique // Access 신원 대조 키. 소문자 (DM-01)
   name          String
   divisionId    String
-  divisionRole  String  @default("member") // "member" | "lead"
-  isOperator    Boolean @default(false) // 최종 관리자 (AU-15)
-  isCoordinator Boolean @default(false) // 전사 총괄 (AU-16)
-  isActive      Boolean @default(true) // 삭제 금지, 비활성화만 (DM-03)
-  onRoster      Boolean @default(true) // 제출 대상 — 운영자가 관리 (DM-04)
-  sortOrder     Int     @default(100)
+  divisionRole  String   @default("member") // "member" | "lead"
+  isOperator    Boolean  @default(false) // 최종 관리자 (AU-15)
+  isCoordinator Boolean  @default(false) // 전사 총괄 (AU-16)
+  isActive      Boolean  @default(true) // 삭제 금지, 비활성화만 (DM-03)
+  onRoster      Boolean  @default(true) // 제출 대상 — 운영자가 관리 (DM-04)
+  sortOrder     Int      @default(100)
   createdAt     DateTime @default(now())
 
   // 사내망 직접 접속용 비밀번호 인증 (AU-20). 외부는 Cloudflare Access가 담당
@@ -97,12 +102,12 @@ model WeekSlot {
 }
 
 model Submission {
-  id           String   @id @default(cuid())
-  divisionId   String // = user.divisionId 업로드 시점 (DM-12)
-  userId       String
-  weekSlotId   String
-  version      Int // 1부터 (DM-05)
-  isLatest     Boolean  @default(true)
+  id         String  @id @default(cuid())
+  divisionId String // = user.divisionId 업로드 시점 (DM-12)
+  userId     String
+  weekSlotId String
+  version    Int // 1부터 (DM-05)
+  isLatest   Boolean @default(true)
 
   filePath     String // STORAGE_ROOT 기준 상대경로 (ST-02)
   originalName String

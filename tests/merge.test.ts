@@ -1,7 +1,8 @@
 // S-08 §6 — 병합 규칙 파서(HM-18)와 모델 하네스(HM-24).
 // 모델 호출 자체는 테스트하지 않는다 (외부 프로세스). **하네스가 모델을 못 믿는지**를 테스트한다.
 import { describe, expect, it } from 'vitest';
-import { parseMergeRule, orderPeople, RuleParseError, DEFAULT_PLAN } from '@/server/merge/rules';
+import { parseCategories, toPlan, orderPeople } from '@/server/merge/rules';
+import { sortByCategory, OTHER } from '@/server/merge/order';
 import { exactDuplicates, validateGroups, type MergeRow } from '@/server/merge/dedupe';
 
 const row = (id: number, who: string, content: string, date = '', place = ''): MergeRow => ({
@@ -13,60 +14,85 @@ const row = (id: number, who: string, content: string, date = '', place = ''): M
   attendee: '',
 });
 
-describe('HM-18 병합 규칙 파서', () => {
-  it('[HM-T30] 빈 규칙은 기본값', () => {
-    expect(parseMergeRule('')).toEqual(DEFAULT_PLAN);
-    expect(parseMergeRule('  \n\n # 주석만 \n')).toEqual(DEFAULT_PLAN);
+describe('HM-18 병합 규칙 — 문법 없는 설정', () => {
+  it('[HM-T30] 부서가 실제로 보낸 원문을 그대로 받는다', () => {
+    // 실제 수신 문구: "순서: AI-홍보(정간물 포함)-시스템-도서관"
+    expect(parseCategories('AI-홍보(정간물 포함)-시스템-도서관')).toEqual([
+      'AI', '홍보(정간물 포함)', '시스템', '도서관',
+    ]);
   });
 
-  it('[HM-T31] 지시어 4종을 해석한다', () => {
-    const p = parseMergeRule(
-      ['# AI홍보전략실', '순서: 최명헌, 김영인 · 하주연', '빈행유지: 실적 10, 특이 2', '특이사항: 항상 유지', '중복묶기: 끔'].join('\n'),
-    );
-    expect(p.order).toEqual(['최명헌', '김영인', '하주연']);
-    expect(p.minRows).toEqual({ achievements: 10, plans: 8, notes: 2 });
-    expect(p.dropEmptyNotes).toBe(false);
-    expect(p.dedupe).toBe(false);
-  });
-
-  it('[HM-T32] 잘못된 규칙은 행 번호와 함께 거부한다 — 조용히 무시하면 먹은 줄 안다', () => {
-    const bad: [string, number][] = [
-      ['순서 최명헌', 1],
-      ['# 주석\n빈행유지: 실적 열개', 2],
-      ['없는지시어: 값', 1],
-      ['특이사항: 아무거나', 1],
-      ['중복묶기: 아마도', 1],
-      ['빈행유지: 실적 9999', 1],
-    ];
-    for (const [text, line] of bad) {
-      try {
-        parseMergeRule(text);
-        throw new Error(`통과하면 안 됨: ${text}`);
-      } catch (e) {
-        expect(e).toBeInstanceOf(RuleParseError);
-        expect((e as RuleParseError).line).toBe(line);
-      }
+  it('[HM-T31] 구분자를 외우게 하지 않는다 — 쉼표·가운뎃점·하이픈 모두', () => {
+    const want = ['AI', '홍보', '시스템'];
+    for (const raw of ['AI, 홍보, 시스템', 'AI·홍보·시스템', 'AI-홍보-시스템', 'AI / 홍보 / 시스템']) {
+      expect(parseCategories(raw), raw).toEqual(want);
     }
   });
 
-  it('[HM-T33] 규칙에 없는 사람도 사라지지 않는다 — 뒤에 붙는다', () => {
-    const people = [
-      { name: '하주연', sortOrder: 3 },
-      { name: '최명헌', sortOrder: 1 },
-      { name: '박신입', sortOrder: 9 },
-      { name: '김영인', sortOrder: 2 },
-    ];
-    const got = orderPeople(people, parseMergeRule('순서: 최명헌, 김영인')).map((p) => p.name);
-    expect(got).toEqual(['최명헌', '김영인', '하주연', '박신입']);
+  it('[HM-T32] 빈 값·중복·과다 입력을 조용히 정리한다 (오류로 막지 않는다)', () => {
+    expect(parseCategories('')).toEqual([]);
+    expect(parseCategories('  ,  , ')).toEqual([]);
+    expect(parseCategories('AI, AI, 홍보')).toEqual(['AI', '홍보']);
+    expect(parseCategories(Array.from({ length: 30 }, (_, i) => `분류${i}`).join(','))).toHaveLength(12);
   });
 
-  it('[HM-T34] 규칙이 비면 sortOrder → 이름 순', () => {
+  it('[HM-T33] 설정 4종이 계획으로 옮겨진다', () => {
+    const plan = toPlan({
+      mergeCategories: 'AI, 홍보',
+      mergeDedupe: false,
+      mergeDropNotes: false,
+      mergeRuleText: '  도서관 업무는 맨 뒤로  ',
+    });
+    expect(plan).toEqual({
+      categories: ['AI', '홍보'],
+      dedupe: false,
+      dropEmptyNotes: false,
+      guidance: '도서관 업무는 맨 뒤로',
+    });
+  });
+
+  it('[HM-T34] 제출자 순서는 sortOrder — 규칙에 이름을 또 적게 하지 않는다', () => {
     const people = [
       { name: '나', sortOrder: 2 },
       { name: '가', sortOrder: 2 },
       { name: '다', sortOrder: 1 },
     ];
-    expect(orderPeople(people, parseMergeRule('')).map((p) => p.name)).toEqual(['다', '가', '나']);
+    expect(orderPeople(people).map((p) => p.name)).toEqual(['다', '가', '나']);
+  });
+});
+
+describe('HM-27 분류 정렬', () => {
+  const cats = ['AI', '홍보', '시스템'];
+  const item = (id: number, cat: string) => ({ id, cat });
+
+  it('[HM-T40] 분류 순서대로 재배치한다', () => {
+    const got = sortByCategory([item(1, '시스템'), item(2, 'AI'), item(3, '홍보')], (x) => x.cat, cats);
+    expect(got.map((x) => x.id)).toEqual([2, 3, 1]);
+  });
+
+  it('[HM-T41] 같은 분류 안에서는 원래 순서를 유지한다 (ABS-6)', () => {
+    const got = sortByCategory(
+      [item(1, '홍보'), item(2, 'AI'), item(3, '홍보'), item(4, 'AI')],
+      (x) => x.cat,
+      cats,
+    );
+    expect(got.map((x) => x.id)).toEqual([2, 4, 1, 3]);
+  });
+
+  it('[HM-T42] 기타는 언제나 맨 뒤 — 분류에 없는 업무가 앞에 오면 규칙이 무의미해진다', () => {
+    const got = sortByCategory(
+      [item(1, OTHER), item(2, '시스템'), item(3, OTHER), item(4, 'AI')],
+      (x) => x.cat,
+      cats,
+    );
+    expect(got.map((x) => x.id)).toEqual([4, 2, 1, 3]);
+  });
+
+  it('[HM-T43] 행은 재배치될 뿐 사라지지 않는다', () => {
+    const items = Array.from({ length: 40 }, (_, i) => item(i, ['AI', '홍보', '시스템', OTHER, '없는분류'][i % 5]));
+    const got = sortByCategory(items, (x) => x.cat, cats);
+    expect(got).toHaveLength(items.length);
+    expect(new Set(got.map((x) => x.id))).toEqual(new Set(items.map((x) => x.id)));
   });
 });
 

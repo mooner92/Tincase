@@ -1,116 +1,65 @@
-// HM-18 — 부서 병합 규칙 파서.
-// 문법은 **결정적**이다: 같은 입력 + 같은 규칙이면 언제나 같은 출력.
-// 규칙 텍스트로 HM-ABS를 건드릴 수 있는 지시어는 존재하지 않는다 (표현 자체가 불가능).
+// HM-18 — 부서 병합 규칙.
+//
+// **문법을 만들지 않는다.** 초안에는 `순서:` `빈행유지:` 같은 지시어 문법이 있었지만
+// 실제 부서가 주고받은 규칙은 이 두 줄이 전부였다:
+//
+//     순서: AI-홍보(정간물 포함)-시스템-도서관
+//     날짜: 상시업무는 공란, 특정되는 업무만 작성
+//
+// 배워야 하는 문법·틀릴 수 있는 문법을 만들 이유가 없다.
+// 남은 것은 설정 3개와 자연어 지침 1개다.
 
 export interface MergePlan {
-  /** 부서원 배치 순서 (이름). 미기재 인원은 뒤에 sortOrder → 이름 순 */
-  order: string[];
-  /** 표별 최소 행 수 — 내용이 적어도 이만큼은 빈 행을 남긴다 */
-  minRows: { achievements: number; plans: number; notes: number };
-  /** 특이사항이 비었을 때 3번 표를 지울지 */
-  dropEmptyNotes: boolean;
-  /** 모델에게 중복 묶기를 맡길지 (기본 켜짐, `중복묶기: 끔`으로 해제) */
+  /** 분류 순서 (예: AI · 홍보 · 시스템 · 도서관). 비면 제출자 순서를 그대로 쓴다 */
+  categories: string[];
+  /** 중복 묶기 */
   dedupe: boolean;
+  /** 특이사항이 비면 3번 표를 지운다 (실제 제출물의 관례) */
+  dropEmptyNotes: boolean;
+  /** 담당자가 쓴 자연어 지침 — 모델에 그대로 전달된다 */
+  guidance: string;
 }
 
-export const DEFAULT_PLAN: MergePlan = {
-  order: [],
-  minRows: { achievements: 8, plans: 8, notes: 4 },
-  dropEmptyNotes: true,
-  dedupe: true,
-};
-
-export class RuleParseError extends Error {
-  constructor(
-    public readonly line: number,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'RuleParseError';
-  }
+export interface RuleFields {
+  mergeCategories: string;
+  mergeDedupe: boolean;
+  mergeDropNotes: boolean;
+  mergeRuleText: string;
 }
 
-const TABLE_KEY: Record<string, keyof MergePlan['minRows']> = {
-  실적: 'achievements',
-  계획: 'plans',
-  특이: 'notes',
-};
+/** 분류 이름은 표시용이라 길 필요가 없다. 너무 길면 모델 프롬프트만 오염된다 */
+const MAX_CATEGORY_LEN = 20;
+const MAX_CATEGORIES = 12;
 
 /**
- * 규칙 텍스트 → 실행 계획.
- * 모르는 지시어·잘못된 값은 **행 번호와 함께** 던진다 (저장 시점 422).
- * 조용히 무시하면 담당자는 규칙이 먹은 줄 안다.
+ * 분류 순서 문자열 → 배열.
+ * 쉼표·가운뎃점·하이픈 어느 것으로 나눠도 받는다 — 부서가 보낸 원문이
+ * "AI-홍보(정간물 포함)-시스템-도서관"이었다. 사람에게 구분자를 외우게 하지 않는다.
  */
-export function parseMergeRule(text: string): MergePlan {
-  const plan: MergePlan = {
-    ...DEFAULT_PLAN,
-    order: [],
-    minRows: { ...DEFAULT_PLAN.minRows },
+export function parseCategories(raw: string): string[] {
+  return raw
+    .split(/[,·\-–—/|]/)
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => s.slice(0, MAX_CATEGORY_LEN))
+    .filter((s, i, arr) => arr.indexOf(s) === i) // 중복 제거, 순서 유지
+    .slice(0, MAX_CATEGORIES);
+}
+
+export function toPlan(d: RuleFields): MergePlan {
+  return {
+    categories: parseCategories(d.mergeCategories),
+    dedupe: d.mergeDedupe,
+    dropEmptyNotes: d.mergeDropNotes,
+    guidance: d.mergeRuleText.trim(),
   };
-  if (!text.trim()) return plan;
-
-  const lines = text.split('\n');
-  for (const [i, raw] of lines.entries()) {
-    const n = i + 1;
-    const line = raw.trim();
-    if (!line || line.startsWith('#')) continue;
-
-    const sep = line.indexOf(':');
-    if (sep < 0) throw new RuleParseError(n, `'지시어: 값' 형식이 아닙니다 — "${line}"`);
-    const key = line.slice(0, sep).trim();
-    const value = line.slice(sep + 1).trim();
-
-    switch (key) {
-      case '순서': {
-        plan.order = value
-          .split(/[,·]/)
-          .map((s) => s.trim())
-          .filter(Boolean);
-        break;
-      }
-      case '빈행유지': {
-        // "실적 8, 계획 8, 특이 4"
-        for (const part of value.split(',')) {
-          const m = /^\s*(실적|계획|특이)\s+(\d+)\s*$/.exec(part);
-          if (!m) throw new RuleParseError(n, `'실적 8, 계획 8, 특이 4' 형식이어야 합니다 — "${part.trim()}"`);
-          const rows = Number(m[2]);
-          if (rows > 200) throw new RuleParseError(n, `행 수가 너무 큽니다 (${rows}) — 200 이하여야 합니다`);
-          plan.minRows[TABLE_KEY[m[1]]] = rows;
-        }
-        break;
-      }
-      case '특이사항': {
-        if (value === '비면 표 삭제') plan.dropEmptyNotes = true;
-        else if (value === '항상 유지') plan.dropEmptyNotes = false;
-        else throw new RuleParseError(n, `'비면 표 삭제' 또는 '항상 유지'여야 합니다 — "${value}"`);
-        break;
-      }
-      case '중복묶기': {
-        if (value === '켬') plan.dedupe = true;
-        else if (value === '끔') plan.dedupe = false;
-        else throw new RuleParseError(n, `'켬' 또는 '끔'이어야 합니다 — "${value}"`);
-        break;
-      }
-      default:
-        throw new RuleParseError(n, `모르는 지시어입니다 — "${key}"`);
-    }
-  }
-  return plan;
 }
 
 /**
- * 규칙의 `순서`에 따라 사람을 줄 세운다.
- * 미기재 인원은 뒤에 붙되 부서가 정한 순서(sortOrder → 이름)를 따른다 — 이름이
- * 빠졌다고 사람이 사라지면 안 된다.
+ * 제출자 정렬 — 분류를 안 쓰는 부서를 위한 기본 순서.
+ * 명단·순서는 운영자 소관이므로(TACP-3) `sortOrder`를 그대로 따른다.
+ * 규칙 텍스트에 사람 이름을 또 적게 하지 않는다 — 두 곳에 적으면 반드시 어긋난다.
  */
-export function orderPeople<T extends { name: string; sortOrder: number }>(people: T[], plan: MergePlan): T[] {
-  const rank = new Map(plan.order.map((name, i) => [name, i]));
-  return [...people].sort((a, b) => {
-    const ra = rank.get(a.name);
-    const rb = rank.get(b.name);
-    if (ra !== undefined && rb !== undefined) return ra - rb;
-    if (ra !== undefined) return -1; // 규칙에 있는 사람이 앞
-    if (rb !== undefined) return 1;
-    return a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'ko');
-  });
+export function orderPeople<T extends { name: string; sortOrder: number }>(people: T[]): T[] {
+  return [...people].sort((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'ko'));
 }
