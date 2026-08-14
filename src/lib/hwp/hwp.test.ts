@@ -9,6 +9,7 @@ import { parseRecords, serializeRecords, paraText } from './record';
 import { openHwp } from './ole';
 import { extractTables, tableGrid } from './model';
 import { readWorklog, validateHwpUpload, UploadValidationError } from './reader';
+import { fillTable, packHwp } from './writer';
 import { createHash } from 'node:crypto';
 
 const FIX = path.resolve(__dirname, '../../../fixtures');
@@ -136,5 +137,75 @@ d('openHwp 메타', () => {
     expect(file.compressed).toBe(true);
     expect(file.sections.length).toBe(1);
     expect(file.previewText).toContain('주요 업무실적');
+  });
+});
+
+// ── 쓰기 계층 (HM-16) ────────────────────────────────────────
+// 핵심 불변식: 행을 늘려도 **원본 서식 레코드를 복제**하므로 규격이 변하지 않는다 (HM-ABS).
+d('writer — 표 편집', () => {
+  const src = () => readFileSync(f('master-template.hwp'));
+  const recsOf = (b: Buffer) => parseRecords(openHwp(b).sections[0]);
+
+  it('[HM-T20] 편집 없이 재조립하면 표 구조가 그대로다', () => {
+    const recs = recsOf(src());
+    const out = packHwp(src(), [serializeRecords(recs)]);
+    const before = readWorklog(src());
+    const after = readWorklog(out);
+    expect(after.tables.map((t) => [t.rows, t.cols])).toEqual(before.tables.map((t) => [t.rows, t.cols]));
+    expect(after.worklog).toEqual(before.worklog);
+  });
+
+  it('[HM-T21] 행 확장 — 8행 양식에 20행을 채워도 열 수·표 개수가 유지된다', () => {
+    const recs = recsOf(src());
+    const rows = [...Array(20)].map((_, i) => [`1-${i + 1}`, `업무 ${i + 1}`, '8/13', '', '']);
+    fillTable(recs, 0, rows);
+    const back = readWorklog(packHwp(src(), [serializeRecords(recs)]));
+    expect(back.tables[0].rows).toBe(21); // 머리글 1 + 데이터 20
+    expect(back.tables[0].cols).toBe(5);
+    expect(back.tables.length).toBe(3); // 나머지 표는 건드리지 않았다
+    expect(back.worklog.achievements.length).toBe(20);
+    expect(back.worklog.achievements.at(-1)!.content).toBe('업무 20');
+    expect(back.warnings).toEqual([]);
+  });
+
+  it('[HM-T22] 행 축소 — 제출 내용이 적으면 빈 행을 남기지 않는다', () => {
+    const recs = recsOf(src());
+    fillTable(recs, 0, [['1-1', '단독 업무', '', '', '']]);
+    const back = readWorklog(packHwp(src(), [serializeRecords(recs)]));
+    expect(back.tables[0].rows).toBe(2);
+    expect(back.worklog.achievements).toEqual([{ content: '단독 업무', date: '', place: '', attendee: '' }]);
+  });
+
+  it('[HM-T23] 빈 셀에도 글자를 넣을 수 있다 (PARA_TEXT 레코드가 없는 셀)', () => {
+    const recs = recsOf(src());
+    // 원본 1-3행의 장소·참석자는 비어 있다 — 거기에 글자를 넣는다
+    fillTable(recs, 0, [
+      ['1-1', '첫째', '8/11', '중회의실', '원장'],
+      ['1-2', '둘째', '8/12', '소회의실', '부원장'],
+      ['1-3', '셋째', '8/13', '대회의실', '연구진'],
+    ]);
+    const back = readWorklog(packHwp(src(), [serializeRecords(recs)]));
+    expect(back.worklog.achievements[2]).toEqual({
+      content: '셋째', date: '8/13', place: '대회의실', attendee: '연구진',
+    });
+  });
+
+  it('[HM-T24] 긴 한글 문자열도 글자 수가 어긋나지 않는다', () => {
+    const recs = recsOf(src());
+    const long = '가나다라마바사아자차카타파하'.repeat(12); // 168자
+    fillTable(recs, 0, [['1-1', long, '', '', '']]);
+    const back = readWorklog(packHwp(src(), [serializeRecords(recs)]));
+    expect(back.worklog.achievements[0].content).toBe(long);
+  });
+
+  it('[HM-T25] 표를 여러 개 동시에 편집해도 서로 침범하지 않는다', () => {
+    const recs = recsOf(src());
+    fillTable(recs, 0, [...Array(15)].map((_, i) => [`1-${i + 1}`, `실적 ${i + 1}`, '', '', '']));
+    fillTable(recs, 1, [['2-1', '계획 하나', '', '', '']]);
+    fillTable(recs, 2, [['3-1', '특이 하나', '', '', '']]);
+    const back = readWorklog(packHwp(src(), [serializeRecords(recs)]));
+    expect(back.worklog.achievements.length).toBe(15);
+    expect(back.worklog.plans).toEqual([{ content: '계획 하나', date: '', place: '', attendee: '' }]);
+    expect(back.worklog.notes).toEqual([{ content: '특이 하나', date: '', place: '', attendee: '' }]);
   });
 });
