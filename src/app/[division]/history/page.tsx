@@ -1,5 +1,6 @@
 // `/{slug}/history` — 내 제출 이력 (PG §3, 본인 것만)
 import { prisma } from '@/server/db';
+import { redirect } from 'next/navigation';
 import { getPageScope } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { toKstIso } from '@/lib/week';
@@ -8,7 +9,11 @@ export const dynamic = 'force-dynamic';
 
 export default async function HistoryPage() {
   const ps = await getPageScope();
-  if (!ps.ok) return noticeFor(ps.code, ps.message);
+  if (!ps.ok) {
+    if (ps.code === 'unauthenticated') redirect('/login');
+    return noticeFor(ps.code, ps.message);
+  }
+  if (ps.scope.user.mustChangePassword) redirect('/password?first=1'); // AU-22
 
   const slots = await prisma.weekSlot.findMany({ orderBy: { opensAt: 'desc' }, take: 26 });
   const subs = await prisma.submission.findMany({

@@ -9,7 +9,13 @@ type St =
   | { kind: 'done'; version: number; summary: { rows: number; cols: number }[]; warnings: string[] }
   | { kind: 'error'; message: string };
 
-export function TemplateManager({ current }: { current: { version: number; uploadedAtKst: string } | null }) {
+export function TemplateManager({
+  current,
+  hasStandard,
+}: {
+  current: { version: number; uploadedAtKst: string } | null;
+  hasStandard: boolean;
+}) {
   const [st, setSt] = useState<St>({ kind: 'idle' });
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
@@ -72,6 +78,23 @@ export function TemplateManager({ current }: { current: { version: number; uploa
           e.target.value = '';
         }}
       />
+
+      {/* ST-20 — 전사 표준 양식을 시작점으로 제공 */}
+      <div className="rounded-lg bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600">
+        <p className="font-medium text-slate-700">부서 양식 만드는 법</p>
+        <p className="mt-1">
+          전사 표준 양식을 받아 <strong>우리 부서 부분만 남기고</strong> 저장한 뒤, 위에서 등록하세요.
+          부서원은 여기 등록된 양식을 받아 작성합니다.
+        </p>
+        {hasStandard ? (
+          /* eslint-disable-next-line @next/next/no-html-link-for-pages -- 파일 다운로드 */
+          <a href="/api/template/standard" className="mt-2 inline-block font-medium text-blue-700 hover:underline">
+            전사 표준 양식 받기 →
+          </a>
+        ) : (
+          <p className="mt-2 text-slate-400">전사 표준 양식이 아직 등록되지 않았습니다. 운영자에게 요청하세요.</p>
+        )}
+      </div>
       <div aria-live="polite">
         {st.kind === 'done' && (
           <div className="rounded-lg bg-green-50 px-4 py-3 text-sm text-green-800">

@@ -1,6 +1,6 @@
 // `/{slug}/manage/settings` — 부서 설정 (PG §5). lead 전용.
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import { notFound, redirect } from 'next/navigation';
 import { prisma } from '@/server/db';
 import { getPageScope } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
@@ -12,16 +12,21 @@ export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage() {
   const ps = await getPageScope();
-  if (!ps.ok) return noticeFor(ps.code, ps.message);
+  if (!ps.ok) {
+    if (ps.code === 'unauthenticated') redirect('/login');
+    return noticeFor(ps.code, ps.message);
+  }
+  if (ps.scope.user.mustChangePassword) redirect('/password?first=1'); // AU-22
   if (!ps.scope.isLead && !ps.scope.readAll) notFound();
   const { scope } = ps;
 
-  const [template, users] = await Promise.all([
+  const [template, users, standard] = await Promise.all([
     prisma.template.findFirst({ where: { divisionId: scope.division.id, isActive: true } }),
     prisma.user.findMany({
       where: { divisionId: scope.division.id, isActive: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     }),
+    prisma.standardTemplate.findFirst({ where: { isActive: true } }),
   ]);
 
   return (
@@ -37,6 +42,7 @@ export default async function SettingsPage() {
       <section className="rounded-xl border border-slate-200 bg-white px-5 py-4">
         <h2 className="mb-3 text-sm font-semibold text-slate-500">부서 양식</h2>
         <TemplateManager
+          hasStandard={!!standard}
           current={
             template && {
               version: template.version,

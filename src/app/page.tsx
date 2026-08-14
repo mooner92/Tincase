@@ -7,6 +7,10 @@ export const dynamic = 'force-dynamic';
 
 export default async function Home() {
   const ps = await getPageScope();
-  if (!ps.ok) return noticeFor(ps.code, ps.message);
+  if (!ps.ok) {
+    if (ps.code === 'unauthenticated') redirect('/login');
+    return noticeFor(ps.code, ps.message);
+  }
+  if (ps.scope.user.mustChangePassword) redirect('/password?first=1'); // AU-22
   redirect(`/${ps.scope.division.slug}`);
 }

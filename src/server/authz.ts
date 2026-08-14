@@ -24,6 +24,8 @@ export interface Scope {
   isLead: boolean;
   /** AU-15·16 — operator(구축 단계) 또는 coordinator */
   readAll: boolean;
+  /** 신원 출처 — 비밀번호 변경 강제 판단에 쓰인다 (AU-22) */
+  source: 'session' | 'cloudflare' | 'dev';
 }
 
 /** AU-15·16 — 전 부서 읽기 판정. 축소 시 이 함수 한 곳만 바꾼다. */
@@ -31,13 +33,12 @@ export function canReadAllDivisions(user: Pick<User, 'isOperator' | 'isCoordinat
   return user.isOperator || user.isCoordinator;
 }
 
-/** AU-04/04b — 신원 → 활성 사용자 + 부서 */
+/** AU-04/04b — 신원 → 활성 사용자 + 부서. 신원 출처(세션/Cloudflare)는 여기서 흡수된다 */
 export async function requireScope(headers: Headers): Promise<Scope> {
   const identity = await verifyAccess(headers);
-  const user = await prisma.user.findUnique({
-    where: { email: identity.email },
-    include: { division: true },
-  });
+  const user = identity.userId
+    ? await prisma.user.findUnique({ where: { id: identity.userId }, include: { division: true } })
+    : await prisma.user.findUnique({ where: { email: identity.email! }, include: { division: true } });
   if (!user || !user.isActive) {
     throw new HttpError(403, 'not_registered', '등록되지 않은 사용자입니다. 운영자에게 문의하세요.');
   }
@@ -54,6 +55,7 @@ export async function requireScope(headers: Headers): Promise<Scope> {
     division,
     isLead: user.divisionRole === 'lead',
     readAll: canReadAllDivisions(user),
+    source: identity.source,
   };
 }
 

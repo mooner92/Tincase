@@ -1,5 +1,6 @@
 // `/{slug}` — member 메인 (S-06 §2). 4상태: OPEN_EMPTY / OPEN_SUBMITTED / LOCKED_*
 import { prisma } from '@/server/db';
+import { redirect } from 'next/navigation';
 import { getPageScope } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { ensureCurrentSlot, effectiveDeadline, divisionStatus } from '@/server/worklog';
@@ -11,7 +12,11 @@ export const dynamic = 'force-dynamic';
 
 export default async function MemberPage() {
   const ps = await getPageScope();
-  if (!ps.ok) return noticeFor(ps.code, ps.message);
+  if (!ps.ok) {
+    if (ps.code === 'unauthenticated') redirect('/login');
+    return noticeFor(ps.code, ps.message);
+  }
+  if (ps.scope.user.mustChangePassword) redirect('/password?first=1'); // AU-22
   const { scope } = ps;
   const now = new Date();
 

@@ -85,9 +85,9 @@ Spec Driven Development — 스펙이 먼저, 코드가 나중. 테스트 77개 
 
 ## 기술 스택
 
-Next.js (App Router) + TypeScript · SQLite + Prisma · Tailwind + shadcn/ui(선별) ·
-`cfb` + `node:zlib` + 자체 레코드 계층 · Cloudflare Access(`jose`) ·
-Docker `127.0.0.1:11111` · 데이터 `/data/worklog` · 백업 `/mnt/backup`(NFS)
+Next.js (App Router) + TypeScript · SQLite + Prisma · Tailwind ·
+`cfb` + `node:zlib` + 자체 레코드 계층 · 인증: scrypt 세션 + Cloudflare Access(`jose`) ·
+Docker `0.0.0.0:11111`(사내망) · 데이터 `/data/worklog` · 백업 `/mnt/backup`(NFS)
 
 ## SDD 규약
 

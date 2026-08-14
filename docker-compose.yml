@@ -6,7 +6,10 @@ services:
     container_name: repman
     restart: unless-stopped
     ports:
-      - "127.0.0.1:11111:3000"          # ← 호스트 IP 명시. "11111:3000" 금지 (사내망 노출)
+      # ADR-0006 — 사내망 직접 접속(비밀번호 로그인)을 허용하므로 LAN에 노출한다.
+      # 이는 v1.0.0의 127.0.0.1 전용 정책을 의도적으로 개정한 것이며,
+      # 인증은 앱의 세션·JWT 검증이 담당한다 (AU-20~26). 인증 없는 노출이 아니다.
+      - "0.0.0.0:11111:3000"
     environment:
       NODE_ENV: production
       TZ: Asia/Seoul                     # OPS-04c — 코드는 이것 없이도 옳다 (WS-07)

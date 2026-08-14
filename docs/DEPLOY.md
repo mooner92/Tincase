@@ -3,17 +3,32 @@
 > 목표: 월요일 8/17 00:00 주차 오픈 전에 `https://worklog.excusa.uk` 가동.
 > ⚠ 표시는 실수하면 보안 사고인 지점.
 
-## ✅ 현재 상태 (2026-08-14 기준 — §1·2·4·7 실행 완료)
+## ✅ 현재 상태 (2026-08-14, v1.1.0 — 사내망 개통 완료)
 
 | 항목 | 상태 |
 |---|---|
-| 컨테이너 | **가동 중** `127.0.0.1:11111` · health 전부 ok · v1.0.0 이미지 |
-| 데이터 | `/data/worklog` 시드 완료 (부서 30 · 사용자 337 · 파일럿 양식 v1) |
-| 백업 | 크론 등록 (db 매일 03:00 · files 일 03:30) · 첫 백업 + verify 통과 |
-| AUD | **placeholder** — Access 앱 생성 후 교체 필요 (아래 §3) |
+| 컨테이너 | **가동 중** `0.0.0.0:11111` · health ok · v1.1.0 |
+| **사내망 접속** | **열림** — `http://192.168.1.104:11111` 로그인 동작 확인 |
+| 데이터 | `/data/worklog` (부서 30 · 사용자 337 · 파일럿 양식 v1) |
+| 비밀번호 | **AI홍보전략실 13명 전원 발급 완료** (첫 로그인 시 변경 강제) |
+| 백업 | 크론 (db 매일 03:00 · files 일 03:30) · verify 통과 |
+| Cloudflare | 미개통 — **운영자 외부 통로용으로만** 설정 예정 (§3) |
 
-**남은 것은 §3(Cloudflare 대시보드)과 §5(브라우저 검증)뿐이다.**
-AUD 교체 후 재기동: `.env.production` 수정 → `sudo docker compose up -d`
+**부서원은 이미 사용 가능하다.** §3은 Sean의 외부 접속을 위한 선택 작업이다.
+
+### 비밀번호 배포 (AU-22)
+
+발급 CSV는 이 세션 스크래치에 있고 **평문이므로 배포 후 즉시 폐기**해야 한다.
+개인별로 전달하고, 각자 첫 로그인 시 변경 화면으로 강제 이동된다.
+
+```bash
+# 재발급 (분실 시)
+DATABASE_URL=file:/data/worklog/db/worklog.db \
+  npx tsx scripts/issue-passwords.ts --division AI홍보전략실 --reset 홍길동
+# 신규 부서 온보딩 시 전원 발급
+DATABASE_URL=file:/data/worklog/db/worklog.db \
+  npx tsx scripts/issue-passwords.ts --division 연구관리실
+```
 
 ---
 
@@ -75,7 +90,7 @@ sudo chown -R 10001:10001 /data/worklog
 |---|---|
 | Application domain | `worklog.excusa.uk` |
 | Session Duration | 24h |
-| Policy | Allow · Include: `Emails ending in @kei.re.kr` (Q-13 확정) |
+| Policy | **Allow · Emails = 운영자(Sean) 1명** — v1.1 개정 ([ADR-0006](adr/0006-internal-password-auth.md)). 나머지 직원은 사내망 사용 |
 
 ⚠ **①만 하고 ②를 빼먹으면 안 된다** — 앱의 JWT 검증(AU-02)이 fail-closed로 막아주지만, 설정도 제대로.
 
@@ -103,11 +118,11 @@ curl -fsS http://127.0.0.1:11111/api/health | python3 -m json.tool
 ## 5. 검증 (AU-12) ⚠
 
 ```bash
-# 1) 바인딩 확인 — 127.0.0.1이어야 한다. 0.0.0.0이면 즉시 중단
+# 1) 바인딩 확인 — v1.1부터 0.0.0.0이 정상 (사내망 접속 허용, ADR-0006)
 ss -tlnp | grep 11111
 
-# 2) 사내망 다른 기기(또는 폰 LTE)에서 직접 접근 → 실패해야 정상
-curl -m 5 http://<서버IP>:11111/ ; echo "exit=$? (0이 아니어야 정상)"
+# 2) 미인증 접근 → /login 리다이렉트여야 정상 (200으로 내용이 보이면 즉시 중단)
+curl -s -o /dev/null -w "%{http_code} %{redirect_url}\n" http://<서버IP>:11111/
 
 # 3) 루트 디스크 보호 (OPS-19) — 실측: 이 서버는 97~99%를 오간다
 sudo docker builder prune -f && sudo docker image prune -f
@@ -145,11 +160,15 @@ crontab -e
 ## 8. 월요일 아침 안내문 (붙여넣기용 초안)
 
 > [주간업무 제출 안내]
-> 이번 주부터 주간 업무일지를 웹으로 제출합니다.
-> ① https://worklog.excusa.uk/aiprd 접속 (KEI 이메일로 로그인)
-> ② [빈 양식 다운로드] → 작성 → 끌어다 놓기로 제출
+> 이번 주부터 주간 업무일지를 웹으로 제출합니다. **사내망에서만 접속됩니다.**
+> ① http://192.168.1.104:11111 접속
+> ② KEI 이메일 + 개별 전달드린 임시 비밀번호로 로그인 → 비밀번호 변경
+> ③ [빈 양식 다운로드] → 작성 → 끌어다 놓기로 제출
 > 마감: 화요일 14:00 (이후 자동 잠김)
+> ※ 한 번 로그인하면 한 달간 유지됩니다.
 > ※ 이번 주는 기존 이메일 제출도 병행합니다. 문제 있으면 저에게 바로 연락 주세요.
+
+비밀번호는 **개인별로 따로** 전달하세요 (단체 메시지 금지).
 
 ## 장애 시 (OPS-18)
 

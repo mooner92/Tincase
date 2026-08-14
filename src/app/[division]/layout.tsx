@@ -4,6 +4,7 @@ import Link from 'next/link';
 import { getPageScope } from '@/server/page-scope';
 import { resolveDivisionPage, HttpError } from '@/server/authz';
 import { noticeFor } from '@/components/Notice';
+import { LogoutButton } from '@/components/LogoutButton';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +16,11 @@ export default async function DivisionLayout({
   params: Promise<{ division: string }>;
 }) {
   const ps = await getPageScope();
-  if (!ps.ok) return noticeFor(ps.code, ps.message);
+  if (!ps.ok) {
+    if (ps.code === 'unauthenticated') redirect('/login');
+    return noticeFor(ps.code, ps.message);
+  }
+  if (ps.scope.user.mustChangePassword) redirect('/password?first=1'); // AU-22
   const { division: slugParam } = await params;
 
   let division;
@@ -52,12 +57,12 @@ export default async function DivisionLayout({
           <Link href={`/${division.slug}/history`} className="hover:underline">
             내 이력
           </Link>
+          <Link href="/password" className="hover:underline">
+            비밀번호
+          </Link>
           <span className="text-slate-400">|</span>
           <span>{user.name} 님</span>
-          {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- Cloudflare 경로 — 앱 라우트 아님 (AU-08) */}
-          <a href="/cdn-cgi/access/logout" className="text-slate-400 hover:text-slate-600 hover:underline">
-            로그아웃
-          </a>
+          <LogoutButton viaCloudflare={ps.scope.source === 'cloudflare'} />
         </nav>
       </header>
       {children}

@@ -44,10 +44,35 @@ model User {
   sortOrder     Int     @default(100)
   createdAt     DateTime @default(now())
 
+  // 사내망 직접 접속용 비밀번호 인증 (AU-20). 외부는 Cloudflare Access가 담당
+  passwordHash       String? // scrypt. null이면 아직 발급 전
+  mustChangePassword Boolean   @default(true) // 초기 발급 비밀번호는 첫 로그인 시 변경 강제
+  lastLoginAt        DateTime?
+  failedLoginCount   Int       @default(0)
+  lockedUntil        DateTime? // 무차별 대입 방어 (AU-23)
+
   division    Division     @relation(fields: [divisionId], references: [id])
   submissions Submission[]
+  sessions    Session[]
 
   @@index([divisionId, isActive, onRoster, sortOrder])
+}
+
+// 사내망 로그인 세션 (AU-21). 쿠키에는 원문 토큰, DB에는 해시만 저장.
+model Session {
+  id         String   @id @default(cuid())
+  tokenHash  String   @unique
+  userId     String
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  expiresAt  DateTime
+  userAgent  String?
+  ip         String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 // 전역 주 달력 — 부서와 무관한 사실. deadline 컬럼 없음 (DM-11)
@@ -106,6 +131,21 @@ model Template {
 
   @@unique([divisionId, version])
   @@index([divisionId, isActive])
+}
+
+// 전사 표준 양식 — 기획조정실이 배포하는 공통 원본 (부서 스코프 밖).
+// 각 부서 담당자가 이걸 받아 자기 부서 부분만 남기고 부서 양식으로 등록한다.
+model StandardTemplate {
+  id         String   @id @default(cuid())
+  filePath   String
+  sha256     String
+  version    Int      @unique
+  isActive   Boolean  @default(true)
+  note       String   @default("") // 출처·주차 등 메모
+  uploadedBy String // User.id (operator)
+  uploadedAt DateTime @default(now())
+
+  @@index([isActive])
 }
 
 // Phase 2 선반영 (마이그레이션 1회 절약)
