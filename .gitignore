@@ -36,3 +36,6 @@ fixtures/*.hwpx
 docs/private/
 
 .env.production
+
+# 빌드 캐시 (커밋 대상 아님)
+tsconfig.tsbuildinfo
