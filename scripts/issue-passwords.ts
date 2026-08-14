@@ -3,9 +3,14 @@
 //   npx tsx scripts/issue-passwords.ts --division AI홍보전략실        # 미발급자만
 //   npx tsx scripts/issue-passwords.ts --division AI홍보전략실 --reset 홍길동
 //   npx tsx scripts/issue-passwords.ts --all                          # 활성 부서 전체
+//   ... --bom      → Excel용 UTF-8 BOM 부착 (없으면 엑셀이 CP949로 읽어 한글이 깨진다)
+//   ... --messages → 개인별 안내문 텍스트로 출력 (그대로 복사해 전달)
 //
-// 출력은 CSV(이름,이메일,임시비밀번호). ⚠ 화면·파일에 평문이 남으므로 배포 후 즉시 폐기할 것.
+// ⚠ 출력에 평문이 남으므로 배포 후 즉시 폐기할 것.
 // 비밀번호는 해시로만 저장되므로 이 출력을 놓치면 재발급밖에 방법이 없다 (설계상 의도).
+//
+// 팁: 파이프로 자르지 말 것 (`| head` 는 SIGPIPE로 스크립트를 중단시켜
+//     일부만 발급되고 출력은 유실된다). 파일로 리다이렉트한 뒤 읽어라.
 import { PrismaClient } from '@prisma/client';
 import { generateInitialPassword, hashPassword } from '../src/server/password';
 
@@ -54,7 +59,12 @@ async function main() {
     process.exit(1);
   }
 
-  console.log('부서,이름,이메일,임시비밀번호');
+  const asMessages = has('messages');
+  if (!asMessages) {
+    if (has('bom')) process.stdout.write('\uFEFF'); // Excel이 UTF-8로 인식하게
+    console.log('부서,이름,이메일,임시비밀번호');
+  }
+  const base = process.env.PUBLIC_BASE_URL ?? 'http://192.168.1.104:11111';
   for (const u of targets) {
     const pw = generateInitialPassword();
     await prisma.user.update({
@@ -68,7 +78,17 @@ async function main() {
     });
     // 재발급이면 기존 세션 무효화 (AU-25)
     await prisma.session.deleteMany({ where: { userId: u.id } });
-    console.log(`${u.division.nameKo},${u.name},${u.email},${pw}`);
+    if (asMessages) {
+      console.log(`───────── ${u.name} 님 ─────────
+[주간업무 시스템 계정]
+주소: ${base}
+아이디: ${u.email}
+임시 비밀번호: ${pw}
+첫 로그인 후 비밀번호를 변경해 주세요.
+`);
+    } else {
+      console.log(`${u.division.nameKo},${u.name},${u.email},${pw}`);
+    }
   }
   console.error(`\n[발급] ${targets.length}명. 배포 후 이 출력은 반드시 폐기하세요.`);
 }

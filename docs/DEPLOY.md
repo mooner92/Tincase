@@ -21,14 +21,34 @@
 발급 CSV는 이 세션 스크래치에 있고 **평문이므로 배포 후 즉시 폐기**해야 한다.
 개인별로 전달하고, 각자 첫 로그인 시 변경 화면으로 강제 이동된다.
 
+**개별 재발급은 `/ops` 화면의 [초기화] 버튼이 가장 빠르다** (AU-27) — 안내문 복사까지 한 번에.
+여러 명 한꺼번에 발급할 때만 CLI를 쓴다.
+
 ```bash
-# 재발급 (분실 시)
-DATABASE_URL=file:/data/worklog/db/worklog.db \
-  npx tsx scripts/issue-passwords.ts --division AI홍보전략실 --reset 홍길동
-# 신규 부서 온보딩 시 전원 발급
-DATABASE_URL=file:/data/worklog/db/worklog.db \
-  npx tsx scripts/issue-passwords.ts --division 연구관리실
+export DATABASE_URL=file:/data/worklog/db/worklog.db
+
+# 신규 부서 온보딩 — Excel로 열 거면 반드시 --bom (없으면 한글이 깨진다)
+npx tsx scripts/issue-passwords.ts --division 연구관리실 --bom > /tmp/pw.csv
+
+# 개인별 안내문으로 뽑기 (메신저에 그대로 붙여넣기 좋음)
+npx tsx scripts/issue-passwords.ts --division 연구관리실 --messages > /tmp/pw.txt
+
+# 특정인 재발급
+npx tsx scripts/issue-passwords.ts --division 연구관리실 --reset 홍길동
 ```
+
+⚠ **출력을 `| head` 등으로 자르지 말 것.** SIGPIPE로 스크립트가 중단되어
+일부만 발급되고 그 비밀번호는 유실된다 (실제로 겪음). 파일로 리다이렉트한 뒤 열어볼 것.
+
+### Windows로 내려받기
+
+```
+scp -P 764 mhchoi@192.168.1.104:/home/mhchoi/repman/docs/private/<파일명> D:\경로\
+```
+
+한글 파일명은 Windows scp에서 깨지므로 **ASCII 파일명**으로 저장할 것.
+Excel에서 한글이 깨지면 인코딩 문제다 — `--bom`으로 다시 뽑거나 CP949로 변환:
+`iconv -f utf-8 -t cp949 in.csv > out.csv`
 
 ---
 
