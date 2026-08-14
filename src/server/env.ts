@@ -8,6 +8,11 @@ const schema = z.object({
   // AUD는 Access 앱 생성 후에야 존재. 개발(DEV_IDENTITY)에서는 비워둘 수 있다.
   CF_ACCESS_AUD: z.string().default(''),
   MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(20 * 1024 * 1024),
+  // HM-24 — 병합 보조 모델. 비워두면 결정론 병합만 수행한다 (모델은 얹는 것이지 의존 대상이 아니다).
+  MERGE_MODEL: z.string().default(''),
+  MERGE_MODEL_URL: z.string().default('http://127.0.0.1:11434'),
+  MERGE_MODEL_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
+  MERGE_MODEL_MAX_ROWS: z.coerce.number().int().positive().default(400),
   DEV_IDENTITY: z.string().email().optional(),
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
 });
