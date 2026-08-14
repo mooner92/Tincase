@@ -93,28 +93,47 @@ export async function findAccessibleSubmission(scope: Scope, submissionId: strin
 }
 
 /**
- * 페이지 라우팅용 — slug/별칭 해석 (PG-01).
- * 반환: 접근 가능하면 division, 별칭이면 canonical로 redirect 필요 표시.
+ * AU-13 — 대상 부서 해석의 **단일 출처**. 페이지·API가 모두 이걸 통과한다.
+ *
+ * 규칙:
+ *   요청 없음        → 내 부서
+ *   내 부서(슬러그·별칭) → 내 부서
+ *   타 부서          → readAll(operator·coordinator)만 허용 + 감사 로그. 그 외 404
+ *
+ * 이 함수를 우회해 `scope.division`을 직접 쓰면, 헤더는 A부서인데 본문은 B부서가 되는
+ * 불일치가 생긴다 (v1.3.0에서 실제로 발생). 부서 스코프 데이터는 반드시 여기서 얻을 것.
  */
-export async function resolveDivisionPage(
+export async function resolveTargetDivision(
   scope: Scope,
-  slugParam: string,
-): Promise<{ division: Division; redirectTo: string | null }> {
+  slugParam?: string | null,
+): Promise<{ division: Division; isOwn: boolean; redirectTo: string | null }> {
   const own = scope.division;
-  if (slugParam === own.slug) return { division: own, redirectTo: null };
+  if (!slugParam || slugParam === own.slug) return { division: own, isOwn: true, redirectTo: null };
   if (own.shortSlug && slugParam === own.shortSlug) {
-    return { division: own, redirectTo: `/${own.slug}` };
+    return { division: own, isOwn: true, redirectTo: `/${own.slug}` };
   }
   if (scope.readAll) {
     const other = await prisma.division.findFirst({
       where: { OR: [{ slug: slugParam }, { shortSlug: slugParam }] },
     });
     if (other) {
-      if (slugParam === other.shortSlug) return { division: other, redirectTo: `/${other.slug}` };
+      if (other.id === own.id) return { division: own, isOwn: true, redirectTo: `/${own.slug}` };
+      if (slugParam === other.shortSlug) {
+        return { division: other, isOwn: false, redirectTo: `/${other.slug}` };
+      }
       await audit(scope.user.email, 'cross_division_read', other.id, `page:${slugParam}`);
-      return { division: other, redirectTo: null };
+      return { division: other, isOwn: false, redirectTo: null };
     }
   }
   // 남의 부서든 없는 부서든 동일 404 (AU-T17)
   throw notFound();
+}
+
+/** @deprecated resolveTargetDivision을 쓸 것 */
+export async function resolveDivisionPage(
+  scope: Scope,
+  slugParam: string,
+): Promise<{ division: Division; redirectTo: string | null }> {
+  const { division, redirectTo } = await resolveTargetDivision(scope, slugParam);
+  return { division, redirectTo };
 }

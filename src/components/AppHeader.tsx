@@ -17,6 +17,7 @@ export function AppHeader({
   isLead,
   isOperator,
   viaCloudflare,
+  foreign = false,
 }: {
   slug: string | null; // null이면 부서 컨텍스트 없음 (/ops 단독 등)
   divisionName: string;
@@ -24,6 +25,8 @@ export function AppHeader({
   isLead: boolean;
   isOperator: boolean;
   viaCloudflare: boolean;
+  /** 내 부서가 아닌 부서를 열람 중 (AU-15·16) — 배지로 명시 */
+  foreign?: boolean;
 }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -47,8 +50,8 @@ export function AppHeader({
   const items: NavItem[] = [
     ...(slug
       ? [
-          { href: `/${slug}`, label: '제출' },
-          { href: `/${slug}/history`, label: '내 이력' },
+          { href: `/${slug}`, label: foreign ? '개요' : '제출' },
+          ...(foreign ? [] : [{ href: `/${slug}/history`, label: '내 이력' }]),
           ...(isLead
             ? [
                 { href: `/${slug}/manage`, label: '수합 관리' },
@@ -86,8 +89,12 @@ export function AppHeader({
           <Link href={slug ? `/${slug}` : '/'} className="display shrink-0 text-[17px]">
             주간업무
           </Link>
-          <span className="badge-pill max-w-44 truncate" title={divisionName}>
+          <span
+            className={`badge-pill max-w-44 truncate ${foreign ? 'bg-brand-ochre/25 text-body-strong' : ''}`}
+            title={foreign ? `${divisionName} (타 부서 열람 중)` : divisionName}
+          >
             {divisionName}
+            {foreign && <span className="ml-1 text-[11px] font-semibold">열람</span>}
           </span>
         </div>
 

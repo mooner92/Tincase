@@ -205,6 +205,80 @@ d('rule 저장 (API-28/29)', () => {
   });
 });
 
+d('부서 해석 단일 출처 (v1.3.1 회귀)', () => {
+  it('[격리] member는 타 부서 슬러그·별칭 모두 404', async () => {
+    const { resolveTargetDivision, HttpError } = await import('@/server/authz');
+    const { requireScope } = await import('@/server/authz');
+    const h = new Headers({ 'x-test-identity': ID.member });
+    const scope = await requireScope(h);
+    for (const s of [B.slug, B.short]) {
+      await expect(resolveTargetDivision(scope, s)).rejects.toMatchObject({ status: 404 });
+    }
+    void HttpError;
+  });
+
+  it('[격리] lead도 타 부서는 404 (readAll 아님)', async () => {
+    const { resolveTargetDivision, requireScope } = await import('@/server/authz');
+    const scope = await requireScope(new Headers({ 'x-test-identity': ID.lead }));
+    await expect(resolveTargetDivision(scope, B.slug)).rejects.toMatchObject({ status: 404 });
+  });
+
+  it('operator는 타 부서 해석 성공 + isOwn=false + 감사 로그', async () => {
+    const { resolveTargetDivision, requireScope } = await import('@/server/authz');
+    const { prisma } = await import('@/server/db');
+    const scope = await requireScope(new Headers({ 'x-test-identity': ID.op }));
+    const r = await resolveTargetDivision(scope, B.slug);
+    expect(r.division.slug).toBe(B.slug);
+    expect(r.isOwn).toBe(false);
+    expect(r.redirectTo).toBeNull();
+    const logs = await prisma.auditLog.count({ where: { action: 'cross_division_read', actor: ID.op } });
+    expect(logs).toBeGreaterThan(0);
+  });
+
+  it('내 부서·별칭·빈 값은 모두 내 부서로 (isOwn=true)', async () => {
+    const { resolveTargetDivision, requireScope } = await import('@/server/authz');
+    const scope = await requireScope(new Headers({ 'x-test-identity': ID.member }));
+    for (const arg of [undefined, A.slug, A.short]) {
+      const r = await resolveTargetDivision(scope, arg);
+      expect(r.division.slug).toBe(A.slug);
+      expect(r.isOwn).toBe(true);
+    }
+    // 별칭은 정식 슬러그로 유도
+    expect((await resolveTargetDivision(scope, A.short)).redirectTo).toBe(`/${A.slug}`);
+  });
+
+  it('타 부서 별칭 → operator는 정식 슬러그로 redirect', async () => {
+    const { resolveTargetDivision, requireScope } = await import('@/server/authz');
+    const scope = await requireScope(new Headers({ 'x-test-identity': ID.op }));
+    const r = await resolveTargetDivision(scope, B.short);
+    expect(r.redirectTo).toBe(`/${B.slug}`);
+    expect(r.isOwn).toBe(false);
+  });
+
+  it('★ zip은 요청한 부서의 파일만 담는다 (헤더/본문 불일치 방지)', async () => {
+    const { GET } = await import('@/app/api/division/download-zip/route');
+    const { POST } = await import('@/app/api/submissions/route');
+    const { prisma } = await import('@/server/db');
+
+    // B부서 제출물 준비 (bLead가 올린다)
+    const fd = new FormData();
+    fd.set('file', new File([new Uint8Array(filled)], 'b주간.hwp'));
+    const up = await POST(nx('/api/submissions', ID.bLead, { method: 'POST', body: fd }));
+    expect(up.status).toBe(201);
+    const bCount = await prisma.submission.count({ where: { division: { slug: B.slug }, isLatest: true } });
+    expect(bCount).toBeGreaterThan(0);
+
+    // operator가 B부서 지정 → 200, 파일명에 B 부서명
+    const ok = await GET(nx(`/api/division/download-zip?division=${B.slug}`, ID.op));
+    expect(ok.status).toBe(200);
+    expect(decodeURIComponent(ok.headers.get('content-disposition') ?? '')).toContain(B.nameKo);
+
+    // lead가 B부서 지정 → 404 (권한 없음)
+    const denied = await GET(nx(`/api/division/download-zip?division=${B.slug}`, ID.lead));
+    expect(denied.status).toBe(404);
+  });
+});
+
 d('Phase 2 계약 예약 (API-30)', () => {
   it('merge API — member 404 · lead 501 (동작 아님을 명시)', async () => {
     const { POST } = await import('@/app/api/division/merge/route');

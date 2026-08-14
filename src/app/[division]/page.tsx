@@ -1,7 +1,7 @@
 // `/{slug}` — member 메인 (S-06 §2). 제출이 주인공: 히어로(주차·마감) + 7/5 그리드.
 import { prisma } from '@/server/db';
 import { redirect } from 'next/navigation';
-import { getPageScope } from '@/server/page-scope';
+import { getPageScope, getDivisionView } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { ensureCurrentSlot, effectiveDeadline, divisionStatus } from '@/server/worklog';
 import { formatDeadlineKo, isLocked, toKstIso } from '@/lib/week';
@@ -10,29 +10,33 @@ import { UploadDropzone } from '@/components/UploadDropzone';
 
 export const dynamic = 'force-dynamic';
 
-export default async function MemberPage() {
+export default async function MemberPage({ params }: { params: Promise<{ division: string }> }) {
   const ps = await getPageScope();
   if (!ps.ok) {
     if (ps.code === 'unauthenticated') redirect('/login');
     return noticeFor(ps.code, ps.message);
   }
   if (ps.scope.user.mustChangePassword) redirect('/password?first=1'); // AU-22
-  const { scope } = ps;
+  const { division: slugParam } = await params;
+  // ★ 반드시 해석된 부서를 쓴다 — scope.division을 쓰면 헤더와 본문이 어긋난다 (v1.3.1 수정)
+  const view = await getDivisionView(slugParam);
+  const { scope, division, isOwn, canSubmit } = view;
   const now = new Date();
 
   const slot = await ensureCurrentSlot(now);
-  const deadline = effectiveDeadline(slot, scope.division);
-  const locked = isLocked({ opensAt: slot.opensAt }, scope.division, now);
+  const deadline = effectiveDeadline(slot, division);
+  const locked = isLocked({ opensAt: slot.opensAt }, division, now);
   const nextOpens = new Date(slot.opensAt.getTime() + 7 * 86400_000);
 
   const [mySubmission, template, { members }] = await Promise.all([
-    prisma.submission.findFirst({ where: { userId: scope.user.id, weekSlotId: slot.id, isLatest: true } }),
-    prisma.template.findFirst({ where: { divisionId: scope.division.id, isActive: true } }),
-    divisionStatus(scope.division.id, slot.id),
+    isOwn
+      ? prisma.submission.findFirst({ where: { userId: scope.user.id, weekSlotId: slot.id, isLatest: true } })
+      : null,
+    prisma.template.findFirst({ where: { divisionId: division.id, isActive: true } }),
+    divisionStatus(division.id, slot.id),
   ]);
 
-  const guideLines = scope.division.guideText.split('\n').filter(Boolean);
-  const onRosterMe = scope.user.onRoster;
+  const guideLines = division.guideText.split('\n').filter(Boolean);
   const submitted = members.filter((m) => m.status === 'submitted').length;
 
   return (
@@ -92,12 +96,16 @@ export default async function MemberPage() {
                 </p>
               </section>
             )
-          ) : template && onRosterMe ? (
+          ) : template && canSubmit ? (
             <section>
               <h2 className="label">{mySubmission ? '다시 올리기 — 새 버전으로 저장됩니다' : '제출'}</h2>
               <UploadDropzone hasPrevious={!!mySubmission} />
             </section>
-          ) : !onRosterMe ? (
+          ) : !isOwn ? (
+            <section className="card px-6 py-5 text-sm text-muted">
+              내 부서가 아니므로 제출할 수 없습니다. 제출은 소속 부서 페이지에서만 가능합니다.
+            </section>
+          ) : !scope.user.onRoster ? (
             <section className="card px-6 py-5 text-sm text-muted">
               제출 대상이 아닙니다. 제출이 필요하면 운영자에게 요청해 주세요.
             </section>
@@ -130,13 +138,17 @@ export default async function MemberPage() {
           <section className="card-feature bg-brand-peach px-7 py-6">
             <h2 className="display text-lg">빈 양식 받기</h2>
             <p className="mt-1 text-sm text-body-strong">파일명에 이번 주차가 자동으로 들어갑니다.</p>
-            {template ? (
+            {!template ? (
+              <p className="mt-4 text-sm font-medium text-body-strong">아직 등록된 양식이 없습니다.</p>
+            ) : isOwn ? (
               /* eslint-disable-next-line @next/next/no-html-link-for-pages -- 파일 다운로드, 클라이언트 내비게이션 아님 */
               <a href="/api/template" className="btn-primary mt-4">
                 양식 다운로드
               </a>
             ) : (
-              <p className="mt-4 text-sm font-medium text-body-strong">아직 등록된 양식이 없습니다.</p>
+              <p className="mt-4 text-sm font-medium text-body-strong">
+                등록됨 — 양식 내려받기는 소속 부서원만 가능합니다.
+              </p>
             )}
           </section>
 
