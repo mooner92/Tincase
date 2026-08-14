@@ -12,8 +12,10 @@ export default async function LoginPage() {
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
       <div className="card px-8 py-9">
-        <h1 className="display text-[28px] leading-tight">주간업무</h1>
-        <p className="mt-1.5 mb-7 text-sm text-muted">한국환경연구원 · 부서 업무일지 수합</p>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/brand/tincase-stacked.svg" alt="Tincase" className="mx-auto h-[84px] w-auto" />
+        <h1 className="sr-only">Tincase 로그인</h1>
+        <p className="mt-4 mb-7 text-center text-sm text-muted">한국환경연구원 · 부서 업무일지 수합</p>
         <LoginForm />
       </div>
     </main>

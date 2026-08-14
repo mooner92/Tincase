@@ -1,4 +1,6 @@
-# repman — KEI 주간 업무일지 수합 플랫폼
+<img src="public/brand/tincase-lockup.svg" alt="Tincase" height="44">
+
+# Tincase — KEI 주간 업무일지 수합 플랫폼
 
 > 한국환경연구원 각 부서의 주간 업무일지를 **이메일 왕복 없이** 부서별 웹 페이지로 수합하고,
 > 부서 담당자가 버튼 하나로 hwp 병합본을 얻는 사내 멀티테넌트 시스템.
@@ -106,12 +108,16 @@ Docker `0.0.0.0:11111`(사내망) · 데이터 `/data/worklog` · 백업 `/mnt/b
 ## 저장소 구조
 
 ```
-repman/
+tincase/
 ├── docs/{spec,adr,research}/   ★ 정본
 ├── docs/private/               ⚠ git 제외 — 시드(개인정보)·인프라 실값
+├── public/brand/               로고 자산 + 사용 규칙 (brand/README.md)
 ├── fixtures/                   ⚠ hwp는 git 제외 — fixtures/README.md 참조
 └── tools/                      조사·시드 스크립트 (hwp5probe, extract-seed …)
 ```
+
+> **이름에 대하여** — 제품명은 **Tincase**, 저장소·컨테이너·세션 쿠키 이름은 `repman`이다.
+> 후자는 사용자에게 보이지 않고, 바꾸면 URL·배포 절차·활성 세션이 깨지므로 그대로 둔다.
 
 ### ⚠ 공개 저장소에서 제외된 것
 

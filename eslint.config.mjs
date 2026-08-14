@@ -12,6 +12,9 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "next-env.d.ts",
+    // hwp 포맷 조사용 단독 Node 스크립트 — 앱 코드가 아니라 CommonJS로 둔다.
+    // 같은 디렉터리의 .py 파일들과 성격이 같다 (tools/roundtrip.py 등).
+    "tools/**/*.js",
   ]),
 ]);
 

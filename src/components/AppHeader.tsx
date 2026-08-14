@@ -86,8 +86,10 @@ export function AppHeader({
     <header className="sticky top-0 z-30 border-b border-hairline-soft bg-canvas/95 backdrop-blur-sm">
       <div className="mx-auto flex h-16 max-w-[1280px] items-center justify-between gap-4 px-5">
         <div className="flex min-w-0 items-center gap-3">
-          <Link href={slug ? `/${slug}` : '/'} className="display shrink-0 text-[17px]">
-            주간업무
+          <Link href={slug ? `/${slug}` : '/'} className="shrink-0" aria-label="Tincase 홈">
+            {/* SVG 로고 — next/image는 최적화할 게 없고 레이아웃만 복잡해진다 */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/brand/tincase-lockup.svg" alt="Tincase" className="h-[26px] w-auto" />
           </Link>
           <span
             className={`badge-pill max-w-44 truncate ${foreign ? 'bg-brand-ochre/25 text-body-strong' : ''}`}

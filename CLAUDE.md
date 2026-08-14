@@ -1,6 +1,11 @@
-# repman — KEI 주간 업무일지 수합 시스템
+# Tincase — KEI 주간 업무일지 수합 시스템
 
-한국환경연구원 AI홍보전략실 주간 업무일지를 웹으로 수합하고 hwp로 자동 병합하는 사내 시스템.
+한국환경연구원 각 부서의 주간 업무일지를 웹으로 수합하고 hwp로 자동 병합하는 사내 시스템.
+
+**제품명은 Tincase다.** 저장소·컨테이너·쿠키 이름은 `repman`으로 남아 있다 —
+사용자에게 보이지 않고, 바꾸면 URL·배포 절차·활성 세션이 깨지기 때문이다.
+사용자에게 보이는 곳(UI·문서·계정 안내문)에는 Tincase를 쓴다.
+로고 자산과 사용 규칙은 [`public/brand/README.md`](public/brand/README.md).
 
 **현재 상태: v1.3.1 — Phase 1 구현 완료, 사내망 가동 중** (Cloudflare 대시보드 연결만 대기).
 먼저 [README.md](README.md) → [docs/spec/00-overview.md](docs/spec/00-overview.md) → [ROADMAP.md](ROADMAP.md) 순으로 읽을 것.

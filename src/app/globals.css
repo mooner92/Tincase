@@ -27,6 +27,8 @@
   --color-brand-ochre: #e8b94a;
   --color-brand-mint: #a4d4c5;
   --color-brand-coral: #ff6b5a;
+  /* 로고 amber — 브랜드 정체성 색. 로고 파일과 반드시 같은 값을 유지한다 */
+  --color-brand-amber: #d08a2c;
 
   --color-success: #22c55e;
   --color-warning: #f59e0b;
