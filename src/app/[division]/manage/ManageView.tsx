@@ -5,6 +5,8 @@ import { divisionStatus, divisionSlots, effectiveDeadline, ensureCurrentSlot } f
 import { formatDeadlineKo, isLocked, toKstIso, currentWeek } from '@/lib/week';
 import { CopyMissingButton } from '@/components/CopyMissingButton';
 import { SlotSelector } from '@/components/SlotSelector';
+import { SubmissionTableClient, type MemberRow } from '@/components/SubmissionTableClient';
+import Link from 'next/link';
 import { notFound } from 'next/navigation';
 
 export async function ManageView({ scope, isoKey }: { scope: Scope; isoKey?: string }) {
@@ -27,10 +29,30 @@ export async function ManageView({ scope, isoKey }: { scope: Scope; isoKey?: str
   const missing = members.filter((m) => m.status === 'missing').map((m) => m.user.name);
   const pct = summary.roster > 0 ? Math.round((summary.submitted / summary.roster) * 100) : 0;
 
+  const tableRows: MemberRow[] = members.map((m) => ({
+    user: { id: m.user.id, name: m.user.name },
+    status: m.status,
+    latest: m.latest && {
+      id: m.latest.id,
+      version: m.latest.version,
+      byteSize: m.latest.byteSize,
+      uploadedAtKst: toKstIso(m.latest.uploadedAt).slice(5, 16).replace('T', ' '),
+    },
+    versionCount: m.versionCount,
+  }));
+
   return (
     <main className="mt-6 space-y-5">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-lg font-bold text-slate-900">수합 관리</h1>
+        <h1 className="text-lg font-bold text-slate-900">
+          수합 관리
+          <Link
+            href={`/${scope.division.slug}/manage/settings`}
+            className="ml-3 align-middle text-sm font-normal text-blue-700 hover:underline"
+          >
+            부서 설정
+          </Link>
+        </h1>
         <SlotSelector
           baseHref={`/${scope.division.slug}/manage`}
           selected={slot.isoKey}
@@ -75,79 +97,13 @@ export async function ManageView({ scope, isoKey }: { scope: Scope; isoKey?: str
         </div>
       </section>
 
-      {/* SubmissionTable (CP-48~53) */}
-      <section className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-        <table className="w-full text-sm">
-          <caption className="sr-only">
-            {scope.division.nameKo} {slot.label} 제출 현황
-          </caption>
-          <thead>
-            <tr className="border-b border-slate-200 text-left text-xs text-slate-500">
-              <th scope="col" className="px-4 py-2.5 font-medium">이름</th>
-              <th scope="col" className="px-4 py-2.5 font-medium">상태</th>
-              <th scope="col" className="px-4 py-2.5 font-medium">버전</th>
-              <th scope="col" className="px-4 py-2.5 font-medium">제출시각</th>
-              <th scope="col" className="px-4 py-2.5 font-medium">크기</th>
-              <th scope="col" className="px-4 py-2.5 text-right font-medium">받기</th>
-            </tr>
-          </thead>
-          <tbody>
-            {members.map((m) => (
-              <tr
-                key={m.user.id}
-                className={`border-b border-slate-100 last:border-0 ${m.status === 'missing' ? 'bg-slate-50/60' : ''}`}
-              >
-                <td className="px-4 py-2.5 font-medium text-slate-800">{m.user.name}</td>
-                <td className="px-4 py-2.5">
-                  {m.status === 'submitted' ? (
-                    <span className="text-green-700">● 제출</span>
-                  ) : (
-                    <span className="text-slate-400">○ 미제출</span>
-                  )}
-                </td>
-                <td className="px-4 py-2.5 tabular-nums text-slate-600">
-                  {m.latest ? (
-                    m.versionCount > 1 ? (
-                      // CP-51 대체: 네이티브 details로 버전 이력 (Sprint 1)
-                      <details className="relative">
-                        <summary className="cursor-pointer list-none text-blue-700 underline decoration-dotted">
-                          v{m.latest.version} ({m.versionCount})
-                        </summary>
-                        <VersionList userId={m.user.id} weekSlotId={slot.id} />
-                      </details>
-                    ) : (
-                      `v${m.latest.version}`
-                    )
-                  ) : (
-                    '—'
-                  )}
-                </td>
-                <td className="px-4 py-2.5 tabular-nums text-slate-600">
-                  {m.latest ? toKstIso(m.latest.uploadedAt).slice(5, 16).replace('T', ' ') : '—'}
-                </td>
-                <td className="px-4 py-2.5 tabular-nums text-slate-600">
-                  {m.latest ? `${(m.latest.byteSize / 1024).toFixed(1)} KB` : '—'}
-                </td>
-                <td className="px-4 py-2.5 text-right">
-                  {m.latest && (
-                    <a
-                      href={`/api/submissions/${m.latest.id}/download`}
-                      className="rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                    >
-                      ↓ 받기
-                    </a>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        {offRoster.length > 0 && (
-          <p className="border-t border-slate-100 px-4 py-2 text-xs text-slate-400">
-            제출 대상 아님: {offRoster.map((u) => u.name).join(', ')} — 명단 변경은 운영자에게 (PG-31)
-          </p>
-        )}
-      </section>
+      {/* SubmissionTable + 드로어 (CP-48~53, PG-19/20) */}
+      <SubmissionTableClient caption={`${scope.division.nameKo} ${slot.label} 제출 현황`} members={tableRows} />
+      {offRoster.length > 0 && (
+        <p className="px-1 text-xs text-slate-400">
+          제출 대상 아님: {offRoster.map((u) => u.name).join(', ')} — 명단 변경은 운영자에게 (PG-31)
+        </p>
+      )}
 
       {/* BulkActions (CP-58~61) */}
       <section className="flex flex-wrap items-center gap-3">
@@ -176,29 +132,5 @@ export async function ManageView({ scope, isoKey }: { scope: Scope; isoKey?: str
         </button>
       </section>
     </main>
-  );
-}
-
-/** 구버전 목록 — details 안에 서버 렌더 (CP-54~56 축약판) */
-async function VersionList({ userId, weekSlotId }: { userId: string; weekSlotId: string }) {
-  const versions = await prisma.submission.findMany({
-    where: { userId, weekSlotId },
-    orderBy: { version: 'desc' },
-  });
-  return (
-    <ul className="absolute z-10 mt-1 w-56 rounded-lg border border-slate-200 bg-white p-2 shadow-lg">
-      {versions.map((v) => (
-        <li key={v.id} className="flex items-center justify-between gap-2 px-2 py-1 text-xs">
-          <span>
-            v{v.version}
-            {v.isLatest && <span className="ml-1 rounded bg-blue-50 px-1 text-blue-700">현재본</span>}
-          </span>
-          <span className="tabular-nums text-slate-400">{toKstIso(v.uploadedAt).slice(5, 16).replace('T', ' ')}</span>
-          <a href={`/api/submissions/${v.id}/download`} className="text-blue-700 hover:underline">
-            받기
-          </a>
-        </li>
-      ))}
-    </ul>
   );
 }

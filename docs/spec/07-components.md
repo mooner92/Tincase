@@ -256,14 +256,16 @@ interface SubmissionTableProps {
 
 ---
 
-### `<VersionHistoryPopover>` · **Client**
+### ~~`<VersionHistoryPopover>`~~ → **FileDrawer 버전 셀렉터로 통합 (v1.0.0 구현)**
 
-| ID | 요구사항 |
+별도 팝오버 대신 드로어 헤더의 버전 드롭다운으로 구현했다 — 이력 확인과 내용 열람이
+한 동선이 되어 팝오버보다 낫다. CP-54~56 요구는 드로어에서 충족:
+
+| ID | 충족 방식 |
 |---|---|
-| CP-54 | 해당 사용자·주차의 전 버전 목록 |
-| CP-55 | 각 버전 다운로드 링크 |
-| CP-56 | 최신 버전에 `현재본` 표시 |
-| CP-57 | Esc·외부 클릭으로 닫기 |
+| CP-54/55 | `GET /api/submissions/:id/versions` + 드로어 버전 선택 → 해당 버전 열람·다운로드 |
+| CP-56 | 셀렉터에 `(현재본)` 표시 |
+| CP-57 | 드로어 자체의 Esc·배경 클릭 닫기 (CP-75) |
 
 ---
 

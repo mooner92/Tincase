@@ -44,6 +44,11 @@ export default async function DivisionLayout({
               수합 관리
             </Link>
           )}
+          {user.isOperator && (
+            <Link href="/ops" className="font-medium text-purple-700 hover:underline">
+              운영
+            </Link>
+          )}
           <Link href={`/${division.slug}/history`} className="hover:underline">
             내 이력
           </Link>

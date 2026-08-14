@@ -3,8 +3,9 @@
 > 한국환경연구원 각 부서의 주간 업무일지를 **이메일 왕복 없이** 부서별 웹 페이지로 수합하고,
 > 부서 담당자가 버튼 하나로 hwp 병합본을 얻는 사내 멀티테넌트 시스템.
 
-**현재 상태: 📐 설계 v2 · 구현 착수 전**
-Spec Driven Development — 스펙이 먼저, 코드가 나중.
+**현재 상태: 🚀 v1.0.0 — Phase 1 구현 완료 · 파일럿(AI홍보전략실) 가동 중**
+Spec Driven Development — 스펙이 먼저, 코드가 나중. 테스트 77개 (격리 게이트 포함) 전부 통과.
+남은 개통 작업: Cloudflare 대시보드 연결 1건 ([docs/DEPLOY.md](docs/DEPLOY.md) §3, ~15분).
 
 ---
 
@@ -116,8 +117,9 @@ repman/
 
 ## 지금 필요한 것
 
-- 🎯 **2026-08-17(월) 파일럿 오픈 목표** — [ROADMAP](ROADMAP.md) Sprint 1 (금~일)
-- 🟡 **Round 3 확인 3건** — member 가시성 깊이 · 총괄 UI 시점 · 월요일 컷 승인
-- 🔴 **Q-01** — `fixtures/verify-write-test.hwp` 한글에서 열어보기 *(Phase 2 전까지, 주말 권장)*
+- ✅ 구현·테스트·컨테이너 가동 완료 (`127.0.0.1:11111`, health ok)
+- 🔴 **Cloudflare 대시보드** — Public Hostname + Access 앱 + AUD 교체 ([DEPLOY](docs/DEPLOY.md) §3·§5, Sean만 가능)
+- 🔴 **Q-01** — `fixtures/verify-write-test.hwp` 한글에서 열어보기 *(Phase 2 게이트, 30초)*
+- 월 8/17 오픈: 안내문 초안은 [DEPLOY](docs/DEPLOY.md) §8 · 첫 주는 이메일 병행
 
 전체: [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md)

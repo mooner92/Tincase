@@ -159,6 +159,11 @@ member 응답은 축소판: `members[].{user.name, status, uploadedAt}` 만 —
 | API-24 | 감사 로그 `preview` 기록 |
 | API-25 | 원문 텍스트 그대로 반환 — 요약·가공하지 않는다 (내용 검토가 목적) |
 
+### `GET /api/submissions/:id/versions`
+
+드로어 버전 전환용 (CP-73). `:id`가 속한 (사용자, 주차)의 전체 버전 목록.
+권한 판정은 `:id` 접근 판정과 동일 (findAccessibleSubmission).
+
 ### `GET /api/division/download-zip`
 
 ST-16. `?slot=` 지원, 0건 409, 스트리밍, 감사 로그.
