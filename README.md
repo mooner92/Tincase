@@ -3,9 +3,11 @@
 > 한국환경연구원 각 부서의 주간 업무일지를 **이메일 왕복 없이** 부서별 웹 페이지로 수합하고,
 > 부서 담당자가 버튼 하나로 hwp 병합본을 얻는 사내 멀티테넌트 시스템.
 
-**현재 상태: 🚀 v1.0.0 — Phase 1 구현 완료 · 파일럿(AI홍보전략실) 가동 중**
-Spec Driven Development — 스펙이 먼저, 코드가 나중. 테스트 77개 (격리 게이트 포함) 전부 통과.
-남은 개통 작업: Cloudflare 대시보드 연결 1건 ([docs/DEPLOY.md](docs/DEPLOY.md) §3, ~15분).
+**현재 상태: 🚀 v1.1.1 — 사내망 가동 중** (`http://192.168.1.104:11111`)
+Spec Driven Development — 스펙이 먼저, 코드가 나중. 테스트 95개 (격리 게이트 포함) 통과.
+
+> **무엇이 되고 무엇이 안 되는지는 [docs/STATUS.md](docs/STATUS.md)에 코드 대조로 정리되어 있다.**
+> 요약: Phase 1(수합) 완료 · Phase 2(자동 병합)와 웹 작성은 미착수 — [Q-01](OPEN-QUESTIONS.md) 확인 대기.
 
 ---
 
@@ -22,13 +24,14 @@ Spec Driven Development — 스펙이 먼저, 코드가 나중. 테스트 77개 
 그래서 단일팀 도구가 아니라 **부서 단위 멀티테넌트**로 설계한다
 ([ADR-0005](docs/adr/0005-multi-division-tenancy.md)). 파일럿은 AI홍보전략실(13명).
 
-| | 지금 | 이후 |
-|---|---|---|
-| 배포 | 빈 양식을 부서원에게 개별 메일 | 부서 페이지에서 상시 다운로드 |
-| 회신·수집 | 메일 회신을 일일이 수집 | 업로드 → 자동 수집 |
-| 확인 | 파일을 받아 하나씩 열어봄 | 화면 드로어에서 바로 열람 |
-| 병합 | 표를 손으로 복사·붙여넣기 | 병합 버튼 1회 *(Phase 2)* |
-| 제출·보관 | 담당자 수작업 | **그대로 유지** (비목표) |
+| | 지금 | 이후 | 상태 |
+|---|---|---|---|
+| 배포 | 빈 양식을 부서원에게 개별 메일 | 부서 페이지에서 상시 다운로드 | ✅ |
+| 회신·수집 | 메일 회신을 일일이 수집 | 업로드 → 자동 수집 | ✅ |
+| 확인 | 파일을 받아 하나씩 열어봄 | 화면 드로어에서 바로 열람 | ✅ |
+| 병합 | 표를 손으로 복사·붙여넣기 | 병합 버튼 1회 | ⛔ Phase 2 |
+| 작성 | 한글에서 작성 후 업로드 | 웹에서 직접 작성 | ⛔ Phase 2 이후 |
+| 제출·보관 | 담당자 수작업 | **그대로 유지** (비목표) | — |
 
 ## 핵심 설계
 
@@ -70,7 +73,10 @@ Spec Driven Development — 스펙이 먼저, 코드가 나중. 테스트 77개 
 | | [07 components](docs/spec/07-components.md) | 컴포넌트 스펙 |
 | | [08 hwp-merge-engine](docs/spec/08-hwp-merge-engine.md) | 병합 엔진 + 규칙 *(Phase 2)* |
 | | [09 deployment-ops](docs/spec/09-deployment-ops.md) | 배포 · 백업 · 디스크 보호 |
+| ★ | [docs/STATUS.md](docs/STATUS.md) | **구현/미구현 현황 (코드 대조)** |
 | ★ | [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md) | 미결 사항 |
+| | [CHANGELOG.md](CHANGELOG.md) | 릴리스 이력 |
+| | [docs/DEPLOY.md](docs/DEPLOY.md) | 배포·운영 절차 |
 | ★ | [ROADMAP.md](ROADMAP.md) | 작업 순서 |
 
 ### 설계 결정 (ADR)
@@ -81,7 +87,8 @@ Spec Driven Development — 스펙이 먼저, 코드가 나중. 테스트 77개 
 | [0002](docs/adr/0002-typescript-single-runtime.md) | TypeScript 단일 런타임 (`cfb` + `node:zlib`) |
 | [0003](docs/adr/0003-sqlite-prisma.md) | SQLite + Prisma |
 | [0004](docs/adr/0004-cloudflare-access-as-identity.md) | Access 신원 + 앱 JWT 검증 |
-| [0005](docs/adr/0005-multi-division-tenancy.md) | **부서 단위 멀티테넌트** |
+| [0005](docs/adr/0005-multi-division-tenancy.md) | 부서 단위 멀티테넌트 |
+| [0006](docs/adr/0006-internal-password-auth.md) | **사내망 비밀번호 인증** (Cloudflare는 운영자 전용) |
 
 ## 기술 스택
 
@@ -117,9 +124,10 @@ repman/
 
 ## 지금 필요한 것
 
-- ✅ 구현·테스트·컨테이너 가동 완료 (`127.0.0.1:11111`, health ok)
-- 🔴 **Cloudflare 대시보드** — Public Hostname + Access 앱 + AUD 교체 ([DEPLOY](docs/DEPLOY.md) §3·§5, Sean만 가능)
-- 🔴 **Q-01** — `fixtures/verify-write-test.hwp` 한글에서 열어보기 *(Phase 2 게이트, 30초)*
+- 🔴 **Q-01** — `fixtures/verify-write-test.hwp` 한글에서 열어보기 *(30초. Phase 2·웹 작성의 게이트)*
+- 🟡 **비밀번호 개인별 전달** — 13명 발급 완료, 미전달
+- 🟡 **전사 표준 양식 등록** — 취합게시판 원본을 `/ops`로
+- 🟡 **Cloudflare 외부 접속** — 운영자용. 대시보드 작업 ([DEPLOY](docs/DEPLOY.md) §3)
 - 월 8/17 오픈: 안내문 초안은 [DEPLOY](docs/DEPLOY.md) §8 · 첫 주는 이메일 병행
 
 전체: [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md)

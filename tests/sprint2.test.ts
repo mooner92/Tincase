@@ -205,6 +205,16 @@ d('rule 저장 (API-28/29)', () => {
   });
 });
 
+d('Phase 2 계약 예약 (API-30)', () => {
+  it('merge API — member 404 · lead 501 (동작 아님을 명시)', async () => {
+    const { POST } = await import('@/app/api/division/merge/route');
+    expect((await POST(nx('/api/division/merge', ID.member, { method: 'POST' }))).status).toBe(404);
+    const res = await POST(nx('/api/division/merge', ID.lead, { method: 'POST' }));
+    expect(res.status).toBe(501);
+    expect((await res.json()).error).toBe('not_implemented');
+  });
+});
+
 d('ops API (operator 전용)', () => {
   it('[AU 격리] lead/member → 404 · operator → 200', async () => {
     const { GET } = await import('@/app/api/ops/divisions/route');
