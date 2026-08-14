@@ -65,6 +65,7 @@ Spec Driven Development — 스펙이 먼저, 코드가 나중. 테스트 102개
 
 | | 문서 | 내용 |
 |---|---|---|
+| ★ | [TACP.md](TACP.md) | **접근제어 헌법** — Principal·권한행렬·불변식·게이트 |
 | ★ | [docs/spec/00-overview.md](docs/spec/00-overview.md) | 범위 · 역할 · 용어 · 원칙 |
 | | [01 domain-model](docs/spec/01-domain-model.md) | 부서·역할·스키마·불변식 |
 | | [02 week-slot](docs/spec/02-week-slot.md) | 주차 계산 · 부서별 마감 |

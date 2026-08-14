@@ -3,7 +3,7 @@
 //   POST — operator만 등록/교체 (기획조정실이 배포한 원본을 운영자가 올린다)
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
-import { requireScope, requireLead, HttpError, notFound } from '@/server/authz';
+import { HttpError, requireLead, requireOperator } from '@/server/authz';
 import { handler, json } from '@/server/http';
 import { audit } from '@/server/audit';
 import { contentDisposition, readStoredFile, sha256, writeFileAtomic } from '@/server/storage';
@@ -39,8 +39,7 @@ export const GET = handler(async (req: NextRequest) => {
 });
 
 export const POST = handler(async (req: NextRequest) => {
-  const scope = await requireScope(req.headers);
-  if (!scope.user.isOperator) throw notFound();
+  const scope = await requireOperator(req.headers); // TACP-12 — 판정은 게이트에만
 
   const form = await req.formData().catch(() => null);
   const file = form?.get('file');

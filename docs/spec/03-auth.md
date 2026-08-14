@@ -1,5 +1,9 @@
 # S-03. 인증 · 인가 · 부서 격리
 
+> **접근제어의 정본은 [TACP.md](../../TACP.md)다.**
+> 이 문서는 인증 메커니즘(세션·Cloudflare JWT·비밀번호)과 AU-* 요구사항 ID를 다루고,
+> 권한 판정 규칙 자체는 TACP를 따른다. 둘이 어긋나면 TACP가 이긴다.
+
 구현: `src/server/auth.ts`, `src/server/authz.ts`, `src/server/session.ts`, `src/server/password.ts`
 v2: 역할·부서 격리 — [ADR-0005](../adr/0005-multi-division-tenancy.md)
 **v3: 사내망 비밀번호 인증 추가 — [ADR-0006](../adr/0006-internal-password-auth.md)**

@@ -351,3 +351,79 @@ d('ops API (operator 전용)', () => {
     expect(good.status).toBe(200);
   });
 });
+
+// ── TACP 준수 ────────────────────────────────────────────────
+// TACP.md가 헌법이면, 지켜지는지 확인하는 것도 코드여야 한다.
+// 문서만 있고 강제가 없으면 다음 사람이 조용히 어긴다.
+d('TACP 준수', () => {
+  it('[TACP-12] 게이트는 authz.ts에만 — 라우트가 역할 플래그를 직접 비교하지 않는다', async () => {
+    const { readdirSync, readFileSync, statSync } = await import('node:fs');
+    const path = await import('node:path');
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((n) => {
+        const p = path.join(dir, n);
+        return statSync(p).isDirectory() ? walk(p) : p.endsWith('.ts') ? [p] : [];
+      });
+
+    const offenders: string[] = [];
+    for (const file of walk('src/app/api')) {
+      const src = readFileSync(file, 'utf8');
+      // 판정처럼 보이는 표현: if (...isOperator) / if (...isCoordinator) / divisionRole === 'lead'
+      for (const [i, line] of src.split('\n').entries()) {
+        if (/if\s*\(!?\s*[\w.]*\.(isOperator|isCoordinator)\b/.test(line) || /divisionRole\s*===\s*'lead'/.test(line)) {
+          offenders.push(`${file}:${i + 1}  ${line.trim()}`);
+        }
+      }
+    }
+    expect(offenders, `게이트를 authz.ts로 옮길 것 (TACP-12):\n${offenders.join('\n')}`).toEqual([]);
+  });
+
+  it('[TACP-2] 명단 API는 isOperator·isCoordinator를 바꾸지 못한다', async () => {
+    const { PUT } = await import('@/app/api/ops/roster/route');
+    const { prisma } = await import('@/server/db');
+    const u = await prisma.user.findFirstOrThrow({ where: { email: ID.member } });
+    await PUT(
+      nx('/api/ops/roster', ID.op, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        // 타입에 없는 필드를 억지로 실어 보낸다 — 무시되어야 한다
+        body: JSON.stringify({ updates: [{ userId: u.id, isOperator: true, isCoordinator: true }] }),
+      }),
+    );
+    const after = await prisma.user.findUniqueOrThrow({ where: { id: u.id } });
+    expect(after.isOperator).toBe(false);
+    expect(after.isCoordinator).toBe(false);
+  });
+
+  it('[TACP-5] 권한 없음과 없는 리소스는 같은 404다', async () => {
+    const { requireOperator, resolveTargetDivision, requireScope } = await import('@/server/authz');
+    // member의 ops 접근 = 404 (403이 아니다 — 있다는 사실도 알리지 않는다)
+    await expect(requireOperator(new Headers({ 'x-test-identity': ID.member }))).rejects.toMatchObject({
+      status: 404,
+    });
+    const scope = await requireScope(new Headers({ 'x-test-identity': ID.member }));
+    const forbidden = await resolveTargetDivision(scope, B.slug).catch((e) => e);
+    const missing = await resolveTargetDivision(scope, 'no-such-division').catch((e) => e);
+    expect(forbidden.status).toBe(missing.status); // 구별 불가
+    expect(forbidden.message).toBe(missing.message);
+  });
+
+  it('[TACP-6] 쓰기 대상은 URL이 아니라 신원이 정한다 — 규칙은 내 부서에만 쓰인다', async () => {
+    const { PUT } = await import('@/app/api/division/rule/route');
+    const { prisma } = await import('@/server/db');
+    const before = await prisma.division.findUniqueOrThrow({ where: { slug: B.slug } });
+    // operator(A부서 소속)가 B부서 슬러그를 붙여 호출해도 B는 변하지 않는다
+    const res = await PUT(
+      nx(`/api/division/rule?division=${B.slug}`, ID.op, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ruleText: 'TACP-6 검증', guideText: '' }),
+      }),
+    );
+    expect(res.status).toBe(200);
+    const after = await prisma.division.findUniqueOrThrow({ where: { slug: B.slug } });
+    expect(after.mergeRuleText).toBe(before.mergeRuleText); // B는 무사하다
+    const own = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
+    expect(own.mergeRuleText).toBe('TACP-6 검증'); // 내 부서에 쓰였다
+  });
+});

@@ -1,18 +1,12 @@
 // GET /api/ops/divisions · PUT — 테넌시 관리 (operator 전용, API-32/33)
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
-import { requireScope, notFound, HttpError } from '@/server/authz';
+import { HttpError, notFound, requireOperator } from '@/server/authz';
 import { handler, json } from '@/server/http';
 import { audit } from '@/server/audit';
 import { validateDeadlinePolicy } from '@/lib/week';
 
 export const dynamic = 'force-dynamic';
-
-async function requireOperator(headers: Headers) {
-  const scope = await requireScope(headers);
-  if (!scope.user.isOperator) throw notFound(); // 존재 은닉
-  return scope;
-}
 
 export const GET = handler(async (req: NextRequest) => {
   const scope = await requireOperator(req.headers);

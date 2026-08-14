@@ -67,6 +67,17 @@ export async function requireLead(headers: Headers): Promise<Scope> {
 }
 
 /**
+ * operator 전용 진입점 — 그 외에게는 404 (존재 은닉).
+ * TACP-12: 게이트는 이 파일에만 산다. 라우트에 복사하지 말 것
+ * (v1.3.1까지 3개 라우트에 각각 복사되어 있었다).
+ */
+export async function requireOperator(headers: Headers): Promise<Scope> {
+  const scope = await requireScope(headers);
+  if (!scope.user.isOperator) throw notFound();
+  return scope;
+}
+
+/**
  * AU-13 — 제출물 접근 판정. 항상 이 함수로만 Submission을 얻는다.
  * 반환되면 접근 허용이 이미 판정된 것. 아니면 404 (구별 불가).
  */

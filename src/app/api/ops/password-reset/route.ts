@@ -3,7 +3,7 @@
 // 이 응답을 놓치면 다시 초기화하는 수밖에 없다 (설계상 의도).
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
-import { requireScope, notFound, HttpError } from '@/server/authz';
+import { HttpError, notFound, requireOperator } from '@/server/authz';
 import { handler, json, rateLimit } from '@/server/http';
 import { audit } from '@/server/audit';
 import { generateInitialPassword, hashPassword } from '@/server/password';
@@ -13,8 +13,7 @@ import { logger } from '@/server/logger';
 export const dynamic = 'force-dynamic';
 
 export const POST = handler(async (req: NextRequest) => {
-  const scope = await requireScope(req.headers);
-  if (!scope.user.isOperator) throw notFound(); // 존재 은닉
+  const scope = await requireOperator(req.headers); // TACP-12 — 판정은 게이트에만
   rateLimit(`pwreset:${scope.user.email}`, 30, 60_000);
 
   const body = (await req.json().catch(() => null)) as { userId?: string } | null;

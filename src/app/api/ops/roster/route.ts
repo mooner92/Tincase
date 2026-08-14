@@ -1,17 +1,11 @@
 // GET /api/ops/roster?division=… · PUT — 인원 배치 (operator 전용, DM-04, API-26/27)
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
-import { requireScope, notFound, HttpError } from '@/server/authz';
+import { HttpError, requireOperator } from '@/server/authz';
 import { handler, json } from '@/server/http';
 import { audit } from '@/server/audit';
 
 export const dynamic = 'force-dynamic';
-
-async function requireOperator(headers: Headers) {
-  const scope = await requireScope(headers);
-  if (!scope.user.isOperator) throw notFound();
-  return scope;
-}
 
 export const GET = handler(async (req: NextRequest) => {
   await requireOperator(req.headers);
