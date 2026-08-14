@@ -31,7 +31,7 @@ model Division {
   nameEn        String                   // "AI and Public Relations Division"
   isActive      Boolean @default(false)  // 온보딩된 부서만 true
 
-  deadlineDow   Int     @default(2)      // 마감 요일 1=월 … 7=일 (기본 화)
+  deadlineDow   Int     @default(4)      // 마감 요일 1=월 … 7=일 (기본 목 — DM-10)
   deadlineTime  String  @default("14:00")// "HH:mm" KST
   mergeRuleText String  @default("")     // 부서 병합 규칙 (S-08 §6)
   guideText     String  @default("")     // 업로드 화면 작성 안내 (줄 단위, CP-21)
@@ -180,6 +180,21 @@ Access가 확인한 이메일(소문자 정규화)로 `User`를 찾는다. 이�
 
 > 원 스펙의 "8명"이 명부상 13명과 달랐던 이유가 이것이다. 숫자를 하드코딩하지 않는다.
 
+### DM-15 — 취합게시판 제출 이력 (`boardStatus`) ★
+
+전사 취합게시판에서 **실제로 제출하는 부서**를 기록한다. 30개 부서가 모두 제출하지는 않는다 —
+상위 조직이 대표로 내거나, 하위 실 담당자가 상위 본부 명의로 내는 구조가 섞여 있다.
+
+| 값 | 의미 | 온보딩 |
+|---|---|---|
+| `confirmed` | 제출일이 확인된 부서 | **1순위** |
+| `unclear` | 담당자는 지정됐으나 제출 미확인 · 보고 단위 모호 | 확인 후 판단 |
+| `none` | 게시판에 나타나지 않음 | 후순위 |
+
+출처는 2026-08-13 게시판 화면 기준의 **관찰**이므로 확정 사실이 아니다.
+운영자가 `/ops`에서 갱신할 수 있게 DB 필드로 둔다 (상수 하드코딩 금지).
+반영: `scripts/apply-board-history.ts`
+
 ### DM-05 — `isLatest` 불변식 (v1과 동일)
 
 `(userId, weekSlotId)`당 `isLatest=true` 정확히 1개. 단일 트랜잭션 + 유니크 제약으로 보증.
@@ -201,7 +216,11 @@ type MemberStatus = { user: User; latest: Submission | null; versionCount: numbe
 
 ### DM-10 — Division 마감 정책
 
-`deadlineDow`(1~7) + `deadlineTime`("HH:mm"). 기본 화 14:00.
+`deadlineDow`(1~7) + `deadlineTime`("HH:mm"). **기본 목요일 14:00.**
+
+근거: 전사 취합게시판 마감이 **목 15:00**이므로 ([R-002 §2](../research/002-kei-org-and-collection-flow.md)),
+부서 내부 마감을 목 14:00으로 두면 담당자가 병합·제출할 1시간이 남는다.
+부서별로 더 앞당길 수 있다 (운영자가 `/ops`에서 조정).
 유효 마감 계산은 [S-02 WS-13](02-week-slot.md). 검증: `deadlineDow ∈ 1..7`, 시각 형식, 그리고
 **월 00:00보다 뒤여야 함** (같은 주 안에서 열림→마감 순서 보장).
 

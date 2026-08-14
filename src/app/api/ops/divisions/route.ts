@@ -17,10 +17,17 @@ async function requireOperator(headers: Headers) {
 export const GET = handler(async (req: NextRequest) => {
   const scope = await requireOperator(req.headers);
   void scope;
-  const divisions = await prisma.division.findMany({
-    orderBy: [{ isActive: 'desc' }, { nameKo: 'asc' }],
+  const rows = await prisma.division.findMany({
     include: { _count: { select: { users: { where: { isActive: true } } } } },
   });
+  // 제출 이력이 있는 부서를 위로 — 온보딩 우선순위가 곧 이 순서다
+  const rank = { confirmed: 0, unclear: 1, none: 2 } as const;
+  const divisions = rows.sort(
+    (a, b) =>
+      (rank[a.boardStatus as keyof typeof rank] ?? 2) - (rank[b.boardStatus as keyof typeof rank] ?? 2) ||
+      Number(b.isActive) - Number(a.isActive) ||
+      a.nameKo.localeCompare(b.nameKo, 'ko'),
+  );
   const activeTemplates = await prisma.template.groupBy({
     by: ['divisionId'],
     where: { isActive: true },
@@ -38,6 +45,8 @@ export const GET = handler(async (req: NextRequest) => {
       deadlineTime: d.deadlineTime,
       memberCount: d._count.users,
       hasTemplate: hasTemplate.has(d.id),
+      boardStatus: d.boardStatus, // 취합게시판 제출 이력 (DM-15)
+      boardNote: d.boardNote,
     })),
   });
 });
@@ -50,6 +59,7 @@ export const PUT = handler(async (req: NextRequest) => {
     deadlineDow?: number;
     deadlineTime?: string;
     shortSlug?: string | null;
+    boardStatus?: string;
   } | null;
   if (!body?.id) throw new HttpError(422, 'invalid_request', 'id가 필요합니다.');
 
@@ -78,6 +88,12 @@ export const PUT = handler(async (req: NextRequest) => {
     data.deadlineTime = policy.deadlineTime;
   }
   if (body.shortSlug !== undefined) data.shortSlug = body.shortSlug || null;
+  if (body.boardStatus !== undefined) {
+    if (!['confirmed', 'unclear', 'none'].includes(body.boardStatus)) {
+      throw new HttpError(422, 'invalid_request', 'boardStatus 값이 올바르지 않습니다.');
+    }
+    data.boardStatus = body.boardStatus;
+  }
   if (Object.keys(data).length === 0) throw new HttpError(422, 'invalid_request', '변경할 내용이 없습니다.');
 
   const updated = await prisma.division.update({ where: { id: div.id }, data });

@@ -19,10 +19,14 @@ model Division {
   nameEn        String
   isActive      Boolean  @default(false) // 온보딩된 부서만 true
 
-  deadlineDow   Int      @default(2) // 마감 요일 1=월 … 7=일 (DM-10)
+  deadlineDow   Int      @default(4) // 마감 요일 1=월 … 7=일. 기본 목요일 (전사 마감 목 15:00보다 앞) — DM-10
   deadlineTime  String   @default("14:00") // "HH:mm" KST
   mergeRuleText String   @default("") // 부서 병합 규칙 (S-08 §6, Phase 2)
   guideText     String   @default("") // 업로드 화면 작성 안내 (CP-21)
+
+  // 취합게시판 제출 이력 (R-002 관찰) — 온보딩 우선순위 판단용. 운영자가 갱신 가능 (DM-15)
+  boardStatus   String   @default("none") // "confirmed" | "unclear" | "none"
+  boardNote     String   @default("") // 관찰 근거 (제출일·특이사항)
 
   createdAt   DateTime     @default(now())
   users       User[]

@@ -68,6 +68,7 @@ async function main() {
         nameEn: d.slug.replace(/_/g, ' '),
         isActive: isPilot, // 파일럿만 활성 (DM-02)
         guideText: isPilot ? PILOT_GUIDE : '',
+        // 마감 기본값은 스키마(목 14:00). 제출 이력은 apply-board-history.ts로 별도 반영 (DM-15)
       },
     });
     dCount++;

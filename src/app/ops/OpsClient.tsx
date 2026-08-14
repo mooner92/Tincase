@@ -1,6 +1,8 @@
 'use client';
-// PG-33~35 — 운영 화면 (operator). 부서 활성화·마감·별칭 + 인원 배치(onRoster·역할·정렬).
-import { useCallback, useEffect, useState } from 'react';
+// PG-33~35 — 운영 화면 (operator). 테넌시 + 인원 배치 + 비밀번호.
+// 부서를 취합게시판 제출 이력으로 탭 분리한다 — 온보딩 우선순위가 곧 그 순서다 (DM-15).
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { RosterDrawer, type UserRow } from './RosterDrawer';
 
 interface DivisionRow {
   id: string;
@@ -12,21 +14,8 @@ interface DivisionRow {
   deadlineTime: string;
   memberCount: number;
   hasTemplate: boolean;
-}
-interface UserRow {
-  id: string;
-  name: string;
-  email: string;
-  divisionRole: 'member' | 'lead';
-  isOperator: boolean;
-  isCoordinator: boolean;
-  isActive: boolean;
-  onRoster: boolean;
-  sortOrder: number;
-  hasPassword: boolean;
-  mustChangePassword: boolean;
-  lastLoginAt: string | null;
-  locked: boolean;
+  boardStatus: 'confirmed' | 'unclear' | 'none';
+  boardNote: string;
 }
 
 /** 초기화 결과 — 평문은 화면에만, 한 번만 보인다 (AU-27) */
@@ -39,8 +28,15 @@ interface IssuedPassword {
 
 const DOW = ['', '월', '화', '수', '목', '금', '토', '일'];
 
+const TABS = [
+  { key: 'confirmed', label: '제출 확인', hint: '취합게시판에 제출일이 확인된 부서 — 온보딩 1순위' },
+  { key: 'unclear', label: '확인 필요', hint: '담당자는 있으나 제출이 확인되지 않음 — 보고 단위 확인 후 판단' },
+  { key: 'none', label: '이력 없음', hint: '취합게시판에 나타나지 않음 — 상위 조직이 대표로 낼 가능성' },
+] as const;
+
 export function OpsClient() {
   const [divisions, setDivisions] = useState<DivisionRow[]>([]);
+  const [tab, setTab] = useState<'confirmed' | 'unclear' | 'none'>('confirmed');
   const [selected, setSelected] = useState<string | null>(null);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
@@ -56,11 +52,16 @@ export function OpsClient() {
   useEffect(loadDivisions, [loadDivisions]);
 
   const loadUsers = useCallback((divisionId: string) => {
-    setSelected(divisionId);
     fetch(`/api/ops/roster?division=${divisionId}`)
       .then((r) => r.json())
       .then((b) => setUsers(b.users ?? []));
   }, []);
+
+  const openRoster = (divisionId: string) => {
+    setSelected(divisionId);
+    setUsers([]);
+    loadUsers(divisionId);
+  };
 
   const flash = (t: string) => {
     setMsg(t);
@@ -76,7 +77,7 @@ export function OpsClient() {
     })
       .then(async (r) => {
         const b = await r.json();
-        flash(r.ok ? '저장됨' : b.message ?? '실패');
+        flash(r.ok ? '저장됨' : (b.message ?? '실패'));
         loadDivisions();
       })
       .finally(() => setBusy(false));
@@ -91,14 +92,16 @@ export function OpsClient() {
     })
       .then(async (r) => {
         const b = await r.json();
-        flash(r.ok ? '저장됨' : b.message ?? '실패');
+        flash(r.ok ? '저장됨' : (b.message ?? '실패'));
         if (selected) loadUsers(selected);
+        loadDivisions();
       })
       .finally(() => setBusy(false));
   };
 
   const resetPassword = (u: UserRow) => {
-    if (!confirm(`${u.name} 님의 비밀번호를 초기화합니다.\n기존 로그인은 모두 해제되고, 새 임시 비밀번호를 전달해야 합니다.`)) return;
+    if (!confirm(`${u.name} 님의 비밀번호를 초기화합니다.\n기존 로그인은 모두 해제되고, 새 임시 비밀번호를 전달해야 합니다.`))
+      return;
     setBusy(true);
     fetch('/api/ops/password-reset', {
       method: 'POST',
@@ -138,8 +141,19 @@ export function OpsClient() {
     setTimeout(() => setCopied(null), 2000);
   };
 
+  const counts = useMemo(
+    () => ({
+      confirmed: divisions.filter((d) => d.boardStatus === 'confirmed').length,
+      unclear: divisions.filter((d) => d.boardStatus === 'unclear').length,
+      none: divisions.filter((d) => d.boardStatus === 'none').length,
+    }),
+    [divisions],
+  );
+  const shown = divisions.filter((d) => d.boardStatus === tab);
+  const selectedName = divisions.find((d) => d.id === selected)?.nameKo ?? null;
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div aria-live="polite" className="h-5 text-sm text-blue-700">
         {msg}
       </div>
@@ -148,16 +162,14 @@ export function OpsClient() {
       {issued.length > 0 && (
         <section className="rounded-xl border-2 border-amber-300 bg-amber-50 px-5 py-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-amber-900">
-              발급된 임시 비밀번호 — 지금 전달하세요
-            </h2>
+            <h2 className="text-sm font-bold text-amber-900">발급된 임시 비밀번호 — 지금 전달하세요</h2>
             <button onClick={() => setIssued([])} className="text-xs text-amber-700 hover:underline">
               목록 지우기
             </button>
           </div>
           <p className="mt-1 text-xs text-amber-800">
             서버에는 해시만 저장되어 <strong>이 화면을 닫으면 다시 볼 수 없습니다.</strong> 개인별로 전달하세요
-            (단체 메시지 금지). 본인이 첫 로그인 시 변경하게 됩니다.
+            (단체 메시지 금지).
           </p>
           <ul className="mt-3 space-y-1.5">
             {issued.map((x) => (
@@ -190,9 +202,33 @@ export function OpsClient() {
         </section>
       )}
 
+      {/* 탭 — 취합게시판 제출 이력 기준 */}
+      <div>
+        <div className="flex gap-1 border-b border-slate-200" role="tablist">
+          {TABS.map((t) => (
+            <button
+              key={t.key}
+              role="tab"
+              aria-selected={tab === t.key}
+              onClick={() => setTab(t.key)}
+              className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
+                tab === t.key
+                  ? 'border-blue-600 text-blue-700'
+                  : 'border-transparent text-slate-500 hover:text-slate-700'
+              }`}
+            >
+              {t.label}{' '}
+              <span className={`ml-1 rounded px-1.5 py-0.5 text-xs ${tab === t.key ? 'bg-blue-50' : 'bg-slate-100'}`}>
+                {counts[t.key]}
+              </span>
+            </button>
+          ))}
+        </div>
+        <p className="mt-2 text-xs text-slate-500">{TABS.find((t) => t.key === tab)?.hint}</p>
+      </div>
+
       <section className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
         <table className="w-full text-sm">
-          <caption className="px-4 pt-3 text-left text-sm font-semibold text-slate-500">부서 (테넌트)</caption>
           <thead>
             <tr className="border-b border-slate-200 text-left text-xs text-slate-500">
               <th className="px-4 py-2 font-medium">부서</th>
@@ -205,13 +241,20 @@ export function OpsClient() {
             </tr>
           </thead>
           <tbody>
-            {divisions.map((d) => (
+            {shown.map((d) => (
               <tr key={d.id} className={`border-b border-slate-100 last:border-0 ${d.isActive ? '' : 'text-slate-400'}`}>
-                <td className="px-4 py-2 font-medium">{d.nameKo}</td>
-                <td className="px-4 py-2 font-mono text-xs">/{d.shortSlug ?? '—'}</td>
-                <td className="px-4 py-2 tabular-nums">{d.memberCount}</td>
-                <td className="px-4 py-2">{d.hasTemplate ? '✓' : <span className="text-red-500">없음</span>}</td>
                 <td className="px-4 py-2">
+                  <span className="font-medium">{d.nameKo}</span>
+                  {d.boardNote && (
+                    <p className="mt-0.5 max-w-md text-[11px] leading-4 text-slate-400">{d.boardNote}</p>
+                  )}
+                </td>
+                <td className="whitespace-nowrap px-4 py-2 font-mono text-xs">/{d.shortSlug ?? '—'}</td>
+                <td className="px-4 py-2 tabular-nums">{d.memberCount}</td>
+                <td className="px-4 py-2">
+                  {d.hasTemplate ? <span className="text-green-600">✓</span> : <span className="text-red-500">없음</span>}
+                </td>
+                <td className="whitespace-nowrap px-4 py-2">
                   <select
                     aria-label={`${d.nameKo} 마감 요일`}
                     value={d.deadlineDow}
@@ -230,7 +273,9 @@ export function OpsClient() {
                     type="time"
                     defaultValue={d.deadlineTime}
                     disabled={busy}
-                    onBlur={(e) => e.target.value !== d.deadlineTime && patchDivision(d.id, { deadlineTime: e.target.value })}
+                    onBlur={(e) =>
+                      e.target.value !== d.deadlineTime && patchDivision(d.id, { deadlineTime: e.target.value })
+                    }
                     className="rounded border border-slate-200 px-1 py-0.5 text-xs"
                   />
                 </td>
@@ -247,113 +292,34 @@ export function OpsClient() {
                 </td>
                 <td className="px-4 py-2">
                   <button
-                    onClick={() => loadUsers(d.id)}
-                    className={`rounded border px-2 py-0.5 text-xs ${
-                      selected === d.id ? 'border-blue-400 bg-blue-50 text-blue-700' : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                    }`}
+                    onClick={() => openRoster(d.id)}
+                    className="rounded border border-slate-200 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
                   >
                     열기
                   </button>
                 </td>
               </tr>
             ))}
+            {shown.length === 0 && (
+              <tr>
+                <td colSpan={7} className="px-4 py-6 text-center text-sm text-slate-400">
+                  이 분류에 해당하는 부서가 없습니다.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </section>
 
-      {selected && (
-        <section className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-          <table className="w-full text-sm">
-            <caption className="px-4 pt-3 text-left text-sm font-semibold text-slate-500">
-              인원 배치 — {divisions.find((d) => d.id === selected)?.nameKo}
-            </caption>
-            <thead>
-              <tr className="border-b border-slate-200 text-left text-xs text-slate-500">
-                <th className="px-4 py-2 font-medium">이름</th>
-                <th className="px-4 py-2 font-medium">이메일</th>
-                <th className="px-4 py-2 font-medium">역할</th>
-                <th className="px-4 py-2 font-medium">제출 대상</th>
-                <th className="px-4 py-2 font-medium">정렬</th>
-                <th className="px-4 py-2 font-medium">비밀번호</th>
-                <th className="px-4 py-2 font-medium">계정</th>
-              </tr>
-            </thead>
-            <tbody>
-              {users.map((u) => (
-                <tr key={u.id} className={`border-b border-slate-100 last:border-0 ${u.isActive ? '' : 'text-slate-300'}`}>
-                  <td className="px-4 py-2 font-medium">
-                    {u.name}
-                    {u.isOperator && <span className="ml-1 rounded bg-purple-50 px-1 text-[11px] text-purple-700">운영</span>}
-                    {u.isCoordinator && <span className="ml-1 rounded bg-amber-50 px-1 text-[11px] text-amber-700">총괄</span>}
-                  </td>
-                  <td className="px-4 py-2 font-mono text-xs">{u.email}</td>
-                  <td className="px-4 py-2">
-                    <select
-                      aria-label={`${u.name} 역할`}
-                      value={u.divisionRole}
-                      disabled={busy}
-                      onChange={(e) => patchUser(u.id, { divisionRole: e.target.value })}
-                      className="rounded border border-slate-200 px-1 py-0.5 text-xs"
-                    >
-                      <option value="member">member</option>
-                      <option value="lead">lead (담당)</option>
-                    </select>
-                  </td>
-                  <td className="px-4 py-2">
-                    <input
-                      aria-label={`${u.name} 제출 대상`}
-                      type="checkbox"
-                      checked={u.onRoster}
-                      disabled={busy}
-                      onChange={(e) => patchUser(u.id, { onRoster: e.target.checked })}
-                    />
-                  </td>
-                  <td className="px-4 py-2">
-                    <input
-                      aria-label={`${u.name} 정렬 순서`}
-                      type="number"
-                      defaultValue={u.sortOrder}
-                      disabled={busy}
-                      min={0}
-                      onBlur={(e) => Number(e.target.value) !== u.sortOrder && patchUser(u.id, { sortOrder: Number(e.target.value) })}
-                      className="w-16 rounded border border-slate-200 px-1 py-0.5 text-xs tabular-nums"
-                    />
-                  </td>
-                  <td className="px-4 py-2">
-                    <div className="flex items-center gap-1.5">
-                      {!u.hasPassword ? (
-                        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">미발급</span>
-                      ) : u.locked ? (
-                        <span className="rounded bg-red-50 px-1.5 py-0.5 text-[11px] text-red-700">잠김</span>
-                      ) : u.mustChangePassword ? (
-                        <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700">변경 대기</span>
-                      ) : (
-                        <span className="rounded bg-green-50 px-1.5 py-0.5 text-[11px] text-green-700">사용 중</span>
-                      )}
-                      <button
-                        disabled={busy}
-                        onClick={() => resetPassword(u)}
-                        className="rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
-                      >
-                        {u.hasPassword ? '초기화' : '발급'}
-                      </button>
-                    </div>
-                  </td>
-                  <td className="px-4 py-2">
-                    <button
-                      disabled={busy}
-                      onClick={() => patchUser(u.id, { isActive: !u.isActive })}
-                      className="rounded border border-slate-200 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
-                    >
-                      {u.isActive ? '비활성화' : '활성화'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </section>
-      )}
+      {/* 스크롤 없이 바로 보이도록 드로어로 (기존엔 표 아래에 펼쳐져 스크롤이 필요했다) */}
+      <RosterDrawer
+        divisionName={selectedName}
+        users={users}
+        busy={busy}
+        onClose={() => setSelected(null)}
+        onPatch={patchUser}
+        onResetPassword={resetPassword}
+      />
     </div>
   );
 }
