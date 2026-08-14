@@ -6,6 +6,7 @@
 
 import { env } from '../env';
 import {
+  dropWeakGroups,
   exactDuplicates,
   expandToPartition,
   mergeDuplicateSets,
@@ -24,6 +25,8 @@ export interface GroupingResult {
   /** 모델을 못 쓴/안 쓴 이유 (사용했으면 null) */
   fallbackReason: string | null;
   elapsedMs: number;
+  /** 글자 겹침이 모자라 버린 묶음 — 화면에 "이건 안 묶었다"로 보여줄 수 있다 */
+  rejected: { ids: number[]; ratio: number }[];
 }
 
 /** 모델 없이 낸 결과 — 결정론 중복은 그대로 반영한다 (아무것도 안 묶는 게 아니다) */
@@ -33,8 +36,33 @@ function withoutModel(rows: readonly MergeRow[], reason: string, elapsedMs = 0):
     usedModel: false,
     fallbackReason: reason,
     elapsedMs,
+    rejected: [],
   };
 }
+
+/**
+ * 응답 스키마를 ollama에 직접 준다 (`format`).
+ * `format: 'json'`은 "유효한 JSON"만 강제할 뿐 **모양은 강제하지 않는다** — 실측에서
+ * 9B가 입력 행을 그대로 되돌려준 적이 있다. 스키마를 주면 그 실패 모드가 사라지고,
+ * 덤으로 빨라진다 (8.6초 → 3.6초, 생성할 토큰이 줄어서).
+ */
+const DUPLICATES_SCHEMA = {
+  type: 'object',
+  properties: {
+    duplicates: {
+      type: 'array',
+      items: {
+        type: 'object',
+        properties: {
+          ids: { type: 'array', items: { type: 'integer' } },
+          reason: { type: 'string' },
+        },
+        required: ['ids', 'reason'],
+      },
+    },
+  },
+  required: ['duplicates'],
+} as const;
 
 const SYSTEM = [
   '너는 한국 공공연구기관의 주간 업무일지 취합을 돕는다.',
@@ -106,7 +134,7 @@ export async function groupDuplicates(
         system: SYSTEM,
         prompt: buildPrompt(rows, extraRule),
         stream: false,
-        format: 'json', // 스키마 강제 — 형식 파탄 차단
+        format: DUPLICATES_SCHEMA, // 모양까지 강제 — 'json'만으로는 부족했다
         options: { temperature: 0, num_ctx: 8192 }, // 재현 가능해야 감사할 수 있다
       }),
     });
@@ -131,13 +159,17 @@ export async function groupDuplicates(
   const problem = validateGroups(rows, duplicates);
   if (problem) return withoutModel(rows, `묶음 검증 실패 — ${problem}`, Date.now() - started);
 
+  // 글자가 너무 안 겹치는 묶음은 버린다 — 주제가 같은 것과 같은 업무인 것은 다르다
+  const { kept, dropped } = dropWeakGroups(rows, duplicates);
+
   // 결정론 결과를 바닥에 깔고 모델 결과를 얹는다 — 모델은 **더하는 층**이다.
   // 겹치면 결정론이 이긴다 (글자가 같은 건 논쟁의 여지가 없다).
-  const merged = mergeDuplicateSets(exactDuplicates(rows), duplicates);
+  const merged = mergeDuplicateSets(exactDuplicates(rows), kept);
   return {
     groups: expandToPartition(rows, merged),
     usedModel: true,
     fallbackReason: null,
     elapsedMs: Date.now() - started,
+    rejected: dropped,
   };
 }

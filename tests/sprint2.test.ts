@@ -279,13 +279,49 @@ d('부서 해석 단일 출처 (v1.3.1 회귀)', () => {
   });
 });
 
-d('Phase 2 계약 예약 (API-30)', () => {
-  it('merge API — member 404 · lead 501 (동작 아님을 명시)', async () => {
+d('병합 API (API-30)', () => {
+  it('[격리] member는 404 — 병합은 lead의 일이다', async () => {
     const { POST } = await import('@/app/api/division/merge/route');
     expect((await POST(nx('/api/division/merge', ID.member, { method: 'POST' }))).status).toBe(404);
+  });
+
+  it('lead가 병합하면 MergeRun이 남고 결과 파일이 생긴다', async () => {
+    const { POST } = await import('@/app/api/division/merge/route');
+    const { prisma } = await import('@/server/db');
     const res = await POST(nx('/api/division/merge', ID.lead, { method: 'POST' }));
-    expect(res.status).toBe(501);
-    expect((await res.json()).error).toBe('not_implemented');
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.status).toBe('succeeded');
+    expect(body.outcome.outputRelPath).toMatch(/\/merged\//);
+    expect(body.outcome.bytes).toBeGreaterThan(0);
+
+    const run = await prisma.mergeRun.findUniqueOrThrow({ where: { id: body.runId } });
+    expect(run.status).toBe('succeeded');
+    expect(run.finishedAt).not.toBeNull();
+    // DM-13 — 실행 시점 설정이 박제된다
+    expect(JSON.parse(run.ruleSnapshot)).toMatchObject({ trigger: 'manual' });
+  });
+
+  it('[TACP-6] 타 부서 슬러그를 붙여도 내 부서만 병합된다', async () => {
+    const { POST } = await import('@/app/api/division/merge/route');
+    const { prisma } = await import('@/server/db');
+    const before = await prisma.mergeRun.count({ where: { division: { slug: B.slug } } });
+    await POST(nx(`/api/division/merge?division=${B.slug}`, ID.lead, { method: 'POST' }));
+    const after = await prisma.mergeRun.count({ where: { division: { slug: B.slug } } });
+    expect(after).toBe(before); // B부서에는 아무 일도 일어나지 않았다
+  });
+
+  it('실패해도 MergeRun에 원인이 남는다 — 화면이 보여주고 재실행할 수 있어야 한다', async () => {
+    const { runMergeRecorded } = await import('@/server/merge/run');
+    const { prisma } = await import('@/server/db');
+    const div = await prisma.division.findUniqueOrThrow({ where: { slug: B.slug } });
+    const slot = await prisma.weekSlot.findFirstOrThrow();
+    const r = await runMergeRecorded(div.id, slot.id, 'auto'); // B부서는 양식·제출이 없다
+    expect(r.status).toBe('failed');
+    expect(r.errorText).toBeTruthy();
+    const run = await prisma.mergeRun.findUniqueOrThrow({ where: { id: r.runId } });
+    expect(run.status).toBe('failed');
+    expect(run.errorText).toBe(r.errorText);
   });
 });
 

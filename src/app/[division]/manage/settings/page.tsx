@@ -73,14 +73,27 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
 
       {/* ① 작성 안내 + 병합 규칙 (PG-25~27) */}
       <section className="card px-5 py-4">
-        <h2 className="mb-3 text-sm font-semibold text-muted">작성 안내 · 병합 규칙</h2>
+        <h2 className="mb-3 text-sm font-semibold text-muted">병합 설정 · 작성 안내</h2>
         {isOwn ? (
-          <RuleEditor initialRule={division.mergeRuleText} initialGuide={division.guideText} />
+          <RuleEditor
+            initialCategories={division.mergeCategories}
+            initialDedupe={division.mergeDedupe}
+            initialDropNotes={division.mergeDropNotes}
+            initialRule={division.mergeRuleText}
+            initialGuide={division.guideText}
+          />
         ) : (
           <div className="space-y-3">
-            <ReadOnlyNotice what="작성 안내 · 병합 규칙" />
-            <pre className="card-cream max-h-60 overflow-auto px-4 py-3 font-mono text-xs leading-5 whitespace-pre-wrap text-body">
-              {[division.guideText, division.mergeRuleText].filter(Boolean).join('\n---\n') || '(비어 있음)'}
+            <ReadOnlyNotice what="병합 설정 · 작성 안내" />
+            <pre className="card-cream max-h-60 overflow-auto px-4 py-3 text-xs leading-5 whitespace-pre-wrap text-body">
+              {[
+                division.mergeCategories && `분류 순서: ${division.mergeCategories}`,
+                `중복 묶기: ${division.mergeDedupe ? '켬' : '끔'}`,
+                division.mergeRuleText && `지침: ${division.mergeRuleText}`,
+                division.guideText,
+              ]
+                .filter(Boolean)
+                .join('\n') || '(비어 있음)'}
             </pre>
           </div>
         )}

@@ -117,3 +117,66 @@ export function expandToPartition(rows: readonly MergeRow[], duplicates: readonl
   }
   return out;
 }
+
+/** 비교용 토큰 — 괄호 주석·문장부호를 털고 1글자 토큰은 버린다 (조사·접속사 노이즈) */
+function tokens(s: string): Set<string> {
+  return new Set(
+    s
+      .replace(/\([^)]*\)/g, '')
+      .split(/[\s·,./\-–—~"'“”‘’()[\]]+/)
+      .map((t) => t.trim())
+      .filter((t) => t.length >= 2),
+  );
+}
+
+/**
+ * 짧은 쪽 토큰이 긴 쪽에 얼마나 들어 있는가 (0~1).
+ * 중복이라면 **한쪽이 다른 쪽을 상당 부분 포함**해야 한다는 상식을 수치로 만든 것.
+ */
+export function containmentRatio(a: string, b: string): number {
+  const ta = tokens(a);
+  const tb = tokens(b);
+  const [small, large] = ta.size <= tb.size ? [ta, tb] : [tb, ta];
+  if (small.size === 0) return 0;
+  let hit = 0;
+  for (const t of small) if (large.has(t)) hit++;
+  return hit / small.size;
+}
+
+/**
+ * 모델이 낸 묶음 중 **글자가 너무 안 겹치는 것**을 버린다.
+ *
+ * 실측 근거 (Qwen3.5-9B):
+ *   버릴 것  "7월 언론보도 홈페이지 등록" + "오늘의 환경뉴스 발송 및 언론 모니터링"  → 0.00
+ *   남길 것  "보도자료 배포(2건) 및 인포그래픽 제작" + "인포그래픽 제작"            → 1.00
+ *   남길 것  "AI연구용 … 시스템 고도화" + "AI연구용 …  고도화 참석"                 → 1.00
+ *
+ * 모델이 "언론"이라는 공통 주제만 보고 다른 업무를 합치려 한 사례다. 주제가 같은 것과
+ * 같은 업무인 것은 다르고, 그 차이는 결국 **같은 말을 쓰는지**로 드러난다.
+ * 의미만으로 판단하는 층(모델) 위에 글자로 확인하는 층을 하나 둔다.
+ */
+export const CONTAINMENT_FLOOR = 0.5;
+
+export function dropWeakGroups(
+  rows: readonly MergeRow[],
+  groups: readonly RowGroup[],
+  floor = CONTAINMENT_FLOOR,
+): { kept: RowGroup[]; dropped: { ids: number[]; ratio: number }[] } {
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const kept: RowGroup[] = [];
+  const dropped: { ids: number[]; ratio: number }[] = [];
+
+  for (const g of groups) {
+    const texts = g.ids.map((id) => byId.get(id)?.content ?? '');
+    // 묶음 안의 모든 쌍이 기준을 넘어야 한다 — 한 쌍이라도 엉뚱하면 묶음 전체가 의심스럽다
+    let worst = 1;
+    for (let i = 0; i < texts.length; i++) {
+      for (let j = i + 1; j < texts.length; j++) {
+        worst = Math.min(worst, containmentRatio(texts[i], texts[j]));
+      }
+    }
+    if (worst >= floor) kept.push(g);
+    else dropped.push({ ids: g.ids, ratio: worst });
+  }
+  return { kept, dropped };
+}

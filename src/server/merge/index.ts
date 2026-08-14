@@ -122,7 +122,7 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
 
   // ── 2. 판단 — 표별로 따로 묶는다 (실적과 계획을 섞지 않는다) ──
   const grouped: Record<Bucket, MergedGroup[]> = { achievements: [], plans: [], notes: [] };
-  let model: GroupingResult = { groups: [], usedModel: false, fallbackReason: '중복묶기 꺼짐', elapsedMs: 0 };
+  let model: GroupingResult = { groups: [], usedModel: false, fallbackReason: '중복묶기 꺼짐', elapsedMs: 0, rejected: [] };
 
   for (const bucket of BUCKETS) {
     const mine = rows.filter((r) => r.bucket === bucket);
@@ -130,7 +130,7 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
 
     const result = plan.dedupe
       ? await groupDuplicates(mine, division.mergeRuleText)
-      : { groups: mine.map((r) => ({ ids: [r.id], reason: '' })), usedModel: false, fallbackReason: '중복묶기 꺼짐', elapsedMs: 0 };
+      : { groups: mine.map((r) => ({ ids: [r.id], reason: '' })), usedModel: false, fallbackReason: '중복묶기 꺼짐', elapsedMs: 0, rejected: [] };
 
     // 가장 정보가 많은 실행 결과를 대표로 남긴다 (실적 표가 보통 제일 크다)
     if (result.elapsedMs >= model.elapsedMs) model = result;

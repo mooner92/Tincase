@@ -198,3 +198,64 @@ crontab -e
 ## 배포 금지 시간대 (OPS-16)
 
 **월 00:00 ~ 화 14:00 (제출 창) 동안 재배포 금지.** 배포는 화 14:00 이후~일요일.
+
+
+---
+
+## 9. 병합 보조 모델 (HM-24)
+
+병합은 모델 **없이도** 완결된다 (`MERGE_MODEL`이 비면 결정론 병합만). 아래는 켤 때의 절차다.
+
+### 9.1 Tincase 전용 ollama
+
+이 서버에는 ollama 인스턴스가 여럿 있고 **대부분 다른 사람 것**이다.
+남의 인스턴스에 운영을 의존하면 그쪽이 내리는 순간 목요일 마감에 조용히 실패한다.
+그래서 **전용 인스턴스를 따로 띄운다.** 모델 파일은 공유하므로 추가 다운로드는 없다.
+
+```bash
+OLLAMA_HOST=0.0.0.0:11437 \
+OLLAMA_MODELS=/home/mhchoi/.ollama-test/models \
+OLLAMA_CONTEXT_LENGTH=8192 \
+  pm2 start ~/ollama-latest/bin/ollama --name tincase-ollama -- serve
+pm2 save
+```
+
+`0.0.0.0` 바인딩이지만 **방화벽이 도커 대역만 통과시킨다** (아래). 기존 인스턴스는 건드리지 않는다.
+
+### 9.2 방화벽
+
+컨테이너는 compose 네트워크(`172.18.x`)에 있고 ufw는 `INPUT DROP`이라 그냥은 못 닿는다.
+도커가 쓰는 사설 대역 전체를 허용한다 — 서브넷이 바뀌어도 살아남는다.
+
+```bash
+sudo ufw allow from 172.16.0.0/12 to any port 11437 proto tcp comment 'Tincase: docker -> ollama'
+```
+
+사내망(192.168.x)에는 규칙이 없으므로 여전히 차단된다.
+
+### 9.3 컨테이너 설정
+
+`docker-compose.yml`에 이미 들어 있다.
+
+```yaml
+extra_hosts:
+  - "host.docker.internal:host-gateway"   # 서브넷이 바뀌어도 호스트를 찾는다
+environment:
+  MERGE_MODEL: hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M
+  MERGE_MODEL_URL: http://host.docker.internal:11437
+```
+
+### 9.4 확인
+
+```bash
+sudo docker exec repman node -e "fetch(process.env.MERGE_MODEL_URL+'/api/tags').then(r=>r.json()).then(d=>console.log(d.models.length))"
+sudo docker logs repman 2>&1 | grep '\[merge\]'      # 스케줄러 등록 확인
+```
+
+### 9.5 되돌리기
+
+```bash
+pm2 delete tincase-ollama && pm2 save
+sudo ufw delete allow from 172.16.0.0/12 to any port 11437 proto tcp
+# docker-compose.yml에서 MERGE_MODEL 을 비우고 재기동 → 결정론 병합으로 계속 동작한다
+```

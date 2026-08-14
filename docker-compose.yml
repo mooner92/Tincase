@@ -16,7 +16,14 @@ services:
       DATABASE_URL: file:/data/db/worklog.db
       STORAGE_ROOT: /data
       CF_ACCESS_TEAM: aidt-kei
+      # HM-24 — 병합 보조 모델. Tincase 전용 ollama (pm2 tincase-ollama, 도커 브리지 바인딩).
+      # 다른 인스턴스(11434/11435 jhkim, 11436 kei-ollama-v031)는 건드리지 않는다.
+      # 비워두면 결정론 병합만 수행한다 — 모델은 얹는 층이지 의존 대상이 아니다.
+      MERGE_MODEL: hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M
+      MERGE_MODEL_URL: http://host.docker.internal:11437
       # CF_ACCESS_AUD는 .env.production(env_file)에서. 누락 시 앱 env 가드가 기동 거부 (OPS-06)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"   # 컨테이너 → 호스트 ollama (서브넷 변경에 안전)
     env_file:
       - .env.production                  # CF_ACCESS_AUD만 담는다 (git 제외)
     volumes:

@@ -1,17 +1,33 @@
-// POST /api/division/merge — 자동 병합 (Phase 2).
-// 계약만 존재하고 동작은 없다 (API-30). writer(HM-16)와 규칙 파서(HM-18)가 서야 열린다.
-// 라우트를 미리 두는 이유: 계약을 고정해 두면 Phase 2에서 클라이언트를 고칠 일이 없다.
+// POST /api/division/merge — 자동 병합 실행 (API-30). lead 전용.
+// 마감이 지나면 스케줄러가 알아서 돌리므로(HM-25) 이 경로는 **재실행**이 주 용도다:
+// 설정을 고쳤거나, 자동 실행이 실패했거나, 늦게 낸 사람을 반영할 때.
 import { NextRequest } from 'next/server';
-import { requireLead } from '@/server/authz';
-import { handler, jsonError } from '@/server/http';
+import { prisma } from '@/server/db';
+import { requireLead, HttpError } from '@/server/authz';
+import { handler, json } from '@/server/http';
+import { audit } from '@/server/audit';
+import { runMergeRecorded } from '@/server/merge/run';
 
 export const dynamic = 'force-dynamic';
 
 export const POST = handler(async (req: NextRequest) => {
-  await requireLead(req.headers); // 권한은 지금부터 동일하게 강제 (member는 404)
-  return jsonError(
-    501,
-    'not_implemented',
-    '자동 병합은 준비 중입니다 (Phase 2). 지금은 전체 zip으로 받아 기존 방식으로 병합해 주세요.',
-  );
+  // TACP-6 — 병합 대상은 언제나 신원의 부서다. 슬러그로 남의 부서를 병합할 수 없다
+  const scope = await requireLead(req.headers);
+  if (!scope.isLead) throw new HttpError(404, 'not_found', '요청한 페이지를 찾을 수 없습니다');
+
+  const isoKey = String((await req.json().catch(() => ({})))?.isoKey ?? '');
+  const slot = isoKey
+    ? await prisma.weekSlot.findUnique({ where: { isoKey } })
+    : await prisma.weekSlot.findFirst({ orderBy: { opensAt: 'desc' } });
+  if (!slot) throw new HttpError(404, 'not_found', '해당 주차를 찾을 수 없습니다.');
+
+  const result = await runMergeRecorded(scope.division.id, slot.id, 'manual');
+  await audit(scope.user.email, 'merge', scope.division.id, `slot:${slot.isoKey}`, {
+    status: result.status,
+  });
+
+  if (result.status === 'failed') {
+    throw new HttpError(422, 'merge_failed', result.errorText ?? '병합에 실패했습니다.');
+  }
+  return json(result);
 });

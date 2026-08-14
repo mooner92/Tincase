@@ -25,6 +25,23 @@ const empty = (reason: string, elapsedMs = 0): ClassifyResult => ({
   elapsedMs,
 });
 
+/** id → 분류 이름. 분류 이름은 부서가 정한 목록 + 기타로 제한된다 (enum) */
+function assignSchema(rows: readonly MergeRow[], categories: readonly string[]) {
+  return {
+    type: 'object',
+    properties: {
+      assign: {
+        type: 'object',
+        properties: Object.fromEntries(
+          rows.map((r) => [String(r.id), { type: 'string', enum: [...categories, OTHER] }]),
+        ),
+        required: rows.map((r) => String(r.id)),
+      },
+    },
+    required: ['assign'],
+  };
+}
+
 const SYSTEM = '너는 한국 공공연구기관의 업무 분류를 돕는다. 판단만 하고 글자는 만들지 않는다. JSON만 출력한다.';
 
 function buildPrompt(rows: readonly MergeRow[], categories: readonly string[], guidance: string): string {
@@ -78,7 +95,7 @@ export async function classifyRows(
         system: SYSTEM,
         prompt: buildPrompt(rows, categories, guidance),
         stream: false,
-        format: 'json',
+        format: assignSchema(rows, categories), // 분류 이름까지 enum으로 강제
         options: { temperature: 0, num_ctx: 8192 },
       }),
     });
