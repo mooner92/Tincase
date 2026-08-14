@@ -1,0 +1,151 @@
+'use client';
+// 상단 통합 내비 (top-nav, 64px) — 워드마크 + 부서 배지 + 활성 표시 메뉴 + 사용자 드롭다운.
+// 비밀번호·로그아웃은 드롭다운으로 내려 상단을 행동 중심 메뉴만 남긴다.
+import Link from 'next/link';
+import { usePathname, useRouter } from 'next/navigation';
+import { useEffect, useRef, useState } from 'react';
+
+export interface NavItem {
+  href: string;
+  label: string;
+}
+
+export function AppHeader({
+  slug,
+  divisionName,
+  userName,
+  isLead,
+  isOperator,
+  viaCloudflare,
+}: {
+  slug: string | null; // null이면 부서 컨텍스트 없음 (/ops 단독 등)
+  divisionName: string;
+  userName: string;
+  isLead: boolean;
+  isOperator: boolean;
+  viaCloudflare: boolean;
+}) {
+  const pathname = usePathname();
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', onDown);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const items: NavItem[] = [
+    ...(slug
+      ? [
+          { href: `/${slug}`, label: '제출' },
+          { href: `/${slug}/history`, label: '내 이력' },
+          ...(isLead
+            ? [
+                { href: `/${slug}/manage`, label: '수합 관리' },
+                { href: `/${slug}/manage/settings`, label: '부서 설정' },
+              ]
+            : []),
+        ]
+      : []),
+    ...(isOperator ? [{ href: '/ops', label: '운영' }] : []),
+  ];
+
+  const isActive = (href: string) => {
+    if (href === `/${slug}`) return pathname === href;
+    if (href.endsWith('/manage')) return pathname === href || /\/manage\/\d{4}-W\d{2}$/.test(pathname);
+    return pathname === href || pathname.startsWith(href + '/');
+  };
+
+  const logout = () => {
+    if (viaCloudflare) {
+      // Cloudflare 엣지 엔드포인트 — 앱 라우트가 아니다 (AU-08)
+      // eslint-disable-next-line @next/next/no-location-assign-relative-destination
+      window.location.href = '/cdn-cgi/access/logout';
+      return;
+    }
+    fetch('/api/auth/logout', { method: 'POST' }).finally(() => {
+      router.replace('/login');
+      router.refresh();
+    });
+  };
+
+  return (
+    <header className="sticky top-0 z-30 border-b border-hairline-soft bg-canvas/95 backdrop-blur-sm">
+      <div className="mx-auto flex h-16 max-w-[1280px] items-center justify-between gap-4 px-5">
+        <div className="flex min-w-0 items-center gap-3">
+          <Link href={slug ? `/${slug}` : '/'} className="display shrink-0 text-[17px]">
+            주간업무
+          </Link>
+          <span className="badge-pill max-w-44 truncate" title={divisionName}>
+            {divisionName}
+          </span>
+        </div>
+
+        <nav className="flex items-center gap-1 overflow-x-auto" aria-label="주요 메뉴">
+          {items.map((it) => (
+            <Link
+              key={it.href}
+              href={it.href}
+              aria-current={isActive(it.href) ? 'page' : undefined}
+              className={`tab-pill whitespace-nowrap ${isActive(it.href) ? 'tab-pill-active' : ''}`}
+            >
+              {it.label}
+            </Link>
+          ))}
+        </nav>
+
+        <div ref={menuRef} className="relative shrink-0">
+          <button
+            onClick={() => setOpen((v) => !v)}
+            aria-haspopup="menu"
+            aria-expanded={open}
+            className="flex items-center gap-1.5 rounded-full border border-hairline bg-canvas py-1.5 pr-3 pl-1.5 text-sm font-medium text-ink transition-colors hover:bg-surface-soft"
+          >
+            <span
+              aria-hidden
+              className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-peach text-[11px] font-bold text-ink"
+            >
+              {userName.slice(0, 1)}
+            </span>
+            {userName}
+            <span aria-hidden className="text-[10px] text-muted">
+              ▾
+            </span>
+          </button>
+          {open && (
+            <div
+              role="menu"
+              className="absolute right-0 mt-2 w-44 overflow-hidden rounded-2xl border border-hairline bg-canvas py-1.5 shadow-[0_8px_24px_rgba(10,10,10,0.08)]"
+            >
+              <Link
+                role="menuitem"
+                href="/password"
+                onClick={() => setOpen(false)}
+                className="block px-4 py-2 text-sm text-body hover:bg-surface-soft"
+              >
+                비밀번호 변경
+              </Link>
+              <button
+                role="menuitem"
+                onClick={logout}
+                className="block w-full px-4 py-2 text-left text-sm text-body hover:bg-surface-soft"
+              >
+                로그아웃
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+}

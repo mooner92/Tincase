@@ -2,8 +2,8 @@
 export function NoticeScreen({ title, description }: { title: string; description: string }) {
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col items-center justify-center px-6 text-center">
-      <h1 className="text-xl font-bold text-slate-800">{title}</h1>
-      <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-600">{description}</p>
+      <h1 className="text-xl font-bold text-ink">{title}</h1>
+      <p className="mt-3 whitespace-pre-line text-sm leading-6 text-body">{description}</p>
     </main>
   );
 }

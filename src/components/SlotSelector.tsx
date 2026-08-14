@@ -31,7 +31,7 @@ export function SlotSelector({
         const s = slots.find((x) => x.isoKey === key);
         router.push(s?.isCurrent ? baseHref : `${baseHref}/${key}`);
       }}
-      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm"
+      className="rounded-xl border border-hairline bg-canvas px-3 py-1.5 text-sm"
     >
       {slots.map((s) => (
         <option key={s.isoKey} value={s.isoKey}>

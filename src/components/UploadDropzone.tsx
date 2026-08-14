@@ -85,7 +85,11 @@ export function UploadDropzone({ hasPrevious }: { hasPrevious: boolean }) {
       if (busy || !files || files.length === 0) return; // CP-27
       const list = Array.from(files);
       if (list.length > 1) {
-        setState({ kind: 'error', canRetry: false, message: '한 개만 올릴 수 있습니다. 첫 번째 파일로 진행하려면 다시 선택해 주세요.' }); // CP-31
+        setState({
+          kind: 'error',
+          canRetry: false,
+          message: '한 개만 올릴 수 있습니다. 첫 번째 파일로 진행하려면 다시 선택해 주세요.',
+        }); // CP-31
         return;
       }
       send(list[0]);
@@ -103,7 +107,8 @@ export function UploadDropzone({ hasPrevious }: { hasPrevious: boolean }) {
         onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && !busy && inputRef.current?.click()}
         onDragOver={(e) => {
           e.preventDefault();
-          if (!busy) setState((s) => (s.kind === 'idle' || s.kind === 'error' || s.kind === 'success' ? { kind: 'dragover' } : s));
+          if (!busy)
+            setState((s) => (s.kind === 'idle' || s.kind === 'error' || s.kind === 'success' ? { kind: 'dragover' } : s));
         }}
         onDragLeave={() => setState((s) => (s.kind === 'dragover' ? { kind: 'idle' } : s))}
         onDrop={(e) => {
@@ -111,12 +116,12 @@ export function UploadDropzone({ hasPrevious }: { hasPrevious: boolean }) {
           if (state.kind === 'dragover') setState({ kind: 'idle' });
           onFiles(e.dataTransfer.files);
         }}
-        className={`flex min-h-36 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-8 text-center transition-colors ${
+        className={`card-feature flex min-h-44 cursor-pointer flex-col items-center justify-center border-2 border-dashed px-6 py-10 text-center transition-colors ${
           state.kind === 'dragover'
-            ? 'border-blue-500 bg-blue-50'
+            ? 'border-ink bg-surface-card'
             : busy
-              ? 'cursor-wait border-slate-300 bg-slate-50'
-              : 'border-slate-300 bg-white hover:border-blue-400 hover:bg-blue-50/40'
+              ? 'cursor-wait border-hairline bg-surface-soft'
+              : 'border-hairline bg-canvas hover:border-muted-soft hover:bg-surface-soft'
         }`}
       >
         <input
@@ -132,37 +137,42 @@ export function UploadDropzone({ hasPrevious }: { hasPrevious: boolean }) {
         />
         {state.kind === 'uploading' ? (
           <div className="w-full max-w-xs">
-            <p className="mb-2 truncate text-sm text-slate-600">{state.fileName} 올리는 중…</p>
-            <div className="h-2 w-full overflow-hidden rounded bg-slate-200" role="progressbar" aria-valuenow={state.percent} aria-valuemin={0} aria-valuemax={100}>
-              <div className="h-full bg-blue-600 transition-all" style={{ width: `${state.percent}%` }} />
+            <p className="mb-2 truncate text-sm text-body">{state.fileName} 올리는 중…</p>
+            <div
+              className="h-2 w-full overflow-hidden rounded-full bg-surface-strong"
+              role="progressbar"
+              aria-valuenow={state.percent}
+              aria-valuemin={0}
+              aria-valuemax={100}
+            >
+              <div className="h-full bg-ink transition-all" style={{ width: `${state.percent}%` }} />
             </div>
-            <p className="mt-1 text-right text-xs tabular-nums text-slate-500">{state.percent}%</p>
+            <p className="mt-1 text-right text-xs tabular-nums text-muted">{state.percent}%</p>
           </div>
         ) : (
           <>
-            <p className="text-sm font-medium text-slate-700">
-              여기에 hwp 파일을 끌어다 놓거나 <span className="text-blue-700 underline">클릭해서 선택</span>하세요
+            <p className="display text-lg">
+              hwp 파일을 끌어다 놓거나 <span className="underline underline-offset-4">클릭해서 선택</span>
             </p>
-            <p className="mt-1 text-xs text-slate-400">.hwp · 최대 20MB{hasPrevious && ' · 다시 올리면 새 버전으로 저장됩니다'}</p>
+            <p className="mt-2 text-[13px] text-muted">
+              .hwp · 최대 20MB{hasPrevious && ' · 다시 올리면 새 버전으로 저장됩니다'}
+            </p>
           </>
         )}
       </div>
 
       <div aria-live="polite">
         {state.kind === 'success' && (
-          <p className="mt-3 rounded-lg bg-green-50 px-4 py-3 text-sm text-green-800">
-            ✓ 제출 완료 (v{state.version})
+          <p className="mt-3 rounded-2xl bg-brand-mint/35 px-5 py-3.5 text-sm font-medium text-ink">
+            <span className="text-success">✓</span> 제출 완료 (v{state.version})
             {state.sameAsPrevious && ' — 이전 버전과 내용이 동일합니다'}
           </p>
         )}
         {state.kind === 'error' && (
-          <div className="mt-3 flex items-start justify-between gap-3 rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800">
+          <div className="mt-3 flex items-start justify-between gap-3 rounded-2xl border border-error/30 bg-error/5 px-5 py-3.5 text-sm text-body-strong">
             <p>{state.message}</p>
             {state.canRetry && (
-              <button
-                onClick={() => lastFileRef.current && send(lastFileRef.current)}
-                className="shrink-0 rounded border border-red-300 px-2 py-1 text-xs font-medium hover:bg-red-100"
-              >
+              <button onClick={() => lastFileRef.current && send(lastFileRef.current)} className="btn-secondary btn-sm shrink-0">
                 다시 시도
               </button>
             )}

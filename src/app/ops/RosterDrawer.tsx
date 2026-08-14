@@ -60,26 +60,26 @@ export function RosterDrawer({
 
   return (
     <div className="fixed inset-0 z-40">
-      <div className="absolute inset-0 bg-slate-900/30" onClick={onClose} aria-hidden />
+      <div className="absolute inset-0 bg-ink/30" onClick={onClose} aria-hidden />
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={`${divisionName} 인원 관리`}
-        className="absolute inset-y-0 right-0 flex w-full max-w-4xl flex-col bg-white shadow-2xl"
+        className="absolute inset-y-0 right-0 flex w-full max-w-4xl flex-col bg-canvas shadow-2xl"
       >
-        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
+        <div className="flex items-center justify-between border-b border-hairline px-5 py-3">
           <div>
-            <h2 ref={titleRef} tabIndex={-1} className="text-base font-bold text-slate-900 outline-none">
-              {divisionName} <span className="font-normal text-slate-500">· 인원 관리</span>
+            <h2 ref={titleRef} tabIndex={-1} className="text-base font-bold text-ink outline-none">
+              {divisionName} <span className="font-normal text-muted">· 인원 관리</span>
             </h2>
-            <p className="mt-0.5 text-xs text-slate-500">
+            <p className="mt-0.5 text-xs text-muted">
               전체 {users.length}명 · 제출 대상 {roster}명 · 비밀번호 발급 {issued}/{users.length}
             </p>
           </div>
           <button
             onClick={onClose}
-            className="rounded px-2 py-1 text-lg leading-none text-slate-400 hover:text-slate-700"
+            className="rounded px-2 py-1 text-lg leading-none text-muted-soft hover:text-body"
             aria-label="닫기"
           >
             ×
@@ -88,8 +88,8 @@ export function RosterDrawer({
 
         <div className="flex-1 overflow-y-auto">
           <table className="w-full text-sm">
-            <thead className="sticky top-0 bg-white shadow-[0_1px_0_0_#e2e8f0]">
-              <tr className="text-left text-xs text-slate-500">
+            <thead className="sticky top-0 bg-canvas shadow-[0_1px_0_0_var(--color-hairline)]">
+              <tr className="text-left text-xs text-muted">
                 <th className="px-4 py-2 font-medium">이름</th>
                 <th className="px-4 py-2 font-medium">이메일</th>
                 <th className="px-4 py-2 font-medium">역할</th>
@@ -103,21 +103,21 @@ export function RosterDrawer({
               {users.map((u) => (
                 <tr
                   key={u.id}
-                  className={`border-b border-slate-100 last:border-0 ${u.isActive ? '' : 'text-slate-300'}`}
+                  className={`border-b border-hairline-soft last:border-0 ${u.isActive ? '' : 'text-hairline'}`}
                 >
                   <td className="whitespace-nowrap px-4 py-2 font-medium">
                     {u.name}
-                    {u.isOperator && <span className="ml-1 rounded bg-purple-50 px-1 text-[11px] text-purple-700">운영</span>}
-                    {u.isCoordinator && <span className="ml-1 rounded bg-amber-50 px-1 text-[11px] text-amber-700">총괄</span>}
+                    {u.isOperator && <span className="ml-1 rounded bg-brand-lavender/40 px-1 text-[11px] text-ink">운영</span>}
+                    {u.isCoordinator && <span className="ml-1 rounded bg-brand-ochre/15 px-1 text-[11px] text-body-strong">총괄</span>}
                   </td>
-                  <td className="px-4 py-2 font-mono text-xs text-slate-500">{u.email}</td>
+                  <td className="px-4 py-2 font-mono text-xs text-muted">{u.email}</td>
                   <td className="px-4 py-2">
                     <select
                       aria-label={`${u.name} 역할`}
                       value={u.divisionRole}
                       disabled={busy}
                       onChange={(e) => onPatch(u.id, { divisionRole: e.target.value })}
-                      className="rounded border border-slate-200 px-1 py-0.5 text-xs"
+                      className="rounded border border-hairline px-1 py-0.5 text-xs"
                     >
                       <option value="member">member</option>
                       <option value="lead">lead (담당)</option>
@@ -142,24 +142,24 @@ export function RosterDrawer({
                       onBlur={(e) =>
                         Number(e.target.value) !== u.sortOrder && onPatch(u.id, { sortOrder: Number(e.target.value) })
                       }
-                      className="w-16 rounded border border-slate-200 px-1 py-0.5 text-xs tabular-nums"
+                      className="w-16 rounded border border-hairline px-1 py-0.5 text-xs tabular-nums"
                     />
                   </td>
                   <td className="whitespace-nowrap px-4 py-2">
                     <div className="flex items-center gap-1.5">
                       {!u.hasPassword ? (
-                        <span className="rounded bg-slate-100 px-1.5 py-0.5 text-[11px] text-slate-500">미발급</span>
+                        <span className="rounded bg-surface-card px-1.5 py-0.5 text-[11px] text-muted">미발급</span>
                       ) : u.locked ? (
-                        <span className="rounded bg-red-50 px-1.5 py-0.5 text-[11px] text-red-700">잠김</span>
+                        <span className="rounded bg-error/10 px-1.5 py-0.5 text-[11px] text-error">잠김</span>
                       ) : u.mustChangePassword ? (
-                        <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[11px] text-amber-700">변경 대기</span>
+                        <span className="rounded bg-brand-ochre/15 px-1.5 py-0.5 text-[11px] text-body-strong">변경 대기</span>
                       ) : (
-                        <span className="rounded bg-green-50 px-1.5 py-0.5 text-[11px] text-green-700">사용 중</span>
+                        <span className="rounded bg-brand-mint/30 px-1.5 py-0.5 text-[11px] text-success">사용 중</span>
                       )}
                       <button
                         disabled={busy}
                         onClick={() => onResetPassword(u)}
-                        className="rounded border border-blue-200 bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700 hover:bg-blue-100 disabled:opacity-50"
+                        className="rounded border border-hairline bg-surface-card px-2 py-0.5 text-xs font-medium text-ink hover:bg-surface-strong disabled:opacity-50"
                       >
                         {u.hasPassword ? '초기화' : '발급'}
                       </button>
@@ -169,7 +169,7 @@ export function RosterDrawer({
                     <button
                       disabled={busy}
                       onClick={() => onPatch(u.id, { isActive: !u.isActive })}
-                      className="rounded border border-slate-200 px-2 py-0.5 text-xs text-slate-600 hover:bg-slate-50"
+                      className="rounded border border-hairline px-2 py-0.5 text-xs text-body hover:bg-surface-soft"
                     >
                       {u.isActive ? '비활성화' : '활성화'}
                     </button>

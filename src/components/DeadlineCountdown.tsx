@@ -49,7 +49,7 @@ export function DeadlineCountdown({
     };
   }, [deadlineAtMs, serverNowMs, router]);
 
-  if (remaining <= 0) return <span className="font-semibold text-slate-500">마감됨</span>;
+  if (remaining <= 0) return <span className="font-semibold text-muted">마감됨</span>;
 
   const h = Math.floor(remaining / 3600_000);
   const m = Math.floor((remaining % 3600_000) / 60_000);
@@ -58,7 +58,7 @@ export function DeadlineCountdown({
 
   return (
     <span
-      className={`tabular-nums font-semibold ${urgent ? 'text-orange-600' : 'text-blue-700'}`}
+      className={`tabular-nums font-semibold ${urgent ? 'text-brand-coral' : 'text-ink'}`}
       aria-live="polite"
     >
       {h >= 1 ? `${h}시간 ${m}분 남음` : `${m}분 ${s}초 남음`}

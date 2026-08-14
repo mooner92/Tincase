@@ -32,15 +32,15 @@ export default async function SettingsPage() {
   return (
     <main className="mt-6 space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-bold text-slate-900">부서 설정</h1>
-        <Link href={`/${scope.division.slug}/manage`} className="text-sm text-blue-700 hover:underline">
+        <h1 className="text-lg font-bold text-ink">부서 설정</h1>
+        <Link href={`/${scope.division.slug}/manage`} className="text-sm text-ink underline underline-offset-2 hover:text-ink-active">
           ← 수합 관리로
         </Link>
       </div>
 
       {/* ② 부서 양식 (PG-28~30) */}
-      <section className="rounded-xl border border-slate-200 bg-white px-5 py-4">
-        <h2 className="mb-3 text-sm font-semibold text-slate-500">부서 양식</h2>
+      <section className="card px-5 py-4">
+        <h2 className="mb-3 text-sm font-semibold text-muted">부서 양식</h2>
         <TemplateManager
           hasStandard={!!standard}
           current={
@@ -53,23 +53,23 @@ export default async function SettingsPage() {
       </section>
 
       {/* ① 작성 안내 + 병합 규칙 (PG-25~27) */}
-      <section className="rounded-xl border border-slate-200 bg-white px-5 py-4">
-        <h2 className="mb-3 text-sm font-semibold text-slate-500">작성 안내 · 병합 규칙</h2>
+      <section className="card px-5 py-4">
+        <h2 className="mb-3 text-sm font-semibold text-muted">작성 안내 · 병합 규칙</h2>
         <RuleEditor initialRule={scope.division.mergeRuleText} initialGuide={scope.division.guideText} />
       </section>
 
       {/* ③ 제출 대상 — 읽기 전용 (PG-31/32, DM-04) */}
-      <section className="rounded-xl border border-slate-200 bg-white px-5 py-4">
-        <h2 className="mb-2 text-sm font-semibold text-slate-500">제출 대상</h2>
+      <section className="card px-5 py-4">
+        <h2 className="mb-2 text-sm font-semibold text-muted">제출 대상</h2>
         <ul className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
           {users.map((u) => (
-            <li key={u.id} className={u.onRoster ? 'text-slate-800' : 'text-slate-400 line-through'}>
+            <li key={u.id} className={u.onRoster ? 'text-ink' : 'text-muted-soft line-through'}>
               {u.name}
-              {u.divisionRole === 'lead' && <span className="ml-1 rounded bg-blue-50 px-1 text-[11px] text-blue-700">담당</span>}
+              {u.divisionRole === 'lead' && <span className="ml-1 rounded bg-surface-card px-1 text-[11px] text-ink">담당</span>}
             </li>
           ))}
         </ul>
-        <p className="mt-3 text-xs text-slate-400">
+        <p className="mt-3 text-xs text-muted-soft">
           명단·순서 변경은 운영자 소관입니다 — 운영자(최명헌)에게 요청하세요. {/* PG-32 */}
         </p>
       </section>

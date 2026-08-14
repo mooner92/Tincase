@@ -16,16 +16,18 @@ export default async function PasswordPage({
   const isFirst = first === '1' || ps.scope.user.mustChangePassword;
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-6">
-      <h1 className="text-xl font-bold text-slate-900">
+    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
+      <div className="card px-8 py-9">
+      <h1 className="display text-[24px] leading-tight">
         {isFirst ? '비밀번호를 변경해 주세요' : '비밀번호 변경'}
       </h1>
-      <p className="mt-1 mb-6 text-sm text-slate-500">
+      <p className="mt-1 mb-6 text-sm text-muted">
         {isFirst
           ? '처음 발급받은 임시 비밀번호는 사용을 계속할 수 없습니다. 본인만 아는 값으로 바꿔 주세요.'
           : `${ps.scope.user.name} 님`}
       </p>
       <PasswordForm first={isFirst} hasPassword={!!ps.scope.user.passwordHash} />
+      </div>
     </main>
   );
 }

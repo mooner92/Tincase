@@ -387,24 +387,46 @@ interface FileDrawerProps {
 
 ---
 
-## 6. 스타일
+## 6. 스타일 — 디자인 시스템 (v1.3)
 
-### CP-66 — Tailwind CSS
+원본: [docs/design-system.md](../design-system.md) (Clay 분석 문서). 사내 도구에 맞게 이식했다.
 
-유틸리티 우선. 별도 CSS 파일 최소화.
+### CP-66 — Tailwind v4 `@theme` 토큰 단일 출처
 
-### CP-67 — shadcn/ui 선별 도입
+색·폰트는 `src/app/globals.css`의 `@theme`에만 정의한다.
+**컴포넌트에 hex 하드코딩 금지** — 토큰 클래스(`bg-canvas`, `text-muted`)만 쓴다.
 
-`Button`, `Dialog`, `Popover`, `Badge`, `Progress`, `Table`만 가져온다.
-전체 설치하지 않는다. 8명용 사내 도구에 디자인 시스템 전체는 과하다.
+### CP-67 — 외부 UI 라이브러리 없음
 
-### CP-68 — 색 토큰
+shadcn/ui 도입 계획은 폐기. `@layer components`의 유틸 클래스
+(`.btn-primary` `.card` `.badge-pill` `.input` `.tab-pill`)로 충분하다.
+의존성을 늘리지 않고 토큰과 1:1로 붙는다.
 
-```
-success  녹색   제출 완료
-warning  주황   마감 임박(3시간 이내)
-muted    회색   미제출 · 마감됨
-danger   빨강   오류
-```
+### CP-68 — 색 팔레트
 
-색상 값은 `tailwind.config.ts` 단일 정의. 컴포넌트에 hex 하드코딩 금지.
+| 역할 | 토큰 | 용도 |
+|---|---|---|
+| 캔버스 | `canvas` #fffaf0 | 페이지 바닥. **크림 틴트가 이 시스템의 정체성** — 쿨그레이로 바꾸지 않는다 |
+| 표면 | `surface-soft` / `surface-card` / `surface-strong` | 보조 카드·비활성 영역 |
+| 잉크 | `ink` #0a0a0a | 헤드라인·기본 CTA |
+| 본문 | `body` / `muted` / `muted-soft` | 본문·부가·캡션 |
+| 헤어라인 | `hairline` / `hairline-soft` | 1px 경계 (그림자 대신) |
+| 포인트 | `brand-teal` `brand-peach` `brand-mint` `brand-lavender` `brand-ochre` `brand-coral` | 피처 카드 |
+| 의미 | `success` `warning` `error` | 상태 |
+
+**포인트 색은 의미를 갖는다** — teal은 요약/집계(featured), peach는 행동 유도(양식 받기),
+mint는 완료, ochre는 주의, coral은 임박. 같은 색을 연속으로 두지 않는다.
+
+### CP-69 — 깊이는 그림자가 아니라 색 대비로
+
+카드는 `border-hairline` 1px + 배경색 차이로 분리한다. 그림자는 오버레이(드로어)에만.
+
+### CP-70b — 라운드 스케일
+
+버튼·입력 `rounded-xl`(12px) · 콘텐츠 카드 `rounded-2xl`(16px) ·
+피처 카드 `rounded-3xl`(24px) · 배지·탭 `rounded-full`.
+
+### CP-71b — 타이포
+
+`.display` = 600 무게 + `-0.03em` 자간. 헤드라인 전용이며 본문에 쓰지 않는다.
+섹션 라벨은 12px/600/대문자+`tracking-[0.12em]`.

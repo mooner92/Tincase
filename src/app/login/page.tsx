@@ -10,10 +10,12 @@ export default async function LoginPage() {
   if (ps.ok) redirect(ps.scope.user.mustChangePassword ? '/password?first=1' : '/');
 
   return (
-    <main className="mx-auto flex min-h-screen max-w-sm flex-col justify-center px-6">
-      <h1 className="text-xl font-bold text-slate-900">주간 업무일지</h1>
-      <p className="mt-1 mb-6 text-sm text-slate-500">한국환경연구원 · 부서 업무일지 수합</p>
-      <LoginForm />
+    <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
+      <div className="card px-8 py-9">
+        <h1 className="display text-[28px] leading-tight">주간업무</h1>
+        <p className="mt-1.5 mb-7 text-sm text-muted">한국환경연구원 · 부서 업무일지 수합</p>
+        <LoginForm />
+      </div>
     </main>
   );
 }

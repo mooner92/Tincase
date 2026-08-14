@@ -23,11 +23,11 @@ export default async function HistoryPage() {
 
   return (
     <main className="mt-6">
-      <h1 className="text-lg font-bold text-slate-900">내 제출 이력</h1>
-      <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200 bg-white">
+      <h1 className="text-lg font-bold text-ink">내 제출 이력</h1>
+      <div className="mt-4 overflow-x-auto card">
         <table className="w-full text-sm">
           <thead>
-            <tr className="border-b border-slate-200 text-left text-xs text-slate-500">
+            <tr className="border-b border-hairline text-left text-xs text-muted">
               <th className="px-4 py-2.5 font-medium">주차</th>
               <th className="px-4 py-2.5 font-medium">상태</th>
               <th className="px-4 py-2.5 font-medium">버전</th>
@@ -39,22 +39,22 @@ export default async function HistoryPage() {
             {slots.map((s) => {
               const sub = byId.get(s.id);
               return (
-                <tr key={s.id} className={`border-b border-slate-100 last:border-0 ${!sub ? 'bg-slate-50/60' : ''}`}>
-                  <td className="px-4 py-2.5 font-medium text-slate-800">
+                <tr key={s.id} className={`border-b border-hairline-soft last:border-0 ${!sub ? 'bg-surface-soft/60' : ''}`}>
+                  <td className="px-4 py-2.5 font-medium text-ink">
                     {s.year}년 {s.label}
                   </td>
                   <td className="px-4 py-2.5">
-                    {sub ? <span className="text-green-700">● 제출</span> : <span className="text-slate-400">미제출</span>}
+                    {sub ? <span className="text-success">● 제출</span> : <span className="text-muted-soft">미제출</span>}
                   </td>
-                  <td className="px-4 py-2.5 tabular-nums text-slate-600">{sub ? `v${sub.version}` : '—'}</td>
-                  <td className="px-4 py-2.5 tabular-nums text-slate-600">
+                  <td className="px-4 py-2.5 tabular-nums text-body">{sub ? `v${sub.version}` : '—'}</td>
+                  <td className="px-4 py-2.5 tabular-nums text-body">
                     {sub ? toKstIso(sub.uploadedAt).slice(0, 16).replace('T', ' ') : '—'}
                   </td>
                   <td className="px-4 py-2.5 text-right">
                     {sub && (
                       <a
                         href={`/api/submissions/${sub.id}/download`}
-                        className="rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                        className="rounded border border-hairline px-2.5 py-1 text-xs font-medium text-body hover:bg-surface-soft"
                       >
                         ↓ 받기
                       </a>

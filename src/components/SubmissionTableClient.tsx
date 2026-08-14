@@ -21,53 +21,47 @@ export function SubmissionTableClient({ members, caption }: { members: MemberRow
 
   return (
     <>
-      <section className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+      <section className="card overflow-x-auto">
         <table className="w-full text-sm">
           <caption className="sr-only">{caption}</caption>
           <thead>
-            <tr className="border-b border-slate-200 text-left text-xs text-slate-500">
-              <th scope="col" className="px-4 py-2.5 font-medium">이름</th>
-              <th scope="col" className="px-4 py-2.5 font-medium">상태</th>
-              <th scope="col" className="px-4 py-2.5 font-medium">버전</th>
-              <th scope="col" className="px-4 py-2.5 font-medium">제출시각</th>
-              <th scope="col" className="px-4 py-2.5 font-medium">크기</th>
-              <th scope="col" className="px-4 py-2.5 text-right font-medium">열람 · 받기</th>
+            <tr className="table-head border-b border-hairline">
+              <th scope="col" className="px-5 py-3 font-medium">이름</th>
+              <th scope="col" className="px-5 py-3 font-medium">상태</th>
+              <th scope="col" className="px-5 py-3 font-medium">버전</th>
+              <th scope="col" className="px-5 py-3 font-medium">제출시각</th>
+              <th scope="col" className="px-5 py-3 font-medium">크기</th>
+              <th scope="col" className="px-5 py-3 text-right font-medium">열람 · 받기</th>
             </tr>
           </thead>
           <tbody>
             {members.map((m) => (
               <tr
                 key={m.user.id}
-                className={`border-b border-slate-100 last:border-0 ${m.status === 'missing' ? 'bg-slate-50/60' : ''}`}
+                className={`border-b border-hairline-soft last:border-0 ${m.status === 'missing' ? 'bg-surface-soft/60' : ''}`}
               >
-                <td className="px-4 py-2.5 font-medium text-slate-800">{m.user.name}</td>
-                <td className="px-4 py-2.5">
+                <td className="px-5 py-3 font-medium text-ink">{m.user.name}</td>
+                <td className="px-5 py-3">
                   {m.status === 'submitted' ? (
-                    <span className="text-green-700">● 제출</span>
+                    <span className="font-medium text-success">● 제출</span>
                   ) : (
-                    <span className="text-slate-400">○ 미제출</span>
+                    <span className="text-muted-soft">○ 미제출</span>
                   )}
                 </td>
-                <td className="px-4 py-2.5 tabular-nums text-slate-600">
+                <td className="px-5 py-3 tabular-nums text-body">
                   {m.latest ? `v${m.latest.version}${m.versionCount > 1 ? ` (${m.versionCount})` : ''}` : '—'}
                 </td>
-                <td className="px-4 py-2.5 tabular-nums text-slate-600">{m.latest?.uploadedAtKst ?? '—'}</td>
-                <td className="px-4 py-2.5 tabular-nums text-slate-600">
+                <td className="px-5 py-3 tabular-nums text-body">{m.latest?.uploadedAtKst ?? '—'}</td>
+                <td className="px-5 py-3 tabular-nums text-body">
                   {m.latest ? `${(m.latest.byteSize / 1024).toFixed(1)} KB` : '—'}
                 </td>
-                <td className="px-4 py-2.5 text-right">
+                <td className="px-5 py-3 text-right">
                   {m.latest && (
                     <span className="inline-flex gap-1.5">
-                      <button
-                        onClick={() => setOpenId(m.latest!.id)}
-                        className="rounded border border-blue-200 bg-blue-50 px-2.5 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
-                      >
+                      <button onClick={() => setOpenId(m.latest!.id)} className="btn-primary btn-sm">
                         열기
                       </button>
-                      <a
-                        href={`/api/submissions/${m.latest.id}/download`}
-                        className="rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
-                      >
+                      <a href={`/api/submissions/${m.latest.id}/download`} className="btn-secondary btn-sm" aria-label={`${m.user.name} 파일 받기`}>
                         ↓
                       </a>
                     </span>

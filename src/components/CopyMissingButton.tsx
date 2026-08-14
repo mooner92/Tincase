@@ -28,7 +28,7 @@ export function CopyMissingButton({ names }: { names: string[] }) {
   return (
     <button
       onClick={copy}
-      className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50"
+      className="rounded-xl border border-hairline bg-canvas px-3 py-1.5 text-sm text-body hover:bg-surface-soft"
     >
       {copied ? '복사됨 ✓' : `미제출 ${names.length}명 복사`}
     </button>

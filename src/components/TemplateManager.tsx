@@ -41,19 +41,19 @@ export function TemplateManager({
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         {current ? (
-          <p className="text-sm text-slate-700">
+          <p className="text-sm text-body">
             현재 양식 <span className="font-semibold">v{current.version}</span>
-            <span className="ml-2 text-slate-400">{current.uploadedAtKst} 등록</span>
+            <span className="ml-2 text-muted-soft">{current.uploadedAtKst} 등록</span>
           </p>
         ) : (
-          <p className="text-sm text-red-700">등록된 양식이 없습니다 — 등록 전까지 부서원 업로드가 막힙니다.</p>
+          <p className="text-sm text-error">등록된 양식이 없습니다 — 등록 전까지 부서원 업로드가 막힙니다.</p>
         )}
         <div className="flex gap-2">
           {current && (
             /* eslint-disable-next-line @next/next/no-html-link-for-pages -- 파일 다운로드, 내비게이션 아님 */
             <a
               href="/api/template"
-              className="rounded border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+              className="rounded border border-hairline px-3 py-1.5 text-xs font-medium text-body hover:bg-surface-soft"
             >
               현재 양식 받기
             </a>
@@ -61,7 +61,7 @@ export function TemplateManager({
           <button
             onClick={() => inputRef.current?.click()}
             disabled={st.kind === 'uploading'}
-            className="rounded bg-slate-800 px-3 py-1.5 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+            className="rounded bg-ink px-3 py-1.5 text-xs font-medium text-white hover:bg-ink-active disabled:opacity-50"
           >
             {st.kind === 'uploading' ? '등록 중…' : current ? '양식 교체' : '양식 등록'}
           </button>
@@ -80,31 +80,31 @@ export function TemplateManager({
       />
 
       {/* ST-20 — 전사 표준 양식을 시작점으로 제공 */}
-      <div className="rounded-lg bg-slate-50 px-4 py-3 text-xs leading-5 text-slate-600">
-        <p className="font-medium text-slate-700">부서 양식 만드는 법</p>
+      <div className="rounded-xl bg-surface-soft px-4 py-3 text-xs leading-5 text-body">
+        <p className="font-medium text-body">부서 양식 만드는 법</p>
         <p className="mt-1">
           전사 표준 양식을 받아 <strong>우리 부서 부분만 남기고</strong> 저장한 뒤, 위에서 등록하세요.
           부서원은 여기 등록된 양식을 받아 작성합니다.
         </p>
         {hasStandard ? (
           /* eslint-disable-next-line @next/next/no-html-link-for-pages -- 파일 다운로드 */
-          <a href="/api/template/standard" className="mt-2 inline-block font-medium text-blue-700 hover:underline">
+          <a href="/api/template/standard" className="mt-2 inline-block font-medium text-ink underline underline-offset-2 hover:text-ink-active">
             전사 표준 양식 받기 →
           </a>
         ) : (
-          <p className="mt-2 text-slate-400">전사 표준 양식이 아직 등록되지 않았습니다. 운영자에게 요청하세요.</p>
+          <p className="mt-2 text-muted-soft">전사 표준 양식이 아직 등록되지 않았습니다. 운영자에게 요청하세요.</p>
         )}
       </div>
       <div aria-live="polite">
         {st.kind === 'done' && (
-          <div className="rounded-lg bg-green-50 px-4 py-3 text-sm text-green-800">
+          <div className="rounded-xl bg-brand-mint/30 px-4 py-3 text-sm text-ink">
             ✓ v{st.version} 등록 완료 · 표 {st.summary.length}개 (
             {st.summary.map((t) => `${t.rows}행`).join(' · ')}) 파싱 확인 {/* CP-83 */}
-            {st.warnings.length > 0 && <p className="mt-1 text-xs text-amber-700">{st.warnings.join(' · ')}</p>}
+            {st.warnings.length > 0 && <p className="mt-1 text-xs text-body-strong">{st.warnings.join(' · ')}</p>}
           </div>
         )}
         {st.kind === 'error' && (
-          <p className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800">
+          <p className="rounded-xl bg-error/10 px-4 py-3 text-sm text-error">
             {st.message} {/* CP-84 — 기존 양식 유지는 서버 메시지에 포함 */}
           </p>
         )}

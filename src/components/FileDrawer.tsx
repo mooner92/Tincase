@@ -117,22 +117,22 @@ export function FileDrawer({
   return (
     <div className="fixed inset-0 z-40">
       {/* 배경 클릭 → 닫기 */}
-      <div className="absolute inset-0 bg-slate-900/30" onClick={onClose} aria-hidden />
+      <div className="absolute inset-0 bg-ink/30" onClick={onClose} aria-hidden />
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="제출물 열람"
-        className="absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col bg-white shadow-2xl"
+        className="absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col bg-canvas shadow-[-8px_0_32px_rgba(10,10,10,0.08)]"
       >
         {/* 헤더 (CP-73) */}
-        <div className="flex items-center justify-between gap-2 border-b border-slate-200 px-5 py-3">
+        <div className="flex items-center justify-between gap-2 border-b border-hairline px-5 py-3">
           <div className="flex items-center gap-3">
-            <h2 ref={titleRef} tabIndex={-1} className="text-base font-bold text-slate-900 outline-none">
+            <h2 ref={titleRef} tabIndex={-1} className="text-base font-bold text-ink outline-none">
               {data ? (
                 <>
                   {data.submission.userName}{' '}
-                  <span className="font-normal text-slate-500">
+                  <span className="font-normal text-muted">
                     · v{data.submission.version} · {data.submission.uploadedAt.slice(5, 16).replace('T', ' ')}
                   </span>
                 </>
@@ -145,7 +145,7 @@ export function FileDrawer({
                 aria-label="버전 선택"
                 value={data.submission.id}
                 onChange={(e) => onNavigate(e.target.value)}
-                className="rounded border border-slate-300 px-2 py-1 text-xs"
+                className="rounded border border-hairline px-2 py-1 text-xs"
               >
                 {versions.map((v) => (
                   <option key={v.id} value={v.id}>
@@ -159,14 +159,14 @@ export function FileDrawer({
           <div className="flex items-center gap-2">
             <button
               onClick={() => navigate(-1)}
-              className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+              className="rounded border border-hairline px-2 py-1 text-xs text-body hover:bg-surface-soft"
               aria-label="이전 제출자"
             >
               ←
             </button>
             <button
               onClick={() => navigate(1)}
-              className="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"
+              className="rounded border border-hairline px-2 py-1 text-xs text-body hover:bg-surface-soft"
               aria-label="다음 제출자"
             >
               →
@@ -174,14 +174,14 @@ export function FileDrawer({
             {data && (
               <a
                 href={`/api/submissions/${data.submission.id}/download`}
-                className="rounded border border-slate-300 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                className="rounded border border-hairline px-2.5 py-1 text-xs font-medium text-body hover:bg-surface-soft"
               >
                 원본 다운로드
               </a>
             )}
             <button
               onClick={onClose}
-              className="rounded px-2 py-1 text-lg leading-none text-slate-400 hover:text-slate-700"
+              className="rounded px-2 py-1 text-lg leading-none text-muted-soft hover:text-body"
               aria-label="닫기"
             >
               ×
@@ -193,35 +193,35 @@ export function FileDrawer({
         <div className="flex-1 overflow-y-auto px-5 py-4">
           {loading && (
             <div className="animate-pulse space-y-4">
-              <div className="h-6 w-40 rounded bg-slate-100" />
-              <div className="h-40 rounded bg-slate-100" />
-              <div className="h-40 rounded bg-slate-100" />
+              <div className="h-6 w-40 rounded bg-surface-card" />
+              <div className="h-40 rounded bg-surface-card" />
+              <div className="h-40 rounded bg-surface-card" />
             </div>
           )}
           {error && (
-            <div className="rounded-lg bg-red-50 px-4 py-3 text-sm text-red-800">
+            <div className="rounded-xl bg-error/10 px-4 py-3 text-sm text-error">
               {error}
               {/* CP-77 — 열람 실패해도 원본 경로는 살아있게 */}
-              <p className="mt-1 text-xs text-red-600">원본 다운로드로 내용을 확인해 주세요.</p>
+              <p className="mt-1 text-xs text-error">원본 다운로드로 내용을 확인해 주세요.</p>
             </div>
           )}
           {data && !loading && (
             <div className="space-y-6">
               {data.warnings.length > 0 && (
-                <p className="rounded bg-amber-50 px-3 py-2 text-xs text-amber-800">{data.warnings.join(' · ')}</p>
+                <p className="rounded bg-brand-ochre/15 px-3 py-2 text-xs text-body-strong">{data.warnings.join(' · ')}</p>
               )}
               {data.tables.map((t) => (
                 <section key={t.title}>
-                  <h3 className="mb-2 text-sm font-semibold text-slate-700">{t.title}</h3>
+                  <h3 className="mb-2 text-sm font-semibold text-body">{t.title}</h3>
                   {t.rows.length <= 1 ? (
-                    <p className="text-xs text-slate-400">내용 없음{t.title.startsWith('3') && ' (표 삭제됨 — 관례상 정상)'}</p>
+                    <p className="text-xs text-muted-soft">내용 없음{t.title.startsWith('3') && ' (표 삭제됨 — 관례상 정상)'}</p>
                   ) : (
-                    <div className="overflow-x-auto rounded-lg border border-slate-200">
+                    <div className="overflow-x-auto rounded-xl border border-hairline">
                       <table className="w-full text-xs">
                         <thead>
-                          <tr className="bg-slate-50 text-left text-slate-500">
+                          <tr className="bg-surface-soft text-left text-muted">
                             {t.rows[0].map((h, i) => (
-                              <th key={i} scope="col" className="border-b border-slate-200 px-2.5 py-1.5 font-medium">
+                              <th key={i} scope="col" className="border-b border-hairline px-2.5 py-1.5 font-medium">
                                 {h}
                               </th>
                             ))}
@@ -229,9 +229,9 @@ export function FileDrawer({
                         </thead>
                         <tbody>
                           {t.rows.slice(1).map((row, ri) => (
-                            <tr key={ri} className="border-b border-slate-100 last:border-0">
+                            <tr key={ri} className="border-b border-hairline-soft last:border-0">
                               {row.map((cell, ci) => (
-                                <td key={ci} className="whitespace-pre-line px-2.5 py-1.5 align-top text-slate-800">
+                                <td key={ci} className="whitespace-pre-line px-2.5 py-1.5 align-top text-ink">
                                   {cell}
                                 </td>
                               ))}
@@ -246,8 +246,8 @@ export function FileDrawer({
               {/* 3번 표가 아예 없는 경우 (CP-72) */}
               {data.tables.length === 2 && (
                 <section>
-                  <h3 className="mb-1 text-sm font-semibold text-slate-700">3. 기타 특이사항</h3>
-                  <p className="text-xs text-slate-400">없음 (표 삭제됨 — 관례상 정상)</p>
+                  <h3 className="mb-1 text-sm font-semibold text-body">3. 기타 특이사항</h3>
+                  <p className="text-xs text-muted-soft">없음 (표 삭제됨 — 관례상 정상)</p>
                 </section>
               )}
             </div>
