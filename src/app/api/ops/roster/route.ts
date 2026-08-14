@@ -30,9 +30,20 @@ export const GET = handler(async (req: NextRequest) => {
       isActive: true,
       onRoster: true,
       sortOrder: true,
+      passwordHash: true, // 발급 여부만 쓴다 (해시 자체는 응답에 넣지 않는다)
+      mustChangePassword: true,
+      lastLoginAt: true,
+      lockedUntil: true,
     },
   });
-  return json({ users });
+  const now = new Date();
+  return json({
+    users: users.map(({ passwordHash, lockedUntil, ...u }) => ({
+      ...u,
+      hasPassword: !!passwordHash,
+      locked: !!lockedUntil && lockedUntil > now,
+    })),
+  });
 });
 
 interface RosterUpdate {

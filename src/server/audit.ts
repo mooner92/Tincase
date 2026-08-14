@@ -11,7 +11,8 @@ export type AuditAction =
   | 'rule_update'
   | 'template_update'
   | 'reject'
-  | 'cross_division_read';
+  | 'cross_division_read'
+  | 'password_reset';
 
 export async function audit(
   actor: string,

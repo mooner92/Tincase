@@ -209,6 +209,87 @@ describe('[AU-22/25] 비밀번호 변경', () => {
   });
 });
 
+describe('[AU-27] 운영자 비밀번호 초기화', () => {
+  it('비운영자 → 404 (존재 은닉)', async () => {
+    const { POST } = await import('@/app/api/ops/password-reset/route');
+    const login = await import('@/app/api/auth/login/route');
+    const { prisma } = await import('@/server/db');
+    const target = await prisma.user.findUniqueOrThrow({ where: { email: OTHER } });
+    const cookie = sessionCookie(await login.POST(jsonReq('/api/auth/login', { email: EMAIL, password: INITIAL })));
+    const res = await POST(jsonReq('/api/ops/password-reset', { userId: target.id }, cookie));
+    expect(res.status).toBe(404);
+  });
+
+  it('운영자 → 임시 비밀번호 발급, 그 값으로 로그인되고 변경 강제', async () => {
+    const { prisma } = await import('@/server/db');
+    const ops = await import('@/app/api/ops/password-reset/route');
+    const login = await import('@/app/api/auth/login/route');
+
+    await prisma.user.update({ where: { email: EMAIL }, data: { isOperator: true } });
+    const opCookie = sessionCookie(await login.POST(jsonReq('/api/auth/login', { email: EMAIL, password: INITIAL })));
+    const target = await prisma.user.findUniqueOrThrow({ where: { email: OTHER } });
+
+    const res = await ops.POST(jsonReq('/api/ops/password-reset', { userId: target.id }, opCookie));
+    expect(res.status).toBe(200);
+    const b = await res.json();
+    expect(b.password).toHaveLength(12);
+    expect(b.email).toBe(OTHER);
+
+    // 발급된 값으로 로그인되고 변경 강제 플래그가 선다
+    const li = await login.POST(jsonReq('/api/auth/login', { email: OTHER, password: b.password }));
+    expect(li.status).toBe(200);
+    expect((await li.json()).mustChangePassword).toBe(true);
+  });
+
+  it('초기화하면 대상의 기존 세션이 전부 끊긴다 (AU-25)', async () => {
+    const { prisma } = await import('@/server/db');
+    const ops = await import('@/app/api/ops/password-reset/route');
+    const login = await import('@/app/api/auth/login/route');
+    const me = await import('@/app/api/me/route');
+
+    const target = await prisma.user.findUniqueOrThrow({ where: { email: OTHER } });
+    // 대상이 로그인해 둔 상태를 만든다
+    const cur = await prisma.user.findUniqueOrThrow({ where: { email: OTHER } });
+    void cur;
+    const reset1 = await ops.POST(
+      jsonReq('/api/ops/password-reset', { userId: target.id },
+        sessionCookie(await login.POST(jsonReq('/api/auth/login', { email: EMAIL, password: INITIAL })))),
+    );
+    const pw1 = (await reset1.json()).password;
+    const victimCookie = sessionCookie(await login.POST(jsonReq('/api/auth/login', { email: OTHER, password: pw1 })));
+    expect((await me.GET(nx('/api/me', { cookie: victimCookie }))).status).toBe(200);
+
+    // 운영자가 다시 초기화 → 기존 세션 무효
+    await ops.POST(
+      jsonReq('/api/ops/password-reset', { userId: target.id },
+        sessionCookie(await login.POST(jsonReq('/api/auth/login', { email: EMAIL, password: INITIAL })))),
+    );
+    expect((await me.GET(nx('/api/me', { cookie: victimCookie }))).status).toBe(401);
+  });
+
+  it('잠긴 계정도 초기화로 풀린다 · 감사 로그 기록', async () => {
+    const { prisma } = await import('@/server/db');
+    const ops = await import('@/app/api/ops/password-reset/route');
+    const login = await import('@/app/api/auth/login/route');
+
+    const target = await prisma.user.findUniqueOrThrow({ where: { email: OTHER } });
+    await prisma.user.update({
+      where: { id: target.id },
+      data: { failedLoginCount: 8, lockedUntil: new Date(Date.now() + 600_000) },
+    });
+    const res = await ops.POST(
+      jsonReq('/api/ops/password-reset', { userId: target.id },
+        sessionCookie(await login.POST(jsonReq('/api/auth/login', { email: EMAIL, password: INITIAL })))),
+    );
+    const pw = (await res.json()).password;
+    const after = await prisma.user.findUniqueOrThrow({ where: { id: target.id } });
+    expect(after.lockedUntil).toBeNull();
+    expect(after.failedLoginCount).toBe(0);
+    expect((await login.POST(jsonReq('/api/auth/login', { email: OTHER, password: pw }))).status).toBe(200);
+    expect(await prisma.auditLog.count({ where: { action: 'password_reset' } })).toBeGreaterThan(0);
+  });
+});
+
 describe('로그아웃', () => {
   it('세션 파기 후 401', async () => {
     const login = await import('@/app/api/auth/login/route');
