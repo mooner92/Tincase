@@ -11,7 +11,12 @@ import path from 'node:path';
 import { generateInitialPassword, hashPassword } from '../src/server/password';
 
 const prisma = new PrismaClient();
-const BASE = process.env.PUBLIC_BASE_URL ?? 'http://192.168.1.104:11111';
+// 실제 주소는 공개 저장소에 두지 않는다 — docs/private/infrastructure.md 참조
+const BASE = process.env.PUBLIC_BASE_URL;
+if (!BASE) {
+  console.error('PUBLIC_BASE_URL 이 필요합니다 (예: PUBLIC_BASE_URL=http://<서버-내부-IP>:11111 npx tsx ...)');
+  process.exit(1);
+}
 
 /** 파일명용 ASCII 슬러그 — Windows scp에서 한글이 깨지므로 (실제로 겪음) */
 const fileSafe = (slug: string) => slug.replace(/[^A-Za-z0-9_]/g, '');

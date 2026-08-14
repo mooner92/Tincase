@@ -188,7 +188,7 @@ export function OpsClient() {
                 <button
                   onClick={() =>
                     copy(
-                      `[Tincase — 주간 업무일지 계정]\n주소: http://192.168.1.104:11111\n아이디: ${x.email}\n임시 비밀번호: ${x.password}\n첫 로그인 후 비밀번호를 변경해 주세요.`,
+                      `[Tincase — 주간 업무일지 계정]\n주소: ${window.location.origin}\n아이디: ${x.email}\n임시 비밀번호: ${x.password}\n첫 로그인 후 비밀번호를 변경해 주세요.`,
                       `msg-${x.userId}`,
                     )
                   }

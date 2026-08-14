@@ -166,7 +166,7 @@ sqlite3 /data/worklog/db/worklog.db ".backup '/mnt/backup/worklog/db-$(date +%F)
 | DB | 매일 03:00 | 30일 | `/mnt/backup/worklog/` (NFS, 실측 227T 여유) |
 | `divisions/**` | 매주 일 03:30 | 12주 | 〃 |
 
-목적지는 **다른 노드의 NFS**(192.168.1.108) — 이 서버 디스크 장애에도 생존.
+목적지는 **다른 노드의 NFS**(<NFS-내부-IP>) — 이 서버 디스크 장애에도 생존.
 NFS에는 백업 파일만 둔다. 라이브 SQLite 상주 금지 (ADR-0003).
 
 ### OPS-09 — 복구 리허설

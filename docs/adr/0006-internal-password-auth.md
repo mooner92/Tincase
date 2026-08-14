@@ -34,7 +34,7 @@ v1.0.0은 Cloudflare Access를 유일한 신원 제공자로 삼고 앱을 `127.
 **신원 제공자 두 개를 같은 seam 뒤에 둔다.**
 
 ```
-사내망 192.168.1.104:11111 ──► 세션 쿠키 (비밀번호 로그인)  ──┐
+사내망 <서버-내부-IP>:11111 ──► 세션 쿠키 (비밀번호 로그인)  ──┐
                                                               ├─► AccessIdentity ─► 인가(authz)
 외부 worklog.excusa.uk ──────► Cloudflare Access JWT ─────────┘
 ```

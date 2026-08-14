@@ -13,7 +13,7 @@ v2: 역할·부서 격리 — [ADR-0005](../adr/0005-multi-division-tenancy.md)
 
 ```
 [사내망 — 전 직원]                        [외부 — 운영자 전용]
-브라우저 → 192.168.1.104:11111            브라우저 → TLS → Cloudflare Edge
+브라우저 → <서버-내부-IP>:11111            브라우저 → TLS → Cloudflare Edge
    │  비밀번호 로그인                          │  Access 정책 (Sean 이메일만)
    │  세션 쿠키 (30일)                         │  JWT 발급 + 헤더 주입
    ▼                                          ▼  Tunnel → cloudflared
@@ -322,7 +322,7 @@ POST /api/ops/password-reset { userId }
 
 ### AU-26 — 평문 HTTP 위험 (수용된 잔여 위험) ★
 
-사내망 접속은 `http://192.168.1.104:11111` 이므로 **비밀번호와 세션 쿠키가 LAN을 평문으로 지난다.**
+사내망 접속은 `http://<서버-내부-IP>:11111` 이므로 **비밀번호와 세션 쿠키가 LAN을 평문으로 지난다.**
 따라서 세션 쿠키에 `secure` 플래그를 켤 수 없다 (켜면 사내망 로그인이 동작하지 않는다).
 Cloudflare 경유(HTTPS)일 때만 `secure`를 켠다 — 요청의 프로토콜로 판단.
 

@@ -1,5 +1,8 @@
 # R-003. ERP 인사자료 자동 동기화 — 타당성 조사
 
+> ⚠ 내부 IP는 플레이스홀더로 치환되어 있다 — 실제 값은 `docs/private/infrastructure.md`.
+> 아래 명령들은 실제 값으로 바꿔야 실행된다.
+
 > 상태: **타당성 확인 완료 · 구현 미착수** · 조사일 2026-08-14
 >
 > 문제: KEI ERP에 공식 API가 없는데 인원이 거의 매일 바뀐다.
@@ -13,7 +16,7 @@
 
 | 확인 항목 | 결과 |
 |---|---|
-| ERP가 이 서버(data04)에서 도달 가능한가 | **✅ 가능** — `192.168.1.207` (80/443/8080 OPEN, HTTPS 302) |
+| ERP가 이 서버(data04)에서 도달 가능한가 | **✅ 가능** — `<ERP-내부-IP>` (80/443/8080 OPEN, HTTPS 302) |
 | 브라우저 자동화 도구 | **✅ 이미 설치됨** — Playwright + chromium-1228 |
 | 인증 방식 | 아이디/비밀번호 로그인 (MFA 없음 — 사용자 확인) |
 | 대상 화면 | **인사관리 > 현황관리 > 인사자료조회** |
@@ -28,11 +31,11 @@
 
 ```
 getent hosts keierp.kei.re.kr        → (실패)
-dig +short @192.168.1.2 keierp...    → 192.168.1.207   ← 있다
-dig +short @192.168.1.2 keigw...     → 192.168.1.205
+dig +short @<내부-DNS> keierp...    → <ERP-내부-IP>   ← 있다
+dig +short @<내부-DNS> keigw...     → <GW-내부-IP>
 ```
 
-`resolvectl`상 DNS는 `192.168.1.2, 203.250.99.2, 168.126.63.2` 순인데도 실패한다
+`resolvectl`상 DNS는 `<내부-DNS>, 203.250.99.2, 168.126.63.2` 순인데도 실패한다
 (외부 DNS의 NXDOMAIN이 먼저 캐시된 것으로 추정).
 
 **대응**: 구현 시 호스트명에 의존하지 말고 **IP를 설정값으로 주입**하거나
@@ -149,8 +152,8 @@ scripts/erp-sync/
 
 ```bash
 # ERP 도달성
-dig +short @192.168.1.2 keierp.kei.re.kr        # → 192.168.1.207
-curl -sk -o /dev/null -w "%{http_code}\n" https://192.168.1.207/
+dig +short @<내부-DNS> keierp.kei.re.kr        # → <ERP-내부-IP>
+curl -sk -o /dev/null -w "%{http_code}\n" https://<ERP-내부-IP>/
 
 # Playwright 설치 확인
 ls ~/.cache/ms-playwright                        # chromium-1228 등

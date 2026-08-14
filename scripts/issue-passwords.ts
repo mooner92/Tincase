@@ -64,7 +64,13 @@ async function main() {
     if (has('bom')) process.stdout.write('\uFEFF'); // Excel이 UTF-8로 인식하게
     console.log('부서,이름,이메일,임시비밀번호');
   }
-  const base = process.env.PUBLIC_BASE_URL ?? 'http://192.168.1.104:11111';
+  // 실제 주소는 공개 저장소에 두지 않는다 — docs/private/infrastructure.md 참조.
+  // 기본값을 두면 안내문에 틀린 주소가 박힌 채 배포될 수 있어 없으면 그냥 실패시킨다.
+  const base = process.env.PUBLIC_BASE_URL;
+  if (asMessages && !base) {
+    console.error('PUBLIC_BASE_URL 이 필요합니다 (예: PUBLIC_BASE_URL=http://<서버-내부-IP>:11111 npx tsx ...)');
+    process.exit(1);
+  }
   for (const u of targets) {
     const pw = generateInitialPassword();
     await prisma.user.update({
