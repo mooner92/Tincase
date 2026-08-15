@@ -51,12 +51,11 @@ beforeAll(async () => {
   execSync('npx prisma db push --skip-generate', { cwd: root, env: { ...process.env }, stdio: 'pipe' });
   const { prisma } = await import('@/server/db');
 
-  const dowTomorrow = ((new Date(Date.now() + 86400_000).getDay() + 6) % 7) + 1;
   const da = await prisma.division.create({
-    data: { slug: A.slug, shortSlug: A.short, nameKo: A.nameKo, nameEn: A.slug, isActive: true, deadlineDow: dowTomorrow, deadlineTime: '23:59' },
+    data: { slug: A.slug, shortSlug: A.short, nameKo: A.nameKo, nameEn: A.slug, isActive: true, deadlineDow: 7, deadlineTime: '23:59' },
   });
   const db = await prisma.division.create({
-    data: { slug: B.slug, shortSlug: B.short, nameKo: B.nameKo, nameEn: B.slug, isActive: true, deadlineDow: dowTomorrow, deadlineTime: '23:59' },
+    data: { slug: B.slug, shortSlug: B.short, nameKo: B.nameKo, nameEn: B.slug, isActive: true, deadlineDow: 7, deadlineTime: '23:59' },
   });
   await prisma.user.create({ data: { email: ID.member, name: 'm', divisionId: da.id } });
   await prisma.user.create({ data: { email: ID.lead, name: 'l', divisionId: da.id, divisionRole: 'lead' } });
@@ -404,9 +403,13 @@ d('TACP 준수', () => {
     const offenders: string[] = [];
     for (const file of walk('src/app/api')) {
       const src = readFileSync(file, 'utf8');
-      // 판정처럼 보이는 표현: if (...isOperator) / if (...isCoordinator) / divisionRole === 'lead'
+      // **판정**만 잡는다. 역할을 읽어 화면에 표시하는 것(`isLead: u.divisionRole === 'lead'`)은
+      // 위반이 아니다 — 조직도에서 담당자를 다르게 그리는 건 인가가 아니라 표현이다.
+      // 위험한 건 라우트가 스스로 허용/거부를 정하는 것이고, 그건 언제나 조건문 안에 있다.
       for (const [i, line] of src.split('\n').entries()) {
-        if (/if\s*\(!?\s*[\w.]*\.(isOperator|isCoordinator)\b/.test(line) || /divisionRole\s*===\s*'lead'/.test(line)) {
+        const isDecision = /\bif\s*\(/.test(line) || /\bthrow\b/.test(line);
+        if (!isDecision) continue;
+        if (/[\w.]*\.(isOperator|isCoordinator)\b/.test(line) || /divisionRole\s*===\s*'lead'/.test(line)) {
           offenders.push(`${file}:${i + 1}  ${line.trim()}`);
         }
       }

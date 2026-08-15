@@ -68,16 +68,17 @@ beforeAll(async () => {
   });
   const { prisma } = await import('@/server/db');
 
-  const now = new Date();
   const mk = async (d: typeof A) =>
     prisma.division.create({
       data: { slug: d.slug, shortSlug: d.short, nameKo: d.nameKo, nameEn: d.slug, isActive: true },
     });
   const da = await mk(A);
   const db = await mk(B);
-  // 마감이 항상 열려 있도록: 오늘 기준 내일 요일 23:59 (테스트 결정성)
-  const dowTomorrow = ((new Date(now.getTime() + 86400_000).getDay() + 6) % 7) + 1;
-  await prisma.division.updateMany({ data: { deadlineDow: dowTomorrow, deadlineTime: '23:59' } });
+  // 마감이 항상 열려 있도록 **주차의 마지막 순간**(일요일 23:59)으로 잡는다.
+  // "내일 요일"로 잡으면 일요일에 돌릴 때 내일=월요일이 되고, 그건 이번 주차의
+  // 시작일이라 이미 지난 시각이 된다 → 업로드가 전부 409로 막힌다.
+  // 실제로 일요일에 테스트 13개가 깨졌다.
+  await prisma.division.updateMany({ data: { deadlineDow: 7, deadlineTime: '23:59' } });
 
   const mkUser = (email: string, divisionId: string, extra: object = {}) =>
     prisma.user.create({
