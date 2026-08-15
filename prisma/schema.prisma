@@ -17,6 +17,8 @@ model Division {
   shortSlug String? @unique // "aiprd" — 정식 슬러그로 redirect (Q-18)
   nameKo    String  @unique
   nameEn    String
+  /** 소속 본부 (조직도 3단계: 연구원 → 본부 → 실). 본부 직속이면 "한국환경연구원" */
+  parentKo  String  @default("한국환경연구원")
   isActive  Boolean @default(false) // 온보딩된 부서만 true
 
   deadlineDow     Int     @default(4) // 마감 요일 1=월 … 7=일. 기본 목요일 (전사 마감 목 15:00보다 앞) — DM-10
