@@ -51,6 +51,19 @@ export async function runMergeRecorded(
         sourceIds: JSON.stringify(outcome.sourceIds),
         rowCounts: JSON.stringify(outcome.rowCounts),
         warnings: JSON.stringify(outcome.warnings),
+        // HM-26 — 화면이 "볼 곳"을 알려주려면 무엇을 합쳤는지 남아 있어야 한다
+        reviewJson: JSON.stringify({
+          groups: outcome.mergedGroups.map((g) => ({
+            authors: g.authors,
+            category: g.category,
+            reason: g.reason,
+            sources: g.sources,
+            kept: g.row.content,
+          })),
+          model: outcome.model,
+          categories: outcome.categories,
+          missing: outcome.missing,
+        }),
         finishedAt: new Date(),
       },
     });

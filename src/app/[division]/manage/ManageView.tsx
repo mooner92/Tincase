@@ -7,16 +7,28 @@ import { formatDeadlineKo, isLocked, toKstIso, currentWeek } from '@/lib/week';
 import { CopyMissingButton } from '@/components/CopyMissingButton';
 import { SlotSelector } from '@/components/SlotSelector';
 import { SubmissionTableClient, type MemberRow } from '@/components/SubmissionTableClient';
+import { MergePanel, type MergeStateView } from '@/components/MergePanel';
 import { notFound } from 'next/navigation';
+
+interface ReviewPayload {
+  groups: MergeStateView['groups'];
+  model: { used: boolean; reason: string | null };
+  categories: { order: string[] } | null;
+  missing: string[];
+}
 
 export async function ManageView({
   division,
-  isOwn,
   isoKey,
+  canMerge,
+  canDownloadMerged,
 }: {
   division: Division; // ★ 해석된 부서. scope.division을 쓰면 타 부서 열람 시 어긋난다
-  isOwn: boolean;
   isoKey?: string;
+  /** 병합 실행 — 내 부서 담당자만 (TACP-6: 쓰기는 신원의 부서에만) */
+  canMerge: boolean;
+  /** 병합본 내려받기 — 담당자 이상 (TACP §3.2) */
+  canDownloadMerged: boolean;
 }) {
   const now = new Date();
   await ensureCurrentSlot(now);
@@ -31,6 +43,27 @@ export async function ManageView({
     divisionStatus(division.id, slot.id),
     divisionSlots(division.id),
   ]);
+
+  // HM-26 — 최신 실행 하나만 본다. 재실행하면 새 기록이 쌓이고 최신이 유효하다
+  const lastRun = await prisma.mergeRun.findFirst({
+    where: { divisionId: division.id, weekSlotId: slot.id },
+    orderBy: { startedAt: 'desc' },
+  });
+  const review = lastRun?.reviewJson ? (JSON.parse(lastRun.reviewJson) as ReviewPayload) : null;
+  const mergeState: MergeStateView = {
+    status: (lastRun?.status as MergeStateView['status']) ?? 'none',
+    finishedAtKst: lastRun?.finishedAt ? toKstIso(lastRun.finishedAt).slice(5, 16).replace('T', ' ') : null,
+    trigger: lastRun ? ((JSON.parse(lastRun.ruleSnapshot) as { trigger?: 'auto' | 'manual' }).trigger ?? null) : null,
+    rowCounts: lastRun?.rowCounts ? JSON.parse(lastRun.rowCounts) : null,
+    warnings: lastRun?.warnings ? JSON.parse(lastRun.warnings) : [],
+    errorText: lastRun?.errorText ?? null,
+    groups: review?.groups ?? [],
+    modelUsed: review?.model?.used ?? false,
+    modelReason: review?.model?.reason ?? null,
+    categoryOrder: review?.categories?.order ?? [],
+    sourceCount: lastRun?.sourceIds ? (JSON.parse(lastRun.sourceIds) as string[]).length : 0,
+    missing: review?.missing ?? [],
+  };
 
   const deadline = effectiveDeadline(slot, division);
   const locked = isLocked({ opensAt: slot.opensAt }, division, now);
@@ -119,6 +152,18 @@ export async function ManageView({
         </p>
       )}
 
+      {/* HM-26 — 병합 결과. 목요일 14:10에 이게 이미 준비돼 있는 게 목표다 */}
+      <div className="mt-8">
+        <MergePanel
+          state={mergeState}
+          isoKey={slot.isoKey}
+          divisionSlug={division.slug}
+          canRun={canMerge}
+          canDownload={canDownloadMerged}
+          submitted={summary.submitted}
+        />
+      </div>
+
       {/* BulkActions (CP-58~61) */}
       <section className="mt-6 flex flex-wrap items-center gap-3">
         {summary.submitted > 0 ? (
@@ -133,13 +178,6 @@ export async function ManageView({
             전체 zip 받기 (0개)
           </button>
         )}
-        <button
-          disabled
-          title={isOwn ? '준비 중 (Phase 2)' : '병합은 해당 부서 담당자가 수행합니다'}
-          className="btn-secondary"
-        >
-          자동 병합 <span className="badge-pill ml-1 py-0 text-[11px]">{isOwn ? '준비 중' : '해당 부서 담당'}</span>
-        </button>
       </section>
     </main>
   );

@@ -463,3 +463,54 @@ d('TACP 준수', () => {
     expect(own.mergeRuleText).toBe('TACP-6 검증'); // 내 부서에 쓰였다
   });
 });
+
+// ── 병합본 접근 (TACP §3.2) ──────────────────────────────────
+// 병합본은 제출물과 다른 자원이다: 개인 문서가 아니라 부서가 대외로 내보내는 산출물이라
+// 공개 범위가 한 단계 넓다. 대신 member에게는 여전히 닫혀 있다 — 남의 업무 내용이 담겨 있다.
+d('병합본 접근', () => {
+  const merged = () => import('@/app/api/division/merged/route');
+
+  it('[TACP §3.2] member는 자기 부서 병합본도 못 받는다 → 404', async () => {
+    const { GET } = await merged();
+    expect((await GET(nx('/api/division/merged', ID.member))).status).toBe(404);
+  });
+
+  it('lead는 병합 후 자기 부서 병합본을 받는다 — 파일명이 그대로 올릴 수 있는 형태', async () => {
+    const { POST } = await import('@/app/api/division/merge/route');
+    expect((await POST(nx('/api/division/merge', ID.lead, { method: 'POST' }))).status).toBe(200);
+
+    const { GET } = await merged();
+    const res = await GET(nx('/api/division/merged', ID.lead));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/x-hwp');
+    const cd = res.headers.get('content-disposition') ?? '';
+    expect(decodeURIComponent(cd)).toContain('주간업무.hwp');
+    expect(Number(res.headers.get('content-length'))).toBeGreaterThan(0);
+  });
+
+  it('[격리] lead는 타 부서 병합본을 못 받는다 → 404', async () => {
+    const { GET } = await merged();
+    expect((await GET(nx(`/api/division/merged?division=${B.slug}`, ID.lead))).status).toBe(404);
+  });
+
+  it('operator는 타 부서 병합본을 받을 수 있고 감사 로그가 남는다 (TACP-10)', async () => {
+    const { prisma } = await import('@/server/db');
+    const { runMergeRecorded } = await import('@/server/merge/run');
+    const { GET } = await merged();
+
+    // B부서에는 양식·제출이 없으므로 병합이 없다 → 404 (권한과 무관한 부재)
+    expect((await GET(nx(`/api/division/merged?division=${B.slug}`, ID.op))).status).toBe(404);
+
+    // 내 부서 병합본은 operator도 받을 수 있다
+    const div = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
+    const slot = await prisma.weekSlot.findFirstOrThrow();
+    await runMergeRecorded(div.id, slot.id, 'manual');
+    expect((await GET(nx('/api/division/merged', ID.op))).status).toBe(200);
+  });
+
+  it('병합본이 없으면 404 — 있는데 못 보는 것과 구별되지 않는다 (TACP-5)', async () => {
+    const { GET } = await merged();
+    const res = await GET(nx('/api/division/merged?isoKey=2020-W01', ID.lead));
+    expect(res.status).toBe(404);
+  });
+});

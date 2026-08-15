@@ -17,5 +17,10 @@ export default async function ManageWeekPage({ params }: { params: Promise<{ div
   const view = await getDivisionView(slugParam);
   if (!view.canManage) notFound();
   if (!/^\d{4}-W\d{2}$/.test(isoKey)) notFound();
-  return <ManageView division={view.division} isOwn={view.isOwn} isoKey={isoKey} />;
+  return <ManageView
+      division={view.division}
+      isoKey={isoKey}
+      canMerge={view.isOwn && view.canManage}
+      canDownloadMerged={view.canManage}
+    />;
 }

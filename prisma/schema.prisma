@@ -168,6 +168,8 @@ model MergeRun {
   ruleSnapshot String // 실행 시점 규칙 원문 (DM-13)
   rowCounts    String?
   warnings     String? // JSON: string[]
+  /** HM-26 — 검토 화면이 쓰는 정보 (합쳐진 행·모델 사용 여부·분류·미제출자). JSON */
+  reviewJson   String?
   errorText    String?
   startedAt    DateTime  @default(now())
   finishedAt   DateTime?

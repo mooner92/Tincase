@@ -148,3 +148,23 @@ export async function resolveDivisionPage(
   const { division, redirectTo } = await resolveTargetDivision(scope, slugParam);
   return { division, redirectTo };
 }
+
+/**
+ * TACP §3.2 — 병합본 접근 판정. 병합본은 제출물과 다른 자원이다:
+ * 개인 문서가 아니라 부서가 대외로 내보내는 산출물이라 공개 범위가 한 단계 넓다.
+ *
+ *   내 부서   lead 이상이 받는다 (member는 현황만 — 남의 업무 내용이 담겨 있다)
+ *   타 부서   readAll(총괄·운영자)만 + 감사 로그
+ */
+export async function requireMergedAccess(
+  scope: Scope,
+  divisionId: string,
+): Promise<void> {
+  const own = divisionId === scope.division.id;
+  if (own) {
+    if (scope.isLead || scope.readAll) return;
+    throw notFound(); // member — 존재 은닉 (TACP-5)
+  }
+  if (!scope.readAll) throw notFound();
+  await audit(scope.user.email, 'cross_division_read', divisionId, 'merged');
+}

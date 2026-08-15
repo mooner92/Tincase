@@ -16,5 +16,9 @@ export default async function ManagePage({ params }: { params: Promise<{ divisio
   const { division: slugParam } = await params;
   const view = await getDivisionView(slugParam);
   if (!view.canManage) notFound(); // PG-T08
-  return <ManageView division={view.division} isOwn={view.isOwn} />;
+  return <ManageView
+      division={view.division}
+      canMerge={view.isOwn && view.canManage}
+      canDownloadMerged={view.canManage}
+    />;
 }
