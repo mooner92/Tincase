@@ -57,7 +57,7 @@ npm run db:seed      # docs/private/seed.json → DB (멱등)
 
 ### Issue tracker
 
-GitHub Issues (`mooner92/repman`) — `gh` CLI 사용. See `docs/agents/issue-tracker.md`.
+GitHub Issues (`mooner92/Tincase`) — `gh` CLI 사용. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
