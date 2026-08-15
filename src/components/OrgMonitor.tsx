@@ -24,7 +24,7 @@ export function OrgMonitor({ layout, weekLabel, capturedAtKst }: { layout: OrgLa
   const missingByDivision = useMemo(
     () =>
       layout.divisions
-        .filter((d) => d.isActive && d.roster > d.submitted)
+        .filter((d) => d.counted && d.roster > d.submitted)
         .map((d) => ({ name: d.name, missing: d.laidOut.filter((p) => p.onRoster && !p.submitted).map((p) => p.name) })),
     [layout.divisions],
   );
@@ -40,10 +40,15 @@ export function OrgMonitor({ layout, weekLabel, capturedAtKst }: { layout: OrgLa
             <span className="text-[24px] text-muted"> / {layout.totals.roster}</span>
             <span className="ml-3 text-[20px] text-muted-soft">{pct}%</span>
           </p>
+          {layout.excluded.divisions > 0 && (
+            <p className="mt-1 text-xs text-muted-soft">
+              업무일지를 내지 않는 부서 {layout.excluded.divisions}개({layout.excluded.people}명)는 집계에서 제외했습니다
+            </p>
+          )}
         </div>
         <div className="flex items-center gap-2 text-xs text-muted">
-          <span className="badge-pill bg-surface-card">
-            부서 {layout.totals.activeDivisions} / {layout.totals.divisions} 사용 중
+          <span className="badge-pill bg-surface-card" title="취합게시판 제출 이력이 있는 부서만 셉니다">
+            집계 대상 {layout.totals.divisions}개 부서 · Tincase 사용 {layout.totals.activeDivisions}개
           </span>
           <button onClick={() => setShowMissing((v) => !v)} className="tab-pill">
             {showMissing ? '조직도 보기' : `미제출 ${layout.totals.roster - layout.totals.submitted}명 목록`}
@@ -98,7 +103,7 @@ export function OrgMonitor({ layout, weekLabel, capturedAtKst }: { layout: OrgLa
                   d={bundledPath(p.angle, R.parent, d.angle, R.division)}
                   fill="none"
                   stroke="#ffffff"
-                  strokeOpacity={d.isActive ? 0.28 : 0.1}
+                  strokeOpacity={d.counted ? 0.28 : 0.08}
                   strokeWidth={1.2}
                 />
               )),
@@ -174,8 +179,8 @@ export function OrgMonitor({ layout, weekLabel, capturedAtKst }: { layout: OrgLa
                     cx={d.x}
                     cy={d.y}
                     r={done ? 7 : 6}
-                    fill={done ? '#4ade80' : d.submitted > 0 ? '#e8b94a' : d.isActive ? '#ffffff' : '#ffffff'}
-                    fillOpacity={dim ? 0.25 : d.isActive ? 1 : 0.25}
+                    fill={done ? '#4ade80' : d.submitted > 0 ? '#e8b94a' : '#ffffff'}
+                    fillOpacity={dim ? 0.25 : d.counted ? 1 : 0.22}
                     stroke={done ? '#4ade80' : 'none'}
                     strokeOpacity={0.35}
                     strokeWidth={5}
@@ -189,7 +194,7 @@ export function OrgMonitor({ layout, weekLabel, capturedAtKst }: { layout: OrgLa
                     dy="3"
                     className="text-[9.5px]"
                     fill="#ffffff"
-                    fillOpacity={dim ? 0.25 : d.isActive || d.submitted > 0 ? 0.85 : 0.35}
+                    fillOpacity={dim ? 0.25 : d.counted ? 0.85 : 0.3}
                   >
                     {d.name}
                   </text>
@@ -231,6 +236,7 @@ export function OrgMonitor({ layout, weekLabel, capturedAtKst }: { layout: OrgLa
               <Legend color="#4ade80" label="제출" />
               <Legend color="#ffffff" opacity={0.45} label="미제출" />
               <Legend color="#ffffff" opacity={0.15} label="제출 대상 아님" />
+              <span className="text-white/40">흐린 부서 = 업무일지 미대상</span>
               <span className="flex items-center gap-1.5">
                 <span className="inline-block h-2.5 w-2.5 rounded-full border-[1.5px] border-[#ffb084]" />
                 부서 담당자

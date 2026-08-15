@@ -23,7 +23,7 @@ export interface ReportMeta {
 export function reportCsv(layout: OrgLayout, meta: ReportMeta): string {
   const esc = (v: string) => `"${v.replace(/"/g, '""')}"`;
   const rows: string[] = [
-    ['본부', '부서', '이름', '역할', '제출대상', '제출여부', '제출시각'].map(esc).join(','),
+    ['본부', '부서', '집계대상', '이름', '역할', '제출대상', '제출여부', '제출시각'].map(esc).join(','),
   ];
   for (const d of layout.divisions) {
     for (const p of d.laidOut) {
@@ -31,6 +31,7 @@ export function reportCsv(layout: OrgLayout, meta: ReportMeta): string {
         [
           d.parent,
           d.name,
+          d.counted ? 'Y' : 'N',
           p.name,
           p.isLead ? '부서담당자' : '제출자',
           p.onRoster ? 'Y' : 'N',
@@ -46,7 +47,8 @@ export function reportCsv(layout: OrgLayout, meta: ReportMeta): string {
     `# 한국환경연구원 주간 업무일지 제출 현황`,
     `# ${meta.weekLabel} (${meta.isoKey}) · 마감 ${meta.deadlineKst}`,
     `# 기준 ${meta.capturedAtKst} · 출력 ${meta.capturedBy}`,
-    `# 제출 ${layout.totals.submitted} / 대상 ${layout.totals.roster}`,
+    `# 제출 ${layout.totals.submitted} / 대상 ${layout.totals.roster} (집계 대상 ${layout.totals.divisions}개 부서)`,
+    `# 제외: 업무일지를 내지 않는 ${layout.excluded.divisions}개 부서 ${layout.excluded.people}명`,
     '',
   ].join('\n');
   return '﻿' + header + rows.join('\n') + '\n';
@@ -60,7 +62,7 @@ function orgSvg(layout: OrgLayout): string {
   for (const parent of layout.parents) {
     for (const d of parent.divisions) {
       parts.push(
-        `<path d="${bundledPath(parent.angle, RADII.parent, d.angle, RADII.division)}" fill="none" stroke="#1a3a3a" stroke-opacity="${d.isActive ? 0.45 : 0.15}" stroke-width="1.2"/>`,
+        `<path d="${bundledPath(parent.angle, RADII.parent, d.angle, RADII.division)}" fill="none" stroke="#1a3a3a" stroke-opacity="${d.counted ? 0.45 : 0.12}" stroke-width="1.2"/>`,
       );
     }
   }
@@ -120,11 +122,11 @@ export function reportHtml(layout: OrgLayout, meta: ReportMeta): string {
     .map((d) => {
       const done = d.roster > 0 && d.submitted === d.roster;
       const missing = d.laidOut.filter((p) => p.onRoster && !p.submitted).map((p) => p.name);
-      return `<tr class="${d.isActive ? '' : 'off'}">
+      return `<tr class="${d.counted ? '' : 'off'}">
         <td>${esc(d.parent === '한국환경연구원' ? '본부 직속' : d.parent)}</td>
         <td><b>${esc(d.name)}</b></td>
         <td class="num ${done ? 'ok' : d.submitted > 0 ? 'part' : ''}">${d.submitted} / ${d.roster}</td>
-        <td>${d.isActive ? (done ? '완료' : '진행') : '미사용'}</td>
+        <td>${!d.counted ? '미대상' : d.isActive ? (done ? '완료' : '진행') : '미사용'}</td>
         <td class="miss">${esc(missing.join(', '))}</td>
       </tr>`;
     })
@@ -183,6 +185,11 @@ export function reportHtml(layout: OrgLayout, meta: ReportMeta): string {
   <h1>주간 업무일지 제출 현황</h1>
   <p class="meta">${esc(meta.weekLabel)} (${esc(meta.isoKey)}) · 마감 ${esc(meta.deadlineKst)}</p>
   <p class="big">${layout.totals.submitted}<span> / ${layout.totals.roster}명</span></p>
+  <p class="meta">집계 대상 ${layout.totals.divisions}개 부서${
+    layout.excluded.divisions > 0
+      ? ` · 업무일지를 내지 않는 ${layout.excluded.divisions}개 부서(${layout.excluded.people}명)는 제외`
+      : ''
+  }</p>
 
   <figure>${orgSvg(layout)}
     <figcaption class="legend">

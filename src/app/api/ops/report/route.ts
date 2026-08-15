@@ -48,6 +48,9 @@ export const GET = handler(async (req: NextRequest) => {
     slug: d.slug,
     parent: d.parentKo,
     isActive: d.isActive,
+    // R-002 실측 — 취합게시판 제출 이력이 있는 부서만 집계한다.
+    // 연구부서 17개(232명)는 애초에 주간 업무일지를 내지 않는다.
+    counted: d.boardStatus === 'confirmed',
     people: d.users.map((u) => {
       const at = byUser.get(u.id);
       return {

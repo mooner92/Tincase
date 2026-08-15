@@ -23,6 +23,12 @@ export interface DivisionNode {
   slug: string;
   parent: string;
   isActive: boolean;
+  /**
+   * 집계 대상인가. 연구부서 다수는 주간 업무일지를 **애초에 내지 않는다**
+   * (취합게시판 이력 실측: 30개 중 11개만 제출, 17개는 이력 없음 — R-002).
+   * 안 내는 부서를 분모에 넣으면 4% 같은 무의미한 숫자가 나오고, 실제로 그랬다.
+   */
+  counted: boolean;
   people: PersonNode[];
 }
 
@@ -55,7 +61,10 @@ export interface OrgLayout {
   parents: LaidOutParent[];
   divisions: LaidOutDivision[];
   people: LaidOutPerson[];
+  /** 집계 대상 부서만 센다 */
   totals: { submitted: number; roster: number; divisions: number; activeDivisions: number };
+  /** 집계에서 빠진 부서 — 숨기지 않고 "왜 빠졌는지"를 말할 수 있게 남긴다 */
+  excluded: { divisions: number; people: number };
   radii: { parent: number; division: number; person: number };
 }
 
@@ -128,15 +137,23 @@ export function layoutOrg(divisions: DivisionNode[], gapRatio = 0.35): OrgLayout
     });
   }
 
+  const counted = laidDivisions.filter((d) => d.counted);
+  const countedPeople = counted.flatMap((d) => d.laidOut);
+  const skipped = laidDivisions.filter((d) => !d.counted);
+
   return {
     parents: laidParents,
     divisions: laidDivisions,
     people: laidPeople,
     totals: {
-      submitted: laidPeople.filter((p) => p.submitted).length,
-      roster: laidPeople.filter((p) => p.onRoster).length,
-      divisions: divisions.length,
-      activeDivisions: divisions.filter((d) => d.isActive).length,
+      submitted: countedPeople.filter((p) => p.submitted).length,
+      roster: countedPeople.filter((p) => p.onRoster).length,
+      divisions: counted.length,
+      activeDivisions: counted.filter((d) => d.isActive).length,
+    },
+    excluded: {
+      divisions: skipped.length,
+      people: skipped.reduce((n, d) => n + d.laidOut.filter((p) => p.onRoster).length, 0),
     },
     radii: { ...RADII },
   };

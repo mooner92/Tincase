@@ -7,14 +7,14 @@
 사용자에게 보이는 곳(UI·문서·계정 안내문)에는 Tincase를 쓴다.
 로고 자산과 사용 규칙은 [`public/brand/README.md`](public/brand/README.md).
 
-**현재 상태: v1.3.1 — Phase 1 구현 완료, 사내망 가동 중** (Cloudflare 대시보드 연결만 대기).
+**현재 상태: v1.4.0 — Phase 1·2 완료, 사내망 가동 중** (Cloudflare 대시보드 연결만 대기).
 먼저 [README.md](README.md) → [docs/spec/00-overview.md](docs/spec/00-overview.md) → [ROADMAP.md](ROADMAP.md) 순으로 읽을 것.
 
 ## 개발 명령
 
 ```bash
 npm run dev          # 로컬 개발 (DEV_IDENTITY 우회 — .env.development)
-npm test             # vitest 102개 (격리 스위트 = 릴리스 게이트)
+npm test             # vitest 134개 (격리 스위트 = 릴리스 게이트)
 npm run test:tz      # 다중 타임존 재실행 (WS-T17/18)
 npm run build        # next build (standalone)
 npm run db:seed      # docs/private/seed.json → DB (멱등)
