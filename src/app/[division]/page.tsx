@@ -6,7 +6,7 @@ import { noticeFor } from '@/components/Notice';
 import { ensureCurrentSlot, effectiveDeadline, divisionStatus } from '@/server/worklog';
 import { formatDeadlineKo, isLocked, toKstIso } from '@/lib/week';
 import { DeadlineCountdown } from '@/components/DeadlineCountdown';
-import { UploadDropzone } from '@/components/UploadDropzone';
+import { SubmitChoice } from '@/components/SubmitChoice';
 
 export const dynamic = 'force-dynamic';
 
@@ -98,8 +98,8 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
             )
           ) : template && canSubmit ? (
             <section>
-              <h2 className="label">{mySubmission ? '다시 올리기 — 새 버전으로 저장됩니다' : '제출'}</h2>
-              <UploadDropzone hasPrevious={!!mySubmission} />
+              <h2 className="label">{mySubmission ? '다시 제출 — 새 버전으로 저장됩니다' : '제출'}</h2>
+              <SubmitChoice hasPrevious={!!mySubmission} isoKey={slot.isoKey} guideLines={guideLines} />
             </section>
           ) : !isOwn ? (
             <section className="card px-6 py-5 text-sm text-muted">

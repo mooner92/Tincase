@@ -32,6 +32,8 @@ export interface UploadInput {
   fileName: string;
   bytes: Buffer;
   fromIp?: string | null;
+  /** WA-04 — 웹 작성으로 만들어진 것인지. 처리 경로는 완전히 동일하다 */
+  origin?: 'upload' | 'web';
 }
 
 export interface UploadResult {
@@ -106,6 +108,7 @@ export async function uploadSubmission(input: UploadInput, now = new Date()): Pr
         byteSize: bytes.length,
         sha256: hash,
         uploadedFrom: input.fromIp ?? null,
+        origin: input.origin ?? 'upload',
       },
     });
     return {

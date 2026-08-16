@@ -11,7 +11,7 @@
  * 이 스크립트는 DB를 건드리지 않는다 — 파일만 만든다. 올리는 것은 사람이 화면에서 한다
  * (그래야 업로드 경로 전체가 실제로 검증된다).
  */
-import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { PrismaClient } from '@prisma/client';
 import { openHwp } from '../src/lib/hwp/ole';

@@ -118,6 +118,9 @@ model Submission {
 
   uploadedAt   DateTime @default(now())
   uploadedFrom String?
+  /** WA-04 — 사람이 만든 hwp인지 시스템이 만든 것인지 (통계·디버깅용).
+      결과물 자체는 구별되지 않아야 하므로 처리 경로는 완전히 동일하다 */
+  origin       String   @default("upload") // "upload" | "web"
 
   division Division @relation(fields: [divisionId], references: [id])
   user     User     @relation(fields: [userId], references: [id])
