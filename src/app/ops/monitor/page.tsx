@@ -8,6 +8,7 @@ import { OrgMonitor } from '@/components/OrgMonitor';
 import { layoutOrg, type DivisionNode } from '@/lib/orgtree';
 import { ensureCurrentSlot } from '@/server/worklog';
 import { toKstIso } from '@/lib/week';
+import { missingStreaks } from '@/server/streak';
 import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
@@ -65,6 +66,8 @@ export default async function MonitorPage() {
   }));
 
   const layout = layoutOrg(nodes);
+  // 스냅샷이 못 보여주는 것 — "이번 주 안 냄"과 "3주 연속 안 냄"은 다른 얘기다
+  const streaks = await missingStreaks(now);
 
   return (
     <div className="min-h-screen">
@@ -96,6 +99,38 @@ export default async function MonitorPage() {
           weekLabel={slot.label}
           capturedAtKst={toKstIso(now).slice(5, 16).replace('T', ' ') + ' 기준'}
         />
+
+        {streaks.length > 0 && (
+          <section className="card mt-6 px-6 py-5">
+            <h2 className="text-sm font-semibold text-ink">
+              연속 미제출 {streaks.length}명
+              <span className="ml-2 text-xs font-normal text-muted">
+                마감이 지난 최근 {streaks[0].weeks}주차 기준 · 한 주 거른 것과 계속 안 내는 것은 다른 얘기입니다
+              </span>
+            </h2>
+            <ul className="mt-3 space-y-1.5 text-sm">
+              {streaks.slice(0, 30).map((r) => (
+                <li key={r.userId} className="flex flex-wrap items-baseline gap-x-3">
+                  <span
+                    className={`inline-block w-14 shrink-0 text-right font-semibold tabular-nums ${
+                      r.streak >= 4 ? 'text-error' : 'text-brand-ochre'
+                    }`}
+                  >
+                    {r.streak}주 연속
+                  </span>
+                  <span className="min-w-36 text-muted">{r.divisionName}</span>
+                  <span className="font-medium text-ink">{r.name}</span>
+                  <span className="text-xs text-muted-soft">
+                    {r.lastSubmittedLabel ? `마지막 제출 ${r.lastSubmittedLabel}` : `${r.weeks}주 동안 제출 없음`}
+                  </span>
+                </li>
+              ))}
+            </ul>
+            {streaks.length > 30 && (
+              <p className="mt-2 text-xs text-muted-soft">… 외 {streaks.length - 30}명. 전체는 CSV로 받으세요.</p>
+            )}
+          </section>
+        )}
       </div>
     </div>
   );

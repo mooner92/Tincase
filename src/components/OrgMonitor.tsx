@@ -112,7 +112,7 @@ export function OrgMonitor({ layout, weekLabel, capturedAtKst }: { layout: OrgLa
             {/* 실 → 사람. 제출한 사람만 초록으로 흐른다 */}
             {layout.divisions.map((d) =>
               d.laidOut.map((p) => {
-                const dim = focus && !isRelated(focus, d, p);
+                const dim = focus && !isRelated(focus, d);
                 if (p.submitted) {
                   return (
                     <path
@@ -205,7 +205,7 @@ export function OrgMonitor({ layout, weekLabel, capturedAtKst }: { layout: OrgLa
             {/* 사람 */}
             {layout.people.map((p) => {
               const d = layout.divisions.find((x) => x.laidOut.includes(p))!;
-              const dim = focus && !isRelated(focus, d, p);
+              const dim = focus && !isRelated(focus, d);
               return (
                 <circle
                   key={p.id}
@@ -266,8 +266,13 @@ function isLeftHalf(angle: number): boolean {
   return a > Math.PI;
 }
 
-function isRelated(focus: NonNullable<Focus>, d: LaidOutDivision, p: LaidOutPerson): boolean {
-  return focus.kind === 'division' ? focus.d.id === d.id : focus.d.id === d.id && (focus.p.id === p.id || true);
+/**
+ * 초점이 이 사람·부서와 관련 있는가.
+ * 사람에 올려도 **부서 전체**를 밝힌다 — 한 사람만 밝히면 그 사람이 어느 부서 소속인지
+ * 오히려 안 보인다. 알고 싶은 건 "이 점이 어디로 이어지는가"다.
+ */
+function isRelated(focus: NonNullable<Focus>, d: LaidOutDivision): boolean {
+  return focus.d.id === d.id;
 }
 
 function Legend({ color, label, opacity = 1 }: { color: string; label: string; opacity?: number }) {

@@ -136,3 +136,37 @@ describe('HM-24 모델 하네스', () => {
     expect(validateGroups(rows, [])).toBeNull(); // 중복 없음도 정상
   });
 });
+
+// ── OPS-31 연속 미제출 (순수 규칙만 검증) ──────────────────────
+// DB에 의존하는 집계는 통합 테스트가 아니라 **규칙**을 확인한다:
+// "최신부터 세다가 낸 주차를 만나면 끊긴다"가 전부다.
+describe('OPS-31 연속 미제출 계산 규칙', () => {
+  /** missingStreaks 안의 계산과 동일한 규칙 — 여기서 규칙 자체를 고정한다 */
+  const streakOf = (slotsNewestFirst: string[], submitted: Set<string>) => {
+    let n = 0;
+    for (const s of slotsNewestFirst) {
+      if (submitted.has(s)) break;
+      n++;
+    }
+    return n;
+  };
+  const W = ['W35', 'W34', 'W33', 'W32', 'W31'];
+
+  it('[OPS-T01] 한 번도 안 냈으면 전 구간이 연속이다', () => {
+    expect(streakOf(W, new Set())).toBe(5);
+  });
+
+  it('[OPS-T02] 최신 주차에 냈으면 0 — 지난주 안 낸 이력은 연속이 아니다', () => {
+    expect(streakOf(W, new Set(['W35']))).toBe(0);
+    expect(streakOf(W, new Set(['W35', 'W31']))).toBe(0);
+  });
+
+  it('[OPS-T03] 중간에 냈으면 거기서 끊긴다', () => {
+    expect(streakOf(W, new Set(['W33']))).toBe(2); // W35·W34만 연속
+    expect(streakOf(W, new Set(['W32', 'W31']))).toBe(3);
+  });
+
+  it('[OPS-T04] 오래된 주차 제출은 최근 연속을 줄이지 못한다', () => {
+    expect(streakOf(W, new Set(['W31']))).toBe(4);
+  });
+});

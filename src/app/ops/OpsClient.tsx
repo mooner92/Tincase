@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 // PG-33~35 — 운영 화면 (operator). 테넌시 + 인원 배치 + 비밀번호.
 // 부서를 취합게시판 제출 이력으로 탭 분리한다 — 온보딩 우선순위가 곧 그 순서다 (DM-15).
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -154,8 +155,16 @@ export function OpsClient() {
 
   return (
     <div className="space-y-5">
-      <div aria-live="polite" className="h-5 text-sm text-ink">
-        {msg}
+      <div className="flex items-center justify-between gap-3">
+        <div aria-live="polite" className="h-5 text-sm text-ink">
+          {msg}
+        </div>
+        {/* 모니터로 가는 길 — 없으면 만들어도 아무도 못 간다 */}
+        <div className="flex shrink-0 gap-2">
+          <Link href="/ops/monitor" className="btn-secondary btn-sm">
+            전사 제출 현황 조직도
+          </Link>
+        </div>
       </div>
 
       {/* AU-27 — 발급된 임시 비밀번호. 화면을 벗어나면 다시 볼 수 없다 */}
@@ -236,6 +245,7 @@ export function OpsClient() {
               <th className="px-4 py-2 font-medium">인원</th>
               <th className="px-4 py-2 font-medium">양식</th>
               <th className="px-4 py-2 font-medium">마감</th>
+              <th className="px-4 py-2 font-medium">업무일지</th>
               <th className="px-4 py-2 font-medium">활성</th>
               <th className="px-4 py-2 font-medium">인원 관리</th>
             </tr>
@@ -278,6 +288,21 @@ export function OpsClient() {
                     }
                     className="rounded border border-hairline px-1 py-0.5 text-xs"
                   />
+                </td>
+                <td className="px-4 py-2">
+                  {/* 집계 대상 — 조사(R-002)가 초기값이지만 현실이 바뀌면 운영자가 고친다.
+                      코드에만 있으면 부서가 새로 시작해도 손댈 방법이 없다 */}
+                  <select
+                    aria-label={`${d.nameKo} 업무일지 제출 여부`}
+                    value={d.boardStatus}
+                    disabled={busy}
+                    onChange={(e) => patchDivision(d.id, { boardStatus: e.target.value })}
+                    className="rounded border border-hairline px-1 py-0.5 text-xs"
+                  >
+                    <option value="confirmed">제출함 (집계)</option>
+                    <option value="unclear">불명확</option>
+                    <option value="none">안 냄</option>
+                  </select>
                 </td>
                 <td className="px-4 py-2">
                   <button
