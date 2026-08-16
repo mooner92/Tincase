@@ -3,7 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseCategories, toPlan, orderPeople } from '@/server/merge/rules';
 import { sortByCategory, OTHER } from '@/server/merge/order';
-import { parseTablePaste } from '@/lib/paste-table';
+import { parseTablePaste, parseHtmlTable, parseClipboardTable } from '@/lib/paste-table';
 import { exactDuplicates, validateGroups, type MergeRow } from '@/server/merge/dedupe';
 
 const row = (id: number, who: string, content: string, date = '', place = ''): MergeRow => ({
@@ -212,5 +212,49 @@ describe('표 붙여넣기 해석', () => {
   it('[WA-T06] 빈 줄은 버린다', () => {
     const text = ['1-1\t업무 A\t\t\t', '\t\t\t\t', '1-2\t업무 B\t\t\t'].join('\n');
     expect(parseTablePaste(text)!.map((r) => r.content)).toEqual(['업무 A', '업무 B']);
+  });
+});
+
+// ── 한글 클립보드 (실측 기반) ─────────────────────────────────
+// 한글은 평문에 셀을 **줄바꿈으로** 넣는다 (엑셀처럼 탭이 아니다).
+// 평문만 보면 4열 4행이 16줄이 되어 칸 하나가 행 하나가 된다 — 실제로 그렇게 나왔다.
+// 그래서 HTML을 먼저 본다.
+describe('한글 클립보드 표', () => {
+  const HWP_HTML = `<html><body><table border=1>
+    <tr><td><p>구분</p></td><td><p>업무실적 내용</p></td><td><p>일자</p></td><td><p>장소</p></td><td><p>참석자</p></td></tr>
+    <tr><td><p>1-1</p></td><td><p>제10차&nbsp;인사위원회</p></td><td><p>OO/OO</p></td><td><p>KEI 중회의실</p></td><td><p>원장, 연구부원장</p></td></tr>
+    <tr><td><p>1-2</p></td><td><p>제5차 국가환경종합계획<br>수정계획 공청회</p></td><td><p>OO/OO</p></td><td><p>한국프레스센터</p></td><td><p></p></td></tr>
+    </table></body></html>`;
+  // 같은 표를 한글이 평문으로 내놓은 모습 — 셀마다 줄바꿈
+  const HWP_TEXT = ['제10차 인사위원회', 'OO/OO', 'KEI 중회의실', '원장, 연구부원장'].join('\n');
+
+  it('[WA-T10] HTML 표를 격자로 읽는다', () => {
+    const grid = parseHtmlTable(HWP_HTML)!;
+    expect(grid).toHaveLength(3);
+    expect(grid[1]).toEqual(['1-1', '제10차 인사위원회', 'OO/OO', 'KEI 중회의실', '원장, 연구부원장']);
+  });
+
+  it('[WA-T11] 셀 안 줄바꿈은 한 줄로 합친다', () => {
+    expect(parseHtmlTable(HWP_HTML)![2][1]).toBe('제5차 국가환경종합계획 수정계획 공청회');
+  });
+
+  it('[WA-T12] ★ HTML이 있으면 그쪽을 쓴다 — 평문만 보면 칸이 행이 된다', () => {
+    const viaHtml = parseClipboardTable(HWP_HTML, HWP_TEXT)!;
+    expect(viaHtml).toHaveLength(2); // 머리글 제외 2행
+    expect(viaHtml[0]).toEqual({
+      content: '제10차 인사위원회',
+      date: 'OO/OO',
+      place: 'KEI 중회의실',
+      attendee: '원장, 연구부원장',
+    });
+
+    // 평문만 주면 (HTML 없는 앱) 칸이 행이 되는 건 어쩔 수 없다 — 그래서 HTML이 먼저다
+    const viaText = parseClipboardTable('', HWP_TEXT)!;
+    expect(viaText).toHaveLength(4);
+  });
+
+  it('[WA-T13] HTML에 표가 없으면 평문으로 넘어간다', () => {
+    const rows = parseClipboardTable('<p>그냥 문단</p>', '업무 A\t8/20\n업무 B\t8/21')!;
+    expect(rows.map((r) => r.content)).toEqual(['업무 A', '업무 B']);
   });
 });

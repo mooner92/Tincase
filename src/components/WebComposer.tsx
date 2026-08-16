@@ -8,7 +8,7 @@
 // `구분`은 시스템이 다시 매기므로(ABS-5) 입력칸이 아니라 **번호 표시**로 둔다.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { parseTablePaste } from '@/lib/paste-table';
+import { parseClipboardTable } from '@/lib/paste-table';
 
 export interface ComposerRow {
   content: string;
@@ -88,6 +88,15 @@ export function WebComposer({
     });
   }, []);
 
+  /** 구역 비우기 — 잘못 붙여넣었을 때 한 줄씩 지우게 두면 아무도 안 쓴다 */
+  const clearSection = useCallback((bucket: Bucket) => {
+    setData((d) => ({ ...d, [bucket]: [blank()] }));
+  }, []);
+
+  const clearAll = useCallback(() => {
+    setData({ achievements: [blank(), blank(), blank()], plans: [blank(), blank()], notes: [blank()] });
+  }, []);
+
   const removeRow = useCallback((bucket: Bucket, i: number) => {
     setData((d) => {
       const rows = d[bucket].filter((_, k) => k !== i);
@@ -97,8 +106,11 @@ export function WebComposer({
 
   /** 한글·엑셀 표를 통째로 붙여넣기 — 이 줄부터 아래로 채운다 */
   const onPaste = useCallback((bucket: Bucket, at: number, e: React.ClipboardEvent) => {
-    const text = e.clipboardData.getData('text/plain');
-    const rows = parseTablePaste(text);
+    // 한글은 평문에 셀을 줄바꿈으로 넣어 격자가 무너진다 → HTML을 먼저 본다
+    const rows = parseClipboardTable(
+      e.clipboardData.getData('text/html'),
+      e.clipboardData.getData('text/plain'),
+    );
     if (!rows) return; // 표가 아니면 평범한 붙여넣기로 둔다
     e.preventDefault();
     setData((d) => {
@@ -136,7 +148,8 @@ export function WebComposer({
       .finally(() => setBusy(false));
   };
 
-  const cell = 'h-10 rounded-lg border border-hairline bg-canvas px-2.5 text-sm text-ink focus:border-ink focus:outline-none';
+  const cell =
+    'h-8 rounded-md border border-hairline bg-canvas px-2 text-[13px] text-ink focus:border-ink focus:outline-none';
 
   return (
     <div className="fixed inset-0 z-40">
@@ -185,24 +198,32 @@ export function WebComposer({
         {/* 본문 */}
         <div className="flex-1 overflow-y-auto px-7 py-5">
           {SECTIONS.map((s) => (
-            <section key={s.key} className="mb-7">
+            <section key={s.key} className="mb-5">
               <div className="mb-2 flex items-baseline gap-2">
                 <h3 className="text-[15px] font-bold text-ink">
                   {s.no}. {s.title}
                 </h3>
                 <span className="text-xs text-muted-soft">{s.hint}</span>
                 <span className="ml-auto text-xs font-medium text-muted">{filled[s.key]}줄</span>
+                {filled[s.key] > 0 && (
+                  <button
+                    onClick={() => clearSection(s.key)}
+                    className="rounded-md px-2 py-0.5 text-xs text-muted-soft hover:bg-error/10 hover:text-error"
+                  >
+                    비우기
+                  </button>
+                )}
               </div>
 
               <div className="overflow-hidden rounded-xl border border-hairline">
                 {/* 머리글 — 한글 표와 같은 이름·순서 */}
-                <div className="flex gap-2 border-b border-hairline bg-surface-card px-3 py-2 text-xs font-semibold text-muted">
-                  <span className="w-10 shrink-0 text-center">구분</span>
+                <div className="flex gap-1.5 border-b border-hairline bg-surface-card px-2.5 py-1.5 text-[11px] font-semibold text-muted">
+                  <span className="w-9 shrink-0 text-center">구분</span>
                   <span className="flex-1">업무 내용</span>
-                  <span className="w-24 shrink-0">일자</span>
-                  <span className="w-32 shrink-0">장소</span>
-                  <span className="w-32 shrink-0">참석자</span>
-                  <span className="w-6 shrink-0" />
+                  <span className="w-[74px] shrink-0">일자</span>
+                  <span className="w-28 shrink-0">장소</span>
+                  <span className="w-28 shrink-0">참석자</span>
+                  <span className="w-5 shrink-0" />
                 </div>
 
                 {data[s.key].map((row, i) => {
@@ -212,11 +233,9 @@ export function WebComposer({
                   return (
                     <div
                       key={i}
-                      className={`flex items-center gap-2 px-3 py-1.5 ${i % 2 ? 'bg-surface-soft/50' : ''} ${
-                        i > 0 ? 'border-t border-hairline-soft' : ''
-                      }`}
+                      className={`flex items-center gap-1.5 px-2.5 py-1 ${i % 2 ? 'bg-surface-soft/60' : ''}`}
                     >
-                      <span className="w-10 shrink-0 text-center font-mono text-[11px] tabular-nums text-muted-soft">
+                      <span className="w-9 shrink-0 text-center font-mono text-[10px] tabular-nums text-muted-soft">
                         {no}
                       </span>
                       <input
@@ -230,24 +249,24 @@ export function WebComposer({
                         value={row.date}
                         onChange={(e) => set(s.key, i, 'date', e.target.value)}
                         placeholder={i === 0 ? '8/20' : ''}
-                        className={`${cell} w-24 shrink-0`}
+                        className={`${cell} w-[74px] shrink-0`}
                       />
                       <input
                         value={row.place}
                         onChange={(e) => set(s.key, i, 'place', e.target.value)}
                         placeholder={i === 0 ? '중회의실' : ''}
-                        className={`${cell} w-32 shrink-0`}
+                        className={`${cell} w-28 shrink-0`}
                       />
                       <input
                         value={row.attendee}
                         onChange={(e) => set(s.key, i, 'attendee', e.target.value)}
                         placeholder={i === 0 ? '원장 외 3명' : ''}
-                        className={`${cell} w-32 shrink-0`}
+                        className={`${cell} w-28 shrink-0`}
                       />
                       <button
                         onClick={() => removeRow(s.key, i)}
                         aria-label={`${i + 1}번째 줄 지우기`}
-                        className="w-6 shrink-0 rounded text-lg leading-none text-hairline hover:text-error"
+                        className="w-5 shrink-0 rounded text-base leading-none text-hairline hover:text-error"
                         title="이 줄 지우기"
                       >
                         ×
@@ -271,6 +290,11 @@ export function WebComposer({
             {msg?.text}
           </span>
           <div className="flex items-center gap-4">
+            {total > 0 && (
+              <button onClick={clearAll} className="text-sm text-muted-soft hover:text-error">
+                전체 지우기
+              </button>
+            )}
             <span className="text-sm text-muted">
               실적 {filled.achievements} · 계획 {filled.plans}
               {filled.notes > 0 && ` · 특이 ${filled.notes}`}
