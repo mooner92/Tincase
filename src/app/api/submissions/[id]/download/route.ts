@@ -2,6 +2,7 @@
 import { NextRequest } from 'next/server';
 import { requireScope, findAccessibleSubmission } from '@/server/authz';
 import { contentDisposition, readStoredFile } from '@/server/storage';
+import { submissionName } from '@/lib/docname';
 import { handler } from '@/server/http';
 import { audit } from '@/server/audit';
 import { logger } from '@/server/logger';
@@ -25,7 +26,7 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
 
   await audit(scope.user.email, 'download', sub.divisionId, `submission:${sub.id}`);
 
-  const filename = `${sub.weekSlot.year}_${sub.weekSlot.label.replace(/ /g, '_')}_${sub.user.name}.hwp`;
+  const filename = submissionName(sub.weekSlot.year, sub.weekSlot.label, sub.division.nameKo, sub.user.name);
   return new Response(new Uint8Array(bytes), {
     headers: {
       'Content-Type': 'application/x-hwp', // ST-14

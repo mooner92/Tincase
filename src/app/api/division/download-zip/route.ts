@@ -6,6 +6,7 @@ import { prisma } from '@/server/db';
 import { requireLead, resolveTargetDivision, HttpError } from '@/server/authz';
 import { ensureCurrentSlot } from '@/server/worklog';
 import { resolveInRoot, contentDisposition } from '@/server/storage';
+import { zipName } from '@/lib/docname';
 import { handler, rateLimit } from '@/server/http';
 import { audit } from '@/server/audit';
 
@@ -32,7 +33,7 @@ export const GET = handler(async (req: NextRequest) => {
     throw new HttpError(409, 'no_submissions', '제출된 파일이 없습니다.');
   }
 
-  const zipName = `${division.nameKo}_${slot.year}_${slot.label.replace(/ /g, '_')}_주간업무.zip`;
+  const outName = zipName(slot.year, slot.label, division.nameKo);
 
   const archive = new ZipArchive({ zlib: { level: 6 } });
   const pass = new PassThrough();
@@ -49,7 +50,7 @@ export const GET = handler(async (req: NextRequest) => {
   return new Response(Readable.toWeb(pass) as ReadableStream, {
     headers: {
       'Content-Type': 'application/zip',
-      'Content-Disposition': contentDisposition(zipName),
+      'Content-Disposition': contentDisposition(outName),
       'Cache-Control': 'no-store',
     },
   });

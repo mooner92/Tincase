@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest';
 import { parseCategories, toPlan, orderPeople } from '@/server/merge/rules';
 import { sortByCategory, OTHER } from '@/server/merge/order';
+import { parseTablePaste } from '@/lib/paste-table';
 import { exactDuplicates, validateGroups, type MergeRow } from '@/server/merge/dedupe';
 
 const row = (id: number, who: string, content: string, date = '', place = ''): MergeRow => ({
@@ -168,5 +169,48 @@ describe('OPS-31 연속 미제출 계산 규칙', () => {
 
   it('[OPS-T04] 오래된 주차 제출은 최근 연속을 줄이지 못한다', () => {
     expect(streakOf(W, new Set(['W31']))).toBe(4);
+  });
+});
+
+// ── 표 붙여넣기 (한글에서 긁어 오는 경로) ─────────────────────
+// 한 칸씩 옮겨 적으면 웹 작성을 쓸 이유가 없다. 이 해석이 틀리면 사람들은 그냥 안 쓴다.
+describe('표 붙여넣기 해석', () => {
+  it('[WA-T01] 한글 표 그대로 — 구분 열은 버린다 (시스템이 다시 매긴다)', () => {
+    const text = ['1-1\t제10차 인사위원회\t8/13\tKEI 중회의실\t원장', '1-2\t보도자료 배포\t\t\t'].join('\n');
+    expect(parseTablePaste(text)).toEqual([
+      { content: '제10차 인사위원회', date: '8/13', place: 'KEI 중회의실', attendee: '원장' },
+      { content: '보도자료 배포', date: '', place: '', attendee: '' },
+    ]);
+  });
+
+  it('[WA-T02] 머리글 행이 딸려 와도 버린다', () => {
+    const text = ['구분\t업무실적 내용\t일자\t장소\t참석자', '1-1\t회의 참석\t8/20\t\t'].join('\n');
+    expect(parseTablePaste(text)).toHaveLength(1);
+    expect(parseTablePaste(text)![0].content).toBe('회의 참석');
+  });
+
+  it('[WA-T03] 구분 없이 4열만 복사한 경우', () => {
+    const text = '회의 참석\t8/20\t중회의실\t원장';
+    expect(parseTablePaste(text)).toEqual([
+      { content: '회의 참석', date: '8/20', place: '중회의실', attendee: '원장' },
+    ]);
+  });
+
+  it('[WA-T04] 내용만 여러 줄 (탭 없음)', () => {
+    expect(parseTablePaste('첫째 업무\n둘째 업무\n셋째 업무')).toEqual([
+      { content: '첫째 업무', date: '', place: '', attendee: '' },
+      { content: '둘째 업무', date: '', place: '', attendee: '' },
+      { content: '셋째 업무', date: '', place: '', attendee: '' },
+    ]);
+  });
+
+  it('[WA-T05] 평범한 글자는 표로 보지 않는다 — 한 칸에 긴 글을 붙이는 것도 정상이다', () => {
+    expect(parseTablePaste('그냥 한 줄짜리 업무 내용입니다')).toBeNull();
+    expect(parseTablePaste('')).toBeNull();
+  });
+
+  it('[WA-T06] 빈 줄은 버린다', () => {
+    const text = ['1-1\t업무 A\t\t\t', '\t\t\t\t', '1-2\t업무 B\t\t\t'].join('\n');
+    expect(parseTablePaste(text)!.map((r) => r.content)).toEqual(['업무 A', '업무 B']);
   });
 });

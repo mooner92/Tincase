@@ -337,3 +337,41 @@ export function stripCfbSentinel(input: Buffer): Buffer {
   buf.writeInt32LE(-1, to + OFF.child);
   return buf;
 }
+
+
+/**
+ * 문서 **맨 끝**에 본문 문단 하나를 덧붙인다 (병합일자 등).
+ *
+ * 표는 건드리지 않는다. 새 레코드를 지어내지도 않는다 — 기존 본문 문단을 통째로 복제해
+ * 글자만 바꾼다 (HM-03과 같은 원리).
+ *
+ * **맨 끝에만** 붙이는 이유: 문서의 첫 문단에는 구역 정의 컨트롤이 들어 있어서
+ * 그 앞이나 사이에 끼워 넣으면 구조가 어긋난다. 끝은 뒤따르는 것이 없어 안전하다.
+ *
+ * 복제할 문단은 **스스로 찾는다** — 위치를 인자로 받으면 표 편집으로 인덱스가 밀린 뒤에
+ * 엉뚱한 것을 복제한다 (실제로 겪었다).
+ */
+export function appendBodyParagraph(recs: HwpRecord[], text: string): void {
+  // 레벨 0 문단 중 **컨트롤이 딸리지 않고 글자가 있는** 마지막 것을 고른다.
+  // 표가 딸린 문단을 복제하면 표까지 통째로 복제된다.
+  let proto: { start: number; end: number } | null = null;
+  for (let i = 0; i < recs.length; i++) {
+    if (recs[i].tag !== TAG.PARA_HEADER || recs[i].level !== 0) continue;
+    let end = i + 1;
+    while (end < recs.length && recs[end].level > 0) end++;
+    const block = recs.slice(i, end);
+    if (block.some((r) => r.tag === TAG.CTRL_HEADER)) continue;
+    if (!block.some((r) => r.tag === TAG.PARA_TEXT)) continue;
+    proto = { start: i, end };
+  }
+  if (!proto) throw new HwpWriteError('복제할 본문 문단을 찾지 못했습니다');
+
+  const copy: HwpRecord[] = recs
+    .slice(proto.start, proto.end)
+    .map((r) => ({ ...r, data: Buffer.from(r.data) }));
+  const base = recs.length;
+  recs.push(...copy);
+
+  // 글자 교체는 셀과 규칙이 같다 (빈 글자면 PARA_TEXT를 두지 않는다 — HM-11a)
+  setCellText(recs, { row: -1, col: -1, start: base, end: recs.length }, text);
+}

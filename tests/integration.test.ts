@@ -270,11 +270,13 @@ d('격리 스위트 — 릴리스 게이트 (AU-T12~T18)', () => {
 d('마감 잠금 (API-T01/T02)', () => {
   it('[API-T01] 마감 지난 부서 → 업로드 409 slot_locked · [API-T02] 조회는 정상', async () => {
     const { prisma } = await import('@/server/db');
-    // A 부서 마감을 과거로 (어제 요일 00:01)
-    const yesterday = ((new Date(Date.now() - 86400_000).getDay() + 6) % 7) + 1;
+    // A 부서 마감을 확실한 과거로 = **주차가 열리는 순간**(월요일 00:00).
+    // '어제 요일'로 계산하면 월요일에 돌릴 때 어제=일요일이 되고, 그건 이번 주차의
+    // 마지막 날이라 미래가 된다 → 잠기지 않아 테스트가 깨진다.
+    // 요일 산술을 오늘 기준으로 하면 주 경계에서 뒤집힌다 (일요일에도 같은 일을 겪었다).
     await prisma.division.updateMany({
       where: { slug: A.slug },
-      data: { deadlineDow: yesterday, deadlineTime: '00:01' },
+      data: { deadlineDow: 1, deadlineTime: '00:00' },
     });
 
     const res = await upload(ID.aMember, hwpBytes);

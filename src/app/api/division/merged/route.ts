@@ -37,7 +37,7 @@ export const GET = handler(async (req: NextRequest) => {
   return new Response(new Uint8Array(bytes), {
     headers: {
       'Content-Type': 'application/x-hwp',
-      'Content-Disposition': contentDisposition(mergedFileName(division.nameKo, slot.year, slot.label)),
+      'Content-Disposition': contentDisposition(mergedFileName(slot.year, slot.label, division.nameKo)),
       'Content-Length': String(bytes.length),
       'Cache-Control': 'no-store',
     },

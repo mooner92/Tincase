@@ -1,11 +1,14 @@
 'use client';
 // WA-06 — 웹에서 작성해 바로 제출 (S-10).
 //
-// 표를 그대로 흉내 내지 않는다. 부서원이 채우는 건 결국 **한 줄에 네 칸**이고,
-// `구분`은 시스템이 다시 매기므로(ABS-5) 사람이 볼 이유가 없다.
-// 화면은 그 네 칸만 보여주고, 문서 모양은 제출할 때 시스템이 만든다.
+// 화면을 **한글 표와 같은 모양**으로 둔다. 부서원은 한글에서 그 표를 채워 왔으므로,
+// 다른 배치를 내밀면 어디에 뭘 넣는지 다시 배워야 한다. 머리글을 그대로 두고
+// 칸 너비도 비슷하게 맞춘다.
+//
+// `구분`은 시스템이 다시 매기므로(ABS-5) 입력칸이 아니라 **번호 표시**로 둔다.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { parseTablePaste } from '@/lib/paste-table';
 
 export interface ComposerRow {
   content: string;
@@ -16,15 +19,13 @@ export interface ComposerRow {
 
 type Bucket = 'achievements' | 'plans' | 'notes';
 
-const SECTIONS: { key: Bucket; title: string; hint: string; optional?: boolean }[] = [
-  { key: 'achievements', title: '1. 주요 업무실적', hint: '이번 주에 한 일' },
-  { key: 'plans', title: '2. 주요 업무계획', hint: '다음 주에 할 일' },
-  { key: 'notes', title: '3. 기타 특이사항', hint: '휴가·출장 등 (없으면 비워 두세요)', optional: true },
+const SECTIONS: { key: Bucket; no: number; title: string; hint: string }[] = [
+  { key: 'achievements', no: 1, title: '주요 업무실적', hint: '이번 주에 한 일' },
+  { key: 'plans', no: 2, title: '주요 업무계획', hint: '다음 주에 할 일' },
+  { key: 'notes', no: 3, title: '기타 특이사항', hint: '휴가·출장 등 · 없으면 비워 두세요' },
 ];
 
 const blank = (): ComposerRow => ({ content: '', date: '', place: '', attendee: '' });
-
-/** 로컬 임시 보관 — 서버 초안(WA-03)은 아직 없다. 최소한 새로고침으로 잃지는 않게 */
 const draftKey = (isoKey: string) => `tincase.compose.${isoKey}`;
 
 export function WebComposer({
@@ -35,12 +36,9 @@ export function WebComposer({
 }: {
   isoKey: string;
   guideLines: string[];
-  /** 이전 제출물을 불러와 이어 쓰기 (WA-07) */
   initial?: Record<Bucket, ComposerRow[]> | null;
   onClose: () => void;
 }) {
-  // 초기값을 한 번에 정한다 — 효과 안에서 setState 하면 렌더가 두 번 돈다.
-  // 불러온 내용 > 로컬 임시본 > 빈 줄 순으로 우선한다
   const [data, setData] = useState<Record<Bucket, ComposerRow[]>>(() => {
     if (initial?.achievements?.length || initial?.plans?.length || initial?.notes?.length) {
       return {
@@ -63,6 +61,7 @@ export function WebComposer({
   });
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [pasted, setPasted] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
@@ -72,9 +71,10 @@ export function WebComposer({
 
   const filled = useMemo(
     () =>
-      Object.fromEntries(
-        SECTIONS.map((s) => [s.key, data[s.key].filter((r) => r.content.trim()).length]),
-      ) as Record<Bucket, number>,
+      Object.fromEntries(SECTIONS.map((s) => [s.key, data[s.key].filter((r) => r.content.trim()).length])) as Record<
+        Bucket,
+        number
+      >,
     [data],
   );
   const total = filled.achievements + filled.plans + filled.notes;
@@ -83,7 +83,6 @@ export function WebComposer({
     setData((d) => {
       const rows = [...d[bucket]];
       rows[i] = { ...rows[i], [field]: v };
-      // 마지막 줄을 채우면 새 줄이 따라온다 — "추가" 버튼을 누르러 가지 않게
       if (i === rows.length - 1 && v.trim() && rows.length < 200) rows.push(blank());
       return { ...d, [bucket]: rows };
     });
@@ -94,6 +93,24 @@ export function WebComposer({
       const rows = d[bucket].filter((_, k) => k !== i);
       return { ...d, [bucket]: rows.length ? rows : [blank()] };
     });
+  }, []);
+
+  /** 한글·엑셀 표를 통째로 붙여넣기 — 이 줄부터 아래로 채운다 */
+  const onPaste = useCallback((bucket: Bucket, at: number, e: React.ClipboardEvent) => {
+    const text = e.clipboardData.getData('text/plain');
+    const rows = parseTablePaste(text);
+    if (!rows) return; // 표가 아니면 평범한 붙여넣기로 둔다
+    e.preventDefault();
+    setData((d) => {
+      const next = [...d[bucket]];
+      rows.forEach((r, k) => {
+        next[at + k] = { ...r };
+      });
+      if (next[next.length - 1].content.trim()) next.push(blank());
+      return { ...d, [bucket]: next };
+    });
+    setPasted(`${rows.length}줄을 붙여넣었습니다`);
+    setTimeout(() => setPasted(null), 2500);
   }, []);
 
   const submit = () => {
@@ -119,99 +136,146 @@ export function WebComposer({
       .finally(() => setBusy(false));
   };
 
+  const cell = 'h-10 rounded-lg border border-hairline bg-canvas px-2.5 text-sm text-ink focus:border-ink focus:outline-none';
+
   return (
     <div className="fixed inset-0 z-40">
-      <div className="absolute inset-0 bg-ink/30" onClick={onClose} aria-hidden />
+      <div className="absolute inset-0 bg-ink/40" onClick={onClose} aria-hidden />
       <div
         role="dialog"
         aria-modal="true"
         aria-label="웹에서 업무일지 작성"
-        className="absolute inset-y-0 right-0 flex w-full max-w-4xl flex-col bg-canvas shadow-2xl"
+        className="absolute inset-y-0 right-0 flex w-full max-w-5xl flex-col bg-canvas shadow-2xl"
       >
-        <div className="flex items-center justify-between border-b border-hairline px-6 py-3">
+        {/* 머리 */}
+        <div className="flex items-center justify-between border-b border-hairline px-7 py-4">
           <div>
-            <h2 className="text-base font-bold text-ink">웹에서 작성</h2>
-            <p className="mt-0.5 text-xs text-muted">
-              한글 없이 바로 제출할 수 있습니다 · 제출하면 부서 양식으로 만들어집니다
+            <h2 className="display text-xl">웹에서 작성</h2>
+            <p className="mt-0.5 text-sm text-muted">
+              한글 없이 바로 제출합니다 · 제출하면 부서 양식으로 만들어집니다
             </p>
           </div>
-          <button onClick={onClose} aria-label="닫기" className="rounded px-2 py-1 text-lg leading-none text-muted-soft hover:text-body">
+          <button
+            onClick={onClose}
+            aria-label="닫기"
+            className="rounded-full px-3 py-1 text-xl leading-none text-muted-soft hover:bg-surface-soft hover:text-body"
+          >
             ×
           </button>
         </div>
 
+        {/* 붙여넣기 안내 — 이걸 모르면 한 칸씩 옮겨 적는다 */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline-soft bg-brand-mint/25 px-7 py-2.5 text-xs text-body-strong">
+          <span className="font-semibold">한글 표를 그대로 붙여넣을 수 있습니다</span>
+          <span className="text-body">
+            한글에서 표를 드래그 → <kbd className="rounded border border-hairline bg-canvas px-1">Ctrl</kbd>
+            <kbd className="ml-0.5 rounded border border-hairline bg-canvas px-1">C</kbd> → 아래 첫 칸에 붙여넣기
+          </span>
+          {pasted && <span className="ml-auto font-semibold text-success">{pasted}</span>}
+        </div>
+
         {guideLines.length > 0 && (
-          <ul className="border-b border-hairline-soft bg-surface-soft px-6 py-2.5 text-xs leading-5 text-body">
+          <ul className="border-b border-hairline-soft bg-surface-soft px-7 py-2.5 text-xs leading-5 text-body">
             {guideLines.map((l) => (
               <li key={l}>· {l}</li>
             ))}
           </ul>
         )}
 
-        <div className="flex-1 overflow-y-auto px-6 py-4">
+        {/* 본문 */}
+        <div className="flex-1 overflow-y-auto px-7 py-5">
           {SECTIONS.map((s) => (
-            <section key={s.key} className="mb-6">
+            <section key={s.key} className="mb-7">
               <div className="mb-2 flex items-baseline gap-2">
-                <h3 className="text-sm font-semibold text-ink">{s.title}</h3>
+                <h3 className="text-[15px] font-bold text-ink">
+                  {s.no}. {s.title}
+                </h3>
                 <span className="text-xs text-muted-soft">{s.hint}</span>
-                <span className="ml-auto text-xs text-muted">{filled[s.key]}줄</span>
+                <span className="ml-auto text-xs font-medium text-muted">{filled[s.key]}줄</span>
               </div>
-              <div className="space-y-1.5">
-                {data[s.key].map((row, i) => (
-                  <div key={i} className="flex items-start gap-1.5">
-                    <span className="w-9 shrink-0 pt-2 text-right font-mono text-[11px] text-muted-soft">
-                      {row.content.trim() ? `${SECTIONS.indexOf(s) + 1}-${data[s.key].slice(0, i + 1).filter((r) => r.content.trim()).length}` : ''}
-                    </span>
-                    <textarea
-                      value={row.content}
-                      onChange={(e) => set(s.key, i, 'content', e.target.value)}
-                      rows={1}
-                      placeholder={i === 0 ? '업무 내용' : ''}
-                      className="min-h-9 flex-1 resize-y rounded-lg border border-hairline bg-canvas px-2.5 py-1.5 text-sm leading-6"
-                    />
-                    <input
-                      value={row.date}
-                      onChange={(e) => set(s.key, i, 'date', e.target.value)}
-                      placeholder={i === 0 ? '일자' : ''}
-                      className="h-9 w-20 shrink-0 rounded-lg border border-hairline px-2 text-sm"
-                    />
-                    <input
-                      value={row.place}
-                      onChange={(e) => set(s.key, i, 'place', e.target.value)}
-                      placeholder={i === 0 ? '장소' : ''}
-                      className="h-9 w-28 shrink-0 rounded-lg border border-hairline px-2 text-sm"
-                    />
-                    <input
-                      value={row.attendee}
-                      onChange={(e) => set(s.key, i, 'attendee', e.target.value)}
-                      placeholder={i === 0 ? '참석자' : ''}
-                      className="h-9 w-28 shrink-0 rounded-lg border border-hairline px-2 text-sm"
-                    />
-                    <button
-                      onClick={() => removeRow(s.key, i)}
-                      aria-label={`${i + 1}번째 줄 지우기`}
-                      className="h-9 w-7 shrink-0 rounded text-muted-soft hover:bg-surface-soft hover:text-error"
+
+              <div className="overflow-hidden rounded-xl border border-hairline">
+                {/* 머리글 — 한글 표와 같은 이름·순서 */}
+                <div className="flex gap-2 border-b border-hairline bg-surface-card px-3 py-2 text-xs font-semibold text-muted">
+                  <span className="w-10 shrink-0 text-center">구분</span>
+                  <span className="flex-1">업무 내용</span>
+                  <span className="w-24 shrink-0">일자</span>
+                  <span className="w-32 shrink-0">장소</span>
+                  <span className="w-32 shrink-0">참석자</span>
+                  <span className="w-6 shrink-0" />
+                </div>
+
+                {data[s.key].map((row, i) => {
+                  const no = row.content.trim()
+                    ? `${s.no}-${data[s.key].slice(0, i + 1).filter((r) => r.content.trim()).length}`
+                    : '';
+                  return (
+                    <div
+                      key={i}
+                      className={`flex items-center gap-2 px-3 py-1.5 ${i % 2 ? 'bg-surface-soft/50' : ''} ${
+                        i > 0 ? 'border-t border-hairline-soft' : ''
+                      }`}
                     >
-                      ×
-                    </button>
-                  </div>
-                ))}
+                      <span className="w-10 shrink-0 text-center font-mono text-[11px] tabular-nums text-muted-soft">
+                        {no}
+                      </span>
+                      <input
+                        value={row.content}
+                        onChange={(e) => set(s.key, i, 'content', e.target.value)}
+                        onPaste={(e) => onPaste(s.key, i, e)}
+                        placeholder={i === 0 ? '업무 내용을 적거나, 한글 표를 붙여넣으세요' : ''}
+                        className={`${cell} flex-1`}
+                      />
+                      <input
+                        value={row.date}
+                        onChange={(e) => set(s.key, i, 'date', e.target.value)}
+                        placeholder={i === 0 ? '8/20' : ''}
+                        className={`${cell} w-24 shrink-0`}
+                      />
+                      <input
+                        value={row.place}
+                        onChange={(e) => set(s.key, i, 'place', e.target.value)}
+                        placeholder={i === 0 ? '중회의실' : ''}
+                        className={`${cell} w-32 shrink-0`}
+                      />
+                      <input
+                        value={row.attendee}
+                        onChange={(e) => set(s.key, i, 'attendee', e.target.value)}
+                        placeholder={i === 0 ? '원장 외 3명' : ''}
+                        className={`${cell} w-32 shrink-0`}
+                      />
+                      <button
+                        onClick={() => removeRow(s.key, i)}
+                        aria-label={`${i + 1}번째 줄 지우기`}
+                        className="w-6 shrink-0 rounded text-lg leading-none text-hairline hover:text-error"
+                        title="이 줄 지우기"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  );
+                })}
               </div>
             </section>
           ))}
-          <p className="pb-2 text-[11px] leading-5 text-muted-soft">
-            일자는 특정 날짜가 있는 업무만 적습니다 (상시 업무는 비워 두세요).
-            빈 줄은 저장되지 않으며, 구분 번호는 제출할 때 시스템이 다시 매깁니다.
+
+          <p className="pb-2 text-xs leading-6 text-muted-soft">
+            일자는 특정 날짜가 있는 업무만 적습니다 (상시 업무는 비워 두세요) ·
+            빈 줄은 저장되지 않습니다 · 구분 번호는 제출할 때 다시 매겨집니다
           </p>
         </div>
 
-        <div className="flex items-center justify-between gap-3 border-t border-hairline px-6 py-3">
-          <span aria-live="polite" className={`text-sm ${msg?.ok ? 'text-success' : 'text-error'}`}>
+        {/* 바닥 */}
+        <div className="flex items-center justify-between gap-3 border-t border-hairline bg-surface-soft px-7 py-3.5">
+          <span aria-live="polite" className={`text-sm font-medium ${msg?.ok ? 'text-success' : 'text-error'}`}>
             {msg?.text}
           </span>
-          <div className="flex items-center gap-3">
-            <span className="text-xs text-muted">{total}줄</span>
-            <button onClick={submit} disabled={busy || total === 0} className="btn-primary btn-sm">
+          <div className="flex items-center gap-4">
+            <span className="text-sm text-muted">
+              실적 {filled.achievements} · 계획 {filled.plans}
+              {filled.notes > 0 && ` · 특이 ${filled.notes}`}
+            </span>
+            <button onClick={submit} disabled={busy || total === 0} className="btn-primary">
               {busy ? '제출 중…' : '제출'}
             </button>
           </div>

@@ -5,6 +5,7 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
 import { requireScope, HttpError } from '@/server/authz';
+import { submissionName } from '@/lib/docname';
 import { handler, json } from '@/server/http';
 import { readStoredFile } from '@/server/storage';
 import { openHwp } from '@/lib/hwp/ole';
@@ -88,7 +89,7 @@ export const POST = handler(async (req: NextRequest) => {
   const result = await uploadSubmission({
     user: scope.user,
     division: scope.division,
-    fileName: `${slot.label.replace(/ /g, '_')}_${scope.division.nameKo}_${scope.user.name}.hwp`,
+    fileName: submissionName(slot.year, slot.label, scope.division.nameKo, scope.user.name),
     bytes,
     fromIp: req.headers.get('x-forwarded-for'),
     origin: 'web',

@@ -13,6 +13,7 @@ import { fillTable, packHwp } from '@/lib/hwp/writer';
 import { toPlan, orderPeople } from './rules';
 import { groupDuplicates, MergeRow, GroupingResult } from './model';
 import { classifyRows, sortByCategory, OTHER } from './classify';
+export { mergedName as mergedFileName } from '@/lib/docname';
 import type { WorklogRow } from '@/lib/hwp/reader';
 
 export interface MergedGroup {
@@ -60,10 +61,6 @@ export function mergedRelPath(divisionSlug: string, year: number, weekLabel: str
   );
 }
 
-/** 병합본 파일명 — 담당자가 받아서 그대로 올릴 수 있게 (HM-19) */
-export function mergedFileName(divisionName: string, year: number, weekLabel: string): string {
-  return `${year}_${weekLabel.replace(/ /g, '_')}_${divisionName}_주간업무.hwp`;
-}
 
 /**
  * 병합 실행. 예외를 던지는 경우는 **양식이 없거나 제출이 0건일 때뿐**이다 —

@@ -4,6 +4,7 @@ import { prisma } from '@/server/db';
 import { requireScope, HttpError } from '@/server/authz';
 import { ensureCurrentSlot } from '@/server/worklog';
 import { contentDisposition, readStoredFile } from '@/server/storage';
+import { templateName } from '@/lib/docname';
 import { handler } from '@/server/http';
 
 export const dynamic = 'force-dynamic';
@@ -19,7 +20,7 @@ export const GET = handler(async (req: NextRequest) => {
   const bytes = await readStoredFile(tpl.filePath);
   const slot = await ensureCurrentSlot();
   // API-18 — 파일명에 주차·부서명 주입. 받자마자 올바른 이름
-  const filename = `${slot.label.replace(/ /g, '_')}_${scope.division.nameKo}_주간업무.hwp`;
+  const filename = templateName(slot.year, slot.label, scope.division.nameKo);
   return new Response(new Uint8Array(bytes), {
     headers: {
       'Content-Type': 'application/x-hwp',
