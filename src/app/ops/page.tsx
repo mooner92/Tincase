@@ -4,6 +4,7 @@ import { getPageScope } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { OpsClient } from './OpsClient';
 import { AppHeader } from '@/components/AppHeader';
+import { AppFooter } from '@/components/AppFooter';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,7 +18,7 @@ export default async function OpsPage() {
   if (!ps.scope.user.isOperator) notFound();
 
   return (
-    <div className="min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <AppHeader
         slug={ps.scope.division.slug}
         divisionName={ps.scope.division.nameKo}
@@ -26,12 +27,13 @@ export default async function OpsPage() {
         isOperator
         viaCloudflare={ps.scope.source === 'cloudflare'}
       />
-      <main className="mx-auto max-w-[1280px] px-5 pt-10 pb-24">
+      <main className="mx-auto w-full max-w-[1120px] flex-1 px-5 pt-10 pb-8">
         <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">운영</p>
         <h1 className="display mt-1 mb-6 text-[32px] leading-[1.15]">테넌시 · 인원 배치</h1>
         {/* PG-34는 v2.1에서 개정 — 운영자는 전체 열람 가능 (AU-15) */}
         <OpsClient />
       </main>
+      <AppFooter />
     </div>
   );
 }

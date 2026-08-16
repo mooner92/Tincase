@@ -11,6 +11,7 @@ import { prisma } from '@/server/db';
 import { getPageScope } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
+import { AppFooter } from '@/components/AppFooter';
 import { toKstIso } from '@/lib/week';
 
 export const dynamic = 'force-dynamic';
@@ -84,7 +85,7 @@ export default async function AuditPage({
   };
 
   return (
-    <div className="min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <AppHeader
         slug={scope.division.slug}
         divisionName={scope.division.nameKo}
@@ -93,7 +94,7 @@ export default async function AuditPage({
         isOperator={scope.user.isOperator}
         viaCloudflare={scope.source === 'cloudflare'}
       />
-      <div className="mx-auto max-w-[1280px] px-5 pt-8 pb-24">
+      <div className="mx-auto w-full max-w-[1120px] flex-1 px-5 pt-8 pb-8">
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
             <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">감사 로그 · 최근 {days}일</p>
@@ -197,6 +198,7 @@ export default async function AuditPage({
           </p>
         )}
       </div>
+      <AppFooter />
     </div>
   );
 }

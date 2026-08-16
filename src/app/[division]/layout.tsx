@@ -5,6 +5,7 @@ import { HttpError } from '@/server/authz';
 import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
 import { ForeignDivisionBanner } from '@/components/ForeignDivisionBanner';
+import { AppFooter } from '@/components/AppFooter';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +34,7 @@ export default async function DivisionLayout({
   if (view.redirectTo) redirect(view.redirectTo); // 별칭 → 정식 슬러그
 
   return (
-    <div className="min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <AppHeader
         slug={view.division.slug}
         divisionName={view.division.nameKo}
@@ -43,12 +44,13 @@ export default async function DivisionLayout({
         viaCloudflare={view.scope.source === 'cloudflare'}
         foreign={!view.isOwn}
       />
-      <div className="mx-auto max-w-[1280px] px-5 pb-24">
+      <div className="mx-auto w-full max-w-[1120px] flex-1 px-5 pb-8">
         {!view.isOwn && (
           <ForeignDivisionBanner divisionName={view.division.nameKo} ownSlug={view.scope.division.slug} />
         )}
         {children}
       </div>
+      <AppFooter />
     </div>
   );
 }

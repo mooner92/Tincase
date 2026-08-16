@@ -4,6 +4,7 @@ import { prisma } from '@/server/db';
 import { getPageScope } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
+import { AppFooter } from '@/components/AppFooter';
 import { OrgMonitor } from '@/components/OrgMonitor';
 import { layoutOrg, type DivisionNode } from '@/lib/orgtree';
 import { ensureCurrentSlot, effectiveDeadline } from '@/server/worklog';
@@ -79,7 +80,7 @@ export default async function MonitorPage() {
   const streaks = await missingStreaks(now);
 
   return (
-    <div className="min-h-screen">
+    <div className="flex min-h-screen flex-col">
       <AppHeader
         slug={scope.division.slug}
         divisionName={scope.division.nameKo}
@@ -88,7 +89,7 @@ export default async function MonitorPage() {
         isOperator={scope.user.isOperator}
         viaCloudflare={scope.source === 'cloudflare'}
       />
-      <div className="mx-auto max-w-[1280px] px-5 pt-8 pb-24">
+      <div className="mx-auto w-full max-w-[1120px] flex-1 px-5 pt-8 pb-8">
         <div className="mb-4 flex items-center justify-between">
           <h1 className="sr-only">전사 제출 현황</h1>
           <div className="flex gap-2 text-sm">
@@ -146,6 +147,7 @@ export default async function MonitorPage() {
           </section>
         )}
       </div>
+      <AppFooter />
     </div>
   );
 }
