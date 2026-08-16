@@ -164,6 +164,9 @@ export function OpsClient() {
           <Link href="/ops/monitor" className="btn-secondary btn-sm">
             전사 제출 현황 조직도
           </Link>
+          <Link href="/ops/audit" className="btn-secondary btn-sm">
+            감사 로그
+          </Link>
         </div>
       </div>
 

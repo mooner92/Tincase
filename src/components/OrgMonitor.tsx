@@ -9,13 +9,24 @@
 import { useMemo, useState } from 'react';
 import type { OrgLayout, LaidOutDivision, LaidOutPerson } from '@/lib/orgtree';
 import { bundledPath } from '@/lib/orgtree';
+import { NudgeButton } from './NudgeButton';
 
 const SIZE = 1000; // viewBox — 실제 크기는 CSS가 정한다
 const R = { parent: 150, division: 275, person: 420 };
 
 type Focus = { kind: 'division'; d: LaidOutDivision } | { kind: 'person'; p: LaidOutPerson; d: LaidOutDivision } | null;
 
-export function OrgMonitor({ layout, weekLabel, capturedAtKst }: { layout: OrgLayout; weekLabel: string; capturedAtKst: string }) {
+export function OrgMonitor({
+  layout,
+  weekLabel,
+  capturedAtKst,
+  deadlineText,
+}: {
+  layout: OrgLayout;
+  weekLabel: string;
+  capturedAtKst: string;
+  deadlineText: string;
+}) {
   const [focus, setFocus] = useState<Focus>(null);
   const [showMissing, setShowMissing] = useState(false);
 
@@ -28,6 +39,7 @@ export function OrgMonitor({ layout, weekLabel, capturedAtKst }: { layout: OrgLa
         .map((d) => ({ name: d.name, missing: d.laidOut.filter((p) => p.onRoster && !p.submitted).map((p) => p.name) })),
     [layout.divisions],
   );
+  const allMissing = useMemo(() => missingByDivision.flatMap((d) => d.missing), [missingByDivision]);
 
   return (
     <div className="space-y-4">
@@ -62,14 +74,24 @@ export function OrgMonitor({ layout, weekLabel, capturedAtKst }: { layout: OrgLa
           {missingByDivision.length === 0 ? (
             <p className="text-sm text-body">미제출자가 없습니다.</p>
           ) : (
-            <ul className="space-y-2 text-sm">
+            <>
+              {/* 명단을 본 다음 동작은 언제나 "알려주기"다 — 옮겨 적게 하지 않는다 */}
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-hairline-soft pb-3">
+                <p className="text-sm text-body">
+                  <span className="font-semibold text-ink">{allMissing.length}명</span>이 아직 내지 않았습니다 ·
+                  마감 {deadlineText}
+                </p>
+                <NudgeButton names={allMissing} deadlineText={deadlineText} weekLabel={weekLabel} />
+              </div>
+              <ul className="space-y-2 text-sm">
               {missingByDivision.map((d) => (
                 <li key={d.name} className="flex flex-wrap gap-x-3 gap-y-1">
                   <span className="min-w-40 font-medium text-ink">{d.name}</span>
                   <span className="text-body">{d.missing.join(', ')}</span>
                 </li>
               ))}
-            </ul>
+              </ul>
+            </>
           )}
         </section>
       ) : (

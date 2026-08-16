@@ -6,8 +6,8 @@ import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
 import { OrgMonitor } from '@/components/OrgMonitor';
 import { layoutOrg, type DivisionNode } from '@/lib/orgtree';
-import { ensureCurrentSlot } from '@/server/worklog';
-import { toKstIso } from '@/lib/week';
+import { ensureCurrentSlot, effectiveDeadline } from '@/server/worklog';
+import { toKstIso, formatDeadlineKo } from '@/lib/week';
 import { missingStreaks } from '@/server/streak';
 import Link from 'next/link';
 
@@ -86,6 +86,9 @@ export default async function MonitorPage() {
             <Link href="/ops" className="tab-pill">
               ← 운영
             </Link>
+            <Link href="/ops/audit" className="tab-pill">
+              감사 로그
+            </Link>
             <a href={`/api/ops/report?isoKey=${slot.isoKey}`} className="tab-pill">
               감사 문서 받기
             </a>
@@ -98,6 +101,7 @@ export default async function MonitorPage() {
           layout={layout}
           weekLabel={slot.label}
           capturedAtKst={toKstIso(now).slice(5, 16).replace('T', ' ') + ' 기준'}
+          deadlineText={formatDeadlineKo(effectiveDeadline(slot, divisions[0]))}
         />
 
         {streaks.length > 0 && (
