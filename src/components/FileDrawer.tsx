@@ -157,20 +157,26 @@ export function FileDrawer({
             )}
           </div>
           <div className="flex items-center gap-2">
-            <button
-              onClick={() => navigate(-1)}
-              className="rounded border border-hairline px-2 py-1 text-xs text-body hover:bg-surface-soft"
-              aria-label="이전 제출자"
-            >
-              ←
-            </button>
-            <button
-              onClick={() => navigate(1)}
-              className="rounded border border-hairline px-2 py-1 text-xs text-body hover:bg-surface-soft"
-              aria-label="다음 제출자"
-            >
-              →
-            </button>
+            {/* ←→ 는 **제출자 사이** 이동이다. 혼자 볼 때는 갈 곳이 없으므로 숨긴다 —
+                눌러도 아무 일이 없는 버튼은 고장으로 읽힌다 */}
+            {members.length > 1 && (
+              <>
+                <button
+                  onClick={() => navigate(-1)}
+                  className="rounded border border-hairline px-2 py-1 text-xs text-body hover:bg-surface-soft"
+                  aria-label="이전 제출자"
+                >
+                  ←
+                </button>
+                <button
+                  onClick={() => navigate(1)}
+                  className="rounded border border-hairline px-2 py-1 text-xs text-body hover:bg-surface-soft"
+                  aria-label="다음 제출자"
+                >
+                  →
+                </button>
+              </>
+            )}
             {data && (
               <a
                 href={`/api/submissions/${data.submission.id}/download`}

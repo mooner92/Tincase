@@ -24,7 +24,8 @@ export function MySubmissionCard({
   sizeKb: string;
   originalName: string;
 }) {
-  const [open, setOpen] = useState(false);
+  // 버전 전환도 이 상태를 바꾼다 — 빈 함수를 넘기면 v2를 골라도 아무 일이 없다
+  const [viewId, setViewId] = useState<string | null>(null);
 
   return (
     <>
@@ -42,7 +43,7 @@ export function MySubmissionCard({
             </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
-            <button onClick={() => setOpen(true)} className="btn-oncolor">
+            <button onClick={() => setViewId(submissionId)} className="btn-oncolor">
               열어보기
             </button>
             <a href={`/api/submissions/${submissionId}/download`} className="btn-secondary btn-sm">
@@ -52,12 +53,13 @@ export function MySubmissionCard({
         </div>
       </section>
 
-      {/* 드로어는 여러 사람을 오가도록 만들어졌지만, 여기서는 나 하나만 넘긴다 */}
+      {/* 드로어는 여러 사람을 오가도록 만들어졌지만 여기서는 나 하나다.
+          ←→ 는 드로어가 알아서 숨기고, 버전 전환은 onNavigate로 들어온다 */}
       <FileDrawer
-        openId={open ? submissionId : null}
+        openId={viewId}
         members={[{ userId, name: userName, latestId: submissionId }]}
-        onClose={() => setOpen(false)}
-        onNavigate={() => {}}
+        onClose={() => setViewId(null)}
+        onNavigate={setViewId}
       />
     </>
   );
