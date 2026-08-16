@@ -3,6 +3,7 @@ import { prisma } from '@/server/db';
 import { redirect } from 'next/navigation';
 import { getPageScope } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
+import { HistoryTable } from '@/components/HistoryTable';
 import { toKstIso } from '@/lib/week';
 
 export const dynamic = 'force-dynamic';
@@ -24,48 +25,20 @@ export default async function HistoryPage() {
   return (
     <main className="mt-6">
       <h1 className="text-lg font-bold text-ink">내 제출 이력</h1>
-      <div className="mt-4 overflow-x-auto card">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-hairline text-left text-xs text-muted">
-              <th className="px-4 py-2.5 font-medium">주차</th>
-              <th className="px-4 py-2.5 font-medium">상태</th>
-              <th className="px-4 py-2.5 font-medium">버전</th>
-              <th className="px-4 py-2.5 font-medium">제출시각</th>
-              <th className="px-4 py-2.5 text-right font-medium">받기</th>
-            </tr>
-          </thead>
-          <tbody>
-            {slots.map((s) => {
-              const sub = byId.get(s.id);
-              return (
-                <tr key={s.id} className={`border-b border-hairline-soft last:border-0 ${!sub ? 'bg-surface-soft/60' : ''}`}>
-                  <td className="px-4 py-2.5 font-medium text-ink">
-                    {s.year}년 {s.label}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    {sub ? <span className="text-success">● 제출</span> : <span className="text-muted-soft">미제출</span>}
-                  </td>
-                  <td className="px-4 py-2.5 tabular-nums text-body">{sub ? `v${sub.version}` : '—'}</td>
-                  <td className="px-4 py-2.5 tabular-nums text-body">
-                    {sub ? toKstIso(sub.uploadedAt).slice(0, 16).replace('T', ' ') : '—'}
-                  </td>
-                  <td className="px-4 py-2.5 text-right">
-                    {sub && (
-                      <a
-                        href={`/api/submissions/${sub.id}/download`}
-                        className="rounded border border-hairline px-2.5 py-1 text-xs font-medium text-body hover:bg-surface-soft"
-                      >
-                        ↓ 받기
-                      </a>
-                    )}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
+      <HistoryTable
+        userId={ps.scope.user.id}
+        userName={ps.scope.user.name}
+        rows={slots.map((s) => {
+          const sub = byId.get(s.id);
+          return {
+            slotId: s.id,
+            label: `${s.year}년 ${s.label}`,
+            submissionId: sub?.id ?? null,
+            version: sub?.version ?? null,
+            uploadedAtKst: sub ? toKstIso(sub.uploadedAt).slice(0, 16).replace('T', ' ') : null,
+          };
+        })}
+      />
     </main>
   );
 }

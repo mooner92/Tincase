@@ -7,6 +7,7 @@ import { ensureCurrentSlot, effectiveDeadline, divisionStatus } from '@/server/w
 import { formatDeadlineKo, isLocked, toKstIso } from '@/lib/week';
 import { DeadlineCountdown } from '@/components/DeadlineCountdown';
 import { SubmitChoice } from '@/components/SubmitChoice';
+import { MySubmissionCard } from '@/components/MySubmissionCard';
 
 export const dynamic = 'force-dynamic';
 
@@ -65,25 +66,15 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
         {/* 좌측 7 — 제출 (주인공) */}
         <div className="space-y-6 lg:col-span-7">
           {mySubmission && (
-            <section className="card-feature bg-brand-mint/35 px-7 py-6">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
-                  <p className="display text-xl">
-                    <span aria-hidden className="mr-1.5 text-success">
-                      ✓
-                    </span>
-                    제출 완료 <span className="text-muted">v{mySubmission.version}</span>
-                  </p>
-                  <p className="mt-1 text-sm text-body">
-                    {toKstIso(mySubmission.uploadedAt).slice(5, 16).replace('T', ' ')} ·{' '}
-                    {(mySubmission.byteSize / 1024).toFixed(1)} KB · {mySubmission.originalName}
-                  </p>
-                </div>
-                <a href={`/api/submissions/${mySubmission.id}/download`} className="btn-oncolor">
-                  내 파일 받기
-                </a>
-              </div>
-            </section>
+            <MySubmissionCard
+              submissionId={mySubmission.id}
+              userId={scope.user.id}
+              userName={scope.user.name}
+              version={mySubmission.version}
+              uploadedAtKst={toKstIso(mySubmission.uploadedAt).slice(5, 16).replace('T', ' ')}
+              sizeKb={(mySubmission.byteSize / 1024).toFixed(1)}
+              originalName={mySubmission.originalName}
+            />
           )}
 
           {/* PG-08 — 잠김이면 업로드 영역을 DOM에서 제거 */}
