@@ -62,7 +62,7 @@ function orgSvg(layout: OrgLayout): string {
   for (const parent of layout.parents) {
     for (const d of parent.divisions) {
       parts.push(
-        `<path d="${bundledPath(parent.angle, RADII.parent, d.angle, RADII.division)}" fill="none" stroke="#1a3a3a" stroke-opacity="${d.counted ? 0.45 : 0.12}" stroke-width="1.2"/>`,
+        `<path d="${bundledPath(parent.angle, RADII.parent, d.angle, RADII.division)}" fill="none" stroke="#222222" stroke-opacity="${d.counted ? 0.45 : 0.12}" stroke-width="1.2"/>`,
       );
     }
   }
@@ -71,19 +71,19 @@ function orgSvg(layout: OrgLayout): string {
       const path = bundledPath(d.angle, RADII.division, p.angle, RADII.person);
       parts.push(
         p.submitted
-          ? `<path d="${path}" fill="none" stroke="#16a34a" stroke-opacity="0.85" stroke-width="1.6"/>`
-          : `<path d="${path}" fill="none" stroke="#1a3a3a" stroke-opacity="${p.onRoster ? 0.22 : 0.08}" stroke-width="1"${p.onRoster ? '' : ' stroke-dasharray="2 4"'}/>`,
+          ? `<path d="${path}" fill="none" stroke="#0a7d2c" stroke-opacity="0.85" stroke-width="1.6"/>`
+          : `<path d="${path}" fill="none" stroke="#222222" stroke-opacity="${p.onRoster ? 0.22 : 0.08}" stroke-width="1"${p.onRoster ? '' : ' stroke-dasharray="2 4"'}/>`,
       );
     }
   }
-  parts.push(`<circle r="52" fill="#f5f0e0" stroke="#d08a2c" stroke-width="2"/>`);
+  parts.push(`<circle r="52" fill="#f5f0e0" stroke="#0a3711" stroke-width="2"/>`);
   parts.push(
     `<text text-anchor="middle" dy="-2" font-size="14" font-weight="700" fill="#0a0a0a">한국환경연구원</text>`,
     `<text text-anchor="middle" dy="16" font-size="12" fill="#6a6a6a">${layout.totals.submitted}/${layout.totals.roster}</text>`,
   );
   for (const p of layout.parents) {
     parts.push(
-      `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="5" fill="#d08a2c"/>`,
+      `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="5" fill="#0a3711"/>`,
       `<text x="${p.x.toFixed(1)}" y="${p.y.toFixed(1)}" dy="${p.y < 0 ? -12 : 18}" text-anchor="middle" font-size="11" font-weight="600" fill="#1a1a1a">${esc(p.name === '한국환경연구원' ? '본부 직속' : p.name)}</text>`,
     );
   }
@@ -92,14 +92,14 @@ function orgSvg(layout: OrgLayout): string {
     const deg = (d.angle * 180) / Math.PI - 90;
     const left = ((d.angle % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2) > Math.PI;
     parts.push(
-      `<circle cx="${d.x.toFixed(1)}" cy="${d.y.toFixed(1)}" r="6" fill="${done ? '#16a34a' : d.submitted > 0 ? '#e8b94a' : '#ffffff'}" stroke="#1a3a3a" stroke-width="1"/>`,
+      `<circle cx="${d.x.toFixed(1)}" cy="${d.y.toFixed(1)}" r="6" fill="${done ? '#0a7d2c' : d.submitted > 0 ? '#b26a00' : '#ffffff'}" stroke="#222222" stroke-width="1"/>`,
       `<text transform="rotate(${(left ? deg + 180 : deg).toFixed(1)} ${d.x.toFixed(1)} ${d.y.toFixed(1)}) translate(${d.x.toFixed(1)} ${d.y.toFixed(1)})" x="${left ? -12 : 12}" text-anchor="${left ? 'end' : 'start'}" dy="3" font-size="9.5" fill="#3a3a3a">${esc(d.name)}</text>`,
     );
   }
   for (const d of layout.divisions) {
     for (const p of d.laidOut) {
       parts.push(
-        `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.isLead ? 4 : 2.8}" fill="${p.submitted ? '#16a34a' : '#ffffff'}" stroke="${p.isLead ? '#d08a2c' : '#1a3a3a'}" stroke-width="${p.isLead ? 1.5 : 0.6}" stroke-opacity="${p.onRoster ? 1 : 0.3}"/>`,
+        `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${p.isLead ? 4 : 2.8}" fill="${p.submitted ? '#0a7d2c' : '#ffffff'}" stroke="${p.isLead ? '#0a3711' : '#222222'}" stroke-width="${p.isLead ? 1.5 : 0.6}" stroke-opacity="${p.onRoster ? 1 : 0.3}"/>`,
       );
     }
   }

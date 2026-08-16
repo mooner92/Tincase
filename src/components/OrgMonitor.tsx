@@ -98,7 +98,7 @@ export function OrgMonitor({
           )}
         </section>
       ) : (
-        <section className="card overflow-hidden bg-brand-teal">
+        <section className="card overflow-hidden bg-brand">
           <svg
             viewBox={`${-SIZE / 2} ${-SIZE / 2} ${SIZE} ${SIZE}`}
             className="h-auto w-full"
@@ -108,15 +108,15 @@ export function OrgMonitor({
             <defs>
               {/* 제출 간선이 흐르는 그라데이션 — 문서가 담당자에게 도착하는 방향 */}
               <linearGradient id="flow" x1="0" y1="0" x2="1" y2="0">
-                <stop offset="0%" stopColor="#a4d4c5" stopOpacity="0.15" />
-                <stop offset="50%" stopColor="#4ade80" stopOpacity="0.95" />
-                <stop offset="100%" stopColor="#a4d4c5" stopOpacity="0.15" />
+                <stop offset="0%" stopColor="#8fd3a3" stopOpacity="0.15" />
+                <stop offset="50%" stopColor="#c9ecd3" stopOpacity="0.95" />
+                <stop offset="100%" stopColor="#8fd3a3" stopOpacity="0.15" />
                 <animate attributeName="x1" values="-1;1" dur="3s" repeatCount="indefinite" />
                 <animate attributeName="x2" values="0;2" dur="3s" repeatCount="indefinite" />
               </linearGradient>
               <radialGradient id="core">
-                <stop offset="0%" stopColor="#d08a2c" stopOpacity="0.9" />
-                <stop offset="100%" stopColor="#d08a2c" stopOpacity="0.1" />
+                <stop offset="0%" stopColor="#7fb98c" stopOpacity="0.9" />
+                <stop offset="100%" stopColor="#7fb98c" stopOpacity="0.1" />
               </radialGradient>
             </defs>
 
@@ -176,7 +176,7 @@ export function OrgMonitor({
             {/* 본부 */}
             {layout.parents.map((p) => (
               <g key={p.name}>
-                <circle cx={p.x} cy={p.y} r={5} fill="#ffb084" />
+                <circle cx={p.x} cy={p.y} r={5} fill="#c9ecd3" />
                 <text
                   x={p.x}
                   y={p.y}
@@ -204,9 +204,9 @@ export function OrgMonitor({
                     cx={d.x}
                     cy={d.y}
                     r={done ? 7 : 6}
-                    fill={done ? '#4ade80' : d.submitted > 0 ? '#e8b94a' : '#ffffff'}
+                    fill={done ? '#8fd3a3' : d.submitted > 0 ? '#f0c24d' : '#ffffff'}
                     fillOpacity={dim ? 0.25 : 1}
-                    stroke={done ? '#4ade80' : 'none'}
+                    stroke={done ? '#8fd3a3' : 'none'}
                     strokeOpacity={0.35}
                     strokeWidth={5}
                   />
@@ -237,9 +237,9 @@ export function OrgMonitor({
                   cx={p.x}
                   cy={p.y}
                   r={p.isLead ? 4.5 : 3}
-                  fill={p.submitted ? '#4ade80' : p.onRoster ? '#ffffff' : '#ffffff'}
+                  fill={p.submitted ? '#8fd3a3' : p.onRoster ? '#ffffff' : '#ffffff'}
                   fillOpacity={dim ? 0.15 : p.submitted ? 1 : p.onRoster ? 0.45 : 0.15}
-                  stroke={p.isLead ? '#ffb084' : 'none'}
+                  stroke={p.isLead ? '#c9ecd3' : 'none'}
                   strokeWidth={1.5}
                   onMouseEnter={() => setFocus({ kind: 'person', p, d })}
                   onMouseLeave={() => setFocus(null)}
@@ -258,11 +258,11 @@ export function OrgMonitor({
           {/* 범례 + 초점 정보 */}
           <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/10 px-6 py-3 text-[11px] text-white/70">
             <div className="flex flex-wrap items-center gap-4">
-              <Legend color="#4ade80" label="제출" />
+              <Legend color="#8fd3a3" label="제출" />
               <Legend color="#ffffff" opacity={0.45} label="미제출" />
               <Legend color="#ffffff" opacity={0.15} label="제출 대상 아님" />
               <span className="flex items-center gap-1.5">
-                <span className="inline-block h-2.5 w-2.5 rounded-full border-[1.5px] border-[#ffb084]" />
+                <span className="inline-block h-2.5 w-2.5 rounded-full border-[1.5px] border-[#c9ecd3]" />
                 부서 담당자
               </span>
             </div>

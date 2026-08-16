@@ -92,7 +92,7 @@ export function AppHeader({
             <img src="/brand/tincase-lockup.svg" alt="Tincase" className="h-[26px] w-auto" />
           </Link>
           <span
-            className={`badge-pill max-w-44 truncate ${foreign ? 'bg-brand-ochre/25 text-body-strong' : ''}`}
+            className={`badge-pill max-w-44 truncate ${foreign ? 'bg-warning-soft text-body-strong' : ''}`}
             title={foreign ? `${divisionName} (타 부서 열람 중)` : divisionName}
           >
             {divisionName}
@@ -122,7 +122,7 @@ export function AppHeader({
           >
             <span
               aria-hidden
-              className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-peach text-[11px] font-bold text-ink"
+              className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-soft text-[11px] font-bold text-ink"
             >
               {userName.slice(0, 1)}
             </span>

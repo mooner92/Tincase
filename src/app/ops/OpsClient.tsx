@@ -172,7 +172,7 @@ export function OpsClient() {
 
       {/* AU-27 — 발급된 임시 비밀번호. 화면을 벗어나면 다시 볼 수 없다 */}
       {issued.length > 0 && (
-        <section className="rounded-xl border-2 border-brand-ochre/60 bg-brand-ochre/15 px-5 py-4">
+        <section className="rounded-xl border-2 border-warning/40 bg-warning-soft px-5 py-4">
           <div className="flex items-center justify-between">
             <h2 className="text-sm font-bold text-ink">발급된 임시 비밀번호 — 지금 전달하세요</h2>
             <button onClick={() => setIssued([])} className="text-xs text-body-strong hover:underline">
@@ -193,7 +193,7 @@ export function OpsClient() {
                 </code>
                 <button
                   onClick={() => copy(x.password, x.userId)}
-                  className="rounded border border-brand-ochre bg-canvas px-2 py-1 text-xs font-medium text-body-strong hover:bg-amber-100"
+                  className="rounded border border-warning/40 bg-canvas px-2 py-1 text-xs font-medium text-body-strong hover:bg-amber-100"
                 >
                   {copied === x.userId ? '복사됨 ✓' : '복사'}
                 </button>

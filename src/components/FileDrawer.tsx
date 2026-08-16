@@ -115,7 +115,7 @@ export function FileDrawer({
   if (!openId) return null;
 
   return (
-    <div className="fixed inset-0 z-40">
+    <div className="fixed inset-0 z-40 h-screen">
       {/* 배경 클릭 → 닫기 */}
       <div className="absolute inset-0 bg-ink/30" onClick={onClose} aria-hidden />
       <div
@@ -123,7 +123,7 @@ export function FileDrawer({
         role="dialog"
         aria-modal="true"
         aria-label="제출물 열람"
-        className="absolute inset-y-0 right-0 flex w-full max-w-2xl flex-col bg-canvas shadow-[-8px_0_32px_rgba(10,10,10,0.08)]"
+        className="absolute inset-y-0 right-0 flex h-full w-full max-w-2xl flex-col border-l border-hairline bg-canvas"
       >
         {/* 헤더 (CP-73) */}
         <div className="flex items-center justify-between gap-2 border-b border-hairline px-5 py-3">
@@ -214,7 +214,7 @@ export function FileDrawer({
           {data && !loading && (
             <div className="space-y-6">
               {data.warnings.length > 0 && (
-                <p className="rounded bg-brand-ochre/15 px-3 py-2 text-xs text-body-strong">{data.warnings.join(' · ')}</p>
+                <p className="rounded bg-warning-soft px-3 py-2 text-xs text-body-strong">{data.warnings.join(' · ')}</p>
               )}
               {data.tables.map((t) => (
                 <section key={t.title}>

@@ -163,7 +163,7 @@ export function UploadDropzone({ hasPrevious }: { hasPrevious: boolean }) {
 
       <div aria-live="polite">
         {state.kind === 'success' && (
-          <p className="mt-3 rounded-2xl bg-brand-mint/35 px-5 py-3.5 text-sm font-medium text-ink">
+          <p className="mt-3 rounded-2xl bg-brand-soft px-5 py-3.5 text-sm font-medium text-ink">
             <span className="text-success">✓</span> 제출 완료 (v{state.version})
             {state.sameAsPrevious && ' — 이전 버전과 내용이 동일합니다'}
           </p>

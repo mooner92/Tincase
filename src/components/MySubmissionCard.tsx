@@ -29,7 +29,7 @@ export function MySubmissionCard({
 
   return (
     <>
-      <section className="card-feature bg-brand-mint/35 px-7 py-6">
+      <section className="card-feature bg-brand-soft px-7 py-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <p className="display text-xl">

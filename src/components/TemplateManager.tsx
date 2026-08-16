@@ -97,7 +97,7 @@ export function TemplateManager({
       </div>
       <div aria-live="polite">
         {st.kind === 'done' && (
-          <div className="rounded-xl bg-brand-mint/30 px-4 py-3 text-sm text-ink">
+          <div className="rounded-xl bg-brand-soft px-4 py-3 text-sm text-ink">
             ✓ v{st.version} 등록 완료 · 표 {st.summary.length}개 (
             {st.summary.map((t) => `${t.rows}행`).join(' · ')}) 파싱 확인 {/* CP-83 */}
             {st.warnings.length > 0 && <p className="mt-1 text-xs text-body-strong">{st.warnings.join(' · ')}</p>}

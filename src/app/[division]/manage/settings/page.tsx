@@ -11,7 +11,7 @@ import { toKstIso } from '@/lib/week';
 /** 타 부서 설정은 열람만 — 실수로 내 부서를 고치는 사고를 구조적으로 막는다 (AU-16) */
 function ReadOnlyNotice({ what, detail }: { what: string; detail?: string }) {
   return (
-    <p className="rounded-xl border border-brand-ochre/50 bg-brand-ochre/10 px-4 py-3 text-sm text-body-strong">
+    <p className="rounded-xl border border-warning/40 bg-warning-soft px-4 py-3 text-sm text-body-strong">
       다른 부서의 {what}은(는) 열람만 가능합니다. 변경은 해당 부서 담당자가 합니다.
       {detail && <span className="ml-1 text-muted">· {detail}</span>}
     </p>

@@ -108,22 +108,22 @@ export async function ManageView({
       </div>
 
       {/* StatusSummary — teal 피처 카드 (CP-44~47) */}
-      <section className="card-feature mt-6 bg-brand-teal px-8 py-7 text-white">
+      <section className="card-feature mt-6 bg-brand px-8 py-7 text-white">
         <div className="flex flex-wrap items-end justify-between gap-5">
           <div>
-            <p className="text-xs font-semibold tracking-[0.12em] text-brand-mint uppercase">제출 현황</p>
+            <p className="text-xs font-semibold tracking-[0.12em] text-brand-tint uppercase">제출 현황</p>
             <p className="mt-1 text-[44px] leading-none font-semibold tracking-tight">
               {summary.submitted}
               <span className="text-xl font-normal text-white/60"> / {summary.roster}</span>
               {summary.missing === 0 && summary.roster > 0 && (
-                <span className="ml-3 align-middle text-base font-medium text-brand-mint">✓ 전원 제출</span>
+                <span className="ml-3 align-middle text-base font-medium text-brand-tint">✓ 전원 제출</span>
               )}
             </p>
           </div>
           <div className="flex flex-col items-end gap-2.5">
             <span
               className={`inline-flex items-center rounded-full px-3 py-1 text-[13px] font-medium ${
-                locked ? 'bg-white/10 text-white/70' : 'bg-brand-mint/20 text-brand-mint'
+                locked ? 'bg-white/10 text-white/70' : 'bg-white/15 text-brand-tint'
               }`}
             >
               {locked ? '마감됨' : '진행 중'} · {formatDeadlineKo(deadline)}
@@ -138,7 +138,7 @@ export async function ManageView({
           aria-valuemin={0}
           aria-valuemax={summary.roster}
         >
-          <div className="h-full rounded-full bg-brand-mint transition-all" style={{ width: `${pct}%` }} />
+          <div className="h-full rounded-full bg-brand-soft transition-all" style={{ width: `${pct}%` }} />
         </div>
       </section>
 

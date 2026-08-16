@@ -58,7 +58,7 @@ export function DeadlineCountdown({
 
   return (
     <span
-      className={`tabular-nums font-semibold ${urgent ? 'text-brand-coral' : 'text-ink'}`}
+      className={`tabular-nums font-semibold ${urgent ? 'text-error' : 'text-ink'}`}
       aria-live="polite"
     >
       {h >= 1 ? `${h}시간 ${m}분 남음` : `${m}분 ${s}초 남음`}

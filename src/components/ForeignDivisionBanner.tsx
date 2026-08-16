@@ -10,7 +10,7 @@ export function ForeignDivisionBanner({
   ownSlug: string;
 }) {
   return (
-    <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-brand-ochre/60 bg-brand-ochre/15 px-5 py-3">
+    <div className="mt-5 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-warning/40 bg-warning-soft px-5 py-3">
       <p className="text-sm text-body-strong">
         <span className="font-semibold">{divisionName}</span> 페이지를 열람 중입니다 — 내 부서가 아닙니다.
         <span className="ml-1.5 text-muted">제출은 내 부서에서만 가능하며, 이 열람은 기록됩니다.</span>

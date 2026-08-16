@@ -70,7 +70,7 @@ export function MergePanel({
   const href = `/api/division/merged?division=${encodeURIComponent(divisionSlug)}&isoKey=${isoKey}`;
 
   return (
-    <section className={`card-feature px-7 py-6 ${done ? 'bg-brand-mint/35' : 'bg-surface-strong'}`}>
+    <section className={`card-feature px-7 py-6 ${done ? 'bg-brand-soft' : 'bg-surface-strong'}`}>
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
           <h2 className="display text-xl">

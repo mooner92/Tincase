@@ -158,13 +158,13 @@ export function WebComposer({
     'h-8 rounded-md border border-hairline bg-canvas px-2 text-[13px] text-ink focus:border-ink focus:outline-none';
 
   return (
-    <div className="fixed inset-0 z-40">
+    <div className="fixed inset-0 z-40 h-screen">
       <div className="absolute inset-0 bg-ink/40" onClick={onClose} aria-hidden />
       <div
         role="dialog"
         aria-modal="true"
         aria-label="웹에서 업무일지 작성"
-        className="absolute inset-y-0 right-0 flex w-full max-w-5xl flex-col bg-canvas shadow-2xl"
+        className="absolute inset-y-0 right-0 flex h-full w-full max-w-5xl flex-col border-l border-hairline bg-canvas"
       >
         {/* 머리 */}
         <div className="flex items-center justify-between border-b border-hairline px-7 py-4">
@@ -184,7 +184,7 @@ export function WebComposer({
         </div>
 
         {/* 붙여넣기 안내 — 이걸 모르면 한 칸씩 옮겨 적는다 */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline-soft bg-brand-mint/25 px-7 py-2.5 text-xs text-body-strong">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline-soft bg-brand-soft px-7 py-2.5 text-xs text-body-strong">
           <span className="font-semibold">한글 표를 그대로 붙여넣을 수 있습니다</span>
           <span className="text-body">
             한글에서 표를 드래그 → <kbd className="rounded border border-hairline bg-canvas px-1">Ctrl</kbd>
@@ -254,7 +254,7 @@ export function WebComposer({
                         placeholder={isPasteTarget ? '여기에 한글 표를 붙여넣으세요 (Ctrl+V) · 직접 입력해도 됩니다' : ''}
                         className={`${cell} flex-1 ${
                           isPasteTarget
-                            ? 'border-2 border-dashed border-brand-amber bg-brand-mint/15 placeholder:text-body-strong'
+                            ? 'border-2 border-dashed border-brand bg-brand-soft placeholder:text-body-strong'
                             : ''
                         }`}
                       />

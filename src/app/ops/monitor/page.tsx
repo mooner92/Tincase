@@ -127,7 +127,7 @@ export default async function MonitorPage() {
                 <li key={r.userId} className="flex flex-wrap items-baseline gap-x-3">
                   <span
                     className={`inline-block w-14 shrink-0 text-right font-semibold tabular-nums ${
-                      r.streak >= 4 ? 'text-error' : 'text-brand-ochre'
+                      r.streak >= 4 ? 'text-error' : 'text-warning'
                     }`}
                   >
                     {r.streak}주 연속

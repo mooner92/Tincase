@@ -1,41 +1,47 @@
 @import "tailwindcss";
 
 /*
- * 디자인 토큰 — DESIGNclay.md 기반 (사내 도구용으로 적용).
- * 크림 캔버스 + 잉크 CTA + 헤어라인 카드 + 채도 높은 포인트 카드(teal/peach/lavender/ochre).
- * 그림자 없이 색 대비와 1px 헤어라인으로 깊이를 만든다. 라이트 단일 테마.
+ * 디자인 토큰 — Airbnb 구조 언어 + Tincase 그린.
+ *
+ * 흰 캔버스 · 넉넉한 여백 · 부드러운 모서리 · 절제된 글자 굵기 · **강조색 하나**.
+ * Airbnb는 Rausch 핑크 하나로 모든 CTA를 끌고 가는데, 우리 브랜드색은 로고의
+ * 딥 그린이므로 그 자리를 그린이 대신한다. 색을 여러 개 쓰면 강조가 강조를 잃는다.
+ *
+ * 그림자는 **한 단계만** 쓴다 (Airbnb도 그렇다) — 떠오르는 카드와 드롭다운에만.
  */
 @theme {
-  --color-canvas: #fffaf0;
-  --color-surface-soft: #faf5e8;
-  --color-surface-card: #f5f0e0;
-  --color-surface-strong: #ebe6d6;
+  /* 표면 — 흰 캔버스 위에 회색 계조 */
+  --color-canvas: #ffffff;
+  --color-surface-soft: #f7f7f7;
+  --color-surface-card: #ffffff;
+  --color-surface-strong: #f2f2f2;
 
-  --color-ink: #0a0a0a;
-  --color-ink-active: #1f1f1f;
-  --color-body: #3a3a3a;
-  --color-body-strong: #1a1a1a;
+  /* 글자 */
+  --color-ink: #222222;
+  --color-ink-active: #000000;
+  --color-body: #3f3f3f;
+  --color-body-strong: #222222;
   --color-muted: #6a6a6a;
-  --color-muted-soft: #9a9a9a;
-  --color-hairline: #e5e5e5;
-  --color-hairline-soft: #f0f0f0;
+  --color-muted-soft: #929292;
+  --color-hairline: #dddddd;
+  --color-hairline-soft: #ebebeb;
+  --color-border-strong: #c1c1c1;
 
-  --color-brand-pink: #ff4d8b;
-  --color-brand-teal: #1a3a3a;
-  --color-brand-lavender: #b8a4ed;
-  --color-brand-peach: #ffb084;
-  --color-brand-ochre: #e8b94a;
-  --color-brand-mint: #a4d4c5;
-  --color-brand-coral: #ff6b5a;
-  /* 로고 amber — 브랜드 정체성 색. 로고 파일과 반드시 같은 값을 유지한다 */
-  --color-brand-amber: #d08a2c;
+  /* 브랜드 — 로고와 **같은 값**을 유지한다 (public/brand/*.svg) */
+  --color-brand: #0a3711; /* 딥 그린. 기본 CTA·강조 */
+  --color-brand-active: #06250b;
+  --color-brand-tint: #7fb98c; /* 어두운 배경 위에서만 */
+  --color-brand-soft: #eef4ef; /* 아주 옅은 배경 */
 
-  --color-success: #22c55e;
-  --color-warning: #f59e0b;
-  --color-error: #ef4444;
+  /* 상태 */
+  --color-success: #0a7d2c;
+  --color-warning: #b26a00;
+  --color-warning-soft: #fdf3e2;
+  --color-error: #c13515;
+  --color-error-soft: #fdeceb;
 
-  --font-sans: "Inter", "Pretendard Variable", Pretendard, -apple-system,
-    BlinkMacSystemFont, "Segoe UI", "Noto Sans KR", "Malgun Gothic",
+  --font-sans: "Pretendard Variable", Pretendard, Inter, -apple-system,
+    BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", "Malgun Gothic",
     "Apple SD Gothic Neo", sans-serif;
 }
 
@@ -47,57 +53,66 @@ body {
 }
 
 @layer components {
-  /* 디스플레이 헤드라인 — 500~600 무게 + 좁은 자간이 브랜드 보이스 */
+  /*
+   * 제목 — 굵기로 밀어붙이지 않는다. 22~28px에 600 정도면 충분하고,
+   * 무게는 여백과 대비가 만든다 (Airbnb가 700+ 대신 500~600을 쓰는 이유).
+   */
   .display {
     @apply font-semibold text-ink;
-    letter-spacing: -0.03em;
+    letter-spacing: -0.02em;
   }
 
-  /* 버튼 — 잉크 CTA(12px 라운드, 44px 높이), 크림 보조, 컬러 위 흰 버튼 */
+  /* 버튼 — 8px 모서리, 48px 높이. 모든 상호작용 요소는 둥글다 */
   .btn-primary {
-    @apply inline-flex h-11 items-center justify-center gap-1.5 rounded-xl bg-ink px-5 text-sm font-semibold text-white transition-colors hover:bg-ink-active disabled:cursor-not-allowed disabled:bg-hairline disabled:text-muted;
+    @apply inline-flex h-12 items-center justify-center gap-1.5 rounded-lg bg-brand px-6 text-[15px] font-semibold text-white transition-colors hover:bg-brand-active disabled:cursor-not-allowed disabled:bg-hairline disabled:text-muted-soft;
   }
   .btn-secondary {
-    @apply inline-flex h-11 items-center justify-center gap-1.5 rounded-xl border border-hairline bg-canvas px-5 text-sm font-semibold text-ink transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:opacity-40;
+    @apply inline-flex h-12 items-center justify-center gap-1.5 rounded-lg border border-ink bg-canvas px-6 text-[15px] font-semibold text-ink transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:border-hairline disabled:text-muted-soft;
   }
+  /* 어두운 배경 위 — 흰 버튼 */
   .btn-oncolor {
-    @apply inline-flex h-9 items-center justify-center rounded-xl bg-canvas px-4 text-xs font-semibold text-ink transition-colors hover:bg-surface-soft;
+    @apply inline-flex h-10 items-center justify-center rounded-lg bg-canvas px-4 text-sm font-semibold text-ink transition-colors hover:bg-surface-soft;
   }
   .btn-sm {
-    @apply h-8 rounded-lg px-3 text-xs;
+    @apply h-9 rounded-lg px-4 text-sm;
   }
 
-  /* 카드 — 캔버스+헤어라인(콘텐츠), 크림(보조), 24px 피처 */
+  /* 카드 — 14px. 기본은 헤어라인만, 떠오를 때만 그림자 한 단계 */
   .card {
-    @apply rounded-2xl border border-hairline bg-canvas;
+    @apply rounded-[14px] border border-hairline bg-canvas;
   }
   .card-cream {
-    @apply rounded-2xl bg-surface-card;
+    @apply rounded-[14px] bg-surface-soft;
   }
   .card-feature {
-    @apply rounded-3xl;
+    @apply rounded-[20px];
+  }
+  .elevated {
+    box-shadow:
+      rgba(0, 0, 0, 0.02) 0 0 0 1px,
+      rgba(0, 0, 0, 0.04) 0 2px 6px,
+      rgba(0, 0, 0, 0.1) 0 4px 8px;
   }
 
-  /* 필·탭·배지 */
+  /* 필·탭·배지 — 완전한 원형 모서리 */
   .badge-pill {
-    @apply inline-flex items-center gap-1 rounded-full bg-surface-card px-3 py-1 text-[13px] font-medium text-ink;
+    @apply inline-flex items-center gap-1 rounded-full border border-hairline bg-canvas px-3 py-1 text-[13px] font-medium text-ink;
   }
   .tab-pill {
-    @apply rounded-full px-4 py-1.5 text-sm font-medium text-muted transition-colors hover:text-ink;
+    @apply rounded-full px-4 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-soft hover:text-ink;
   }
   .tab-pill-active {
-    @apply bg-surface-card text-ink;
+    @apply bg-ink text-white hover:bg-ink hover:text-white;
   }
 
-  /* 입력 */
+  /* 입력 — 초점은 잉크 테두리로. 브랜드색은 CTA에만 쓴다 */
   .input {
-    @apply h-11 w-full rounded-xl border border-hairline bg-canvas px-4 text-[15px] text-ink transition-colors placeholder:text-muted-soft focus:border-ink focus:outline-none;
+    @apply h-12 w-full rounded-lg border border-hairline bg-canvas px-4 text-[15px] text-ink transition-colors placeholder:text-muted-soft focus:border-ink focus:outline-none;
   }
   .label {
     @apply mb-1.5 block text-[13px] font-medium text-muted;
   }
 
-  /* 표 공통 */
   .table-head {
     @apply text-left text-xs font-medium text-muted;
   }

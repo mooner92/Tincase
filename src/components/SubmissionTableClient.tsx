@@ -58,10 +58,10 @@ export function SubmissionTableClient({ members, caption }: { members: MemberRow
                 <td className="px-5 py-3 text-right">
                   {m.latest && (
                     <span className="inline-flex gap-1.5">
-                      <button onClick={() => setOpenId(m.latest!.id)} className="btn-primary btn-sm">
+                      <button onClick={() => setOpenId(m.latest!.id)} className="btn-secondary btn-sm">
                         열기
                       </button>
-                      <a href={`/api/submissions/${m.latest.id}/download`} className="btn-secondary btn-sm" aria-label={`${m.user.name} 파일 받기`}>
+                      <a href={`/api/submissions/${m.latest.id}/download`} className="inline-flex h-9 items-center justify-center rounded-lg border border-hairline px-3 text-sm text-body transition-colors hover:bg-surface-soft" aria-label={`${m.user.name} 파일 받기`}>
                         ↓
                       </a>
                     </span>

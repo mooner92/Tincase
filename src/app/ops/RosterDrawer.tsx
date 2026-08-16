@@ -59,14 +59,14 @@ export function RosterDrawer({
   const roster = users.filter((u) => u.onRoster && u.isActive).length;
 
   return (
-    <div className="fixed inset-0 z-40">
+    <div className="fixed inset-0 z-40 h-screen">
       <div className="absolute inset-0 bg-ink/30" onClick={onClose} aria-hidden />
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={`${divisionName} 인원 관리`}
-        className="absolute inset-y-0 right-0 flex w-full max-w-4xl flex-col bg-canvas shadow-2xl"
+        className="absolute inset-y-0 right-0 flex h-full w-full max-w-4xl flex-col border-l border-hairline bg-canvas"
       >
         <div className="flex items-center justify-between border-b border-hairline px-5 py-3">
           <div>
@@ -107,8 +107,8 @@ export function RosterDrawer({
                 >
                   <td className="whitespace-nowrap px-4 py-2 font-medium">
                     {u.name}
-                    {u.isOperator && <span className="ml-1 rounded bg-brand-lavender/40 px-1 text-[11px] text-ink">운영</span>}
-                    {u.isCoordinator && <span className="ml-1 rounded bg-brand-ochre/15 px-1 text-[11px] text-body-strong">총괄</span>}
+                    {u.isOperator && <span className="ml-1 rounded bg-surface-strong px-1 text-[11px] text-ink">운영</span>}
+                    {u.isCoordinator && <span className="ml-1 rounded bg-warning-soft px-1 text-[11px] text-body-strong">총괄</span>}
                   </td>
                   <td className="px-4 py-2 font-mono text-xs text-muted">{u.email}</td>
                   <td className="px-4 py-2">
@@ -152,9 +152,9 @@ export function RosterDrawer({
                       ) : u.locked ? (
                         <span className="rounded bg-error/10 px-1.5 py-0.5 text-[11px] text-error">잠김</span>
                       ) : u.mustChangePassword ? (
-                        <span className="rounded bg-brand-ochre/15 px-1.5 py-0.5 text-[11px] text-body-strong">변경 대기</span>
+                        <span className="rounded bg-warning-soft px-1.5 py-0.5 text-[11px] text-body-strong">변경 대기</span>
                       ) : (
-                        <span className="rounded bg-brand-mint/30 px-1.5 py-0.5 text-[11px] text-success">사용 중</span>
+                        <span className="rounded bg-brand-soft px-1.5 py-0.5 text-[11px] text-success">사용 중</span>
                       )}
                       <button
                         disabled={busy}

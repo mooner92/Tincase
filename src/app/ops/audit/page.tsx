@@ -31,8 +31,8 @@ const ACTION_KO: Record<string, { label: string; tone: 'normal' | 'watch' | 'str
 
 const TONE = {
   normal: 'bg-surface-card text-body',
-  watch: 'bg-brand-ochre/20 text-body-strong',
-  strong: 'bg-brand-coral/15 text-body-strong',
+  watch: 'bg-warning-soft text-body-strong',
+  strong: 'bg-error-soft text-body-strong',
 } as const;
 
 const PAGE = 200;

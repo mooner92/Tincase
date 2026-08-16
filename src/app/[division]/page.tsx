@@ -113,7 +113,7 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
               <ul className="mt-3 space-y-1.5 text-sm leading-6 text-body">
                 {guideLines.map((l) => (
                   <li key={l} className="flex gap-2">
-                    <span aria-hidden className="text-brand-ochre">
+                    <span aria-hidden className="text-brand">
                       ●
                     </span>
                     {l}
@@ -126,9 +126,9 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
 
         {/* 우측 5 — 양식·부서 현황 */}
         <div className="space-y-6 lg:col-span-5">
-          <section className="card-feature bg-brand-peach px-7 py-6">
+          <section className="card px-7 py-6">
             <h2 className="display text-lg">빈 양식 받기</h2>
-            <p className="mt-1 text-sm text-body-strong">파일명에 이번 주차가 자동으로 들어갑니다.</p>
+            <p className="mt-1 text-sm text-muted">파일명에 이번 주차가 자동으로 들어갑니다.</p>
             {!template ? (
               <p className="mt-4 text-sm font-medium text-body-strong">아직 등록된 양식이 없습니다.</p>
             ) : isOwn ? (
