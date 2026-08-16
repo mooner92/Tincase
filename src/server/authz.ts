@@ -4,6 +4,7 @@ import type { Division, User } from '@prisma/client';
 import { verifyAccess } from './auth';
 import { prisma } from './db';
 import { audit } from './audit';
+import { isLocked } from '@/lib/week';
 
 export class HttpError extends Error {
   constructor(
@@ -101,6 +102,43 @@ export async function findAccessibleSubmission(scope: Scope, submissionId: strin
     return sub;
   }
   throw notFound(); // ST-15: member의 타인 파일 → 404 (같은 부서여도)
+}
+
+/**
+ * TACP-14 — 제출물 **삭제** 판정. 읽기(`findAccessibleSubmission`)와 별개다.
+ *
+ *   본인      → 마감 전까지만        (마감 후 409)
+ *   operator  → 부서·마감 무관        (감사 로그는 호출부가 남긴다)
+ *   lead      → **404**. 읽을 수는 있어도 지울 수는 없다
+ *   그 외      → 404
+ *
+ * lead를 뺀 이유는 ADR-0007에 있다 — 담당자가 지울 수 있으면 현황표의 "미제출"이
+ * "안 냈다 또는 지워졌다"가 되어, 독촉할지 말지 판단할 수 없게 된다.
+ *
+ * 마감만 409인 이유: 리소스 존재는 본인이 이미 아는 사실이라 누출이 아니고,
+ * 이유를 안 알려주면 사용자는 버튼이 고장 난 줄 안다.
+ */
+export async function requireDeletableSubmission(scope: Scope, submissionId: string) {
+  const sub = await prisma.submission.findUnique({
+    where: { id: submissionId },
+    include: { user: true, weekSlot: true, division: true },
+  });
+  if (!sub) throw notFound();
+
+  // operator는 시스템 소유자다 — 부서도 마감도 걸리지 않는다 (TACP §8, TACP-14)
+  if (scope.user.isOperator) return sub;
+
+  // 여기부터는 본인만이다. lead·coordinator는 남의 것을 읽어도 지우지 못한다
+  if (sub.userId !== scope.user.id) throw notFound();
+
+  if (isLocked({ opensAt: sub.weekSlot.opensAt }, sub.division)) {
+    throw new HttpError(
+      409,
+      'slot_locked',
+      '마감된 주차는 취소할 수 없습니다. 담당자에게 문의해 주세요.',
+    );
+  }
+  return sub;
 }
 
 /**

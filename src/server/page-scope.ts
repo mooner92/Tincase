@@ -52,6 +52,9 @@ export const getDivisionView = cache(async (slugParam: string): Promise<Division
     canManage: (isOwn && ps.scope.isLead) || ps.scope.readAll,
     // 제출은 내 부서에서만 (DM-12 — 업로드 부서는 신원에서 도출된다)
     canSubmit: isOwn && ps.scope.user.onRoster,
+    // TACP-14 — 남의 제출물 삭제는 operator만. lead·coordinator는 읽기까지다.
+    // canManage와 **일부러 분리한다** — 합치면 담당자에게 삭제권이 딸려간다
+    canDeleteAny: ps.scope.user.isOperator,
   };
 });
 
@@ -62,4 +65,6 @@ export interface DivisionView {
   redirectTo: string | null;
   canManage: boolean;
   canSubmit: boolean;
+  /** TACP-14 — 남의 제출물 삭제 (operator 전용) */
+  canDeleteAny: boolean;
 }

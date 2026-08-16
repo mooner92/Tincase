@@ -7,7 +7,8 @@ import { currentWeek, deadlineFor, isLocked } from '@/lib/week';
 import { validateHwpUpload, UploadValidationError } from '@/lib/hwp/reader';
 import { env } from './env';
 import { HttpError } from './authz';
-import { sha256, submissionRelPath, writeFileAtomic } from './storage';
+import { resolveInRoot, sha256, submissionRelPath, writeFileAtomic } from './storage';
+import { unlink } from 'node:fs/promises';
 
 /** WS-11 — 크론 없이 지연 생성. upsert라 동시 요청 안전 */
 export async function ensureCurrentSlot(now = new Date()): Promise<WeekSlot> {
@@ -202,4 +203,68 @@ export async function divisionSlots(divisionId: string, limit = 26) {
 
 export function effectiveDeadline(slot: WeekSlot, division: Division): Date {
   return deadlineFor({ opensAt: slot.opensAt }, division);
+}
+
+// ── 제출 취소 (ST-30~33 · TACP-14 · ADR-0007) ────────────────
+export interface DeleteResult {
+  removedVersions: number;
+  slotLabel: string;
+  ownerName: string;
+}
+
+/**
+ * ST-30 — 그 사람의 **그 주차 제출물 전체**를 지운다. 부분 삭제는 없다 (ADR-0007).
+ *
+ * 권한 판정은 이 함수가 하지 않는다 — `requireDeletableSubmission`이 이미 끝냈고,
+ * 판정이 두 곳에 있으면 갈라진다 (TACP-12). 여기는 **실행만** 한다.
+ *
+ * 순서가 업로드와 반대다. 업로드는 DB 커밋 후 파일을 쓰지만(ST-10),
+ * 삭제는 **DB를 먼저 지우고 파일을 지운다.** 어느 쪽이든 중간에 죽을 수 있는데,
+ * 남아도 되는 쪽은 "참조 없는 파일"이지 "파일 없는 레코드"가 아니다.
+ * 전자는 디스크만 먹지만 후자는 받기·병합이 500으로 터진다.
+ */
+export async function deleteSubmission(
+  sub: Submission & { user: User; weekSlot: WeekSlot; division: Division },
+  actorEmail: string,
+): Promise<DeleteResult> {
+  const siblings = await prisma.submission.findMany({
+    where: { userId: sub.userId, weekSlotId: sub.weekSlotId },
+    orderBy: { version: 'asc' },
+  });
+
+  // 감사 로그는 파일이 사라지기 **전에** 내용을 붙잡아 둔다.
+  // 복구는 못 해도 "무엇이 있었는지"는 남는다 (ADR-0007에서 치르기로 한 대가)
+  await audit(actorEmail, 'delete', sub.divisionId, `submission:${sub.id}`, {
+    slot: sub.weekSlot.isoKey,
+    owner: sub.user.email,
+    versions: siblings.map((s) => ({
+      version: s.version,
+      originalName: s.originalName,
+      byteSize: s.byteSize,
+      sha256: s.sha256,
+    })),
+    bySelf: actorEmail === sub.user.email, // 본인 취소인지 운영자 삭제인지
+  });
+
+  await prisma.submission.deleteMany({
+    where: { userId: sub.userId, weekSlotId: sub.weekSlotId },
+  });
+
+  for (const s of siblings) {
+    try {
+      await unlink(resolveInRoot(s.filePath));
+    } catch (e) {
+      // 파일이 이미 없어도 삭제는 성공이다 — 목표 상태(없음)에 도달했다
+      const code = (e as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') {
+        logger.error({ err: String(e), submissionId: s.id, relPath: s.filePath }, 'orphan file after delete');
+      }
+    }
+  }
+
+  return {
+    removedVersions: siblings.length,
+    slotLabel: sub.weekSlot.label,
+    ownerName: sub.user.name,
+  };
 }

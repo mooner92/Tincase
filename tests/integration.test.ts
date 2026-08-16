@@ -38,6 +38,8 @@ const ID = {
   op: 'op@test.kei.re.kr',
   coord: 'coord@test.kei.re.kr',
   ghost: 'ghost@test.kei.re.kr', // DB에 없음
+  aDel: 'a-del@test.kei.re.kr', // 삭제 테스트 전용 (A부서) — 남의 제출물을 지우면 뒤 테스트가 깨진다
+  bDel: 'b-del@test.kei.re.kr', // 삭제 테스트 전용 (B부서)
 };
 
 const req = (url: string, identity?: string, init?: RequestInit) =>
@@ -90,6 +92,8 @@ beforeAll(async () => {
   await mkUser(ID.bLead, db.id, { divisionRole: 'lead' });
   await mkUser(ID.op, da.id, { isOperator: true });
   await mkUser(ID.coord, db.id, { isCoordinator: true });
+  await mkUser(ID.aDel, da.id);
+  await mkUser(ID.bDel, db.id);
 
   if (hasFixtures) {
     hwpBytes = readFileSync(path.join(FIX, 'master-template.hwp'));
@@ -102,6 +106,13 @@ async function upload(identity: string, bytes: Buffer, name = '주간업무.hwp'
   const fd = new FormData();
   fd.set('file', new File([new Uint8Array(bytes)], name));
   return POST(nx('/api/submissions', identity, { method: 'POST', body: fd }));
+}
+
+async function del(identity: string, id: string) {
+  const { DELETE } = await import('@/app/api/submissions/[id]/route');
+  return DELETE(nx(`/api/submissions/${id}`, identity, { method: 'DELETE' }), {
+    params: Promise.resolve({ id }),
+  });
 }
 
 const d = hasFixtures ? describe : describe.skip;
@@ -182,7 +193,7 @@ d('현황 (API-T05~T07)', () => {
     const res = await GET(nx('/api/division/status', ID.aMember));
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.summary.roster).toBe(4); // A부서 onRoster: member2 + lead + op
+    expect(body.summary.roster).toBe(5); // A부서 onRoster: member + member2 + lead + op + aDel
     const submitted = body.members.filter((m: { status: string }) => m.status === 'submitted');
     expect(submitted.length).toBe(2);
     expect(body.members[0].user.id).toBeUndefined(); // 축소판
@@ -267,6 +278,68 @@ d('격리 스위트 — 릴리스 게이트 (AU-T12~T18)', () => {
   });
 });
 
+d('제출 취소 — 삭제 권한 (ST-T30~33 · TACP-14)', () => {
+  it('[ST-T31] lead는 같은 부서 타인 제출물을 **읽을 수는 있어도 지우지는 못한다** → 404', async () => {
+    const { prisma } = await import('@/server/db');
+    await upload(ID.aDel, hwpBytes);
+    await upload(ID.aDel, hwpBytes2); // v2 — 전체 삭제 확인용
+    const sub = await prisma.submission.findFirstOrThrow({
+      where: { user: { email: ID.aDel }, isLatest: true },
+    });
+
+    // 대조군: 같은 lead가 같은 건을 **받는 것은** 된다 (TACP-11)
+    const dl = await import('@/app/api/submissions/[id]/download/route');
+    const canRead = await dl.GET(nx(`/api/submissions/${sub.id}/download`, ID.aLead), {
+      params: Promise.resolve({ id: sub.id }),
+    });
+    expect(canRead.status).toBe(200);
+
+    // 그런데 삭제는 404다 — 읽기 권한이 삭제 권한을 주지 않는다
+    expect((await del(ID.aLead, sub.id)).status).toBe(404);
+    expect(await prisma.submission.count({ where: { user: { email: ID.aDel } } })).toBe(2);
+  });
+
+  it('[ST-T32] coordinator의 타 부서 제출물 삭제 → 404 (readAll은 읽기까지다, TACP-8)', async () => {
+    const { prisma } = await import('@/server/db');
+    const sub = await prisma.submission.findFirstOrThrow({
+      where: { user: { email: ID.aDel }, isLatest: true },
+    });
+    expect((await del(ID.coord, sub.id)).status).toBe(404);
+    expect(await prisma.submission.count({ where: { user: { email: ID.aDel } } })).toBe(2);
+  });
+
+  it('[ST-T30] 본인 삭제 → 그 주차 **전 버전**이 사라지고 파일도 지워진다', async () => {
+    const { prisma } = await import('@/server/db');
+    const { fileExists } = await import('@/server/storage');
+    const all = await prisma.submission.findMany({ where: { user: { email: ID.aDel } } });
+    expect(all).toHaveLength(2);
+
+    const res = await del(ID.aDel, all.find((x) => x.isLatest)!.id);
+    expect(res.status).toBe(200);
+    expect((await res.json()).removedVersions).toBe(2); // v1도 함께 (ADR-0007)
+
+    expect(await prisma.submission.count({ where: { user: { email: ID.aDel } } })).toBe(0);
+    for (const s of all) expect(await fileExists(s.filePath)).toBe(false);
+  });
+
+  it('[ST-T33] operator는 타 부서 제출물도 지운다 + 감사 로그 (TACP-14)', async () => {
+    const { prisma } = await import('@/server/db');
+    await upload(ID.bDel, hwpBytes); // B부서 — op는 A부서 소속이다
+    const sub = await prisma.submission.findFirstOrThrow({ where: { user: { email: ID.bDel } } });
+
+    expect((await del(ID.op, sub.id)).status).toBe(200);
+    expect(await prisma.submission.count({ where: { user: { email: ID.bDel } } })).toBe(0);
+
+    const log = await prisma.auditLog.findFirst({
+      where: { action: 'delete', target: `submission:${sub.id}` },
+      orderBy: { at: 'desc' },
+    });
+    expect(log).not.toBeNull();
+    expect(log!.actor).toBe(ID.op);
+    expect(JSON.stringify(log!.detail)).toContain(ID.bDel); // 누구 것이었는지 남는다
+  });
+});
+
 d('마감 잠금 (API-T01/T02)', () => {
   it('[API-T01] 마감 지난 부서 → 업로드 409 slot_locked · [API-T02] 조회는 정상', async () => {
     const { prisma } = await import('@/server/db');
@@ -296,6 +369,28 @@ d('마감 잠금 (API-T01/T02)', () => {
       params: Promise.resolve({ id: own.id }),
     });
     expect(r.status).toBe(200); // 마감 후에도 다운로드는 가능
+  });
+});
+
+d('마감 후 삭제 (ST-T30b/T33b · TACP-14)', () => {
+  it('[ST-T30b] 마감 후 본인 취소 → 409 slot_locked (병합본만 남는 상태를 막는다)', async () => {
+    const { prisma } = await import('@/server/db');
+    const sub = await prisma.submission.findFirstOrThrow({
+      where: { user: { email: ID.aMember2 }, isLatest: true },
+    });
+    const res = await del(ID.aMember2, sub.id);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('slot_locked');
+    expect(await prisma.submission.count({ where: { user: { email: ID.aMember2 } } })).toBe(1);
+  });
+
+  it('[ST-T33b] 마감 후에도 operator는 지운다 (TACP §8 — 운영자 자신에 대한 방어는 하지 않는다)', async () => {
+    const { prisma } = await import('@/server/db');
+    const sub = await prisma.submission.findFirstOrThrow({
+      where: { user: { email: ID.aMember2 }, isLatest: true },
+    });
+    expect((await del(ID.op, sub.id)).status).toBe(200);
+    expect(await prisma.submission.count({ where: { user: { email: ID.aMember2 } } })).toBe(0);
   });
 });
 

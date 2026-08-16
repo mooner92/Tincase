@@ -4,8 +4,10 @@
 > 코드·스펙·UI가 이 문서와 어긋나면 **문서가 아니라 코드가 틀린 것**이다.
 > 규칙을 바꾸려면 §10 절차를 따른다. 코드를 먼저 고치는 것은 위반이다.
 
-버전 1.0 · 2026-08-14 · 대상 코드 v1.3.1
-관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md)
+버전 1.1 · 2026-08-17 · 대상 코드 v1.7.0
+관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md)
+
+변경 이력: v1.1 — `delete` Action 신설, TACP-8에 예외 하나(TACP-14) 추가
 
 ---
 
@@ -28,7 +30,7 @@ v1.3.0에서 레이아웃만 URL을 해석하고 페이지는 신원의 부서�
 |---|---|
 | **Principal** | 행동하는 주체. 사람(계정)이며, 역할 플래그의 조합으로 정의된다 |
 | **Resource** | 보호 대상. 부서·제출물·양식·규칙·명단·감사로그 |
-| **Action** | `read` · `write` · `manage` 중 하나 |
+| **Action** | `read` · `write` · `delete` · `manage` 중 하나 |
 | **Gate** | 판정을 내리는 **유일한** 함수. 전부 `src/server/authz.ts`에 산다 |
 | **own / foreign** | 신원의 부서(own) 인가, 그 밖(foreign) 인가 |
 
@@ -89,7 +91,9 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
 |---|:---:|:---:|:---:|:---:|
 | 부서 페이지 · 제출 현황(이름·시각) | read | read | read | read |
 | 내 제출물 | read/write | read/write | read/write | read/write |
+| **내 제출물 삭제** | delete(마감 전) | delete(마감 전) | delete(마감 전) | delete |
 | **남의 제출물 내용** | — | read | read | read |
+| **남의 제출물 삭제** | — | — | — | delete |
 | 부서 양식 내려받기 | read | read | read | read |
 | 부서 양식 등록·교체 | — | write | write | write |
 | 작성 안내 · 병합 규칙 | read | write | write | write |
@@ -123,13 +127,15 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
 | **존재 여부조차** | — | — | read | read |
 | 부서 페이지 · 제출 현황 | — | — | read | read |
 | 제출물 내용 | — | — | read | read |
+| **제출물 삭제** | — | — | — | **delete** |
 | 양식 내려받기 | — | — | — | — |
 | 양식 · 규칙 변경 | — | — | — | — |
 | 제출 | — | — | — | — |
 | 명단 · 역할 | — | — | — | manage |
 
-**타 부서 열은 `read` 아니면 `—` 다.** operator의 명단 관리(TACP-3)만이 유일한 예외이며,
-이는 문서가 아니라 사람에 대한 권한이다.
+**타 부서 열에서 `lead`·`coordinator`는 `read` 아니면 `—` 다.**
+operator에게만 두 가지 예외가 있다 — 명단 관리(TACP-3, 문서가 아니라 사람에 대한 권한)와
+제출물 삭제(TACP-14, 시스템 소유자의 정리 권한)다. 둘 다 감사 로그에 남는다.
 
 ---
 
@@ -178,11 +184,16 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
 `scope.division`을 페이지·API에서 직접 쓰는 것은 **위반이다.** v1.3.0 사고가 정확히 이것이었다.
 예외는 TACP-6의 쓰기 경로 하나뿐이며, 그때는 "신원의 부서"라는 의도를 주석으로 남긴다.
 
-### TACP-8 — readAll은 읽기만이다
+### TACP-8 — readAll은 읽기만이다 (예외: TACP-14)
 
 `coordinator`·`operator`의 전 부서 권한은 **읽기 전용**이다.
 `requireLead`가 `readAll`을 통과시키는 것은 lead 전용 **화면**을 보게 하기 위함이지,
 남의 부서에 쓰라는 뜻이 아니다. 쓰기는 TACP-6이 구조적으로 막는다.
+
+**유일한 예외는 operator의 제출물 삭제(TACP-14)다.**
+`coordinator`는 해당되지 않는다 — readAll을 공유하지만 삭제는 못 한다.
+즉 이 예외는 `readAll`에 붙은 것이 **아니라** `isOperator`에 붙은 것이다.
+새 예외를 만들려면 §10을 거친다.
 
 ### TACP-9 — 화면은 권한을 반영한다
 
@@ -200,6 +211,35 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
 같은 부서원끼리는 **누가 냈는지·언제 냈는지** 서로 본다. 그래야 서로 챙긴다.
 **파일 내용**은 lead부터다. 감시가 아니라 수합을 위한 최소 공개다.
 
+### TACP-14 — 삭제는 본인과 운영자만, 마감이 본인을 막는다
+
+삭제는 `read`·`write`와 **다른 Action이다.** 읽을 수 있다고 지울 수 있는 게 아니다.
+
+| 주체 | 삭제 가능 | 조건 |
+|---|:---:|---|
+| 본인 | ✓ | **마감 전까지만** |
+| operator | ✓ | 부서·마감 무관 |
+| lead | ✗ | 남의 제출물을 **읽을 수는 있어도 지울 수는 없다** |
+| coordinator | ✗ | 위와 같다 |
+
+**lead를 뺀 이유**가 이 규칙의 핵심이다. lead는 부서 문서의 책임자지만(TACP-3),
+제출물은 부서 문서가 아니라 **그 사람이 쓴 글**이다. 담당자가 부서원의 제출을 지울 수 있으면
+"안 낸 것"과 "지워진 것"이 구별되지 않고, 그 순간 제출 현황은 사실의 기록이 아니게 된다.
+담당자에게 필요한 것은 삭제가 아니라 **재제출 요청**이다.
+
+**마감이 본인을 막는 이유.** 마감 후 삭제를 열어두면 병합본에는 들어갔는데
+원본은 없는 상태가 만들어진다. 마감(WS-11)은 제출뿐 아니라 **철회에도 걸린다** — 예외 없다.
+
+**operator가 마감 후에도 지울 수 있는 이유**는 §8과 같다. operator는 시스템 소유자이고
+DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 줄지 않는다.
+막는 대신 **감사 로그가 남는 경로**를 제공하는 편이 정직하다.
+
+**삭제는 그 주차의 제출물 전체다.** v1만 지우고 v2를 남기는 부분 삭제는 없다.
+버전은 "같은 제출의 이력"이지 별개 제출물이 아니므로, 일부만 지우면 이력이 거짓말을 한다.
+
+**삭제는 되돌릴 수 없다.** 파일도 함께 지운다. 대신 감사 로그에
+파일명·크기·sha256·버전 수를 남겨 **무엇이 있었는지는 사라지지 않게** 한다.
+
 ---
 
 ## 5. 게이트 — 판정이 사는 유일한 곳
@@ -214,7 +254,8 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
 | `requireLead(headers)` | lead 또는 readAll | **404** |
 | `requireOperator(headers)` | operator | **404** |
 | `resolveTargetDivision(scope, slug?)` | 대상 부서 해석 (TACP-7) | **404** |
-| `findAccessibleSubmission(scope, id)` | 제출물 접근 판정 | **404** |
+| `findAccessibleSubmission(scope, id)` | 제출물 **읽기** 판정 | **404** |
+| `requireDeletableSubmission(scope, id)` | 제출물 **삭제** 판정 (TACP-14) | **404** / 409 |
 | `getDivisionView(slug)` | 페이지용 — 위를 묶어 `{division, isOwn, canManage, canSubmit}` | 404 |
 
 ### 판정 순서
@@ -256,6 +297,10 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
 | AU-T21b | 별칭 → 정식 슬러그 redirect |
 | AU-T22b | zip은 요청한 부서의 파일만 담는다 |
 | ST-15 | member의 같은 부서 타인 파일 → 404 |
+| ST-T30 | 본인 삭제 → 허용. 마감 후 본인 삭제 → **409** |
+| ST-T31 | **lead의 같은 부서 타인 제출물 삭제 → 404** (읽기는 되는데 삭제는 안 된다) |
+| ST-T32 | coordinator의 타 부서 제출물 삭제 → 404 |
+| ST-T33 | operator의 타 부서·마감 후 삭제 → 허용 + 감사 로그 |
 
 새 Resource를 추가하면 **그 Resource의 격리 테스트를 같은 커밋에 넣는다.**
 

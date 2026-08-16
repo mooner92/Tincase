@@ -90,6 +90,20 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 | API-15 | ST-15 권한 매트릭스. 스코프 밖은 404 |
 | API-16 | 구버전도 id 지정으로 다운로드 가능 · RFC 5987 파일명 (ST-13) |
 
+### `DELETE /api/submissions/:id` — 제출 취소 (v1.7.0)
+
+권한 근거는 [TACP-14](../../TACP.md) · [ADR-0007](../adr/0007-submission-deletion.md).
+
+| ID | 요구사항 |
+|---|---|
+| API-40 | 판정은 `requireDeletableSubmission` 하나로. 본인(마감 전) · operator(무조건). **lead·coordinator는 404** |
+| API-41 | id는 손잡이일 뿐 — 그 사람의 **그 주차 전 버전**이 함께 삭제된다 (부분 삭제 없음) |
+| API-42 | 마감 후 본인 요청 → **409 `slot_locked`**. 권한 없음(404)과 구별한다 — 존재는 이미 아는 사실이라 누출이 아니다 |
+| API-43 | 감사 로그 `delete` 필수. 파일명·크기·sha256·버전 목록을 **파일이 지워지기 전에** 기록 |
+| API-44 | 속도 제한 20회 / 5분 (업로드 10회보다 넉넉 — 정리 작업은 연속으로 일어난다) |
+
+응답 `200 {removedVersions, slotLabel, ownerName}`
+
 ### `GET /api/template` — 부서 양식 다운로드
 
 | ID | 요구사항 |

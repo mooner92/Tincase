@@ -20,5 +20,6 @@ export default async function ManagePage({ params }: { params: Promise<{ divisio
       division={view.division}
       canMerge={view.isOwn && view.canManage}
       canDownloadMerged={view.canManage}
+      canDeleteAny={view.canDeleteAny}
     />;
 }

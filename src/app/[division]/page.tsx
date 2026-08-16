@@ -74,6 +74,7 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
               uploadedAtKst={toKstIso(mySubmission.uploadedAt).slice(5, 16).replace('T', ' ')}
               sizeKb={(mySubmission.byteSize / 1024).toFixed(1)}
               originalName={mySubmission.originalName}
+              canCancel={!locked} /* TACP-14 — 마감 후에는 렌더하지 않는다 */
             />
           )}
 

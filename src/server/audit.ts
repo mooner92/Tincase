@@ -4,6 +4,7 @@ import { logger } from './logger';
 
 export type AuditAction =
   | 'upload'
+  | 'delete'
   | 'download'
   | 'download_zip'
   | 'preview'

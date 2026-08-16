@@ -22,6 +22,7 @@ export async function ManageView({
   isoKey,
   canMerge,
   canDownloadMerged,
+  canDeleteAny,
 }: {
   division: Division; // ★ 해석된 부서. scope.division을 쓰면 타 부서 열람 시 어긋난다
   isoKey?: string;
@@ -29,6 +30,8 @@ export async function ManageView({
   canMerge: boolean;
   /** 병합본 내려받기 — 담당자 이상 (TACP §3.2) */
   canDownloadMerged: boolean;
+  /** 제출물 삭제 — operator 전용 (TACP-14). 담당자에게는 주지 않는다 */
+  canDeleteAny: boolean;
 }) {
   const now = new Date();
   await ensureCurrentSlot(now);
@@ -144,7 +147,11 @@ export async function ManageView({
 
       {/* SubmissionTable + 드로어 (CP-48~53, PG-19/20) */}
       <div className="mt-6">
-        <SubmissionTableClient caption={`${division.nameKo} ${slot.label} 제출 현황`} members={tableRows} />
+        <SubmissionTableClient
+          caption={`${division.nameKo} ${slot.label} 제출 현황`}
+          members={tableRows}
+          canDelete={canDeleteAny}
+        />
       </div>
       {offRoster.length > 0 && (
         <p className="mt-2 px-1 text-xs text-muted-soft">
