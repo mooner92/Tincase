@@ -21,11 +21,14 @@ export function OrgMonitor({
   weekLabel,
   capturedAtKst,
   deadlineText,
+  excludedNote,
 }: {
   layout: OrgLayout;
   weekLabel: string;
   capturedAtKst: string;
   deadlineText: string;
+  /** 트리에 그리지 않은 부서 — 숨기는 게 아니라 그리지 않는 것이므로 숫자로 알린다 */
+  excludedNote: { divisions: number; people: number };
 }) {
   const [focus, setFocus] = useState<Focus>(null);
   const [showMissing, setShowMissing] = useState(false);
@@ -52,9 +55,9 @@ export function OrgMonitor({
             <span className="text-[24px] text-muted"> / {layout.totals.roster}</span>
             <span className="ml-3 text-[20px] text-muted-soft">{pct}%</span>
           </p>
-          {layout.excluded.divisions > 0 && (
+          {excludedNote.divisions > 0 && (
             <p className="mt-1 text-xs text-muted-soft">
-              업무일지를 내지 않는 부서 {layout.excluded.divisions}개({layout.excluded.people}명)는 집계에서 제외했습니다
+              업무일지를 내지 않는 부서 {excludedNote.divisions}개({excludedNote.people}명)는 제외했습니다
             </p>
           )}
         </div>
@@ -125,7 +128,7 @@ export function OrgMonitor({
                   d={bundledPath(p.angle, R.parent, d.angle, R.division)}
                   fill="none"
                   stroke="#ffffff"
-                  strokeOpacity={d.counted ? 0.28 : 0.08}
+                  strokeOpacity={0.28}
                   strokeWidth={1.2}
                 />
               )),
@@ -202,7 +205,7 @@ export function OrgMonitor({
                     cy={d.y}
                     r={done ? 7 : 6}
                     fill={done ? '#4ade80' : d.submitted > 0 ? '#e8b94a' : '#ffffff'}
-                    fillOpacity={dim ? 0.25 : d.counted ? 1 : 0.22}
+                    fillOpacity={dim ? 0.25 : 1}
                     stroke={done ? '#4ade80' : 'none'}
                     strokeOpacity={0.35}
                     strokeWidth={5}
@@ -216,7 +219,7 @@ export function OrgMonitor({
                     dy="3"
                     className="text-[9.5px]"
                     fill="#ffffff"
-                    fillOpacity={dim ? 0.25 : d.counted ? 0.85 : 0.3}
+                    fillOpacity={dim ? 0.25 : 0.85}
                   >
                     {d.name}
                   </text>
@@ -258,7 +261,6 @@ export function OrgMonitor({
               <Legend color="#4ade80" label="제출" />
               <Legend color="#ffffff" opacity={0.45} label="미제출" />
               <Legend color="#ffffff" opacity={0.15} label="제출 대상 아님" />
-              <span className="text-white/40">흐린 부서 = 업무일지 미대상</span>
               <span className="flex items-center gap-1.5">
                 <span className="inline-block h-2.5 w-2.5 rounded-full border-[1.5px] border-[#ffb084]" />
                 부서 담당자

@@ -65,7 +65,16 @@ export default async function MonitorPage() {
     }),
   }));
 
-  const layout = layoutOrg(nodes);
+  // 트리에는 **실제로 업무일지를 내는 부서만** 그린다.
+  // 30개 전부 그리면 227명이 회색 점으로 원 둘레를 채워 정작 볼 것이 안 보인다.
+  // 제외된 부서는 숫자로만 알린다 (숨기는 게 아니라 그리지 않는 것).
+  const counted = nodes.filter((n) => n.counted);
+  const skipped = nodes.filter((n) => !n.counted);
+  const layout = layoutOrg(counted);
+  const excludedNote = {
+    divisions: skipped.length,
+    people: skipped.reduce((n, d) => n + d.people.filter((p) => p.onRoster).length, 0),
+  };
   // 스냅샷이 못 보여주는 것 — "이번 주 안 냄"과 "3주 연속 안 냄"은 다른 얘기다
   const streaks = await missingStreaks(now);
 
@@ -102,6 +111,7 @@ export default async function MonitorPage() {
           weekLabel={slot.label}
           capturedAtKst={toKstIso(now).slice(5, 16).replace('T', ' ') + ' 기준'}
           deadlineText={formatDeadlineKo(effectiveDeadline(slot, divisions[0]))}
+          excludedNote={excludedNote}
         />
 
         {streaks.length > 0 && (

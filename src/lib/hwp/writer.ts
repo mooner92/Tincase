@@ -108,12 +108,25 @@ export function setCellText(recs: HwpRecord[], cell: CellSpan, text: string): nu
   }
   if (headerIdx < 0) throw new HwpWriteError(`셀(${cell.row},${cell.col})에 PARA_HEADER가 없습니다`);
 
-  // 빈 셀에는 PARA_TEXT 레코드 자체가 없다 (실측). 이때만 새로 만든다 —
-  // PARA_TEXT는 UTF-16LE 글자뿐이고 서식은 PARA_CHAR_SHAPE가 들고 있어서 안전하다.
-  const PARA_MARK = '\r'; // 0x000D — 채워진 셀의 꼬리와 동일 (실측)
-  let inserted = 0;
+  const PARA_MARK = '\r'; // 0x000D — 문단 끝 (실측)
+  let delta = 0;
+
+  if (text === '') {
+    // ★ 빈 칸에는 PARA_TEXT 레코드가 **없어야 한다** (원본 양식 실측: 빈 셀 20개 전부 없음).
+    // 문단끝 표시만 든 빈 레코드를 넣으면 한글이 문서를 손상으로 판정한다 —
+    // 라이브러리·LibreOffice는 그대로 읽어서 이 실수가 오래 드러나지 않았다.
+    if (textIdx >= 0) {
+      recs.splice(textIdx, 1);
+      delta = -1;
+    }
+    setNChars(recs, headerIdx, 1); // 빈 문단도 글자 수는 1 (문단끝 몫)
+    return delta;
+  }
+
   let tail = PARA_MARK;
   if (textIdx < 0) {
+    // 빈 칸에 글자를 넣는다 — PARA_TEXT는 UTF-16LE 글자뿐이고 서식은
+    // PARA_CHAR_SHAPE가 들고 있어서 새로 만들어도 안전하다.
     textIdx = headerIdx + 1;
     recs.splice(textIdx, 0, {
       tag: TAG.PARA_TEXT,
@@ -121,7 +134,7 @@ export function setCellText(recs: HwpRecord[], cell: CellSpan, text: string): nu
       data: Buffer.alloc(0),
       extended: false,
     });
-    inserted = 1;
+    delta = 1;
   } else {
     // 문단 끝 제어 문자는 원본 그대로 유지하고 본문만 교체
     const old = recs[textIdx].data.toString('ucs2');
@@ -132,14 +145,16 @@ export function setCellText(recs: HwpRecord[], cell: CellSpan, text: string): nu
 
   const next = Buffer.from(text + tail, 'ucs2');
   recs[textIdx] = { ...recs[textIdx], data: next };
+  setNChars(recs, headerIdx, next.length / 2);
+  return delta; // 레코드 수 변화 — 호출자가 인덱스를 다시 잡아야 한다
+}
 
-  // 글자 수 갱신 — 안 고치면 한글이 문단을 잘라 읽는다. 최상위 플래그 비트는 보존
+/** 글자 수 갱신. 최상위 플래그 비트는 보존한다 — 안 고치면 한글이 문단을 잘라 읽는다 */
+function setNChars(recs: HwpRecord[], headerIdx: number, count: number): void {
   const d = Buffer.from(recs[headerIdx].data);
   const flag = d.readUInt32LE(0) & NCHARS_FLAG;
-  d.writeUInt32LE((flag | (next.length / 2)) >>> 0, 0);
+  d.writeUInt32LE((flag | count) >>> 0, 0);
   recs[headerIdx] = { ...recs[headerIdx], data: d };
-
-  return inserted; // 레코드가 늘었으면 호출자가 인덱스를 다시 잡아야 한다
 }
 
 /**
@@ -228,7 +243,8 @@ export function packHwp(original: Buffer, sections: readonly Buffer[]): Buffer {
   sections.forEach((sec, n) => {
     CFB.utils.cfb_add(cf, `/BodyText/Section${n}`, deflateRawSync(sec, { level: 9 }));
   });
-  return Buffer.from(CFB.write(cf, { type: 'buffer' }) as Uint8Array);
+  // 센티널을 떼어낸다 -- 한글이 낯선 스트림을 만나면 문서를 열지 못한다 (HM-08a)
+  return stripCfbSentinel(Buffer.from(CFB.write(cf, { type: 'buffer' }) as Uint8Array));
 }
 
 /** 편의 함수 — 섹션 레코드를 열고 고친 뒤 되돌려 준다 */
@@ -236,4 +252,88 @@ export function editSection(sectionBytes: Buffer, edit: (recs: HwpRecord[]) => v
   const recs = parseRecords(sectionBytes);
   edit(recs);
   return serializeRecords(recs);
+}
+
+
+// -- cfb 센티널 제거 (HM-08a) --------------------------------
+//
+// `cfb`(SheetJS) 라이브러리는 쓸 때마다 4바이트짜리 표식 스트림을 강제로 넣는다
+// (`seed_cfb`). 자기 라이브러리로 만든 파일임을 표시하는 용도인데,
+// **한글은 이 낯선 스트림을 만나면 문서를 열지 못한다** (실측).
+//
+// OLE 디렉터리는 적록 트리지만 이 파일들은 실제로 오른쪽으로만 이어진 목록이라,
+// 센티널을 가리키는 포인터를 그 다음 항목으로 넘기고 항목을 지우면 끝난다.
+// 트리 재균형이 필요한 형태(왼쪽 자식이 있는 경우)면 **건드리지 않고 그대로 둔다** --
+// 잘못 이어 붙인 디렉터리는 파일을 통째로 못 읽게 만든다.
+
+const SENTINEL_NAME = String.fromCharCode(1) + 'Sh33tJ5';
+const DIR_ENTRY = 128;
+const OFF = { nameLen: 64, type: 66, left: 68, right: 72, child: 76 } as const;
+
+/** 디렉터리 엔트리가 실제로 놓인 파일 오프셋들 (FAT 체인을 따라간다) */
+function dirEntryOffsets(buf: Buffer): number[] {
+  const sectorSize = 1 << buf.readUInt16LE(30);
+  const numFat = buf.readUInt32LE(44);
+  const sectorAt = (n: number) => (n + 1) * sectorSize;
+
+  const fat: Buffer[] = [];
+  for (let i = 0; i < numFat; i++) {
+    const s = buf.readUInt32LE(76 + i * 4);
+    if (s >= 0xfffffffa) break;
+    fat.push(buf.subarray(sectorAt(s), sectorAt(s) + sectorSize));
+  }
+  const fatBuf = Buffer.concat(fat);
+  const next = (n: number) => (n * 4 + 4 <= fatBuf.length ? fatBuf.readUInt32LE(n * 4) : 0xfffffffe);
+
+  const offsets: number[] = [];
+  let sec = buf.readUInt32LE(48);
+  const seen = new Set<number>();
+  while (sec < 0xfffffffa && !seen.has(sec)) {
+    seen.add(sec);
+    for (let k = 0; k < sectorSize; k += DIR_ENTRY) offsets.push(sectorAt(sec) + k);
+    sec = next(sec);
+  }
+  return offsets;
+}
+
+/**
+ * 센티널 스트림을 디렉터리에서 떼어낸다. 떼어내지 못하면 원본을 그대로 돌려준다
+ * (실패해도 파일이 나빠지지는 않는다).
+ */
+export function stripCfbSentinel(input: Buffer): Buffer {
+  const buf = Buffer.from(input);
+  const offsets = dirEntryOffsets(buf);
+
+  const nameOf = (o: number) => {
+    const len = buf.readUInt16LE(o + OFF.nameLen);
+    if (len < 2 || len > 64) return '';
+    return buf.subarray(o, o + len - 2).toString('utf16le');
+  };
+
+  const target = offsets.findIndex((o) => buf[o + OFF.type] !== 0 && nameOf(o) === SENTINEL_NAME);
+  if (target < 0) return input; // 이미 없다
+
+  const to = offsets[target];
+  const left = buf.readInt32LE(to + OFF.left);
+  const right = buf.readInt32LE(to + OFF.right);
+  if (left !== -1) return input; // 트리 재균형이 필요한 형태 -- 손대지 않는다
+
+  // 센티널을 가리키던 포인터를 그 다음 항목으로 넘긴다
+  let relinked = false;
+  for (const [i, o] of offsets.entries()) {
+    if (i === target || buf[o + OFF.type] === 0) continue;
+    for (const field of [OFF.left, OFF.right, OFF.child] as const) {
+      if (buf.readInt32LE(o + field) === target) {
+        buf.writeInt32LE(right, o + field);
+        relinked = true;
+      }
+    }
+  }
+  if (!relinked) return input; // 아무도 안 가리키면 우리가 구조를 잘못 읽은 것이다
+
+  buf.fill(0, to, to + DIR_ENTRY); // 미사용 항목 (type 0)
+  buf.writeInt32LE(-1, to + OFF.left);
+  buf.writeInt32LE(-1, to + OFF.right);
+  buf.writeInt32LE(-1, to + OFF.child);
+  return buf;
 }

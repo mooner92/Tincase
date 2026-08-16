@@ -5,11 +5,11 @@ import { existsSync, readFileSync } from 'node:fs';
 import { inflateRawSync } from 'node:zlib';
 import * as CFB from 'cfb';
 import path from 'node:path';
-import { parseRecords, serializeRecords, paraText } from './record';
+import { parseRecords, serializeRecords, paraText, TAG } from './record';
 import { openHwp } from './ole';
 import { extractTables, tableGrid } from './model';
 import { readWorklog, validateHwpUpload, UploadValidationError } from './reader';
-import { fillTable, packHwp } from './writer';
+import { fillTable, packHwp, stripCfbSentinel, locateTables } from './writer';
 import { createHash } from 'node:crypto';
 
 const FIX = path.resolve(__dirname, '../../../fixtures');
@@ -207,5 +207,111 @@ d('writer — 표 편집', () => {
     expect(back.worklog.achievements.length).toBe(15);
     expect(back.worklog.plans).toEqual([{ content: '계획 하나', date: '', place: '', attendee: '' }]);
     expect(back.worklog.notes).toEqual([{ content: '특이 하나', date: '', place: '', attendee: '' }]);
+  });
+});
+
+// -- HM-08a 센티널 제거 --------------------------------------
+// cfb는 쓸 때마다 자기 표식 스트림을 넣는데, 한글이 그걸 만나면 문서를 열지 못한다.
+// 이 테스트가 깨지면 **생성한 hwp를 아무도 못 연다** — 조용히 실패하는 종류라 게이트로 둔다.
+d('writer — cfb 센티널', () => {
+  const src = () => readFileSync(f('master-template.hwp'));
+  const streams = (b: Buffer) => CFB.read(b, { type: 'buffer' }).FullPaths.map((x) => x.split('/').pop() ?? '');
+
+  it('[HM-T26] 출력에 센티널 스트림이 없다', () => {
+    const recs = parseRecords(openHwp(src()).sections[0]);
+    fillTable(recs, 0, [['1-1', '검증', '', '', '']]);
+    const out = packHwp(src(), [serializeRecords(recs)]);
+    expect(streams(out).some((n) => n.includes('Sh33t'))).toBe(false);
+  });
+
+  it('[HM-T27] 스트림 목록이 원본과 정확히 같다 — 빠뜨린 것도 더한 것도 없어야 한다', () => {
+    const recs = parseRecords(openHwp(src()).sections[0]);
+    fillTable(recs, 0, [['1-1', '검증', '', '', '']]);
+    const out = packHwp(src(), [serializeRecords(recs)]);
+    expect(streams(out).sort()).toEqual(streams(src()).sort());
+  });
+
+  it('[HM-T28] 센티널이 없는 입력은 그대로 돌려준다 (두 번 걸어도 안전)', () => {
+    const once = stripCfbSentinel(src());
+    expect(once.equals(src())).toBe(true);
+  });
+
+  it('[HM-T29] 제거 후에도 표를 다시 읽을 수 있다', () => {
+    const recs = parseRecords(openHwp(src()).sections[0]);
+    fillTable(recs, 0, [...Array(12)].map((_, i) => [`1-${i + 1}`, `행 ${i + 1}`, '', '', '']));
+    const back = readWorklog(packHwp(src(), [serializeRecords(recs)]));
+    expect(back.worklog.achievements).toHaveLength(12);
+    expect(back.worklog.achievements.at(-1)!.content).toBe('행 12');
+  });
+});
+
+// -- HM-11a 빈 셀 규칙 (한글 실측으로 확인된 게이트) ----------
+//
+// 한글 양식은 **빈 칸에 PARA_TEXT 레코드를 두지 않는다** (원본 양식 실측: 빈 셀 20개 전부).
+// 문단끝 표시만 든 빈 레코드를 넣으면 **한글이 문서를 손상으로 판정한다.**
+//
+// 이 테스트가 없으면 안 걸린다: 우리 리더도 LibreOffice도 빈 레코드를 그대로 읽는다.
+// 실제로 그래서 여섯 번의 확인 왕복 끝에야 원인이 잡혔다.
+d('writer — 빈 셀 규칙', () => {
+  const src = () => readFileSync(f('master-template.hwp'));
+  const cellsOf = (b: Buffer, table = 0) => {
+    const recs = parseRecords(openHwp(b).sections[0]);
+    const t = locateTables(recs)[table];
+    return t.cells.map((c) => ({
+      row: c.row,
+      col: c.col,
+      hasText: recs.slice(c.start, c.end).some((r) => r.tag === TAG.PARA_TEXT),
+      nChars: recs.slice(c.start, c.end).find((r) => r.tag === TAG.PARA_HEADER)!.data.readUInt32LE(0) & 0x7fffffff,
+    }));
+  };
+
+  it('[HM-T30] 원본 양식의 빈 셀에는 PARA_TEXT가 없다 (규칙의 근거)', () => {
+    const empty = cellsOf(src()).filter((c) => !c.hasText);
+    expect(empty.length).toBeGreaterThan(0);
+    for (const c of empty) expect(c.nChars).toBe(1); // 빈 문단도 글자 수는 1 (문단끝 몫)
+  });
+
+  it('[HM-T31] 빈 글자를 채워도 PARA_TEXT를 만들지 않는다 ★', () => {
+    const recs = parseRecords(openHwp(src()).sections[0]);
+    fillTable(recs, 0, [...Array(12)].map((_, i) => [`1-${i + 1}`, `업무 ${i + 1}`, '', '', '']));
+    const out = packHwp(src(), [serializeRecords(recs)]);
+    // 3·4·5열은 전부 빈 글자였다 → 레코드가 없어야 한다
+    for (const c of cellsOf(out).filter((c) => c.row >= 1 && c.col >= 2)) {
+      expect(c.hasText, `(${c.row},${c.col})에 빈 PARA_TEXT가 생겼다`).toBe(false);
+      expect(c.nChars).toBe(1);
+    }
+  });
+
+  it('[HM-T32] 글자가 있던 셀을 비우면 레코드를 지운다', () => {
+    const recs = parseRecords(openHwp(src()).sections[0]);
+    fillTable(recs, 0, [['1-1', '', '', '', '']]); // 1-1은 원래 "제10차 인사위원회"
+    const out = packHwp(src(), [serializeRecords(recs)]);
+    const c = cellsOf(out).find((x) => x.row === 1 && x.col === 1)!;
+    expect(c.hasText).toBe(false);
+    expect(c.nChars).toBe(1);
+  });
+
+  it('[HM-T33] 빈 칸에 글자를 넣으면 레코드를 만든다 (반대 방향)', () => {
+    const recs = parseRecords(openHwp(src()).sections[0]);
+    fillTable(recs, 0, [...Array(3)].map((_, i) => [`1-${i + 1}`, `내용 ${i + 1}`, '', '중회의실', '']));
+    const out = packHwp(src(), [serializeRecords(recs)]);
+    for (const c of cellsOf(out).filter((c) => c.row >= 1 && c.col === 3)) {
+      expect(c.hasText).toBe(true);
+      expect(c.nChars).toBe('중회의실'.length + 1);
+    }
+  });
+
+  it('[HM-T34] 표 3개를 동시에 고쳐도 규칙이 유지된다 (실제 병합 조건)', () => {
+    const recs = parseRecords(openHwp(src()).sections[0]);
+    fillTable(recs, 0, [...Array(20)].map((_, i) => [`1-${i + 1}`, `실적 ${i + 1}`, '', '', '']));
+    fillTable(recs, 1, [...Array(10)].map((_, i) => [`2-${i + 1}`, `계획 ${i + 1}`, '', '', '']));
+    fillTable(recs, 2, [['3-1', '특이', '', '', '']]);
+    const out = packHwp(src(), [serializeRecords(recs)]);
+    for (const table of [0, 1, 2]) {
+      for (const c of cellsOf(out, table)) {
+        // 어떤 셀도 "레코드는 있는데 글자 수가 1" 인 상태여선 안 된다
+        expect(c.hasText && c.nChars === 1, `표${table + 1} (${c.row},${c.col}) 빈 레코드`).toBe(false);
+      }
+    }
   });
 });
