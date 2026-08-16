@@ -62,12 +62,16 @@ export function WebComposer({
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pasted, setPasted] = useState<string | null>(null);
+  const [done, setDone] = useState(false);
   const router = useRouter();
 
+  // 임시 보관은 **제출 전까지만**. 제출 후에도 남아 있으면 다음에 열었을 때
+  // 낸 건지 안 낸 건지 헷갈린다 (지연 저장이 뒤늦게 되살리는 것도 막는다)
   useEffect(() => {
+    if (done) return;
     const t = setTimeout(() => localStorage.setItem(draftKey(isoKey), JSON.stringify(data)), 800);
     return () => clearTimeout(t);
-  }, [data, isoKey]);
+  }, [data, isoKey, done]);
 
   const filled = useMemo(
     () =>
@@ -139,8 +143,10 @@ export function WebComposer({
           setMsg({ ok: false, text: body.message ?? '제출하지 못했습니다.' });
           return;
         }
+        setDone(true); // 지연 저장이 다시 쓰지 못하게 먼저 막는다
         localStorage.removeItem(draftKey(isoKey));
-        setMsg({ ok: true, text: `제출되었습니다 (v${body.version}).` });
+        setData({ achievements: [blank(), blank(), blank()], plans: [blank(), blank()], notes: [blank()] });
+        setMsg({ ok: true, text: `제출되었습니다 (v${body.version}). 다시 열면 빈 화면으로 시작합니다.` });
         router.refresh();
         setTimeout(onClose, 900);
       })
@@ -227,6 +233,9 @@ export function WebComposer({
                 </div>
 
                 {data[s.key].map((row, i) => {
+                  // 비어 있는 구역의 첫 칸이 곧 "여기에 붙여넣으세요"다.
+                  // 한 줄이라도 채워지면 안내는 방해가 되므로 사라진다
+                  const isPasteTarget = i === 0 && filled[s.key] === 0;
                   const no = row.content.trim()
                     ? `${s.no}-${data[s.key].slice(0, i + 1).filter((r) => r.content.trim()).length}`
                     : '';
@@ -242,8 +251,12 @@ export function WebComposer({
                         value={row.content}
                         onChange={(e) => set(s.key, i, 'content', e.target.value)}
                         onPaste={(e) => onPaste(s.key, i, e)}
-                        placeholder={i === 0 ? '업무 내용을 적거나, 한글 표를 붙여넣으세요' : ''}
-                        className={`${cell} flex-1`}
+                        placeholder={isPasteTarget ? '여기에 한글 표를 붙여넣으세요 (Ctrl+V) · 직접 입력해도 됩니다' : ''}
+                        className={`${cell} flex-1 ${
+                          isPasteTarget
+                            ? 'border-2 border-dashed border-brand-amber bg-brand-mint/15 placeholder:text-body-strong'
+                            : ''
+                        }`}
                       />
                       <input
                         value={row.date}
