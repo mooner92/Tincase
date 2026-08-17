@@ -87,9 +87,10 @@ export function AppHeader({
       <div className="mx-auto flex h-16 max-w-[1120px] items-center justify-between gap-4 px-5">
         <div className="flex min-w-0 items-center gap-3">
           <Link href={slug ? `/${slug}` : '/'} className="shrink-0" aria-label="Tincase 홈">
-            {/* SVG 로고 — next/image는 최적화할 게 없고 레이아웃만 복잡해진다 */}
+            {/* SVG 로고 — next/image는 최적화할 게 없고 레이아웃만 복잡해진다.
+                h는 30px: viewBox 높이가 84→96으로 늘어(아래 잘림 수정) 같은 h면 12% 작아진다 */}
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/brand/tincase-lockup.svg" alt="Tincase" className="h-[26px] w-auto" />
+            <img src="/brand/tincase-lockup.svg" alt="Tincase" className="h-[30px] w-auto" />
           </Link>
           <span
             className={`badge-pill max-w-44 truncate ${foreign ? 'bg-warning-soft text-body-strong' : ''}`}
