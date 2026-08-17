@@ -139,6 +139,14 @@ export function AppHeader({
             >
               <Link
                 role="menuitem"
+                href="/guide"
+                onClick={() => setOpen(false)}
+                className="block px-4 py-2 text-sm text-body hover:bg-surface-soft"
+              >
+                사용 안내
+              </Link>
+              <Link
+                role="menuitem"
                 href="/password"
                 onClick={() => setOpen(false)}
                 className="block px-4 py-2 text-sm text-body hover:bg-surface-soft"
