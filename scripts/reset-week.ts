@@ -16,12 +16,23 @@ import { resolveInRoot } from '../src/server/storage';
 
 const prisma = new PrismaClient();
 
-async function removeQuietly(rel: string): Promise<boolean> {
+/**
+ * 이미 없으면 성공(`gone`), 정말 못 지웠으면 실패(`failed`)로 **구분**한다.
+ *
+ * 처음에는 둘 다 조용히 false를 돌려줬다. 그래서 운영 서버에서 이 스크립트가
+ * "파일 0개"라고 보고했는데 실제로는 5개가 그대로 남아 있었다 —
+ * 컨테이너가 uid 10001로 파일을 만들고 디렉터리에 group write가 없어서
+ * 호스트 계정이 unlink에 실패했고, 그 EACCES를 catch가 삼켰다.
+ * **정리했다고 보고하고 정리가 안 되는 것**이 이 스크립트의 최악의 실패다.
+ */
+async function removeFile(rel: string): Promise<'removed' | 'gone' | 'failed'> {
   try {
     await unlink(resolveInRoot(rel));
-    return true;
-  } catch {
-    return false; // 이미 없으면 그만 — 정리가 목적이지 완벽한 기록이 목적이 아니다
+    return 'removed';
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ENOENT') return 'gone';
+    console.error(`  ✗ 파일 삭제 실패: ${rel} — ${(e as Error).message}`);
+    return 'failed';
   }
 }
 
@@ -62,8 +73,13 @@ async function main() {
   }
 
   let files = 0;
-  for (const s of subs) if (await removeQuietly(s.filePath)) files++;
-  for (const r of runs) if (r.outputPath && (await removeQuietly(r.outputPath))) files++;
+  let failed = 0;
+  const tally = (r: 'removed' | 'gone' | 'failed') => {
+    if (r === 'removed') files++;
+    else if (r === 'failed') failed++;
+  };
+  for (const s of subs) tally(await removeFile(s.filePath));
+  for (const r of runs) if (r.outputPath) tally(await removeFile(r.outputPath));
 
   const { count: delSubs } = await prisma.submission.deleteMany({
     where: { divisionId: division.id, weekSlotId: slot.id },
@@ -74,6 +90,15 @@ async function main() {
 
   console.log(`\n지웠습니다 — 제출물 ${delSubs}건 · 병합 기록 ${delRuns}건 · 파일 ${files}개`);
   console.log('사용자·비밀번호·부서 설정·양식·감사 로그는 그대로입니다.');
+
+  if (failed > 0) {
+    // 조용히 넘어가면 "정리됐다"고 믿게 된다. DB는 이미 지워졌으므로 고아 파일이다
+    console.error(`\n⚠ 파일 ${failed}개를 지우지 못했습니다 (DB 행은 지워져 고아 파일입니다).`);
+    console.error('  운영 서버라면 컨테이너 안에서 실행하거나 root 권한으로 지우세요:');
+    console.error('    sudo find "$STORAGE_ROOT/divisions" -name "*.hwp" -newermt <날짜>');
+    await prisma.$disconnect();
+    process.exit(1); // 실패는 종료 코드로도 드러나야 한다
+  }
   await prisma.$disconnect();
 }
 
