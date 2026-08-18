@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { getPageScope, getDivisionView } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { ensureCurrentSlot, effectiveDeadline, divisionStatus } from '@/server/worklog';
-import { formatDeadlineKo, isLocked, toKstIso } from '@/lib/week';
+import { formatDeadlineKo, isLocked, slotKind, toKstIso } from '@/lib/week';
 import { DeadlineCountdown } from '@/components/DeadlineCountdown';
 import { SubmitChoice } from '@/components/SubmitChoice';
 import { MySubmissionCard } from '@/components/MySubmissionCard';
@@ -38,6 +38,8 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
   ]);
 
   const guideLines = division.guideText.split('\n').filter(Boolean);
+  // WS-14 — 그 달 마지막 주에는 월간 업무일지를 낸다. 주차는 그대로이고 '무엇을 내는가'가 바뀐다
+  const monthly = slotKind(slot) === 'monthly';
   const submitted = members.filter((m) => m.status === 'submitted').length;
 
   return (
@@ -46,9 +48,16 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
       <section className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">
-            {slot.year}년 · 이번 주차
+            {slot.year}년 · {monthly ? `${slot.month}월 마지막 주` : '이번 주차'}
           </p>
-          <h1 className="display mt-1 text-[40px] leading-[1.1]">{slot.label}</h1>
+          <h1 className="display mt-1 flex flex-wrap items-center gap-2.5 text-[40px] leading-[1.1]">
+            {slot.label}
+            {monthly && (
+              <span className="rounded-full bg-brand px-3 py-1 text-[15px] font-semibold text-white">
+                월간
+              </span>
+            )}
+          </h1>
         </div>
         <div className="flex items-center gap-2 pb-1.5">
           {locked ? (
@@ -61,6 +70,20 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
           )}
         </div>
       </section>
+
+      {monthly && (
+        <section className="mt-6 flex gap-3 rounded-[14px] border border-brand-tint bg-brand-soft px-5 py-4">
+          <span aria-hidden className="mt-0.5 text-brand">◆</span>
+          <div>
+            <p className="font-semibold text-ink">이번 주는 {slot.month}월 월간 업무일지입니다</p>
+            <p className="mt-1 text-[15px] text-body">
+              그 달의 마지막 날이 이번 주에 있어 이번이 {slot.month}월의 마지막 주입니다.
+              한 주가 아니라 <strong className="font-semibold text-ink">한 달치</strong>를 정리해 주세요 —
+              주간보다 자세하고 분량도 많습니다. 마감·제출 방법은 평소와 같습니다.
+            </p>
+          </div>
+        </section>
+      )}
 
       <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-12">
         {/* 좌측 7 — 제출 (주인공) */}

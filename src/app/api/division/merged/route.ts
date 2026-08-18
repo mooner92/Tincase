@@ -8,6 +8,7 @@ import { handler } from '@/server/http';
 import { audit } from '@/server/audit';
 import { readStoredFile, contentDisposition } from '@/server/storage';
 import { mergedFileName } from '@/server/merge';
+import { slotKind } from '@/lib/week';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,7 +38,7 @@ export const GET = handler(async (req: NextRequest) => {
   return new Response(new Uint8Array(bytes), {
     headers: {
       'Content-Type': 'application/x-hwp',
-      'Content-Disposition': contentDisposition(mergedFileName(slot.year, slot.label, division.nameKo)),
+      'Content-Disposition': contentDisposition(mergedFileName(slot.year, slot.label, division.nameKo, slotKind(slot))),
       'Content-Length': String(bytes.length),
       'Cache-Control': 'no-store',
     },

@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { getPageScope } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { HistoryTable } from '@/components/HistoryTable';
-import { toKstIso } from '@/lib/week';
+import { toKstIso, slotKind } from '@/lib/week';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +36,7 @@ export default async function HistoryPage() {
             submissionId: sub?.id ?? null,
             version: sub?.version ?? null,
             uploadedAtKst: sub ? toKstIso(sub.uploadedAt).slice(0, 16).replace('T', ' ') : null,
+            monthly: slotKind(s) === 'monthly',
           };
         })}
       />

@@ -12,6 +12,7 @@
 
 export type DocKind =
   | '주간업무' // 병합본 — 취합게시판에 그대로 올리는 것
+  | '월간업무' // 그 달 마지막 주의 병합본 (WS-14)
   | '양식' //     빈 양식
   | '제출물'; //  개인 제출물 묶음(zip)
 
@@ -22,6 +23,8 @@ function safe(s: string): string {
     .replace(/\s+/g, '_')
     .trim();
 }
+
+import type { WeekKind } from './week';
 
 export interface DocNameParts {
   year: number;
@@ -37,9 +40,23 @@ export function docName({ year, weekLabel, divisionName, suffix, ext }: DocNameP
   return `${year}_${safe(weekLabel)}_${safe(divisionName)}_${safe(suffix)}.${ext}`;
 }
 
-/** 병합본 — 담당자가 받아서 그대로 올린다 */
-export const mergedName = (year: number, weekLabel: string, divisionName: string) =>
-  docName({ year, weekLabel, divisionName, suffix: '주간업무', ext: 'hwp' });
+/**
+ * 병합본 — 담당자가 받아서 **그대로 올린다.** 그래서 이름이 곧 그 문서의 정체다.
+ * 월간 주(WS-14)의 병합본을 "주간업무"라고 부르면 받는 쪽이 잘못 분류한다.
+ */
+export const mergedName = (
+  year: number,
+  weekLabel: string,
+  divisionName: string,
+  kind: WeekKind = 'weekly',
+) =>
+  docName({
+    year,
+    weekLabel,
+    divisionName,
+    suffix: kind === 'monthly' ? '월간업무' : '주간업무',
+    ext: 'hwp',
+  });
 
 /** 빈 양식 — 부서원이 받아서 채운다 */
 export const templateName = (year: number, weekLabel: string, divisionName: string) =>

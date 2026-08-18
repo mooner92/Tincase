@@ -7,7 +7,9 @@ import {
   describeWeek,
   formatDeadlineKo,
   isLocked,
+  isMonthlyWeek,
   mondayOf,
+  slotKind,
   toKstIso,
   validateDeadlinePolicy,
 } from './week';
@@ -169,5 +171,64 @@ describe('표시 유틸', () => {
   });
   it('toKstIso — +09:00 오프셋 (API-04)', () => {
     expect(toKstIso(new Date('2026-08-11T05:00:00.000Z'))).toBe('2026-08-11T14:00:00+09:00');
+  });
+});
+
+
+// ── WS-14/15 월간 주차 (사용자가 준 2026년 5·6월 달력이 정본이다) ──
+describe('월간 주차 (WS-T23~T28)', () => {
+  const kindOf = (y: number, mo: number, d: number) => describeWeek(kst(y, mo, d)).kind;
+
+  it('[WS-T23] 2026년 5월 — 4·11·18일은 주간, 25일 주가 월간 (5/31이 일요일이라 그 주로 딱 끝난다)', () => {
+    expect(kindOf(2026, 5, 4)).toBe('weekly');
+    expect(kindOf(2026, 5, 11)).toBe('weekly');
+    expect(kindOf(2026, 5, 18)).toBe('weekly');
+    expect(kindOf(2026, 5, 25)).toBe('monthly');
+    // 주차 번호는 그대로다 — 월간이라고 5주차가 되지 않는다
+    expect(describeWeek(kst(2026, 5, 25)).label).toBe('5월 4주차');
+  });
+
+  it('[WS-T24] 2026년 6월 — 1·8·15·22일은 주간, 29일 주가 월간 (6/30 화요일, 주는 7월로 넘어간다)', () => {
+    for (const d of [1, 8, 15, 22]) expect(kindOf(2026, 6, d)).toBe('weekly');
+    expect(kindOf(2026, 6, 29)).toBe('monthly');
+    expect(describeWeek(kst(2026, 6, 29)).label).toBe('6월 5주차');
+  });
+
+  it('[WS-T25] 달을 넘어가도 **월요일이 있는 달**의 월간이다', () => {
+    // 6/29(월)~7/5(일) 주는 7월 날짜를 5일이나 포함하지만 6월 월간이다
+    const w = describeWeek(kst(2026, 6, 29));
+    expect(w.month).toBe(6);
+    expect(w.kind).toBe('monthly');
+    // 7월의 1주차는 7/6부터 시작한다
+    expect(describeWeek(kst(2026, 7, 6)).label).toBe('7월 1주차');
+    expect(describeWeek(kst(2026, 7, 6)).kind).toBe('weekly');
+  });
+
+  it('[WS-T26] 어느 달이든 월간 주는 **정확히 하나**다 (2026년 12개월 전수)', () => {
+    for (let mo = 1; mo <= 12; mo++) {
+      const monthlies: number[] = [];
+      // 그 달에 있는 모든 월요일을 훑는다
+      for (let d = 1; d <= 31; d++) {
+        const t = kst(2026, mo, d);
+        if (new Date(t.getTime() + 9 * 3600_000).getUTCMonth() + 1 !== mo) continue; // 달 넘어감
+        if (mondayOf(t).getTime() !== t.getTime()) continue; // 월요일만
+        if (isMonthlyWeek(t)) monthlies.push(d);
+      }
+      expect(monthlies, `${mo}월`).toHaveLength(1);
+    }
+  });
+
+  it('[WS-T27] 월간 주에는 그 달의 마지막 날이 들어 있다 (2026년 전수)', () => {
+    for (let mo = 1; mo <= 12; mo++) {
+      const last = new Date(Date.UTC(2026, mo, 0)).getUTCDate();
+      const mondayOfLastDay = mondayOf(kst(2026, mo, last));
+      expect(isMonthlyWeek(mondayOfLastDay), `${mo}월 ${last}일`).toBe(true);
+    }
+  });
+
+  it('[WS-T28] slotKind는 저장된 슬롯(월요일)만으로 판정한다', () => {
+    expect(slotKind({ opensAt: kst(2026, 5, 25) })).toBe('monthly');
+    expect(slotKind({ opensAt: kst(2026, 5, 18) })).toBe('weekly');
+    expect(slotKind({ opensAt: kst(2026, 2, 23) })).toBe('monthly'); // 2/28(토)이 든 주
   });
 });

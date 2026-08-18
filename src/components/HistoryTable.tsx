@@ -11,6 +11,8 @@ export interface HistoryRow {
   submissionId: string | null;
   version: number | null;
   uploadedAtKst: string | null;
+  /** WS-14 — 그 달 마지막 주. 이력에서도 월간이 어느 주였는지 보여야 한다 */
+  monthly?: boolean;
 }
 
 export function HistoryTable({
@@ -43,7 +45,14 @@ export function HistoryTable({
                 key={r.slotId}
                 className={`border-b border-hairline-soft last:border-0 ${!r.submissionId ? 'bg-surface-soft/60' : ''}`}
               >
-                <td className="px-4 py-2.5 font-medium text-ink">{r.label}</td>
+                <td className="px-4 py-2.5 font-medium text-ink">
+                  {r.label}
+                  {r.monthly && (
+                    <span className="ml-2 rounded-full bg-brand-soft px-2 py-0.5 text-[11px] font-semibold text-brand">
+                      월간
+                    </span>
+                  )}
+                </td>
                 <td className="px-4 py-2.5">
                   {r.submissionId ? (
                     <span className="text-success">● 제출</span>

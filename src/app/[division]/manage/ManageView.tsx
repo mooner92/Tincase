@@ -3,7 +3,7 @@
 import { prisma } from '@/server/db';
 import type { Division } from '@prisma/client';
 import { divisionStatus, divisionSlots, effectiveDeadline, ensureCurrentSlot } from '@/server/worklog';
-import { formatDeadlineKo, isLocked, toKstIso, currentWeek } from '@/lib/week';
+import { formatDeadlineKo, isLocked, toKstIso, currentWeek, slotKind } from '@/lib/week';
 import { CopyMissingButton } from '@/components/CopyMissingButton';
 import { SlotSelector } from '@/components/SlotSelector';
 import { SubmissionTableClient, type MemberRow } from '@/components/SubmissionTableClient';
@@ -90,8 +90,14 @@ export async function ManageView({
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">수합 관리</p>
-          <h1 className="display mt-1 text-[32px] leading-[1.15]">
+          <h1 className="display mt-1 flex flex-wrap items-center gap-2.5 text-[32px] leading-[1.15]">
             {slot.year}년 {slot.label}
+            {/* WS-14 — 이 주에 모으는 것이 월간이면 담당자가 먼저 알아야 한다 */}
+            {slotKind(slot) === 'monthly' && (
+              <span className="rounded-full bg-brand px-2.5 py-1 text-[13px] font-semibold text-white">
+                {slot.month}월 월간
+              </span>
+            )}
           </h1>
         </div>
         <div className="pb-1">
@@ -105,6 +111,7 @@ export async function ManageView({
               year: s.year,
               submitted: slotList.submittedOf(s.id),
               isCurrent: s.isoKey === currentKey,
+              monthly: slotKind(s) === 'monthly',
             }))}
           />
         </div>

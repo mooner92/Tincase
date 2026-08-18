@@ -159,6 +159,7 @@ export default async function GuidePage() {
           <span className="badge-pill">마감 매주 목요일 14:00</span>
           <span className="badge-pill">한글(.hwp) · 최대 20MB</span>
           <span className="badge-pill">다시 올리면 새 버전</span>
+          <span className="badge-pill bg-brand-soft text-brand">그 달 마지막 주는 월간</span>
         </div>
 
         <h2 className="display mt-12 mb-1 text-[22px]">제출하는 분</h2>
@@ -180,6 +181,8 @@ export default async function GuidePage() {
         <h2 className="display mt-14 mb-4 text-[22px]">자주 묻는 것</h2>
         <div className="card divide-y divide-hairline-soft">
           {[
+            ['주간과 월간은 어떻게 구분되나요?', '그 달의 마지막 날이 들어 있는 주가 마지막 주이고, 그 주에는 월간 업무일지를 냅니다. 예를 들어 2026년 5월은 31일이 일요일이라 25일로 시작하는 주가, 6월은 30일이 화요일이라 29일로 시작하는 주(7월 5일까지)가 월간입니다. 월간 주에는 제출 화면 위쪽에 초록색 [월간] 표시가 뜹니다.'],
+            ['월간에는 뭘 더 써야 하나요?', '한 주가 아니라 한 달치를 정리합니다. 양식과 마감(목요일 14:00)은 주간과 같고, 분량이 늘어납니다. 병합본 파일 이름도 "월간업무"로 나옵니다.'],
             ['마감을 놓치면 어떻게 되나요?', '마감 후에는 제출도 취소도 되지 않습니다. 담당자에게 말씀해 주세요 — 예외는 시스템이 아니라 사람이 판단할 일입니다.'],
             ['같은 주에 두 번 내도 되나요?', '됩니다. 다시 올리면 새 버전으로 저장되고 마지막 것이 병합에 들어갑니다. 이전 버전도 남아 있어 필요하면 다시 받을 수 있습니다.'],
             ['다른 사람이 낸 내용을 볼 수 있나요?', '부서원끼리는 누가 언제 냈는지만 봅니다. 파일 내용은 부서담당자부터 볼 수 있습니다.'],

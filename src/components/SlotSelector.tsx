@@ -8,6 +8,8 @@ export interface SlotOption {
   year: number;
   submitted: number;
   isCurrent: boolean;
+  /** WS-14 — 그 달 마지막 주(월간 업무일지) */
+  monthly?: boolean;
 }
 
 export function SlotSelector({
@@ -35,7 +37,8 @@ export function SlotSelector({
     >
       {slots.map((s) => (
         <option key={s.isoKey} value={s.isoKey}>
-          {s.year}년 {s.label} ({s.submitted}/{roster}){s.isCurrent ? ' · 이번 주' : ''}
+          {s.year}년 {s.label}
+          {s.monthly ? ' · 월간' : ''} ({s.submitted}/{roster}){s.isCurrent ? ' · 이번 주' : ''}
         </option>
       ))}
     </select>

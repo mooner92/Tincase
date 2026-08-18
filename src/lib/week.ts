@@ -11,7 +11,11 @@ export interface WeekDescriptor {
   label: string; //         "8월 2주차" (WS-02)
   isoKey: string; //        "2026-W33" — DB 유니크 키 (WS-09)
   opensAt: Date; //         월 00:00 KST 인스턴트
+  /** WS-14 — 이 주에 내는 것이 주간인가 월간인가 */
+  kind: WeekKind;
 }
+
+export type WeekKind = 'weekly' | 'monthly';
 
 export interface DeadlinePolicy {
   deadlineDow: number; //   1=월 … 7=일 (DM-10)
@@ -40,7 +44,27 @@ function isoWeekKey(y: number, m0: number, d: number): string {
   return `${isoYear}-W${String(week).padStart(2, '0')}`;
 }
 
-/** WS-02/03/09 — 월요일 인스턴트 → 슬롯 서술자 */
+/**
+ * WS-14 — 그 달의 **마지막 주**인가. 마지막 주에 내는 것이 월간 업무일지다.
+ *
+ * 판정: 이 주의 월요일이 그 달의 **마지막 월요일**인가.
+ * 같은 말로 — **그 달의 마지막 날이 이 주에 들어 있는가**. (둘은 항상 일치한다:
+ * 마지막 날이 속한 주의 월요일이 곧 그 달 마지막 월요일이다. 달은 최소 28일이라
+ * 그 월요일이 전달로 넘어가는 일은 없다.)
+ *
+ * 주가 다음 달로 넘어가도 **월요일이 있는 달**의 마지막 주다:
+ *   2026-06-29(월) ~ 07-05(일) → 6월 30일이 들어 있으므로 **6월** 월간
+ *   2026-05-25(월) ~ 05-31(일) → 5월 31일로 딱 끝나므로 **5월** 월간
+ *
+ * 달력에서 세는 방식 그대로다 — "이번 주에 말일이 있으면 이번이 마지막 주".
+ */
+export function isMonthlyWeek(monday: Date): boolean {
+  const k = new TZDate(monday.getTime(), KST);
+  const daysInMonth = new Date(Date.UTC(k.getFullYear(), k.getMonth() + 1, 0)).getUTCDate();
+  return k.getDate() + 7 > daysInMonth; // 다음 월요일은 이미 다음 달
+}
+
+/** WS-02/03/09/14 — 월요일 인스턴트 → 슬롯 서술자 */
 export function describeWeek(monday: Date): WeekDescriptor {
   const k = new TZDate(monday.getTime(), KST);
   const year = k.getFullYear();
@@ -51,10 +75,24 @@ export function describeWeek(monday: Date): WeekDescriptor {
     year,
     month,
     weekOfMonth,
+    // 라벨은 **주차 그대로 둔다**. 마지막 주도 그 달의 N주차인 것은 변함없고,
+    // 라벨은 DB에 저장돼 파일명·이력에 남으므로 의미를 덧붙이면 과거 데이터와 갈라진다.
+    // "월간이냐"는 kind로 따로 답한다 (WS-15).
     label: `${month}월 ${weekOfMonth}주차`,
     isoKey,
     opensAt: new Date(monday.getTime()),
+    kind: isMonthlyWeek(monday) ? 'monthly' : 'weekly',
   };
+}
+
+/** WS-15 — 화면에 쓰는 이름. 월간 주에는 "5월 월간"이 제목이고 주차는 부제다 */
+export function kindLabel(kind: WeekKind): string {
+  return kind === 'monthly' ? '월간 업무일지' : '주간 업무일지';
+}
+
+/** 슬롯 레코드(월요일만 알면 된다)에서 바로 판정 — 페이지·API 공용 */
+export function slotKind(slot: { opensAt: Date }): WeekKind {
+  return isMonthlyWeek(slot.opensAt) ? 'monthly' : 'weekly';
 }
 
 /** WS-08 — 지금 기준 현재 슬롯 */
