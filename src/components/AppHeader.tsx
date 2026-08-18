@@ -107,23 +107,28 @@ export function AppHeader({
         </div>
 
         <nav className="flex items-center gap-1 overflow-x-auto" aria-label="주요 메뉴">
-          {items.map((it) => (
-            <Link
-              key={it.href}
-              href={it.href}
-              aria-current={isActive(it.href) ? 'page' : undefined}
-              className={`tab-pill whitespace-nowrap ${isActive(it.href) ? 'tab-pill-active' : ''} ${
-                it.hint ? 'ml-2 border border-hairline' : ''
-              }`}
-            >
-              {it.hint && (
-                <span aria-hidden className="mr-1 text-[13px]">
-                  ?
-                </span>
-              )}
-              {it.label}
-            </Link>
-          ))}
+          {items.map((it) => {
+            const active = isActive(it.href);
+            // 안내는 업무 메뉴가 아니다. 옅은 초록으로 눈에 띄게 하되,
+            // 선택됐을 때도 초록을 유지한다 — 잉크색으로 바뀌면 다른 탭에 섞여 버린다
+            const tone = it.hint
+              ? active
+                ? 'bg-brand text-white hover:bg-brand hover:text-white'
+                : 'bg-brand-soft text-brand hover:bg-brand-soft hover:text-brand-active'
+              : active
+                ? 'tab-pill-active'
+                : '';
+            return (
+              <Link
+                key={it.href}
+                href={it.href}
+                aria-current={active ? 'page' : undefined}
+                className={`tab-pill whitespace-nowrap ${tone} ${it.hint ? 'ml-2 font-semibold' : ''}`}
+              >
+                {it.label}
+              </Link>
+            );
+          })}
         </nav>
 
         <div ref={menuRef} className="relative shrink-0">
