@@ -81,14 +81,30 @@ function ClipCard({ c }: { c: Clip }) {
         <p className="mt-1.5 text-[15px] text-body">{c.lead}</p>
       </div>
 
-      {/* WebP는 GIF와 같은 그림인데 용량이 1/6이다. 웹에서는 이쪽을 쓴다 */}
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src={`/guide/${c.id}.webp`}
-        alt={`${c.title} 화면 시연`}
-        className="w-full border-y border-hairline"
-        loading="lazy"
-      />
+      {/*
+        시연 화면은 흰 바탕이고 안내 페이지도 흰 바탕이라, 그냥 얹으면
+        **어디까지가 화면이고 어디부터가 페이지인지** 구별되지 않는다.
+        그래서 브라우저 창 모양의 틀에 넣는다 — 테두리·상단 바·그림자 세 가지가
+        "이건 화면 속 화면"이라고 말해 준다.
+      */}
+      <div className="bg-[#e7e9ea] px-5 py-6 sm:px-7">
+        <figure className="overflow-hidden rounded-xl border border-border-strong bg-canvas shadow-[0_10px_28px_rgba(10,10,10,0.13)]">
+          <div className="flex items-center gap-1.5 border-b border-hairline bg-surface-soft px-3.5 py-2.5">
+            <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-border-strong" />
+            <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-border-strong" />
+            <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-border-strong" />
+            <span className="ml-2 truncate text-[12px] text-muted">{c.title}</span>
+          </div>
+          {/* WebP는 GIF와 같은 그림인데 용량이 1/6이다. 웹에서는 이쪽을 쓴다 */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`/guide/${c.id}.webp`}
+            alt={`${c.title} 화면 시연`}
+            className="block w-full"
+            loading="lazy"
+          />
+        </figure>
+      </div>
 
       <div className="px-7 pt-5 pb-6">
         <ul className="space-y-2">

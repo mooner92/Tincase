@@ -8,6 +8,8 @@ import { useEffect, useRef, useState } from 'react';
 export interface NavItem {
   href: string;
   label: string;
+  /** 업무 메뉴가 아니라 도움말 — 시각적으로 구분한다 */
+  hint?: boolean;
 }
 
 export function AppHeader({
@@ -61,6 +63,9 @@ export function AppHeader({
         ]
       : []),
     ...(isOperator ? [{ href: '/ops', label: '운영' }] : []),
+    // 안내는 **처음 쓰는 사람**이 찾는 것이다. 드롭다운 안은 이미 아는 사람만 여는 자리라
+    // 정작 필요한 사람에게 안 보인다. 맨 끝에 두되 물음표를 붙여 업무 메뉴와 구분한다
+    { href: '/guide', label: '사용 안내', hint: true },
   ];
 
   const isActive = (href: string) => {
@@ -107,8 +112,15 @@ export function AppHeader({
               key={it.href}
               href={it.href}
               aria-current={isActive(it.href) ? 'page' : undefined}
-              className={`tab-pill whitespace-nowrap ${isActive(it.href) ? 'tab-pill-active' : ''}`}
+              className={`tab-pill whitespace-nowrap ${isActive(it.href) ? 'tab-pill-active' : ''} ${
+                it.hint ? 'ml-2 border border-hairline' : ''
+              }`}
             >
+              {it.hint && (
+                <span aria-hidden className="mr-1 text-[13px]">
+                  ?
+                </span>
+              )}
               {it.label}
             </Link>
           ))}
@@ -137,14 +149,6 @@ export function AppHeader({
               role="menu"
               className="absolute right-0 mt-2 w-44 overflow-hidden rounded-2xl border border-hairline bg-canvas py-1.5 shadow-[0_8px_24px_rgba(10,10,10,0.08)]"
             >
-              <Link
-                role="menuitem"
-                href="/guide"
-                onClick={() => setOpen(false)}
-                className="block px-4 py-2 text-sm text-body hover:bg-surface-soft"
-              >
-                사용 안내
-              </Link>
               <Link
                 role="menuitem"
                 href="/password"
