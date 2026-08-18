@@ -121,8 +121,25 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
               내 부서가 아니므로 제출할 수 없습니다. 제출은 소속 부서 페이지에서만 가능합니다.
             </section>
           ) : !scope.user.onRoster ? (
-            <section className="card px-6 py-5 text-sm text-muted">
-              제출 대상이 아닙니다. 제출이 필요하면 운영자에게 요청해 주세요.
+            /*
+              명단 밖. 당사자에게 이 화면은 **아무 설명 없이 제출 버튼이 없는 화면**이라
+              "고장 났나?"로 읽힌다. 그래서 세 가지를 분명히 적는다 —
+              지금 상태 / 옆의 현황에 내가 없는 이유 / 무엇을 하면 되는지.
+            */
+            <section className="card border-warning/40 bg-warning-soft px-6 py-5">
+              <p className="font-semibold text-ink">제출 대상 명단에 없습니다</p>
+              <p className="mt-1.5 text-[15px] text-body">
+                그래서 제출 화면이 열리지 않고, 오른쪽 <strong className="font-semibold">부서 제출 현황</strong>에도
+                이름이 표시되지 않습니다. 업무일지를 내셔야 한다면 운영자에게 명단 등록을 요청해 주세요 —
+                등록되면 바로 제출할 수 있습니다.
+              </p>
+              <p className="mt-2 text-sm text-muted">
+                문의{' '}
+                <a href="mailto:mhchoi@kei.re.kr" className="text-body underline underline-offset-2">
+                  AI홍보전략실 최명헌
+                </a>
+                {' · '}빈 양식은 지금도 받을 수 있습니다.
+              </p>
             </section>
           ) : (
             <section className="card border-warning/40 bg-warning/5 px-6 py-5 text-sm text-body">

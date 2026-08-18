@@ -47,6 +47,18 @@ export interface UploadResult {
 export async function uploadSubmission(input: UploadInput, now = new Date()): Promise<UploadResult> {
   const { user, division, bytes } = input;
 
+  // API-45 — 명단 밖은 제출물을 만들지 않는다. **게이트가 아니라 도메인 불변식이다.**
+  //
+  // 라우트는 `requireSubmitter`가 먼저 막는다(authz.ts, TACP-12). 여기 한 번 더 두는 이유는
+  // 이 함수를 스크립트(seed-fake-submissions 등)도 직접 부르기 때문이다.
+  //
+  // 왜 막아야 하는가: 현황(divisionStatus)도 병합(대상 인원 조회)도 onRoster만 본다.
+  // 그래서 명단 밖 제출물은 **담당자 눈에 안 띄고 병합에도 안 들어가는 유령 제출물**이 된다.
+  // 조용히 사라지는 것보다 분명히 거절하는 편이 낫다.
+  if (!user.onRoster) {
+    throw new HttpError(403, 'not_on_roster', '제출 대상이 아닙니다. 운영자에게 명단 등록을 요청해 주세요.');
+  }
+
   const slot = await ensureCurrentSlot(now);
 
   // API-11 — 마감은 서버가 최종 판정. 예외 경로 없음

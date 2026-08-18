@@ -40,6 +40,7 @@ const ID = {
   ghost: 'ghost@test.kei.re.kr', // DB에 없음
   aDel: 'a-del@test.kei.re.kr', // 삭제 테스트 전용 (A부서) — 남의 제출물을 지우면 뒤 테스트가 깨진다
   bDel: 'b-del@test.kei.re.kr', // 삭제 테스트 전용 (B부서)
+  aOff: 'a-off@test.kei.re.kr', // 명단 밖(onRoster=false) — 제출 대상 아님
 };
 
 const req = (url: string, identity?: string, init?: RequestInit) =>
@@ -94,6 +95,7 @@ beforeAll(async () => {
   await mkUser(ID.coord, db.id, { isCoordinator: true });
   await mkUser(ID.aDel, da.id);
   await mkUser(ID.bDel, db.id);
+  await mkUser(ID.aOff, da.id, { onRoster: false });
 
   if (hasFixtures) {
     hwpBytes = readFileSync(path.join(FIX, 'master-template.hwp'));
@@ -275,6 +277,34 @@ d('격리 스위트 — 릴리스 게이트 (AU-T12~T18)', () => {
     const bSubs = await prisma.submission.findMany({ where: { division: { slug: B.slug } } });
     expect(aSubs.every((s) => s.filePath.includes(A.slug))).toBe(true); // ST-T15
     expect(bSubs.every((s) => s.filePath.includes(B.slug))).toBe(true);
+  });
+});
+
+d('명단 밖 사용자 (ST-T34/T35 · API-45)', () => {
+  it('[ST-T34] onRoster=false는 **파일 업로드도** 막힌다 → 403 not_on_roster', async () => {
+    const res = await upload(ID.aOff, hwpBytes);
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe('not_on_roster');
+  });
+
+  it('[ST-T35] 웹 작성도 같은 판정 — 두 경로가 갈라지지 않는다', async () => {
+    const { POST } = await import('@/app/api/submissions/compose/route');
+    const res = await POST(
+      nx('/api/submissions/compose', ID.aOff, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ achievements: [['업무', '', '', '']], plans: [], notes: [] }),
+      }),
+    );
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe('not_on_roster');
+  });
+
+  it('[ST-T36] 현황에는 명단 밖으로 잡힌다 (제출자 목록엔 없다)', async () => {
+    const { GET } = await import('@/app/api/division/status/route');
+    const body = await (await GET(nx('/api/division/status', ID.aLead))).json();
+    expect(body.members.some((m: { user: { name: string } }) => m.user.name === 'a-off')).toBe(false);
+    expect(body.offRoster.some((u: { name: string }) => u.name === 'a-off')).toBe(true);
   });
 });
 

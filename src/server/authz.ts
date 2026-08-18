@@ -68,6 +68,24 @@ export async function requireLead(headers: Headers): Promise<Scope> {
 }
 
 /**
+ * API-45 — **제출할 수 있는 사람인가.** 명단 밖(`onRoster=false`)은 403.
+ *
+ * 404가 아니라 403인 이유: 자기 자신에 대한 사실이라 누출이 아니다 (TACP-5의
+ * `not_registered`와 같은 부류). 그리고 이유를 알려주지 않으면 당사자는 화면이
+ * 고장 난 줄 안다 — 실제로는 운영자에게 명단 등록을 요청해야 한다.
+ *
+ * 업로드·웹작성 두 라우트가 **본문을 읽기 전에** 이걸 통과한다. 순서가 중요하다:
+ * 낼 수 없는 사람에게 "내용을 한 줄 이상 적어 주세요"(422)를 돌려주면 엉뚱한 안내다.
+ */
+export async function requireSubmitter(headers: Headers): Promise<Scope> {
+  const scope = await requireScope(headers);
+  if (!scope.user.onRoster) {
+    throw new HttpError(403, 'not_on_roster', '제출 대상이 아닙니다. 운영자에게 명단 등록을 요청해 주세요.');
+  }
+  return scope;
+}
+
+/**
  * operator 전용 진입점 — 그 외에게는 404 (존재 은닉).
  * TACP-12: 게이트는 이 파일에만 산다. 라우트에 복사하지 말 것
  * (v1.3.1까지 3개 라우트에 각각 복사되어 있었다).

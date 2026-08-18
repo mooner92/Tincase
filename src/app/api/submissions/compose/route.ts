@@ -4,7 +4,7 @@
 // 기존 uploadSubmission()과 같은 경로로 저장한다 (검증·버전·감사 로그 전부 동일).
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
-import { requireScope, HttpError } from '@/server/authz';
+import { requireSubmitter, HttpError } from '@/server/authz';
 import { submissionName } from '@/lib/docname';
 import { handler, json } from '@/server/http';
 import { readStoredFile } from '@/server/storage';
@@ -54,8 +54,7 @@ function toRows(list: Row[] | undefined, prefix: number): string[][] {
 
 export const POST = handler(async (req: NextRequest) => {
   // TACP-6 — 제출 부서는 신원에서 나온다. 본문이 부서를 정하지 않는다
-  const scope = await requireScope(req.headers);
-  if (!scope.user.onRoster) throw new HttpError(403, 'not_on_roster', '제출 대상이 아닙니다.');
+  const scope = await requireSubmitter(req.headers); // API-45 — 본문을 읽기 전에 판정한다
 
   const body = (await req.json().catch(() => null)) as Body | null;
   if (!body) throw new HttpError(422, 'invalid_request', '요청 형식이 올바르지 않습니다.');

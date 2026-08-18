@@ -1,6 +1,6 @@
 // POST /api/submissions — 업로드 (API-09~14)
 import { NextRequest } from 'next/server';
-import { requireScope, HttpError } from '@/server/authz';
+import { requireSubmitter, HttpError } from '@/server/authz';
 import { uploadSubmission } from '@/server/worklog';
 import { handler, json, rateLimit } from '@/server/http';
 import { toKstIso } from '@/lib/week';
@@ -8,7 +8,7 @@ import { toKstIso } from '@/lib/week';
 export const dynamic = 'force-dynamic';
 
 export const POST = handler(async (req: NextRequest) => {
-  const scope = await requireScope(req.headers);
+  const scope = await requireSubmitter(req.headers); // API-45 — 명단 밖은 여기서 걸린다
   rateLimit(`upload:${scope.user.email}`, 10, 5 * 60_000); // API-34
 
   const form = await req.formData().catch(() => null);
