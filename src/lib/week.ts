@@ -90,6 +90,17 @@ export function kindLabel(kind: WeekKind): string {
   return kind === 'monthly' ? '월간 업무일지' : '주간 업무일지';
 }
 
+/**
+ * WS-16 — 그 달의 월간 주가 시작하는 **월요일**.
+ *
+ * 화면에 "이번 달은 언제가 월간인지"를 보여줄 때 쓴다. 안내 문구에 특정 연도를
+ * 적어두면 해가 바뀌는 순간 낡은 정보가 되므로, 예시도 오늘 날짜에서 만든다.
+ */
+export function monthlyMondayOf(year: number, month: number): Date {
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return mondayOf(new Date(Date.UTC(year, month - 1, lastDay, -9))); // KST 자정
+}
+
 /** 슬롯 레코드(월요일만 알면 된다)에서 바로 판정 — 페이지·API 공용 */
 export function slotKind(slot: { opensAt: Date }): WeekKind {
   return isMonthlyWeek(slot.opensAt) ? 'monthly' : 'weekly';

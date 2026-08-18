@@ -9,6 +9,7 @@ import {
   isLocked,
   isMonthlyWeek,
   mondayOf,
+  monthlyMondayOf,
   slotKind,
   toKstIso,
   validateDeadlinePolicy,
@@ -230,5 +231,74 @@ describe('월간 주차 (WS-T23~T28)', () => {
     expect(slotKind({ opensAt: kst(2026, 5, 25) })).toBe('monthly');
     expect(slotKind({ opensAt: kst(2026, 5, 18) })).toBe('weekly');
     expect(slotKind({ opensAt: kst(2026, 2, 23) })).toBe('monthly'); // 2/28(토)이 든 주
+  });
+});
+
+
+// ── 장기 불변식 (WS-T29~T31) ────────────────────────────────
+// "몇 년이 지나도 유지되는가"에 답하는 테스트다. 로직에 연도가 박혀 있으면 여기서 깨진다.
+describe('장기 불변식 — 2020~2060 전수 (WS-T29~T31)', () => {
+  const FROM = 2020;
+  const TO = 2060; // 41년 × 12달 = 492개월
+
+  /** 그 달에 있는 모든 월요일(1일~말일) */
+  const mondaysIn = (y: number, mo: number): number[] => {
+    const last = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+    const out: number[] = [];
+    for (let d = 1; d <= last; d++) {
+      const t = kst(y, mo, d);
+      if (mondayOf(t).getTime() === t.getTime()) out.push(d);
+    }
+    return out;
+  };
+
+  it('[WS-T29] 모든 달에 월간 주가 **정확히 하나**', () => {
+    const bad: string[] = [];
+    for (let y = FROM; y <= TO; y++) {
+      for (let mo = 1; mo <= 12; mo++) {
+        const n = mondaysIn(y, mo).filter((d) => isMonthlyWeek(kst(y, mo, d))).length;
+        if (n !== 1) bad.push(`${y}-${mo}: ${n}개`);
+      }
+    }
+    expect(bad).toEqual([]);
+  });
+
+  it('[WS-T30] 월간 주에는 그 달의 **말일**이 들어 있다 (윤년 2/29 포함)', () => {
+    const bad: string[] = [];
+    for (let y = FROM; y <= TO; y++) {
+      for (let mo = 1; mo <= 12; mo++) {
+        const last = new Date(Date.UTC(y, mo, 0)).getUTCDate();
+        const monday = monthlyMondayOf(y, mo);
+        const sunday = monday.getTime() + 6 * 86400_000;
+        const lastDayT = kst(y, mo, last).getTime();
+        if (!isMonthlyWeek(monday)) bad.push(`${y}-${mo} 월요일이 월간이 아님`);
+        if (lastDayT < monday.getTime() || lastDayT > sunday) bad.push(`${y}-${mo} 말일이 주 밖`);
+      }
+    }
+    expect(bad).toEqual([]);
+    // 윤년 표본 — 2/29가 월간 주 안에 있어야 한다
+    for (const y of [2024, 2028, 2032, 2048]) {
+      const monday = monthlyMondayOf(y, 2);
+      expect(new Date(Date.UTC(y, 1, 29, -9)).getTime()).toBeGreaterThanOrEqual(monday.getTime());
+      expect(describeWeek(monday).kind).toBe('monthly');
+    }
+  });
+
+  it('[WS-T31] 주차 번호는 늘 1~5이고, 한 달의 월요일은 4개 또는 5개다', () => {
+    const bad: string[] = [];
+    for (let y = FROM; y <= TO; y++) {
+      for (let mo = 1; mo <= 12; mo++) {
+        const ms = mondaysIn(y, mo);
+        if (ms.length < 4 || ms.length > 5) bad.push(`${y}-${mo} 월요일 ${ms.length}개`);
+        ms.forEach((d, i) => {
+          const w = describeWeek(kst(y, mo, d));
+          if (w.weekOfMonth !== i + 1) bad.push(`${y}-${mo}-${d} 주차 ${w.weekOfMonth} ≠ ${i + 1}`);
+          if (w.month !== mo || w.year !== y) bad.push(`${y}-${mo}-${d} 소속 달 어긋남`);
+        });
+        // 마지막 월요일이 곧 월간 주다
+        expect(describeWeek(kst(y, mo, ms[ms.length - 1])).kind, `${y}-${mo}`).toBe('monthly');
+      }
+    }
+    expect(bad).toEqual([]);
   });
 });

@@ -10,6 +10,7 @@ import { getPageScope } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
+import { monthlyMondayOf, toKstIso } from '@/lib/week';
 
 export const dynamic = 'force-dynamic';
 
@@ -128,6 +129,45 @@ function ClipCard({ c }: { c: Clip }) {
   );
 }
 
+/**
+ * 월간 주 예시를 **오늘 날짜에서 만든다** (WS-16).
+ *
+ * 처음에는 "2026년 5월은 31일이 일요일이라…"라고 적어 뒀는데, 그건 해가 바뀌는
+ * 순간 낡은 안내가 된다. 규칙 자체가 날짜에서 계산되므로 예시도 그렇게 만든다 —
+ * 몇 년 뒤에 열어도 그때의 이번 달·다음 달이 나온다.
+ */
+function monthlyExamples(now: Date): { month: string; range: string; note: string }[] {
+  const DOW = ['일', '월', '화', '수', '목', '금', '토'];
+  const kstNow = new Date(now.getTime() + 9 * 3600_000);
+  const out = [];
+  for (let i = 0; i < 2; i++) {
+    const y = kstNow.getUTCFullYear();
+    const m = kstNow.getUTCMonth() + 1 + i;
+    const year = y + Math.floor((m - 1) / 12);
+    const month = ((m - 1) % 12) + 1;
+    const monday = monthlyMondayOf(year, month);
+    const sunday = new Date(monday.getTime() + 6 * 86400_000);
+    const md = (d: Date) => {
+      const k = toKstIso(d); // YYYY-MM-DDTHH:mm:ss+09:00
+      const [Y, M, D] = k.slice(0, 10).split('-').map(Number);
+      return { Y, M, D, dow: DOW[new Date(Date.UTC(Y, M - 1, D)).getUTCDay()] };
+    };
+    const a = md(monday);
+    const b = md(sunday);
+    const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const lastDow = DOW[new Date(Date.UTC(year, month - 1, lastDay)).getUTCDay()];
+    out.push({
+      month: `${year}년 ${month}월`,
+      range: `${a.M}월 ${a.D}일(${a.dow}) ~ ${b.M}월 ${b.D}일(${b.dow})`,
+      note:
+        b.M === month
+          ? `말일 ${lastDay}일(${lastDow})로 그 주가 끝납니다`
+          : `말일 ${lastDay}일(${lastDow})이 이 주에 있어, 주는 ${b.M}월로 넘어갑니다`,
+    });
+  }
+  return out;
+}
+
 export default async function GuidePage() {
   const ps = await getPageScope();
   if (!ps.ok) {
@@ -135,6 +175,7 @@ export default async function GuidePage() {
     return noticeFor(ps.code, ps.message);
   }
   const { scope } = ps;
+  const examples = monthlyExamples(new Date());
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -181,7 +222,7 @@ export default async function GuidePage() {
         <h2 className="display mt-14 mb-4 text-[22px]">자주 묻는 것</h2>
         <div className="card divide-y divide-hairline-soft">
           {[
-            ['주간과 월간은 어떻게 구분되나요?', '그 달의 마지막 날이 들어 있는 주가 마지막 주이고, 그 주에는 월간 업무일지를 냅니다. 예를 들어 2026년 5월은 31일이 일요일이라 25일로 시작하는 주가, 6월은 30일이 화요일이라 29일로 시작하는 주(7월 5일까지)가 월간입니다. 월간 주에는 제출 화면 위쪽에 초록색 [월간] 표시가 뜹니다.'],
+            ['주간과 월간은 어떻게 구분되나요?', `그 달의 마지막 날이 들어 있는 주가 마지막 주이고, 그 주에는 월간 업무일지를 냅니다. ${examples.map((e) => `${e.month}은 ${e.range} — ${e.note}`).join('. ')}. 월간 주에는 제출 화면 위쪽에 초록색 [월간] 표시가 뜹니다.`],
             ['월간에는 뭘 더 써야 하나요?', '한 주가 아니라 한 달치를 정리합니다. 양식과 마감(목요일 14:00)은 주간과 같고, 분량이 늘어납니다. 병합본 파일 이름도 "월간업무"로 나옵니다.'],
             ['마감을 놓치면 어떻게 되나요?', '마감 후에는 제출도 취소도 되지 않습니다. 담당자에게 말씀해 주세요 — 예외는 시스템이 아니라 사람이 판단할 일입니다.'],
             ['같은 주에 두 번 내도 되나요?', '됩니다. 다시 올리면 새 버전으로 저장되고 마지막 것이 병합에 들어갑니다. 이전 버전도 남아 있어 필요하면 다시 받을 수 있습니다.'],
