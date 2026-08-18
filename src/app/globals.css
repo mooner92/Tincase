@@ -40,9 +40,10 @@
   --color-error: #c13515;
   --color-error-soft: #fdeceb;
 
-  --font-sans: "Pretendard Variable", Pretendard, Inter, -apple-system,
-    BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans KR", "Malgun Gothic",
-    "Apple SD Gothic Neo", sans-serif;
+  /* 페이퍼로지 — layout.tsx의 next/font/local이 --font-paperlogy를 채운다.
+     뒤의 목록은 글꼴이 뜨기 전·못 뜰 때만 쓰인다 (한글 있는 것으로만 골랐다) */
+  --font-sans: var(--font-paperlogy), Pretendard, "Malgun Gothic",
+    "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
 }
 
 body {
