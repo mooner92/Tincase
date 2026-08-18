@@ -12,6 +12,7 @@ export interface UserRow {
   isCoordinator: boolean;
   isActive: boolean;
   onRoster: boolean;
+  rosterNote?: string | null;
   sortOrder: number;
   hasPassword: boolean;
   mustChangePassword: boolean;
@@ -125,12 +126,27 @@ export function RosterDrawer({
                   </td>
                   <td className="px-4 py-2 text-center">
                     <input
-                      aria-label={`${u.name} 제출 대상`}
+                      aria-label={`${u.name} 집계 대상`}
                       type="checkbox"
                       checked={u.onRoster}
                       disabled={busy}
                       onChange={(e) => onPatch(u.id, { onRoster: e.target.checked })}
                     />
+                    {/* 빼는 것과 **이유**를 같이 적어야 몇 주 뒤에 되돌릴 수 있다 (DM-16).
+                        복직하면 체크만 다시 켜면 되고, 과거 제출 이력은 그대로 남는다 */}
+                    {!u.onRoster && (
+                      <input
+                        aria-label={`${u.name} 제외 사유`}
+                        defaultValue={u.rosterNote ?? ''}
+                        placeholder="사유 (휴직 등)"
+                        disabled={busy}
+                        onBlur={(e) =>
+                          e.target.value.trim() !== (u.rosterNote ?? '') &&
+                          onPatch(u.id, { rosterNote: e.target.value })
+                        }
+                        className="mt-1 w-24 rounded border border-hairline px-1 py-0.5 text-xs"
+                      />
+                    )}
                   </td>
                   <td className="px-4 py-2">
                     <input

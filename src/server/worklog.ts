@@ -47,17 +47,9 @@ export interface UploadResult {
 export async function uploadSubmission(input: UploadInput, now = new Date()): Promise<UploadResult> {
   const { user, division, bytes } = input;
 
-  // API-45 — 명단 밖은 제출물을 만들지 않는다. **게이트가 아니라 도메인 불변식이다.**
-  //
-  // 라우트는 `requireSubmitter`가 먼저 막는다(authz.ts, TACP-12). 여기 한 번 더 두는 이유는
-  // 이 함수를 스크립트(seed-fake-submissions 등)도 직접 부르기 때문이다.
-  //
-  // 왜 막아야 하는가: 현황(divisionStatus)도 병합(대상 인원 조회)도 onRoster만 본다.
-  // 그래서 명단 밖 제출물은 **담당자 눈에 안 띄고 병합에도 안 들어가는 유령 제출물**이 된다.
-  // 조용히 사라지는 것보다 분명히 거절하는 편이 낫다.
-  if (!user.onRoster) {
-    throw new HttpError(403, 'not_on_roster', '제출 대상이 아닙니다. 운영자에게 명단 등록을 요청해 주세요.');
-  }
+  // DM-16 — 명단(onRoster)은 **집계 대상**이지 제출 권한이 아니다. 여기서 막지 않는다.
+  // 병합은 원래 낸 사람 전부를 담고(isLatest 기준), 현황은 명단 밖 제출을
+  // '추가 제출'로 따로 보여준다(DM-17). 그래서 유령 제출물이 생기지 않는다.
 
   const slot = await ensureCurrentSlot(now);
 
@@ -158,8 +150,10 @@ export interface MemberStatusRow {
 
 export async function divisionStatus(divisionId: string, slotId: string): Promise<{
   members: MemberStatusRow[];
-  offRoster: Pick<User, 'id' | 'name'>[];
-  summary: { roster: number; submitted: number; missing: number };
+  /** DM-17 — 명단 밖인데 **낸 사람**. 분모에는 안 들어가지만 묻히면 안 된다 */
+  extras: MemberStatusRow[];
+  offRoster: { id: string; name: string; note: string | null }[];
+  summary: { roster: number; submitted: number; missing: number; extras: number };
 }> {
   const users = await prisma.user.findMany({
     where: { divisionId, isActive: true },
@@ -176,26 +170,31 @@ export async function divisionStatus(divisionId: string, slotId: string): Promis
     byUser.set(s.userId, arr);
   }
 
-  const members: MemberStatusRow[] = users
-    .filter((u) => u.onRoster)
-    .map((u) => {
-      const list = byUser.get(u.id) ?? [];
-      const latest = list.find((s) => s.isLatest) ?? null;
-      return {
-        user: { id: u.id, name: u.name, sortOrder: u.sortOrder },
-        status: latest ? 'submitted' : 'missing',
-        latest,
-        versionCount: list.length,
-      };
-    });
+  const toRow = (u: (typeof users)[number]): MemberStatusRow => {
+    const list = byUser.get(u.id) ?? [];
+    return {
+      user: { id: u.id, name: u.name, sortOrder: u.sortOrder },
+      status: list.some((s) => s.isLatest) ? 'submitted' : 'missing',
+      latest: list.find((s) => s.isLatest) ?? null,
+      versionCount: list.length,
+    };
+  };
+
+  const members = users.filter((u) => u.onRoster).map(toRow);
+  // 명단 밖이어도 **낸 사람은 보여준다** (DM-17). 안 낸 사람은 원래 기대치가 없으니 조용히 둔다
+  const extras = users.filter((u) => !u.onRoster && byUser.has(u.id)).map(toRow);
 
   return {
     members,
-    offRoster: users.filter((u) => !u.onRoster).map((u) => ({ id: u.id, name: u.name })),
+    extras,
+    offRoster: users
+      .filter((u) => !u.onRoster)
+      .map((u) => ({ id: u.id, name: u.name, note: u.rosterNote })),
     summary: {
       roster: members.length,
       submitted: members.filter((m) => m.status === 'submitted').length,
       missing: members.filter((m) => m.status === 'missing').length,
+      extras: extras.length,
     },
   };
 }

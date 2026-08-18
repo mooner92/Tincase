@@ -51,7 +51,10 @@ model User {
   isOperator    Boolean  @default(false) // 최종 관리자 (AU-15)
   isCoordinator Boolean  @default(false) // 전사 총괄 (AU-16)
   isActive      Boolean  @default(true) // 삭제 금지, 비활성화만 (DM-03)
-  onRoster      Boolean  @default(true) // 제출 대상 — 운영자가 관리 (DM-04)
+  onRoster      Boolean  @default(true) // **집계 대상**. 제출 권한이 아니다 (DM-04, DM-16)
+  /** DM-16 — 집계에서 뺀 이유. "휴직" · "부서장" 등. onRoster=false일 때만 뜻이 있다.
+      빼는 것과 그 이유를 같이 적어두지 않으면, 몇 주 뒤에 왜 뺐는지 아무도 모른다 */
+  rosterNote    String?
   sortOrder     Int      @default(100)
   createdAt     DateTime @default(now())
 

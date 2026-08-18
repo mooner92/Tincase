@@ -42,7 +42,7 @@ export async function ManageView({
     : await prisma.weekSlot.findUnique({ where: { isoKey: currentKey } });
   if (!slot) notFound(); // 없는 isoKey
 
-  const [{ members, offRoster, summary }, slotList] = await Promise.all([
+  const [{ members, extras, offRoster, summary }, slotList] = await Promise.all([
     divisionStatus(division.id, slot.id),
     divisionSlots(division.id),
   ]);
@@ -72,6 +72,10 @@ export async function ManageView({
   const locked = isLocked({ opensAt: slot.opensAt }, division, now);
   const missing = members.filter((m) => m.status === 'missing').map((m) => m.user.name);
   const pct = summary.roster > 0 ? Math.round((summary.submitted / summary.roster) * 100) : 0;
+  // DM-17 — 병합·zip은 **모인 파일 전부**를 다룬다 (명단 밖 제출 포함).
+  // 진척률(submitted/roster)과 다른 수다. 이걸 같은 수로 쓰면 추가 제출만 있을 때
+  // "제출된 파일이 없습니다"라고 하면서 병합은 되는 모순이 생긴다
+  const collected = summary.submitted + summary.extras;
 
   const tableRows: MemberRow[] = members.map((m) => ({
     user: { id: m.user.id, name: m.user.name },
@@ -160,9 +164,32 @@ export async function ManageView({
           canDelete={canDeleteAny}
         />
       </div>
+      {/* DM-17 — 명단 밖인데 낸 사람. 분모에는 없지만 병합에는 들어간다 */}
+      {extras.length > 0 && (
+        <section className="mt-6">
+          <h2 className="label">추가 제출 — 집계 대상은 아니지만 병합에 포함됩니다</h2>
+          <SubmissionTableClient
+            caption={`${division.nameKo} ${slot.label} 추가 제출`}
+            members={extras.map((m) => ({
+              user: { id: m.user.id, name: m.user.name },
+              status: m.status,
+              latest: m.latest && {
+                id: m.latest.id,
+                version: m.latest.version,
+                byteSize: m.latest.byteSize,
+                uploadedAtKst: toKstIso(m.latest.uploadedAt).slice(5, 16).replace('T', ' '),
+              },
+              versionCount: m.versionCount,
+            }))}
+            canDelete={canDeleteAny}
+          />
+        </section>
+      )}
+
       {offRoster.length > 0 && (
         <p className="mt-2 px-1 text-xs text-muted-soft">
-          제출 대상 아님: {offRoster.map((u) => u.name).join(', ')} — 명단 변경은 운영자에게
+          집계 제외: {offRoster.map((u) => (u.note ? `${u.name}(${u.note})` : u.name)).join(', ')} —
+          내실 수는 있고, 내시면 위에 «추가 제출»로 표시됩니다. 명단 변경은 운영자에게
         </p>
       )}
 
@@ -174,18 +201,18 @@ export async function ManageView({
           divisionSlug={division.slug}
           canRun={canMerge}
           canDownload={canDownloadMerged}
-          submitted={summary.submitted}
+          submitted={collected}
         />
       </div>
 
       {/* BulkActions (CP-58~61) */}
       <section className="mt-6 flex flex-wrap items-center gap-3">
-        {summary.submitted > 0 ? (
+        {collected > 0 ? (
           <a
             href={`/api/division/download-zip?slot=${slot.isoKey}&division=${encodeURIComponent(division.slug)}`}
             className="btn-primary"
           >
-            전체 zip 받기 ({summary.submitted}개)
+            전체 zip 받기 ({collected}개)
           </a>
         ) : (
           <button disabled title="제출된 파일이 없습니다" className="btn-primary">

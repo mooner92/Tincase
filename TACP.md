@@ -256,6 +256,7 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | `resolveTargetDivision(scope, slug?)` | 대상 부서 해석 (TACP-7) | **404** |
 | `findAccessibleSubmission(scope, id)` | 제출물 **읽기** 판정 | **404** |
 | `requireDeletableSubmission(scope, id)` | 제출물 **삭제** 판정 (TACP-14) | **404** / 409 |
+| `requireSubmitter(headers)` | 제출 진입점. 부서원이면 통과 (DM-16) | 401 / 403 |
 | `getDivisionView(slug)` | 페이지용 — 위를 묶어 `{division, isOwn, canManage, canSubmit}` | 404 |
 
 ### 판정 순서

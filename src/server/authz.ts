@@ -68,21 +68,20 @@ export async function requireLead(headers: Headers): Promise<Scope> {
 }
 
 /**
- * API-45 — **제출할 수 있는 사람인가.** 명단 밖(`onRoster=false`)은 403.
+ * API-45 — **제출 진입점.** 부서원이면 누구나 낼 수 있다.
  *
- * 404가 아니라 403인 이유: 자기 자신에 대한 사실이라 누출이 아니다 (TACP-5의
- * `not_registered`와 같은 부류). 그리고 이유를 알려주지 않으면 당사자는 화면이
- * 고장 난 줄 안다 — 실제로는 운영자에게 명단 등록을 요청해야 한다.
+ * `onRoster`는 **집계 대상**이지 제출 권한이 아니다 (DM-16). 부서장·휴직자처럼
+ * 매주 낼 것으로 기대하지 않는 사람도 낼 일이 생기면 낼 수 있어야 한다.
+ * 권한과 기대치를 한 플래그로 묶으면, 안 내도 되는 사람이 **못 내는 사람**이 된다.
  *
- * 업로드·웹작성 두 라우트가 **본문을 읽기 전에** 이걸 통과한다. 순서가 중요하다:
- * 낼 수 없는 사람에게 "내용을 한 줄 이상 적어 주세요"(422)를 돌려주면 엉뚱한 안내다.
+ * 그래서 여기서 막는 것은 `requireScope`가 이미 보는 것뿐이다 —
+ * 비활성 계정, 온보딩 안 된 부서. 게이트를 남겨 두는 이유는 제출에만 걸리는 규칙이
+ * 생기면 여기 한 곳에 넣기 위함이다 (TACP-12).
+ *
+ * 명단 밖 제출이 묻히지 않도록 현황이 **추가 제출**로 따로 보여준다 (DM-17).
  */
 export async function requireSubmitter(headers: Headers): Promise<Scope> {
-  const scope = await requireScope(headers);
-  if (!scope.user.onRoster) {
-    throw new HttpError(403, 'not_on_roster', '제출 대상이 아닙니다. 운영자에게 명단 등록을 요청해 주세요.');
-  }
-  return scope;
+  return requireScope(headers);
 }
 
 /**

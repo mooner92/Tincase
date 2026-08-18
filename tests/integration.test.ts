@@ -280,31 +280,47 @@ d('격리 스위트 — 릴리스 게이트 (AU-T12~T18)', () => {
   });
 });
 
-d('명단 밖 사용자 (ST-T34/T35 · API-45)', () => {
-  it('[ST-T34] onRoster=false는 **파일 업로드도** 막힌다 → 403 not_on_roster', async () => {
+d('집계 제외자 — 낼 수는 있다 (ST-T34~37 · DM-16/17)', () => {
+  it('[ST-T34] onRoster=false도 **제출은 된다** — 명단은 집계 대상이지 권한이 아니다', async () => {
     const res = await upload(ID.aOff, hwpBytes);
-    expect(res.status).toBe(403);
-    expect((await res.json()).error).toBe('not_on_roster');
+    expect(res.status).toBe(201);
   });
 
-  it('[ST-T35] 웹 작성도 같은 판정 — 두 경로가 갈라지지 않는다', async () => {
-    const { POST } = await import('@/app/api/submissions/compose/route');
-    const res = await POST(
-      nx('/api/submissions/compose', ID.aOff, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ achievements: [['업무', '', '', '']], plans: [], notes: [] }),
-      }),
-    );
-    expect(res.status).toBe(403);
-    expect((await res.json()).error).toBe('not_on_roster');
+  it('[ST-T35] 분모에는 안 들어가고 «추가 제출»로 잡힌다 (DM-17)', async () => {
+    const { prisma } = await import('@/server/db');
+    const { divisionStatus, ensureCurrentSlot } = await import('@/server/worklog');
+    const da = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
+    const slot = await ensureCurrentSlot();
+    const st = await divisionStatus(da.id, slot.id);
+
+    expect(st.members.some((m) => m.user.name === 'a-off')).toBe(false); // 분모 밖
+    expect(st.extras.some((m) => m.user.name === 'a-off')).toBe(true); //  묻히지 않는다
+    expect(st.summary.extras).toBe(1);
+    // 분모는 명단 인원 그대로 — 제출했다고 늘지 않는다
+    expect(st.summary.roster).toBe(st.members.length);
   });
 
-  it('[ST-T36] 현황에는 명단 밖으로 잡힌다 (제출자 목록엔 없다)', async () => {
-    const { GET } = await import('@/app/api/division/status/route');
-    const body = await (await GET(nx('/api/division/status', ID.aLead))).json();
-    expect(body.members.some((m: { user: { name: string } }) => m.user.name === 'a-off')).toBe(false);
-    expect(body.offRoster.some((u: { name: string }) => u.name === 'a-off')).toBe(true);
+  it('[ST-T36] 병합에는 들어간다 — 낸 사람은 전부 담는다', async () => {
+    const { prisma } = await import('@/server/db');
+    const { ensureCurrentSlot } = await import('@/server/worklog');
+    const da = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
+    const slot = await ensureCurrentSlot();
+    // 병합 대상 조회 조건과 동일 (divisionId + weekSlotId + isLatest)
+    const targets = await prisma.submission.findMany({
+      where: { divisionId: da.id, weekSlotId: slot.id, isLatest: true },
+      include: { user: true },
+    });
+    expect(targets.some((t) => t.user.name === 'a-off')).toBe(true);
+  });
+
+  it('[ST-T37] 제외 사유가 현황에 함께 나온다 — 왜 뺐는지 남아야 되돌릴 수 있다 (DM-16)', async () => {
+    const { prisma } = await import('@/server/db');
+    const { divisionStatus, ensureCurrentSlot } = await import('@/server/worklog');
+    await prisma.user.update({ where: { email: ID.aOff }, data: { rosterNote: '휴직' } });
+    const da = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
+    const slot = await ensureCurrentSlot();
+    const st = await divisionStatus(da.id, slot.id);
+    expect(st.offRoster.find((u) => u.name === 'a-off')?.note).toBe('휴직');
   });
 });
 

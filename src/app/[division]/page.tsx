@@ -29,7 +29,7 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
   const locked = isLocked({ opensAt: slot.opensAt }, division, now);
   const nextOpens = new Date(slot.opensAt.getTime() + 7 * 86400_000);
 
-  const [mySubmission, template, { members }] = await Promise.all([
+  const [mySubmission, template, { members, extras }] = await Promise.all([
     isOwn
       ? prisma.submission.findFirst({ where: { userId: scope.user.id, weekSlotId: slot.id, isLatest: true } })
       : null,
@@ -114,32 +114,23 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
           ) : template && canSubmit ? (
             <section>
               <h2 className="label">{mySubmission ? '다시 제출 — 새 버전으로 저장됩니다' : '제출'}</h2>
+              {/*
+                DM-16 — 집계 제외자(부서장·휴직 등)도 낼 수 있다. 다만 오른쪽 현황의
+                분모에 없어서 "내 이름이 왜 없지?"가 되므로, 그 이유를 여기서 먼저 밝힌다.
+              */}
+              {!scope.user.onRoster && (
+                <p className="mb-3 rounded-lg bg-surface-soft px-4 py-2.5 text-sm text-body">
+                  집계 대상에서 빠져 있어 오른쪽 현황에는 이름이 표시되지 않습니다
+                  {scope.user.rosterNote ? ` (사유: ${scope.user.rosterNote})` : ''}.{' '}
+                  <strong className="font-semibold text-ink">제출은 지금 하실 수 있고</strong>, 내시면
+                  담당자 화면에 «추가 제출»로 표시되며 병합에도 들어갑니다.
+                </p>
+              )}
               <SubmitChoice hasPrevious={!!mySubmission} isoKey={slot.isoKey} guideLines={guideLines} />
             </section>
           ) : !isOwn ? (
             <section className="card px-6 py-5 text-sm text-muted">
               내 부서가 아니므로 제출할 수 없습니다. 제출은 소속 부서 페이지에서만 가능합니다.
-            </section>
-          ) : !scope.user.onRoster ? (
-            /*
-              명단 밖. 당사자에게 이 화면은 **아무 설명 없이 제출 버튼이 없는 화면**이라
-              "고장 났나?"로 읽힌다. 그래서 세 가지를 분명히 적는다 —
-              지금 상태 / 옆의 현황에 내가 없는 이유 / 무엇을 하면 되는지.
-            */
-            <section className="card border-warning/40 bg-warning-soft px-6 py-5">
-              <p className="font-semibold text-ink">제출 대상 명단에 없습니다</p>
-              <p className="mt-1.5 text-[15px] text-body">
-                그래서 제출 화면이 열리지 않고, 오른쪽 <strong className="font-semibold">부서 제출 현황</strong>에도
-                이름이 표시되지 않습니다. 업무일지를 내셔야 한다면 운영자에게 명단 등록을 요청해 주세요 —
-                등록되면 바로 제출할 수 있습니다.
-              </p>
-              <p className="mt-2 text-sm text-muted">
-                문의{' '}
-                <a href="mailto:mhchoi@kei.re.kr" className="text-body underline underline-offset-2">
-                  AI홍보전략실 최명헌
-                </a>
-                {' · '}빈 양식은 지금도 받을 수 있습니다.
-              </p>
             </section>
           ) : (
             <section className="card border-warning/40 bg-warning/5 px-6 py-5 text-sm text-body">
@@ -191,6 +182,7 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
               <span className="text-sm font-semibold text-ink">
                 {submitted}
                 <span className="font-normal text-muted"> / {members.length}</span>
+                {extras.length > 0 && <span className="font-normal text-muted"> +{extras.length}</span>}
               </span>
             </div>
             <ul className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">

@@ -23,6 +23,7 @@ export const GET = handler(async (req: NextRequest) => {
       isCoordinator: true,
       isActive: true,
       onRoster: true,
+      rosterNote: true,
       sortOrder: true,
       passwordHash: true, // 발급 여부만 쓴다 (해시 자체는 응답에 넣지 않는다)
       mustChangePassword: true,
@@ -43,6 +44,8 @@ export const GET = handler(async (req: NextRequest) => {
 interface RosterUpdate {
   userId: string;
   onRoster?: boolean;
+  /** DM-16 — 집계에서 뺀 이유("휴직" 등). 뺀 것과 이유를 같이 적어야 나중에 되돌릴 수 있다 */
+  rosterNote?: string | null;
   sortOrder?: number;
   divisionRole?: 'member' | 'lead';
   isActive?: boolean;
@@ -76,6 +79,7 @@ export const PUT = handler(async (req: NextRequest) => {
         where: { id: u.userId },
         data: {
           ...(u.onRoster !== undefined && { onRoster: u.onRoster }),
+          ...(u.rosterNote !== undefined && { rosterNote: u.rosterNote?.trim() || null }),
           ...(u.sortOrder !== undefined && { sortOrder: u.sortOrder }),
           ...(u.divisionRole !== undefined && { divisionRole: u.divisionRole }),
           ...(u.isActive !== undefined && { isActive: u.isActive }),
