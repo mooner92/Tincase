@@ -7,9 +7,9 @@
 //
 // 붙여넣기는 `text/html`로 쓴다 — 한글도 게시판 편집기도 HTML 표를 받으면
 // 표 그대로 들어간다. text/plain만 쓰면 줄글로 쏟아진다 (붙여넣기 파싱에서 배운 것과 같은 이유).
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { copyRich, copyText } from '@/lib/clipboard';
+import { copyText } from '@/lib/clipboard';
 
 interface TableView {
   key: string;
@@ -27,13 +27,6 @@ interface Content {
 
 /** 헤더 행을 뺀 본문만. 서버가 준 격자는 첫 줄이 열 이름이다 */
 const bodyRows = (t: TableView) => t.rows.slice(1);
-
-/**
- * 복사·저장에 쓰는 행 — **내용 칸이 빈 행은 뺀다.**
- * 양식에 미리 그려진 빈 줄(특이사항 4행 등)이 그대로 게시판에 붙으면 빈 표가 된다.
- * 화면에서는 그대로 보여준다 — 거기에 적으라고 있는 칸이기 때문이다.
- */
-const filledRows = (t: TableView) => bodyRows(t).filter((r) => r.slice(1).some((c) => c.trim()));
 
 export function MergedDrawer({
   open,
@@ -116,84 +109,6 @@ export function MergedDrawer({
     setCopied(what);
     setTimeout(() => setCopied(null), 1600);
   };
-
-  /** 표를 **표째로** 클립보드에 — 한글·게시판 편집기가 그대로 받는다 */
-  const copyTables = useCallback(async () => {
-    if (!data) return;
-    const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const useful = data.tables.filter((t) => filledRows(t).length > 0);
-
-    /*
-      한글은 **폭 정보가 없는 표를 최소 폭으로 접는다.** 처음엔 border만 주고 폭을 안 줬더니
-      «본원 소회의실»이 두세 글자마다 줄바꿈되며 무너졌다.
-      그래서 부서 양식 표의 실제 칸 폭(HWPUNIT 실측)을 pt로 환산해 그대로 싣는다.
-
-        구분 30.2 · 내용 177.3 · 일자 61.3 · 장소 81.1 · 참석자 157.5 (합 507.3pt)
-
-      `word-break: keep-all` — 한글은 단어 중간에서 끊으면 안 읽힌다.
-    */
-    /*
-      한컴 웹에디터는 `<colgroup>`을 무시한다 — 폭을 거기에만 주면 칸이 다시 최소로 접힌다.
-      그래서 **모든 `<td>`에 픽셀 `width` 속성을 직접** 단다. 옛 HTML 속성이라
-      웹에디터·한글·메일 어디서든 가장 잘 먹힌다. style은 보조로 함께 둔다.
-    */
-    /*
-      폭은 **양식에서 읽어 온 값**을 쓴다 (API-53). 코드에 박아 두면 부서가 양식을
-      바꾸는 순간 어긋난다 — 게시판 양식을 그대로 등록해 쓰는 것이 «완벽히 같게»의 길이라
-      폭도 그 파일을 따라가야 한다. 못 읽으면 우리 양식 실측 비율로 떨어진다.
-    */
-    const FALLBACK = [40, 236, 82, 108, 210];
-    const raw = useful[0]?.widths?.filter((w) => w > 0) ?? [];
-    const TOTAL_PX = 676; // A4 본문 폭에 들어가는 픽셀 폭
-    const COL_PX =
-      raw.length === 5
-        ? raw.map((w) => Math.round((w / raw.reduce((a, b) => a + b, 0)) * TOTAL_PX))
-        : FALLBACK;
-
-    /*
-      구분 열만은 양식 비율을 그대로 따르지 않는다.
-      양식에서 5.9%(≈40px)인데, 행이 10개를 넘으면 「1-10」처럼 네 글자가 되어
-      웹에디터에서 **두 줄로 접힌다** (한글은 좁은 장평으로 버티지만 편집기는 못 버틴다).
-      모자란 만큼은 가장 넓은 «내용» 열에서 가져온다 — 전체 폭은 그대로 지킨다.
-    */
-    const MIN_LABEL_PX = 52;
-    if (COL_PX[0] < MIN_LABEL_PX) {
-      COL_PX[1] -= MIN_LABEL_PX - COL_PX[0];
-      COL_PX[0] = MIN_LABEL_PX;
-    }
-    // 양식의 표 문단은 **가운데 정렬**이다 (실측: ParaShape align=3). 붙여넣기도 같게 맞춘다
-    const cellStyle =
-      'border:1px solid #000;padding:3px 4px;word-break:keep-all;vertical-align:middle;text-align:center';
-    const td = (c: string, i: number, head = false) =>
-      `<td width="${COL_PX[i]}" style="${cellStyle};width:${COL_PX[i]}px` +
-      // 구분(1-10)은 절대 접히면 안 되는 짧은 코드다
-      `${i === 0 ? ';white-space:nowrap' : ''}` +
-      `${head ? ';font-weight:bold;background:#f2f2f2' : ''}">${esc(c) || '&nbsp;'}</td>`;
-
-    const html = useful
-      .map(
-        (t) =>
-          `<p><b>${esc(t.title)}</b></p>` +
-          `<table border="1" cellspacing="0" cellpadding="3" width="${TOTAL_PX}"` +
-          // 양식은 바깥 테두리가 굵다 — 안쪽 칸은 1px, 표 자체는 2px
-          ` style="border-collapse:collapse;table-layout:fixed;width:${TOTAL_PX}px;` +
-          `font-size:10pt;border:2px solid #000">` +
-          `<tbody>` +
-          `<tr>${t.columns.map((c, i) => td(c, i, true)).join('')}</tr>` +
-          filledRows(t)
-            .map((r) => `<tr>${r.map((c, i) => td(c, i)).join('')}</tr>`)
-            .join('') +
-          `</tbody></table><p></p>`,
-      )
-      .join('');
-    const plain = useful
-      .map((t) => `${t.title}\n` + filledRows(t).map((r) => r.join('\t')).join('\n'))
-      .join('\n\n');
-    setErr(null);
-    const ok = await copyRich(html, plain);
-    if (ok) flash('표');
-    else setErr('복사하지 못했습니다. 브라우저가 막았을 수 있으니 [hwp로 받기]를 이용해 주세요.');
-  }, [data]);
 
   const edit = (ti: number, ri: number, ci: number, v: string) => {
     if (!data) return;
@@ -280,15 +195,21 @@ export function MergedDrawer({
           >
             제목 복사
           </button>
-          <button onClick={copyTables} disabled={!data} className="btn-primary btn-sm">
-            표 복사
-          </button>
+          {/*
+            «표 복사»는 뺐다 (v1.16.0). 한컴 웹에디터가 붙여넣은 HTML을 자기 방식으로
+            다시 그려서 양식과 완전히 같게 만들 수 없었다 — 폭·정렬·머리행까지 맞춰도
+            미세하게 어긋났다. 어설프게 비슷한 것보다 **확실한 길 하나**가 낫다.
+            브라우저는 한글 고유 형식을 클립보드에 올릴 수 없으므로(text/plain·html·png만),
+            hwp를 받아 한글에서 복사하는 것이 유일하게 서식이 100% 보존되는 경로다.
+            되살릴 때는 v1.15.1의 표 복사 구현에서 이어가면 된다.
+          */}
           <a
             href={`/api/division/merged?division=${divisionSlug}&isoKey=${isoKey}`}
-            className="text-sm text-muted underline-offset-2 hover:text-ink hover:underline"
+            className="btn-primary btn-sm"
           >
             hwp로 받기
           </a>
+          <span className="text-sm text-muted">→ 한글에서 열어 표를 복사해 게시판에 붙여넣습니다</span>
           <span className="ml-auto text-sm">
             {copied && <span className="font-medium text-success">{copied} 복사됨</span>}
             {dirty && !copied && <span className="text-warning">저장하지 않은 수정</span>}
