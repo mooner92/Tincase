@@ -6,6 +6,7 @@ import {
   deadlineFor,
   describeWeek,
   formatDeadlineKo,
+  formatSubmittedKo,
   isLocked,
   isMonthlyWeek,
   mondayOf,
@@ -300,5 +301,30 @@ describe('장기 불변식 — 2020~2060 전수 (WS-T29~T31)', () => {
       }
     }
     expect(bad).toEqual([]);
+  });
+});
+
+
+describe('제출 시각 표시 (WS-T32~34)', () => {
+  const now = kst(2026, 8, 19, 16, 30); // 목 16:30
+
+  it('[WS-T32] 오늘은 시각만, 어제는 "어제", 그 전은 날짜', () => {
+    expect(formatSubmittedKo(kst(2026, 8, 19, 16, 26), now)).toBe('16:26');
+    expect(formatSubmittedKo(kst(2026, 8, 18, 10, 24), now)).toBe('어제 10:24');
+    expect(formatSubmittedKo(kst(2026, 8, 17, 9, 5), now)).toBe('8/17 09:05');
+  });
+
+  it('[WS-T33] 24시간이 아니라 **달력 날짜**로 센다', () => {
+    // 어제 23:50 → 지금 00:10. 20분 차이지만 달력으로는 어제다
+    const justAfterMidnight = kst(2026, 8, 19, 0, 10);
+    expect(formatSubmittedKo(kst(2026, 8, 18, 23, 50), justAfterMidnight)).toBe('어제 23:50');
+    // 오늘 00:05 → 지금 23:55. 거의 24시간이지만 같은 날이다
+    expect(formatSubmittedKo(kst(2026, 8, 19, 0, 5), kst(2026, 8, 19, 23, 55))).toBe('00:05');
+  });
+
+  it('[WS-T34] 달·해가 바뀌어도 어긋나지 않는다', () => {
+    expect(formatSubmittedKo(kst(2026, 7, 31, 14, 0), kst(2026, 8, 1, 9, 0))).toBe('어제 14:00');
+    expect(formatSubmittedKo(kst(2025, 12, 31, 14, 0), kst(2026, 1, 1, 9, 0))).toBe('어제 14:00');
+    expect(formatSubmittedKo(kst(2025, 12, 30, 14, 0), kst(2026, 1, 1, 9, 0))).toBe('12/30 14:00');
   });
 });

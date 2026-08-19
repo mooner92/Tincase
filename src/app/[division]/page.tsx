@@ -4,7 +4,7 @@ import { redirect } from 'next/navigation';
 import { getPageScope, getDivisionView } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { ensureCurrentSlot, effectiveDeadline, divisionStatus } from '@/server/worklog';
-import { formatDeadlineKo, isLocked, slotKind, toKstIso } from '@/lib/week';
+import { formatDeadlineKo, formatSubmittedKo, isLocked, slotKind, toKstIso } from '@/lib/week';
 import { DeadlineCountdown } from '@/components/DeadlineCountdown';
 import { SubmitChoice } from '@/components/SubmitChoice';
 import { MySubmissionCard } from '@/components/MySubmissionCard';
@@ -204,7 +204,9 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
                       {mine && ' (나)'}
                     </span>
                     {m.latest && (
-                      <span className="text-xs text-muted-soft">{toKstIso(m.latest.uploadedAt).slice(11, 16)}</span>
+                      <span className="text-xs whitespace-nowrap text-muted-soft">
+                        {formatSubmittedKo(m.latest.uploadedAt, now)}
+                      </span>
                     )}
                   </li>
                 );

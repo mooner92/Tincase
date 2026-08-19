@@ -159,6 +159,31 @@ export function msUntilDeadline(deadline: Date, now: Date = new Date()): number 
   return deadline.getTime() - now.getTime();
 }
 
+/**
+ * WS-17 — 제출 시각 표시. **오늘인지 아닌지가 먼저 보여야 한다.**
+ *
+ *   오늘   `16:26`        — 기본값이라 굳이 날짜를 붙이지 않는다
+ *   어제   `어제 10:24`
+ *   그 외  `8/17 10:24`
+ *
+ * 시각만 찍으면 어제 낸 것과 오늘 낸 것이 구별되지 않는다. 주차 단위 화면이라
+ * 목록에 며칠치가 섞이는데, 담당자는 "오늘 들어온 게 몇 건인가"를 본다.
+ * 그렇다고 전부 `8/18 16:26`으로 쓰면 좁은 목록에서 시각이 묻힌다 — 그래서 셋으로 나눈다.
+ */
+export function formatSubmittedKo(at: Date, now: Date = new Date()): string {
+  const k = new TZDate(at.getTime(), KST);
+  const n = new TZDate(now.getTime(), KST);
+  const hhmm = `${String(k.getHours()).padStart(2, '0')}:${String(k.getMinutes()).padStart(2, '0')}`;
+
+  // 날짜 차이는 **달력 날짜**로 센다 — 24시간 차이가 아니다 (23시 제출 → 다음날 01시면 '어제')
+  const day = (d: TZDate) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  const diff = Math.round((day(n) - day(k)) / 86400_000);
+
+  if (diff === 0) return hhmm;
+  if (diff === 1) return `어제 ${hhmm}`;
+  return `${k.getMonth() + 1}/${k.getDate()} ${hhmm}`;
+}
+
 /** 표시용: KST 기준 "8월 11일(화) 14:00" */
 export function formatDeadlineKo(deadline: Date): string {
   const k = new TZDate(deadline.getTime(), KST);
