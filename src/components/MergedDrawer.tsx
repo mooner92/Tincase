@@ -9,6 +9,7 @@
 // 표 그대로 들어간다. text/plain만 쓰면 줄글로 쏟아진다 (붙여넣기 파싱에서 배운 것과 같은 이유).
 import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { copyRich, copyText } from '@/lib/clipboard';
 
 interface TableView {
   key: string;
@@ -24,6 +25,13 @@ interface Content {
 
 /** 헤더 행을 뺀 본문만. 서버가 준 격자는 첫 줄이 열 이름이다 */
 const bodyRows = (t: TableView) => t.rows.slice(1);
+
+/**
+ * 복사·저장에 쓰는 행 — **내용 칸이 빈 행은 뺀다.**
+ * 양식에 미리 그려진 빈 줄(특이사항 4행 등)이 그대로 게시판에 붙으면 빈 표가 된다.
+ * 화면에서는 그대로 보여준다 — 거기에 적으라고 있는 칸이기 때문이다.
+ */
+const filledRows = (t: TableView) => bodyRows(t).filter((r) => r.slice(1).some((c) => c.trim()));
 
 export function MergedDrawer({
   open,
@@ -87,35 +95,25 @@ export function MergedDrawer({
   const copyTables = useCallback(async () => {
     if (!data) return;
     const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const html = data.tables
-      .filter((t) => bodyRows(t).length > 0)
+    const useful = data.tables.filter((t) => filledRows(t).length > 0);
+    const html = useful
       .map(
         (t) =>
           `<p><b>${esc(t.title)}</b></p><table border="1" cellspacing="0" cellpadding="4">` +
           `<tr>${t.columns.map((c) => `<th>${esc(c)}</th>`).join('')}</tr>` +
-          bodyRows(t)
+          filledRows(t)
             .map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`)
             .join('') +
           `</table><p></p>`,
       )
       .join('');
-    // 한글은 표 안에서 셀을 **줄바꿈**으로 구분한다 — plain 대체본도 그 규칙에 맞춘다
-    const plain = data.tables
-      .filter((t) => bodyRows(t).length > 0)
-      .map((t) => `${t.title}\n` + bodyRows(t).map((r) => r.join('\t')).join('\n'))
+    const plain = useful
+      .map((t) => `${t.title}\n` + filledRows(t).map((r) => r.join('\t')).join('\n'))
       .join('\n\n');
-    try {
-      await navigator.clipboard.write([
-        new ClipboardItem({
-          'text/html': new Blob([html], { type: 'text/html' }),
-          'text/plain': new Blob([plain], { type: 'text/plain' }),
-        }),
-      ]);
-      flash('표');
-    } catch {
-      await navigator.clipboard.writeText(plain); // 구형 브라우저 — 글자만이라도
-      flash('표(글자만)');
-    }
+    setErr(null);
+    const ok = await copyRich(html, plain);
+    if (ok) flash('표');
+    else setErr('복사하지 못했습니다. 브라우저가 막았을 수 있으니 [hwp로 받기]를 이용해 주세요.');
   }, [data]);
 
   const edit = (ti: number, ri: number, ci: number, v: string) => {
@@ -181,7 +179,12 @@ export function MergedDrawer({
         {/* 제출 동선 그대로 — 제목 복사 → 표 복사 → 게시판에 붙여넣기 */}
         <div className="flex flex-wrap items-center gap-2 border-b border-hairline bg-surface-soft px-6 py-3">
           <button
-            onClick={() => data && navigator.clipboard.writeText(data.title).then(() => flash('제목'))}
+            onClick={async () => {
+              if (!data) return;
+              setErr(null);
+              if (await copyText(data.title)) flash('제목');
+              else setErr('제목을 복사하지 못했습니다.');
+            }}
             disabled={!data}
             className="btn-secondary btn-sm"
           >
