@@ -149,21 +149,39 @@ export function MergedDrawer({
       raw.length === 5
         ? raw.map((w) => Math.round((w / raw.reduce((a, b) => a + b, 0)) * TOTAL_PX))
         : FALLBACK;
-    const cellStyle = 'border:1px solid #000;padding:3px 4px;word-break:keep-all;vertical-align:middle';
-    const td = (c: string, i: number, center: boolean, bold = false) =>
+
+    /*
+      구분 열만은 양식 비율을 그대로 따르지 않는다.
+      양식에서 5.9%(≈40px)인데, 행이 10개를 넘으면 「1-10」처럼 네 글자가 되어
+      웹에디터에서 **두 줄로 접힌다** (한글은 좁은 장평으로 버티지만 편집기는 못 버틴다).
+      모자란 만큼은 가장 넓은 «내용» 열에서 가져온다 — 전체 폭은 그대로 지킨다.
+    */
+    const MIN_LABEL_PX = 52;
+    if (COL_PX[0] < MIN_LABEL_PX) {
+      COL_PX[1] -= MIN_LABEL_PX - COL_PX[0];
+      COL_PX[0] = MIN_LABEL_PX;
+    }
+    // 양식의 표 문단은 **가운데 정렬**이다 (실측: ParaShape align=3). 붙여넣기도 같게 맞춘다
+    const cellStyle =
+      'border:1px solid #000;padding:3px 4px;word-break:keep-all;vertical-align:middle;text-align:center';
+    const td = (c: string, i: number, head = false) =>
       `<td width="${COL_PX[i]}" style="${cellStyle};width:${COL_PX[i]}px` +
-      `${center ? ';text-align:center' : ''}${bold ? ';font-weight:bold' : ''}">${esc(c) || '&nbsp;'}</td>`;
+      // 구분(1-10)은 절대 접히면 안 되는 짧은 코드다
+      `${i === 0 ? ';white-space:nowrap' : ''}` +
+      `${head ? ';font-weight:bold;background:#f2f2f2' : ''}">${esc(c) || '&nbsp;'}</td>`;
 
     const html = useful
       .map(
         (t) =>
           `<p><b>${esc(t.title)}</b></p>` +
           `<table border="1" cellspacing="0" cellpadding="3" width="${TOTAL_PX}"` +
-          ` style="border-collapse:collapse;table-layout:fixed;width:${TOTAL_PX}px;font-size:10pt">` +
+          // 양식은 바깥 테두리가 굵다 — 안쪽 칸은 1px, 표 자체는 2px
+          ` style="border-collapse:collapse;table-layout:fixed;width:${TOTAL_PX}px;` +
+          `font-size:10pt;border:2px solid #000">` +
           `<tbody>` +
-          `<tr>${t.columns.map((c, i) => td(c, i, true, true)).join('')}</tr>` +
+          `<tr>${t.columns.map((c, i) => td(c, i, true)).join('')}</tr>` +
           filledRows(t)
-            .map((r) => `<tr>${r.map((c, i) => td(c, i, i === 0)).join('')}</tr>`)
+            .map((r) => `<tr>${r.map((c, i) => td(c, i)).join('')}</tr>`)
             .join('') +
           `</tbody></table><p></p>`,
       )
