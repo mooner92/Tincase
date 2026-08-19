@@ -315,3 +315,42 @@ d('writer — 빈 셀 규칙', () => {
     }
   });
 });
+
+
+// ── HM-31 문단 정합성 (한글이 손상 판정하는 조건) ─────────────
+//
+// PARA_HEADER는 뒤따르는 레코드 개수를 자기 안에 들고 있다. 레코드를 지우거나 더하면서
+// 이 수를 안 고치면 한글이 **문서 손상**으로 판정한다. 라이브러리·LibreOffice는 그냥 읽어서
+// 이런 실수가 오래 안 드러난다 — 그래서 파일이 아니라 **구조를 직접** 본다.
+describe('문단 선언 개수 정합 (HM-T31)', () => {
+  const audit = (recs: ReturnType<typeof parseRecords>) => {
+    const bad: string[] = [];
+    for (let i = 0; i < recs.length; i++) {
+      if (recs[i].tag !== TAG.PARA_HEADER || recs[i].data.length < 18) continue;
+      const csDeclared = recs[i].data.readUInt16LE(12);
+      const lsDeclared = recs[i].data.readUInt16LE(16);
+      let cs = 0;
+      let ls = 0;
+      for (let j = i + 1; j < recs.length; j++) {
+        if (recs[j].tag === TAG.PARA_HEADER || recs[j].tag === TAG.LIST_HEADER) break;
+        if (recs[j].tag === TAG.PARA_CHAR_SHAPE) cs += recs[j].data.length / 8;
+        if (recs[j].tag === TAG.PARA_LINE_SEG) ls += recs[j].data.length / 36;
+      }
+      if (cs !== csDeclared) bad.push(`문단 ${i}: charShape 선언 ${csDeclared} ≠ 실제 ${cs}`);
+      if (ls !== lsDeclared) bad.push(`문단 ${i}: lineSeg 선언 ${lsDeclared} ≠ 실제 ${ls}`);
+    }
+    return bad;
+  };
+
+  it.skipIf(!has)('[HM-T31] 표를 채운 뒤에도 선언 개수와 실제 레코드 수가 맞는다', () => {
+    const recs = parseRecords(sectionOf('master-template.hwp'));
+    expect(audit(recs), '원본 양식').toEqual([]);
+
+    fillTable(recs, 0, [
+      ['1-1', '짧은 업무', '8/18', '온라인', ''],
+      ['1-2', '칸 폭을 훌쩍 넘겨 두 줄 이상으로 넘어가야 하는 아주 긴 업무 내용 문장입니다', '8/19', '본원 소회의실', '실장, 팀원 전원'],
+      ['1-3', '', '', '', ''],
+    ]);
+    expect(audit(recs), '채운 뒤').toEqual([]);
+  });
+});

@@ -118,6 +118,23 @@ export function setCellText(recs: HwpRecord[], cell: CellSpan, text: string): nu
       removed++;
     }
   }
+  /*
+   * ★ PARA_HEADER는 **뒤따르는 레코드의 개수를 자기 안에 들고 있다.**
+   *   12-13 charShapeCount · 14-15 rangeTagCount · **16-17 lineAlignCount(줄 수)**
+   *
+   * 레코드만 지우고 이 수를 그대로 두면 한글이 "있어야 할 줄 정보가 없다"고 보고
+   * **문서 손상**으로 판정한다 (실측: 문단 78개 중 35개 불일치 → 열리지 않음).
+   * 빈 셀의 PARA_TEXT 때(HM-11a)와 같은 부류의 실수다 — 라이브러리는 그냥 읽지만
+   * 한글은 자기 안의 앞뒤가 맞는지 본다.
+   */
+  if (removed > 0) {
+    for (let k = cell.start; k < cell.end - removed && k < recs.length; k++) {
+      if (recs[k].tag !== TAG.PARA_HEADER || recs[k].data.length < 18) continue;
+      const d = Buffer.from(recs[k].data);
+      d.writeUInt16LE(0, 16); // lineAlignCount = 0 → 한글이 열 때 다시 계산한다
+      recs[k] = { ...recs[k], data: d };
+    }
+  }
   // 지운 만큼 이 셀의 끝이 당겨졌다. 이 경계를 지키지 않으면 빈 칸을 처리할 때
   // **다음 셀의 PARA_TEXT를 잡아** 남의 글자를 고치게 된다
   const end = cell.end - removed;
