@@ -161,7 +161,18 @@ export function MergedDrawer({
 
   return (
     <div className="fixed inset-0 z-40 h-screen">
-      <div className="absolute inset-y-0 right-0 flex h-full w-full max-w-4xl flex-col border-l border-hairline bg-canvas">
+      {/* 배경 클릭 → 닫기 (다른 드로어들과 동일 구조). 수정 중이면 확인부터 */}
+      <div
+        className="absolute inset-0 bg-ink/40"
+        onClick={() => (!dirty || confirm('저장하지 않은 수정이 있습니다. 닫을까요?')) && onClose()}
+        aria-hidden
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-label="병합본 보기"
+        className="absolute inset-y-0 right-0 flex h-full w-full max-w-4xl flex-col border-l border-hairline bg-canvas"
+      >
         <header className="flex items-start justify-between gap-3 border-b border-hairline px-6 py-4">
           <div className="min-w-0">
             <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">병합본</p>
