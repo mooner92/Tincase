@@ -1,6 +1,6 @@
 {
   "name": "tincase",
-  "version": "1.12.2",
+  "version": "1.13.0",
   "private": true,
   "scripts": {
     "dev": "next dev -p 3000",

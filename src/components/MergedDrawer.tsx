@@ -7,7 +7,7 @@
 //
 // 붙여넣기는 `text/html`로 쓴다 — 한글도 게시판 편집기도 HTML 표를 받으면
 // 표 그대로 들어간다. text/plain만 쓰면 줄글로 쏟아진다 (붙여넣기 파싱에서 배운 것과 같은 이유).
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { copyRich, copyText } from '@/lib/clipboard';
 
@@ -52,7 +52,31 @@ export function MergedDrawer({
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
+
+  /**
+   * 칸 높이를 **내용에 맞춘다.**
+   *
+   * `rows={1}` 고정이면 «본원 소회의실»처럼 줄바꿈되는 값이 아래로 잘려서,
+   * 확인하려면 칸마다 클릭해 스크롤해야 한다. 확인하려고 여는 화면인데 그러면 안 된다.
+   * 세로로 길어지더라도 **한눈에 다 보이는 편**이 낫다.
+   *
+   * CSS `field-sizing: content`가 같은 일을 하지만 사내 PC 브라우저 버전을 장담할 수 없어
+   * scrollHeight로 직접 맞춘다 — 어디서나 동작한다.
+   */
+  const fit = (el: HTMLTextAreaElement | null) => {
+    if (!el) return;
+    el.style.height = 'auto';
+    // border-box이므로 테두리 두께를 더해야 한다 — scrollHeight는 테두리를 뺀 값이다
+    const border = el.offsetHeight - el.clientHeight;
+    el.style.height = `${el.scrollHeight + border}px`;
+  };
+
+  // 값이 밖에서 바뀌는 경우(불러오기·저장 후 재조회)도 다시 맞춘다
+  useLayoutEffect(() => {
+    bodyRef.current?.querySelectorAll('textarea').forEach((el) => fit(el as HTMLTextAreaElement));
+  }, [data]);
 
   // 상태 변경은 전부 비동기 콜백 안에서. `alive`는 드로어를 빨리 여닫았을 때
   // 늦게 도착한 응답이 새 상태를 덮어쓰는 것을 막는다
@@ -96,13 +120,39 @@ export function MergedDrawer({
     if (!data) return;
     const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     const useful = data.tables.filter((t) => filledRows(t).length > 0);
+
+    /*
+      한글은 **폭 정보가 없는 표를 최소 폭으로 접는다.** 처음엔 border만 주고 폭을 안 줬더니
+      «본원 소회의실»이 두세 글자마다 줄바꿈되며 무너졌다.
+      그래서 부서 양식 표의 실제 칸 폭(HWPUNIT 실측)을 pt로 환산해 그대로 싣는다.
+
+        구분 30.2 · 내용 177.3 · 일자 61.3 · 장소 81.1 · 참석자 157.5 (합 507.3pt)
+
+      `word-break: keep-all` — 한글은 단어 중간에서 끊으면 안 읽힌다.
+    */
+    const COL_PT = [30.2, 177.3, 61.3, 81.1, 157.5];
+    const TOTAL_PT = COL_PT.reduce((a, b) => a + b, 0);
+    const cell = 'border:1px solid #000;padding:2pt 3pt;word-break:keep-all;vertical-align:top';
+    const table =
+      `border-collapse:collapse;table-layout:fixed;width:${TOTAL_PT}pt;` +
+      `font-family:함초롬돋움,맑은 고딕,sans-serif;font-size:10pt`;
+
     const html = useful
       .map(
         (t) =>
-          `<p><b>${esc(t.title)}</b></p><table border="1" cellspacing="0" cellpadding="4">` +
-          `<tr>${t.columns.map((c) => `<th>${esc(c)}</th>`).join('')}</tr>` +
+          `<p style="font-family:함초롬돋움;font-size:11pt"><b>${esc(t.title)}</b></p>` +
+          `<table border="1" cellspacing="0" style="${table}">` +
+          `<colgroup>${COL_PT.map((w) => `<col style="width:${w}pt" width="${Math.round(w * 1.333)}">`).join('')}</colgroup>` +
+          `<tr>${t.columns
+            .map((c) => `<td style="${cell};text-align:center;font-weight:bold">${esc(c)}</td>`)
+            .join('')}</tr>` +
           filledRows(t)
-            .map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join('')}</tr>`)
+            .map(
+              (r) =>
+                `<tr>${r
+                  .map((c, i) => `<td style="${cell}${i === 0 ? ';text-align:center' : ''}">${esc(c) || '&nbsp;'}</td>`)
+                  .join('')}</tr>`,
+            )
             .join('') +
           `</table><p></p>`,
       )
@@ -221,7 +271,7 @@ export function MergedDrawer({
           )}
         </div>
 
-        <div className="flex-1 overflow-y-auto px-6 py-5">
+        <div ref={bodyRef} className="flex-1 overflow-y-auto px-6 py-5">
           {err && <p className="card border-error/40 bg-error-soft px-4 py-3 text-sm text-error">{err}</p>}
           {!data && !err && <p className="text-sm text-muted">불러오는 중…</p>}
 
@@ -243,7 +293,9 @@ export function MergedDrawer({
                             <th
                               key={c}
                               // 구분 열은 두 자리 번호(1-10)에서 줄바꿈이 난다 — 폭을 잡아 준다
-                              className={`px-3 py-2 font-medium ${i === 0 ? 'w-14 whitespace-nowrap' : ''} ${i === 1 ? 'w-1/2' : ''}`}
+                              className={`px-3 py-2 font-medium ${
+                                ['w-14 whitespace-nowrap', 'w-[38%]', 'w-[11%]', 'w-[22%]', 'w-[22%]'][i] ?? ''
+                              }`}
                             >
                               {c}
                             </th>
@@ -260,8 +312,12 @@ export function MergedDrawer({
                                   <textarea
                                     value={cell}
                                     rows={1}
-                                    onChange={(e) => edit(ti, ri, ci, e.target.value)}
-                                    className="w-full resize-y rounded border border-transparent bg-transparent px-2 py-1.5 text-sm text-ink hover:border-hairline focus:border-ink focus:bg-canvas focus:outline-none"
+                                    ref={fit}
+                                    onChange={(e) => {
+                                      fit(e.target);
+                                      edit(ti, ri, ci, e.target.value);
+                                    }}
+                                    className="block w-full resize-none overflow-hidden rounded border border-transparent bg-transparent px-2 py-1.5 text-sm leading-snug text-ink hover:border-hairline focus:border-ink focus:bg-canvas focus:outline-none"
                                   />
                                 ) : (
                                   <span className="block px-2 py-1.5 whitespace-nowrap tabular-nums text-body">
