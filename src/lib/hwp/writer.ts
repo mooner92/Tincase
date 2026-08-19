@@ -100,16 +100,38 @@ export function locateTables(recs: readonly HwpRecord[]): TableSpan[] {
  * PARA_HEADER의 글자 수도 같이 고친다 — 안 고치면 한글이 문단을 잘라 읽는다.
  */
 export function setCellText(recs: HwpRecord[], cell: CellSpan, text: string): number {
+  /*
+   * HM-28 — **줄 배치 캐시(PARA_LINE_SEG)를 버린다.**
+   *
+   * 이 레코드는 "이 문단은 몇 줄이고 각 줄이 몇 번째 글자에서 시작해 폭이 얼마인가"를
+   * 미리 계산해 둔 것이다. 글자만 바꾸고 이 값을 그대로 두면 한글은 **옛 글자 기준의
+   * 줄 배치로** 새 글자를 그린다 — 긴 글이 한 줄에 욱여넣어지며 자간이 무너지고 글자가
+   * 겹친다 (병합본의 «메가프로젝트 … 참석 및 지원» 행이 그랬다).
+   *
+   * 글꼴 폭을 모르므로 다시 계산할 수는 없다. 대신 **지운다** — 캐시가 없으면 한글이
+   * 열 때 직접 계산하고, 칸 폭을 넘는 글은 자연스럽게 다음 줄로 넘어간다(칸이 아래로 늘어난다).
+   */
+  let removed = 0;
+  for (let k = cell.end - 1; k >= cell.start; k--) {
+    if (recs[k].tag === TAG.PARA_LINE_SEG) {
+      recs.splice(k, 1);
+      removed++;
+    }
+  }
+  // 지운 만큼 이 셀의 끝이 당겨졌다. 이 경계를 지키지 않으면 빈 칸을 처리할 때
+  // **다음 셀의 PARA_TEXT를 잡아** 남의 글자를 고치게 된다
+  const end = cell.end - removed;
+
   let headerIdx = -1;
   let textIdx = -1;
-  for (let k = cell.start; k < cell.end; k++) {
+  for (let k = cell.start; k < end; k++) {
     if (recs[k].tag === TAG.PARA_HEADER && headerIdx < 0) headerIdx = k;
     if (recs[k].tag === TAG.PARA_TEXT && textIdx < 0) textIdx = k;
   }
   if (headerIdx < 0) throw new HwpWriteError(`셀(${cell.row},${cell.col})에 PARA_HEADER가 없습니다`);
 
   const PARA_MARK = '\r'; // 0x000D — 문단 끝 (실측)
-  let delta = 0;
+  let delta = -removed; // 레코드 수 변화 — LINE_SEG 삭제분부터 센다
 
   if (text === '') {
     // ★ 빈 칸에는 PARA_TEXT 레코드가 **없어야 한다** (원본 양식 실측: 빈 셀 20개 전부 없음).
@@ -117,7 +139,7 @@ export function setCellText(recs: HwpRecord[], cell: CellSpan, text: string): nu
     // 라이브러리·LibreOffice는 그대로 읽어서 이 실수가 오래 드러나지 않았다.
     if (textIdx >= 0) {
       recs.splice(textIdx, 1);
-      delta = -1;
+      delta -= 1;
     }
     setNChars(recs, headerIdx, 1); // 빈 문단도 글자 수는 1 (문단끝 몫)
     return delta;
@@ -134,7 +156,7 @@ export function setCellText(recs: HwpRecord[], cell: CellSpan, text: string): nu
       data: Buffer.alloc(0),
       extended: false,
     });
-    delta = 1;
+    delta += 1;
   } else {
     // 문단 끝 제어 문자는 원본 그대로 유지하고 본문만 교체
     const old = recs[textIdx].data.toString('ucs2');
@@ -222,14 +244,70 @@ export function resizeTable(recs: HwpRecord[], t: TableSpan, targetDataRows: num
  * 셀을 **뒤에서부터** 채우는 이유: 빈 셀에 PARA_TEXT를 새로 넣으면 뒤쪽 인덱스가
  * 밀린다. 역순으로 가면 아직 안 건드린 셀의 위치는 항상 그대로다.
  */
+/**
+ * HM-29 — 그 표의 **'보통' 글자 서식 id**를 문서 자신에게서 찾는다.
+ *
+ * 양식의 예시 행은 «제10차 인사위원회»처럼 **기울임 서식**으로 적혀 있다(실측: CharShape 15).
+ * 그 행을 덮어써서 채우면 우리 글자도 기울임으로 나온다 — 실제 병합본이 그랬다.
+ *
+ * 하드코딩하지 않고 구분 열(col 0)의 서식을 쓴다. 거기엔 「1-1」 같은 번호만 들어가서
+ * 강조를 줄 이유가 없는 칸이라, **그 문서의 보통 서식**이 거기 있다 (실측: CharShape 14 —
+ * 15와 같은 글꼴에 기울임만 빠진 것).
+ */
+function plainCharShapeOf(recs: HwpRecord[], t: TableSpan): number | null {
+  for (const cell of t.cells) {
+    if (cell.col !== 0 || cell.row < 1) continue;
+    for (let k = cell.start; k < cell.end; k++) {
+      if (recs[k].tag === TAG.PARA_CHAR_SHAPE && recs[k].data.length >= 8) {
+        return recs[k].data.readUInt32LE(4);
+      }
+    }
+  }
+  return null;
+}
+
+/** 그 셀의 모든 글자 구간을 한 가지 서식으로 통일한다 (기울임·굵게가 섞여 들어오지 않게) */
+function normalizeCharShape(recs: HwpRecord[], cell: CellSpan, shapeId: number): void {
+  for (let k = cell.start; k < cell.end && k < recs.length; k++) {
+    if (recs[k].tag !== TAG.PARA_CHAR_SHAPE) continue;
+    const d = Buffer.from(recs[k].data);
+    for (let o = 0; o + 8 <= d.length; o += 8) d.writeUInt32LE(shapeId, o + 4);
+    recs[k] = { ...recs[k], data: d };
+  }
+}
+
+/**
+ * HM-30 — 셀 속성의 **«셀 크기에 맞춰 글자 줄이기»** 비트를 끈다.
+ *
+ * 양식의 예시 행 셀에는 이 비트가 켜져 있다 (실측: LIST_HEADER attr `0x04000020`,
+ * 빈 행은 `0x00000020`). 켜져 있으면 한글이 칸을 넘는 글을 **줄바꿈하지 않고 장평을 줄여**
+ * 한 줄에 욱여넣는다 — 글자가 겹쳐 보이던 원인이다.
+ *
+ * 끄면 칸 폭을 넘는 글은 다음 줄로 넘어가고 칸이 아래로 늘어난다.
+ */
+const CELL_SHRINK_TO_FIT = 0x04000000;
+
+function clearShrinkToFit(recs: HwpRecord[], headerIdx: number): void {
+  const r = recs[headerIdx];
+  if (r.tag !== TAG.LIST_HEADER || r.data.length < 8) return;
+  const attr = r.data.readUInt32LE(4);
+  if (!(attr & CELL_SHRINK_TO_FIT)) return;
+  const d = Buffer.from(r.data);
+  d.writeUInt32LE(attr & ~CELL_SHRINK_TO_FIT, 4);
+  recs[headerIdx] = { ...r, data: d };
+}
+
 export function fillTable(recs: HwpRecord[], tableOrdinal: number, rows: readonly (readonly string[])[]): void {
   const found = locateTables(recs)[tableOrdinal];
   if (!found) throw new HwpWriteError(`${tableOrdinal + 1}번째 표가 없습니다`);
   const t = resizeTable(recs, found, rows.length);
+  const plain = plainCharShapeOf(recs, t);
 
   const ordered = [...t.cells].filter((c) => c.row >= 1).sort((a, b) => b.start - a.start);
   for (const cell of ordered) {
     const text = rows[cell.row - 1]?.[cell.col] ?? '';
+    clearShrinkToFit(recs, cell.start); // cell.start = 그 셀의 LIST_HEADER
+    if (plain !== null) normalizeCharShape(recs, cell, plain);
     setCellText(recs, cell, text);
   }
 }

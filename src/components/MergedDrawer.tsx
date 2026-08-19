@@ -130,31 +130,30 @@ export function MergedDrawer({
 
       `word-break: keep-all` — 한글은 단어 중간에서 끊으면 안 읽힌다.
     */
-    const COL_PT = [30.2, 177.3, 61.3, 81.1, 157.5];
-    const TOTAL_PT = COL_PT.reduce((a, b) => a + b, 0);
-    const cell = 'border:1px solid #000;padding:2pt 3pt;word-break:keep-all;vertical-align:top';
-    const table =
-      `border-collapse:collapse;table-layout:fixed;width:${TOTAL_PT}pt;` +
-      `font-family:함초롬돋움,맑은 고딕,sans-serif;font-size:10pt`;
+    /*
+      한컴 웹에디터는 `<colgroup>`을 무시한다 — 폭을 거기에만 주면 칸이 다시 최소로 접힌다.
+      그래서 **모든 `<td>`에 픽셀 `width` 속성을 직접** 단다. 옛 HTML 속성이라
+      웹에디터·한글·메일 어디서든 가장 잘 먹힌다. style은 보조로 함께 둔다.
+    */
+    const COL_PX = [40, 236, 82, 108, 210]; // 양식 실측 비율(5.9/34.9/12.1/16.0/31.0%)을 676px에 배분
+    const TOTAL_PX = COL_PX.reduce((a, b) => a + b, 0);
+    const cellStyle = 'border:1px solid #000;padding:3px 4px;word-break:keep-all;vertical-align:middle';
+    const td = (c: string, i: number, center: boolean, bold = false) =>
+      `<td width="${COL_PX[i]}" style="${cellStyle};width:${COL_PX[i]}px` +
+      `${center ? ';text-align:center' : ''}${bold ? ';font-weight:bold' : ''}">${esc(c) || '&nbsp;'}</td>`;
 
     const html = useful
       .map(
         (t) =>
-          `<p style="font-family:함초롬돋움;font-size:11pt"><b>${esc(t.title)}</b></p>` +
-          `<table border="1" cellspacing="0" style="${table}">` +
-          `<colgroup>${COL_PT.map((w) => `<col style="width:${w}pt" width="${Math.round(w * 1.333)}">`).join('')}</colgroup>` +
-          `<tr>${t.columns
-            .map((c) => `<td style="${cell};text-align:center;font-weight:bold">${esc(c)}</td>`)
-            .join('')}</tr>` +
+          `<p><b>${esc(t.title)}</b></p>` +
+          `<table border="1" cellspacing="0" cellpadding="3" width="${TOTAL_PX}"` +
+          ` style="border-collapse:collapse;table-layout:fixed;width:${TOTAL_PX}px;font-size:10pt">` +
+          `<tbody>` +
+          `<tr>${t.columns.map((c, i) => td(c, i, true, true)).join('')}</tr>` +
           filledRows(t)
-            .map(
-              (r) =>
-                `<tr>${r
-                  .map((c, i) => `<td style="${cell}${i === 0 ? ';text-align:center' : ''}">${esc(c) || '&nbsp;'}</td>`)
-                  .join('')}</tr>`,
-            )
+            .map((r) => `<tr>${r.map((c, i) => td(c, i, i === 0)).join('')}</tr>`)
             .join('') +
-          `</table><p></p>`,
+          `</tbody></table><p></p>`,
       )
       .join('');
     const plain = useful
