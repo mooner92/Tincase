@@ -10,7 +10,7 @@ import { handler, json, rateLimit } from '@/server/http';
 import { audit } from '@/server/audit';
 import { readStoredFile, writeFileAtomic } from '@/server/storage';
 import { readWorklog, TABLE_TITLES, TABLE_COLUMNS } from '@/lib/hwp/reader';
-import { tableGrid } from '@/lib/hwp/model';
+import { tableGrid, columnWidths } from '@/lib/hwp/model';
 import { composeMergedHwp } from '@/server/merge';
 import { boardTitle } from '@/lib/docname';
 import { slotKind, toKstIso } from '@/lib/week';
@@ -54,6 +54,9 @@ export const GET = handler(async (req: NextRequest) => {
       title: TABLE_TITLES[i] ?? `표 ${i + 1}`,
       columns: [...TABLE_COLUMNS],
       rows: tableGrid(t),
+      // API-53 — 붙여넣기용 표 폭. **양식에서 그대로 읽는다** (HWPUNIT).
+      // 코드에 비율을 박아 두면 부서가 양식을 바꾸는 순간 어긋난다
+      widths: columnWidths(t),
     })),
   });
 });

@@ -7,6 +7,8 @@ export interface HwpCell {
   row: number;
   colSpan: number;
   rowSpan: number;
+  /** 칸 너비 (HWPUNIT = 1/7200 inch). 붙여넣기용 표 폭을 양식에서 그대로 가져오는 데 쓴다 */
+  width: number;
   /** 다중 문단은 \n으로 join (HM-13) */
   text: string;
 }
@@ -64,6 +66,7 @@ export function extractTables(records: readonly HwpRecord[]): HwpTable[] {
               row: s.data.readUInt16LE(10),
               colSpan: s.data.readUInt16LE(12),
               rowSpan: s.data.readUInt16LE(14),
+              width: s.data.length >= 20 ? s.data.readUInt32LE(16) : 0,
             },
             paras: [],
           };
@@ -94,4 +97,15 @@ export function tableGrid(t: HwpTable): string[][] {
     if (c.row < t.rows && c.col < t.cols) grid[c.row][c.col] = c.text;
   }
   return grid;
+}
+
+/**
+ * 첫 행의 칸 너비 목록 (HWPUNIT). 표를 다른 데 붙여넣을 때 **양식과 같은 비율**로
+ * 만들기 위해 쓴다 — 폭을 코드에 박아 두면 부서가 양식을 바꾸는 순간 어긋난다.
+ */
+export function columnWidths(t: HwpTable): number[] {
+  return t.cells
+    .filter((c) => c.row === 0)
+    .sort((a, b) => a.col - b.col)
+    .map((c) => c.width);
 }

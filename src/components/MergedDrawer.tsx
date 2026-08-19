@@ -16,6 +16,8 @@ interface TableView {
   title: string;
   columns: string[];
   rows: string[][];
+  /** 양식에서 읽은 칸 너비 (HWPUNIT = 1/7200 inch) */
+  widths?: number[];
 }
 interface Content {
   title: string;
@@ -135,8 +137,18 @@ export function MergedDrawer({
       그래서 **모든 `<td>`에 픽셀 `width` 속성을 직접** 단다. 옛 HTML 속성이라
       웹에디터·한글·메일 어디서든 가장 잘 먹힌다. style은 보조로 함께 둔다.
     */
-    const COL_PX = [40, 236, 82, 108, 210]; // 양식 실측 비율(5.9/34.9/12.1/16.0/31.0%)을 676px에 배분
-    const TOTAL_PX = COL_PX.reduce((a, b) => a + b, 0);
+    /*
+      폭은 **양식에서 읽어 온 값**을 쓴다 (API-53). 코드에 박아 두면 부서가 양식을
+      바꾸는 순간 어긋난다 — 게시판 양식을 그대로 등록해 쓰는 것이 «완벽히 같게»의 길이라
+      폭도 그 파일을 따라가야 한다. 못 읽으면 우리 양식 실측 비율로 떨어진다.
+    */
+    const FALLBACK = [40, 236, 82, 108, 210];
+    const raw = useful[0]?.widths?.filter((w) => w > 0) ?? [];
+    const TOTAL_PX = 676; // A4 본문 폭에 들어가는 픽셀 폭
+    const COL_PX =
+      raw.length === 5
+        ? raw.map((w) => Math.round((w / raw.reduce((a, b) => a + b, 0)) * TOTAL_PX))
+        : FALLBACK;
     const cellStyle = 'border:1px solid #000;padding:3px 4px;word-break:keep-all;vertical-align:middle';
     const td = (c: string, i: number, center: boolean, bold = false) =>
       `<td width="${COL_PX[i]}" style="${cellStyle};width:${COL_PX[i]}px` +
