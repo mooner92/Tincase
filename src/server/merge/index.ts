@@ -51,6 +51,37 @@ interface Tagged extends MergeRow {
   raw: WorklogRow;
 }
 
+/**
+ * HM-27 — 양식 + 표 내용 → 병합본 hwp. **병합과 수정이 같은 경로를 쓴다.**
+ *
+ * 담당자가 병합본을 손으로 고칠 수 있게 되면서(API-50) 조립이 두 곳에서 일어난다.
+ * 두 곳이 각자 만들면 "병합한 것"과 "고친 것"의 결과가 미묘하게 달라진다 —
+ * 표를 지우는 조건, 채번 방식 같은 것들이 갈라진다. 그래서 여기 하나로 모은다.
+ */
+export function composeMergedHwp(templateBytes: Buffer, tableRows: Record<Bucket, string[][]>): {
+  bytes: Buffer;
+  tableCount: number;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+  const section = openHwp(templateBytes).sections[0];
+  const recs = parseRecords(section);
+  const tableCount = countTables(recs);
+
+  BUCKETS.forEach((bucket, i) => {
+    if (i >= tableCount) {
+      if (tableRows[bucket].length > 0) {
+        warnings.push(`양식에 ${i + 1}번 표가 없어 ${tableRows[bucket].length}행을 넣지 못했습니다.`);
+      }
+      return;
+    }
+    if (tableRows[bucket].length === 0) return; // 표를 그대로 둔다 (빈 양식 그대로)
+    fillTable(recs, i, tableRows[bucket]);
+  });
+
+  return { bytes: packHwp(templateBytes, [serializeRecords(recs)]), tableCount, warnings };
+}
+
 export function mergedRelPath(divisionSlug: string, year: number, weekLabel: string): string {
   return path.join(
     'divisions',
@@ -180,8 +211,6 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
 
   // ── 3. 조립 — 글자는 전부 원문 그대로 ──
   const src = await readStoredFile(template.filePath);
-  const section = openHwp(src).sections[0];
-  const recs = parseRecords(section);
 
   const tableRows: Record<Bucket, string[][]> = { achievements: [], plans: [], notes: [] };
   BUCKETS.forEach((bucket, tableIdx) => {
@@ -199,19 +228,10 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
   // 특이사항이 비면 3번 표를 지운다 — 실제 제출물의 관례 (sample-filled-w1에 3번 표가 없다)
   if (plan.dropEmptyNotes && grouped.notes.length === 0) tableRows.notes = [];
 
-  const tableCount = countTables(recs);
-  BUCKETS.forEach((bucket, i) => {
-    if (i >= tableCount) {
-      if (grouped[bucket].length > 0) {
-        warnings.push(`양식에 ${i + 1}번 표가 없어 ${grouped[bucket].length}행을 넣지 못했습니다.`);
-      }
-      return;
-    }
-    if (tableRows[bucket].length === 0) return; // 표를 그대로 둔다 (빈 양식 그대로)
-    fillTable(recs, i, tableRows[bucket]);
-  });
-
-  const out = packHwp(src, [serializeRecords(recs)]);
+  const composed = composeMergedHwp(src, tableRows);
+  warnings.push(...composed.warnings);
+  const out = composed.bytes;
+  const tableCount = composed.tableCount;
 
   // ── 4. 자체 점검 (HM-22) — 누락은 조용히 일어난다 ──
   const check = verifyMerged(out, grouped, tableCount);

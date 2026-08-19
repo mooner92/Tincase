@@ -66,6 +66,27 @@ export const templateName = (year: number, weekLabel: string, divisionName: stri
 export const submissionName = (year: number, weekLabel: string, divisionName: string, userName: string) =>
   docName({ year, weekLabel, divisionName, suffix: userName, ext: 'hwp' });
 
+/**
+ * 취합게시판 **답변 제목**. 받는 쪽이 그대로 쓰는 문자열이라 형식이 곧 규격이다.
+ *
+ *   주간  `8월3주차 연구운영회의 주간업무(AI홍보전략실)`
+ *   월간  `8월 연구운영회의 월간업무(AI홍보전략실)`
+ *
+ * 월간에 주차 번호를 빼는 이유: 그 주 한 주가 아니라 **그 달 전체**의 보고라서
+ * "8월5주차 월간업무"라고 쓰면 5주차만의 보고로 읽힌다.
+ * 주간에서 `8월 3주차`의 공백을 지우는 것은 받은 예시 형식 그대로다.
+ */
+export function boardTitle(
+  month: number,
+  weekLabel: string,
+  divisionName: string,
+  kind: WeekKind = 'weekly',
+): string {
+  const period = kind === 'monthly' ? `${month}월` : weekLabel.replace(/\s+/g, '');
+  const doc = kind === 'monthly' ? '월간업무' : '주간업무';
+  return `${period} 연구운영회의 ${doc}(${divisionName})`;
+}
+
 /** 전체 묶음 */
 export const zipName = (year: number, weekLabel: string, divisionName: string) =>
   docName({ year, weekLabel, divisionName, suffix: '제출물', ext: 'zip' });

@@ -6,6 +6,7 @@
 // 합쳐진 행, 안 합친 이유, 빠진 사람, 실패.
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { MergedDrawer } from './MergedDrawer';
 
 export interface MergeGroupView {
   authors: string[];
@@ -48,6 +49,7 @@ export function MergePanel({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [openGroups, setOpenGroups] = useState(false);
+  const [openContent, setOpenContent] = useState(false);
   const router = useRouter();
 
   const run = () => {
@@ -105,8 +107,13 @@ export function MergePanel({
 
         <div className="flex shrink-0 items-center gap-2">
           {done && canDownload && (
+            <button onClick={() => setOpenContent(true)} className="btn-oncolor">
+              내용 보기
+            </button>
+          )}
+          {done && canDownload && (
             <a href={href} className="btn-oncolor">
-              병합본 받기
+              받기
             </a>
           )}
           {canRun && (
@@ -118,6 +125,14 @@ export function MergePanel({
       </div>
 
       {err && <p className="mt-3 text-sm text-error">{err}</p>}
+
+      <MergedDrawer
+        open={openContent}
+        onClose={() => setOpenContent(false)}
+        isoKey={isoKey}
+        divisionSlug={divisionSlug}
+        canEdit={canRun}
+      />
 
       {done && (
         <>
