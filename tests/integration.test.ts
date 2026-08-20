@@ -342,6 +342,18 @@ d('병합본 열람 권한 (AU-T35~37 · TACP-15)', () => {
     expect(res.status).toBe(404);
   });
 
+  it('[AU-T38] 병합본 열람 응답에 **작성자가 없다** — TACP-11이 지키려는 것은 그대로다', async () => {
+    const { GET } = await import('@/app/api/division/merged/content/route');
+    const res = await GET(nx(`/api/division/merged/content?division=${A.slug}`, ID.aMember));
+    if (res.status === 404) return; // 병합본이 없는 실행 순서 — 권한 문제가 아니다
+    expect(res.status).toBe(200);
+    const body = JSON.stringify(await res.json());
+    // 부서원 이름·이메일·작성자 필드가 응답 어디에도 없어야 한다
+    for (const leak of ['a-member', 'a-lead', 'authors', '"who"', '@test.kei.re.kr']) {
+      expect(body, `누출: ${leak}`).not.toContain(leak);
+    }
+  });
+
   it('[AU-T37] 병합본 **수정**은 열람과 달리 담당자만 — member는 404', async () => {
     const { PUT } = await import('@/app/api/division/merged/content/route');
     const res = await PUT(
