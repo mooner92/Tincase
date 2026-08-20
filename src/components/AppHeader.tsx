@@ -53,6 +53,8 @@ export function AppHeader({
     ...(slug
       ? [
           { href: `/${slug}`, label: foreign ? '개요' : '제출' },
+          // TACP-15 — 병합본은 부서원 모두가 본다. 타 부서 열람 중에도 그 부서 보관함을 본다
+          { href: `/${slug}/archive`, label: '보관함' },
           ...(foreign ? [] : [{ href: `/${slug}/history`, label: '내 이력' }]),
           ...(isLead
             ? [

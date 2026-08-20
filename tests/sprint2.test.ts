@@ -467,15 +467,21 @@ d('TACP 준수', () => {
   });
 });
 
-// ── 병합본 접근 (TACP §3.2) ──────────────────────────────────
-// 병합본은 제출물과 다른 자원이다: 개인 문서가 아니라 부서가 대외로 내보내는 산출물이라
-// 공개 범위가 한 단계 넓다. 대신 member에게는 여전히 닫혀 있다 — 남의 업무 내용이 담겨 있다.
+// ── 병합본 접근 (TACP §3.2 · TACP-15) ────────────────────────
+// 병합본은 제출물과 다른 자원이다: 개인 문서가 아니라 부서가 대외로 내보내는 산출물이다.
+// v1.2에서 **부서원 모두에게 열었다** — 그 문서는 취합게시판에 올라가 전사가 읽는데
+// 정작 글을 쓴 본인만 못 보고 있었다. 숨겨서 지키는 것이 없었다.
 d('병합본 접근', () => {
   const merged = () => import('@/app/api/division/merged/route');
 
-  it('[TACP §3.2] member는 자기 부서 병합본도 못 받는다 → 404', async () => {
+  it('[TACP-15] member도 자기 부서 병합본을 받는다 (v1.2 개정 — 이전에는 404였다)', async () => {
+    const { POST } = await import('@/app/api/division/merge/route');
+    await POST(nx('/api/division/merge', ID.lead, { method: 'POST' }));
+
     const { GET } = await merged();
-    expect((await GET(nx('/api/division/merged', ID.member))).status).toBe(404);
+    const res = await GET(nx('/api/division/merged', ID.member));
+    expect(res.status).toBe(200);
+    expect(res.headers.get('content-type')).toBe('application/x-hwp');
   });
 
   it('lead는 병합 후 자기 부서 병합본을 받는다 — 파일명이 그대로 올릴 수 있는 형태', async () => {

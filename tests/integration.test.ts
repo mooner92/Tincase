@@ -324,6 +324,37 @@ d('집계 제외자 — 낼 수는 있다 (ST-T34~37 · DM-16/17)', () => {
   });
 });
 
+d('병합본 열람 권한 (AU-T35~37 · TACP-15)', () => {
+  const mergedFor = async (identity: string, slug: string) => {
+    const { GET } = await import('@/app/api/division/merged/route');
+    return GET(nx(`/api/division/merged?division=${slug}`, identity));
+  };
+
+  it('[AU-T35] member도 **내 부서** 병합본을 받는다 (v1.2 개정)', async () => {
+    const res = await mergedFor(ID.aMember, A.slug);
+    // 병합본이 아직 없으면 404 not_found — 권한 때문에 막힌 게 아니어야 한다
+    expect([200, 404]).toContain(res.status);
+    if (res.status === 404) expect((await res.json()).error).toBe('not_found');
+  });
+
+  it('[AU-T36] member의 **타 부서** 병합본은 여전히 404 (TACP-7)', async () => {
+    const res = await mergedFor(ID.aMember, B.slug);
+    expect(res.status).toBe(404);
+  });
+
+  it('[AU-T37] 병합본 **수정**은 열람과 달리 담당자만 — member는 404', async () => {
+    const { PUT } = await import('@/app/api/division/merged/content/route');
+    const res = await PUT(
+      nx('/api/division/merged/content', ID.aMember, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ tables: [] }),
+      }),
+    );
+    expect(res.status).toBe(404);
+  });
+});
+
 d('제출 취소 — 삭제 권한 (ST-T30~33 · TACP-14)', () => {
   it('[ST-T31] lead는 같은 부서 타인 제출물을 **읽을 수는 있어도 지우지는 못한다** → 404', async () => {
     const { prisma } = await import('@/server/db');

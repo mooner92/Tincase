@@ -208,18 +208,19 @@ export async function resolveDivisionPage(
  * TACP §3.2 — 병합본 접근 판정. 병합본은 제출물과 다른 자원이다:
  * 개인 문서가 아니라 부서가 대외로 내보내는 산출물이라 공개 범위가 한 단계 넓다.
  *
- *   내 부서   lead 이상이 받는다 (member는 현황만 — 남의 업무 내용이 담겨 있다)
+ *   내 부서   부서원 모두 (TACP-15)
  *   타 부서   readAll(총괄·운영자)만 + 감사 로그
  */
 export async function requireMergedAccess(
   scope: Scope,
   divisionId: string,
 ): Promise<void> {
-  const own = divisionId === scope.division.id;
-  if (own) {
-    if (scope.isLead || scope.readAll) return;
-    throw notFound(); // member — 존재 은닉 (TACP-5)
-  }
+  // TACP-15 — 내 부서 병합본은 **부서원 모두**가 본다.
+  // v1.1까지는 lead부터였는데 그 근거("남의 업무 내용이 담겨 있다")가 틀렸다:
+  // 병합본은 취합게시판에 올라가 전사가 보는 문서다. 자기가 쓴 글이 든 문서를
+  // 정작 본인만 못 보는 상태였고, 숨겨서 지키는 것이 없었다.
+  if (divisionId === scope.division.id) return;
+
   if (!scope.readAll) throw notFound();
   await audit(scope.user.email, 'cross_division_read', divisionId, 'merged');
 }
