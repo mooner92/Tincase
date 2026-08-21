@@ -53,6 +53,15 @@ export const getDivisionView = cache(async (slugParam: string): Promise<Division
     // 제출은 내 부서에서만 (DM-12 — 업로드 부서는 신원에서 도출된다).
     // 명단(onRoster)은 **집계 대상**이지 제출 권한이 아니다 (DM-16)
     canSubmit: isOwn,
+    /*
+      TACP-15 — 병합본 **수정** 권한. API(`PUT /api/division/merged/content`)가
+      `isLead` + 신원의 부서를 요구하므로 화면도 **똑같이** 판정해야 한다.
+
+      `canManage`를 쓰면 안 된다 — 거기엔 `readAll`(총괄·운영자)이 섞여 있어서
+      총괄담당에게 수정 버튼이 보이는데 누르면 404가 난다. 못 하는 행동의 버튼은
+      아예 렌더하지 않는다 (TACP-9).
+    */
+    canEditMerged: isOwn && ps.scope.isLead,
     // TACP-14 — 남의 제출물 삭제는 operator만. lead·coordinator는 읽기까지다.
     // canManage와 **일부러 분리한다** — 합치면 담당자에게 삭제권이 딸려간다
     canDeleteAny: ps.scope.user.isOperator,
@@ -66,6 +75,8 @@ export interface DivisionView {
   redirectTo: string | null;
   canManage: boolean;
   canSubmit: boolean;
+  /** TACP-15 — 병합본 수정 (담당자 + 내 부서). 열람과 다르다 */
+  canEditMerged: boolean;
   /** TACP-14 — 남의 제출물 삭제 (operator 전용) */
   canDeleteAny: boolean;
 }

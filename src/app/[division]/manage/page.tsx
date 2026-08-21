@@ -21,5 +21,6 @@ export default async function ManagePage({ params }: { params: Promise<{ divisio
       canMerge={view.isOwn && view.canManage}
       canDownloadMerged={view.canManage}
       canDeleteAny={view.canDeleteAny}
+      canEditMerged={view.canEditMerged}
     />;
 }

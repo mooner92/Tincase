@@ -342,6 +342,26 @@ d('병합본 열람 권한 (AU-T35~37 · TACP-15)', () => {
     expect(res.status).toBe(404);
   });
 
+  it('[AU-T39] 병합본 수정은 **lead만** — 총괄(readAll)도 404. 화면 판정과 같은 규칙', async () => {
+    const { prisma } = await import('@/server/db');
+    const { getDivisionView } = await import('@/server/page-scope');
+    const { PUT } = await import('@/app/api/division/merged/content/route');
+
+    // coordinator는 readAll을 갖지만 그 부서의 lead는 아니다
+    const res = await PUT(
+      nx('/api/division/merged/content', ID.coord, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ tables: [] }),
+      }),
+    );
+    expect(res.status).toBe(404);
+
+    // 화면도 같은 답을 해야 한다 — 다르면 «보이는데 안 되는 버튼»이 생긴다 (TACP-9)
+    const lead = await prisma.user.findFirstOrThrow({ where: { email: ID.aLead } });
+    expect(lead.divisionRole).toBe('lead');
+  });
+
   it('[AU-T38] 병합본 열람 응답에 **작성자가 없다** — TACP-11이 지키려는 것은 그대로다', async () => {
     const { GET } = await import('@/app/api/division/merged/content/route');
     const res = await GET(nx(`/api/division/merged/content?division=${A.slug}`, ID.aMember));

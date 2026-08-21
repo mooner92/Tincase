@@ -57,7 +57,7 @@ export default async function ArchivePage({ params }: { params: Promise<{ divisi
       </p>
 
       <div className="mt-7">
-        <ArchiveList items={items} divisionSlug={view.division.slug} canEdit={view.canManage && view.isOwn} />
+        <ArchiveList items={items} divisionSlug={view.division.slug} canEdit={view.canEditMerged} />
       </div>
     </main>
   );

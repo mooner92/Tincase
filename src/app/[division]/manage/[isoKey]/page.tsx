@@ -23,5 +23,6 @@ export default async function ManageWeekPage({ params }: { params: Promise<{ div
       canMerge={view.isOwn && view.canManage}
       canDownloadMerged={view.canManage}
       canDeleteAny={view.canDeleteAny}
+      canEditMerged={view.canEditMerged}
     />;
 }

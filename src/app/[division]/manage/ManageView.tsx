@@ -23,6 +23,7 @@ export async function ManageView({
   canMerge,
   canDownloadMerged,
   canDeleteAny,
+  canEditMerged,
 }: {
   division: Division; // ★ 해석된 부서. scope.division을 쓰면 타 부서 열람 시 어긋난다
   isoKey?: string;
@@ -32,6 +33,8 @@ export async function ManageView({
   canDownloadMerged: boolean;
   /** 제출물 삭제 — operator 전용 (TACP-14). 담당자에게는 주지 않는다 */
   canDeleteAny: boolean;
+  /** 병합본 수정 — 담당자 + 내 부서 (TACP-15). 총괄은 열람까지다 */
+  canEditMerged: boolean;
 }) {
   const now = new Date();
   await ensureCurrentSlot(now);
@@ -200,6 +203,7 @@ export async function ManageView({
           isoKey={slot.isoKey}
           divisionSlug={division.slug}
           canRun={canMerge}
+          canEditMerged={canEditMerged}
           canDownload={canDownloadMerged}
           submitted={collected}
         />

@@ -37,6 +37,7 @@ export function MergePanel({
   divisionSlug,
   canRun,
   canDownload,
+  canEditMerged,
   submitted,
 }: {
   state: MergeStateView;
@@ -44,6 +45,8 @@ export function MergePanel({
   divisionSlug: string;
   canRun: boolean;
   canDownload: boolean;
+  /** 병합본 수정 — 담당자 + 내 부서 (TACP-15). «병합 실행»과 다른 판정이다 */
+  canEditMerged: boolean;
   submitted: number;
 }) {
   const [busy, setBusy] = useState(false);
@@ -131,7 +134,7 @@ export function MergePanel({
         onClose={() => setOpenContent(false)}
         isoKey={isoKey}
         divisionSlug={divisionSlug}
-        canEdit={canRun}
+        canEdit={canEditMerged}
       />
 
       {done && (
