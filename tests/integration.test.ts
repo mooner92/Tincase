@@ -344,7 +344,6 @@ d('병합본 열람 권한 (AU-T35~37 · TACP-15)', () => {
 
   it('[AU-T39] 병합본 수정은 **lead만** — 총괄(readAll)도 404. 화면 판정과 같은 규칙', async () => {
     const { prisma } = await import('@/server/db');
-    const { getDivisionView } = await import('@/server/page-scope');
     const { PUT } = await import('@/app/api/division/merged/content/route');
 
     // coordinator는 readAll을 갖지만 그 부서의 lead는 아니다
