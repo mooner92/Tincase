@@ -10,6 +10,7 @@
  * 그래서 이름·부서·업무 내용이 전부 가공인 데모 DB를 따로 만들어 거기서 녹화한다.
  * 부수 효과로 화면이 항상 같은 상태에서 시작하므로 다시 찍어도 결과가 같다.
  */
+import { randomBytes } from 'node:crypto';
 import { PrismaClient } from '@prisma/client';
 import { hashPassword } from '../src/server/password';
 import { currentWeek } from '../src/lib/week';
@@ -50,7 +51,15 @@ async function main() {
     },
   });
 
-  const pw = await hashPassword('demo-password-1234');
+  /*
+   * 비밀번호를 코드에 적지 않는다 — 공개 저장소이고, 비밀 탐지기가 «하드코딩된 비밀번호»로
+   * 잡는다(실제로 GitGuardian 경고가 왔다). 값 자체는 데모용이라 위험하지 않지만,
+   * **저장소에 비밀번호 모양의 문자열을 두지 않는 습관**이 규칙을 지키는 유일한 방법이다.
+   *
+   * 데모 DB는 DEV_IDENTITY로 로그인하므로 비밀번호를 쓸 일이 사실상 없다.
+   * 그래도 계정에는 해시가 있어야 하니 실행할 때마다 임의로 만든다.
+   */
+  const pw = await hashPassword(randomBytes(24).toString('base64url'));
   const mkUser = (name: string, email: string, extra: object = {}) =>
     prisma.user.upsert({
       where: { email },

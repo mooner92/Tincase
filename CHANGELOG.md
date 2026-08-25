@@ -179,8 +179,8 @@ v1.1의 규칙을 못박아 둔 테스트(«member는 자기 부서 병합본도
 우리는 `http://<사내IP>:11111`로 접속하므로 그 객체가 아예 없었다 — 버튼을 눌러도
 아무 일도 일어나지 않았다.
 
-    http://127.0.0.1:11111      isSecureContext=true   clipboard=object
-    http://192.168.1.104:11111  isSecureContext=false  clipboard=undefined  ← 실제 접속 경로
+    http://127.0.0.1:11111         isSecureContext=true   clipboard=object
+    http://<서버-내부-IP>:11111    isSecureContext=false  clipboard=undefined  ← 실제 접속 경로
 
 **내가 127.0.0.1로 확인한 것이 문제였다.** localhost는 보안 컨텍스트라 통과했고,
 사용자가 실제로 쓰는 조건과 달랐다. 기능은 되는데 검증 환경이 틀렸다.

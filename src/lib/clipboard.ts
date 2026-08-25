@@ -1,10 +1,10 @@
 // 클립보드 — **사내망 평문 HTTP에서도 동작해야 한다.**
 //
 // `navigator.clipboard`는 보안 컨텍스트(HTTPS 또는 localhost)에서만 존재한다.
-// 우리 앱은 `http://<사내IP>:11111`로 접속하므로 **그 객체가 아예 없다**.
+// 우리 앱은 `http://<서버-내부-IP>:11111`로 접속하므로 **그 객체가 아예 없다**.
 // 실측:
-//   http://127.0.0.1:11111   → isSecureContext=true,  clipboard=object
-//   http://192.168.1.104:11111 → isSecureContext=false, clipboard=undefined
+//   http://127.0.0.1:11111        → isSecureContext=true,  clipboard=object
+//   http://<서버-내부-IP>:11111   → isSecureContext=false, clipboard=undefined
 //
 // 그래서 구형 `document.execCommand('copy')`를 대체 경로로 둔다.
 //

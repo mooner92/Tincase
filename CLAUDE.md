@@ -53,6 +53,18 @@ npm run db:seed      # docs/private/seed.json → DB (멱등)
 문서의 `<CF_ACCOUNT_ID>` · `<CF_TUNNEL_ID>` · `<서버-내부-IP>` 는 플레이스홀더다.
 **실제 값이나 내부 문서 내용을 커밋에 넣지 말 것.**
 
+이 규칙은 **기억으로 지켜지지 않았다.** 2026-08-14에 내부망 IP를 한 번 지웠는데
+8/16·8/19 커밋에 다시 들어갔고, GitGuardian 경고를 받고서야 알았다.
+그래서 검사를 스크립트로 만들었다 — **커밋 전에 돌린다**:
+
+```bash
+bash scripts/check-secrets.sh
+```
+
+내부망 호스트 IP · 하드코딩 비밀번호 · 개인키/토큰 · Cloudflare 실제 ID ·
+`docs/private` 추적 여부를 본다. 오탐을 내지 않도록 사설 **대역**(172.16.0.0/12)과
+`tests/`의 더미 비밀번호는 통과시킨다 — 헛경고를 내는 검사는 곧 무시된다.
+
 ## Agent skills
 
 ### Issue tracker
