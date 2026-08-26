@@ -102,7 +102,18 @@ export const GET = handler(async (req: NextRequest) => {
     editedAt: toKstIso(run.finishedAt ?? run.startedAt),
     canSeeAuthors,
     tables: parsed.tables.slice(0, 3).map((t, i) => {
-      const grid = tableGrid(t);
+      /*
+       * UX-03 — **내용이 빈 행은 보내지 않는다.**
+       *
+       * 빈 표는 `fillTable([])`이 머리행만 남기지만 hwp 구조상 빈 행 하나가 남고,
+       * 화면에는 「1행」이라 적힌 표에 빈 줄로 보인다 — «뭔가 잘못됐나»로 읽힌다.
+       *
+       * 화면이 아니라 **여기서** 거르는 이유: 드로어의 수정·삭제가 행 번호로 원본 배열을
+       * 짚기 때문에(`ri + 1`), 화면에서만 거르면 **엉뚱한 행이 고쳐진다.**
+       * 걸러진 격자를 그대로 내려보내면 그 대응이 어긋날 일이 없다.
+       */
+      const full = tableGrid(t);
+      const grid = [full[0] ?? [], ...full.slice(1).filter((r) => r.slice(1).some((c) => c.trim()))];
       return {
         key: BUCKETS[i],
         title: TABLE_TITLES[i] ?? `표 ${i + 1}`,

@@ -279,7 +279,7 @@ export function MergedDrawer({
                               {c}
                             </th>
                           ))}
-                          {showAuthors && <th className="w-[13%] px-3 py-2 font-medium">작성자</th>}
+                          {showAuthors && <th className="w-[15%] px-3 py-2 font-medium whitespace-nowrap">작성자</th>}
                           {canEdit && <th className="w-8" />}
                         </tr>
                       </thead>
@@ -307,7 +307,7 @@ export function MergedDrawer({
                               </td>
                             ))}
                             {showAuthors && (
-                              <td className="px-3 py-1.5 align-top text-xs">
+                              <td className="px-3 py-1.5 align-top text-xs whitespace-nowrap">
                                 {(t.authors?.[ri] ?? []).length === 0 ? (
                                   // 담당자가 새로 써 넣었거나 대조하지 못한 행 — 모르는 걸 아는 척하지 않는다
                                   <span className="text-muted-soft">—</span>

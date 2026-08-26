@@ -26,10 +26,69 @@ export function HistoryTable({
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
 
+  /** 열기·받기 — 표와 카드가 같은 것을 쓴다 (두 벌이면 갈라진다) */
+  const actions = (r: HistoryRow) =>
+    r.submissionId && (
+      <span className="inline-flex gap-1.5">
+        <button
+          onClick={() => setOpenId(r.submissionId)}
+          className="rounded border border-hairline px-2.5 py-1 text-xs font-medium text-ink hover:bg-surface-soft"
+        >
+          열기
+        </button>
+        <a
+          href={`/api/submissions/${r.submissionId}/download`}
+          className="rounded border border-hairline px-2.5 py-1 text-xs font-medium text-body hover:bg-surface-soft"
+        >
+          ↓ 받기
+        </a>
+      </span>
+    );
+
   return (
     <>
-      <div className="card mt-4 overflow-x-auto">
-        <table className="w-full text-sm">
+      {/*
+        UX-02 — 휴대폰에서는 **표를 쓰지 않는다** (v1.23.2).
+        `overflow-x-auto` 안에 `w-full` 표를 두면 스크롤되는 게 아니라 **눌린다** —
+        390px에서 머리글이 「버\n전」「제출\n시각」처럼 세로로 쪼개져 읽을 수 없었다 (실측).
+        가로 스크롤로 바꿔도 버튼이 화면 밖에 있어 불편하다. 그래서 좁은 화면은 카드로 쌓는다.
+      */}
+      <ul className="mt-4 space-y-2 sm:hidden">
+        {rows.map((r) => (
+          <li
+            key={r.slotId}
+            className={`card flex items-center justify-between gap-3 px-4 py-3 ${!r.submissionId ? 'bg-surface-soft/60' : ''}`}
+          >
+            <div className="min-w-0">
+              <p className="font-medium text-ink">
+                {r.label}
+                {r.monthly && (
+                  <span className="ml-2 rounded-full bg-brand-soft px-2 py-0.5 text-[11px] font-semibold text-brand">
+                    월간
+                  </span>
+                )}
+              </p>
+              <p className="mt-0.5 text-xs">
+                {r.submissionId ? (
+                  <>
+                    <span className="text-success">● 제출</span>
+                    <span className="ml-1.5 tabular-nums text-muted">
+                      {r.uploadedAtKst}
+                      {r.version ? ` · v${r.version}` : ''}
+                    </span>
+                  </>
+                ) : (
+                  <span className="text-muted-soft">미제출</span>
+                )}
+              </p>
+            </div>
+            <div className="shrink-0">{actions(r)}</div>
+          </li>
+        ))}
+      </ul>
+
+      <div className="card mt-4 hidden overflow-x-auto sm:block">
+        <table className="w-full text-sm whitespace-nowrap">
           <thead>
             <tr className="border-b border-hairline text-left text-xs text-muted">
               <th className="px-4 py-2.5 font-medium">주차</th>
@@ -62,24 +121,7 @@ export function HistoryTable({
                 </td>
                 <td className="px-4 py-2.5 tabular-nums text-body">{r.version ? `v${r.version}` : '—'}</td>
                 <td className="px-4 py-2.5 tabular-nums text-body">{r.uploadedAtKst ?? '—'}</td>
-                <td className="px-4 py-2.5 text-right">
-                  {r.submissionId && (
-                    <span className="inline-flex gap-1.5">
-                      <button
-                        onClick={() => setOpenId(r.submissionId)}
-                        className="rounded border border-hairline px-2.5 py-1 text-xs font-medium text-ink hover:bg-surface-soft"
-                      >
-                        열기
-                      </button>
-                      <a
-                        href={`/api/submissions/${r.submissionId}/download`}
-                        className="rounded border border-hairline px-2.5 py-1 text-xs font-medium text-body hover:bg-surface-soft"
-                      >
-                        ↓ 받기
-                      </a>
-                    </span>
-                  )}
-                </td>
+                <td className="px-4 py-2.5 text-right">{actions(r)}</td>
               </tr>
             ))}
           </tbody>

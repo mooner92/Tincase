@@ -194,11 +194,19 @@ export function MergePanel({
               ))}
             </ul>
           )}
+          {/*
+            UX-04 — 「지금 미제출」이 아니라 **「이 병합본을 만들 때 빠져 있던 사람」**이다.
+            둘은 다르다: 병합 뒤에 낸 사람은 위 현황표에 «제출»로 뜨는데 여기엔 그대로 남아,
+            같은 화면에서 3/9와 미제출 7명이 동시에 보인다 (실제로 그렇게 보였다).
+            그래서 **시점을 문장에 박아 두고**, 그 뒤 제출이 있으면 다시 병합하라고 말한다.
+          */}
           {state.missing.length > 0 && (
             <p className="mt-3 text-sm text-body">
-              <span className="font-medium">미제출 {state.missing.length}명</span>
+              <span className="font-medium">이 병합본에 빠진 사람 {state.missing.length}명</span>
               <span className="ml-1.5 text-muted">{state.missing.join(', ')}</span>
-              <span className="ml-1 text-muted-soft">— 병합본에 빠져 있습니다</span>
+              <span className="ml-1 text-muted-soft">
+                — {state.finishedAtKst ?? '병합'} 기준입니다. 그 뒤에 낸 사람이 있으면 [다시 병합]을 눌러주세요
+              </span>
             </p>
           )}
         </>

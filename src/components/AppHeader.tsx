@@ -95,24 +95,56 @@ export function AppHeader({
 
   return (
     <header className="sticky top-0 z-30 border-b border-hairline-soft bg-canvas/95 backdrop-blur-sm">
-      <div className="mx-auto flex h-16 max-w-[1120px] items-center justify-between gap-4 px-5">
-        <div className="flex min-w-0 items-center gap-3">
-          <Link href={slug ? `/${slug}` : '/'} className="shrink-0" aria-label="Tincase 홈">
-            {/* SVG 로고 — next/image는 최적화할 게 없고 레이아웃만 복잡해진다.
-                h는 30px: viewBox 높이가 84→96으로 늘어(아래 잘림 수정) 같은 h면 12% 작아진다 */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/brand/tincase-lockup.svg" alt="Tincase" className="h-[30px] w-auto" />
-          </Link>
-          <span
-            className={`badge-pill max-w-44 truncate ${foreign ? 'bg-warning-soft text-body-strong' : ''}`}
-            title={foreign ? `${divisionName} (타 부서 열람 중)` : divisionName}
-          >
-            {divisionName}
-            {foreign && <span className="ml-1 text-[11px] font-semibold">열람</span>}
-          </span>
+      {/*
+        UX-01 — 좁은 화면에서 메뉴가 로고를 덮던 것을 고쳤다 (v1.23.2).
+        폭이 모자라면 셋(로고·메뉴·사용자)이 서로를 밀어내는데, 로고만 `shrink-0`이라
+        메뉴가 그 위로 겹쳐 「Tincase」의 글자를 가렸다 (390px 실측).
+        게다가 메뉴는 `overflow-x-auto`라 «가로로 더 있다»는 표시가 없어,
+        휴대폰에서는 「내 이력」·「사용 안내」가 **없는 것처럼** 보였다.
+
+        고친 방향: 한 줄에 우겨넣지 않는다. 좁으면 메뉴를 **아랫줄로 내린다** —
+        가로 스크롤은 있는 줄도 모르는 사람이 대부분이다.
+      */}
+      <div className="mx-auto max-w-[1120px] px-5">
+        <div className="flex h-16 items-center justify-between gap-3">
+          <div className="flex min-w-0 shrink items-center gap-3">
+            <Link href={slug ? `/${slug}` : '/'} className="shrink-0" aria-label="Tincase 홈">
+              {/* SVG 로고 — next/image는 최적화할 게 없고 레이아웃만 복잡해진다.
+                  h는 30px: viewBox 높이가 84→96으로 늘어(아래 잘림 수정) 같은 h면 12% 작아진다 */}
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src="/brand/tincase-lockup.svg" alt="Tincase" className="h-[30px] w-auto" />
+            </Link>
+            {/* 부서 배지는 좁은 화면에서 감춘다 — 부서는 페이지 제목에도 있다 */}
+            <span
+              className={`badge-pill hidden max-w-44 truncate sm:inline-block ${foreign ? 'bg-warning-soft text-body-strong' : ''}`}
+              title={foreign ? `${divisionName} (타 부서 열람 중)` : divisionName}
+            >
+              {divisionName}
+              {foreign && <span className="ml-1 text-[11px] font-semibold">열람</span>}
+            </span>
+          </div>
+
+          <nav className="hidden items-center gap-1 md:flex" aria-label="주요 메뉴">
+            <Nav />
+          </nav>
+
+          <UserMenu />
         </div>
 
-        <nav className="flex items-center gap-1 overflow-x-auto" aria-label="주요 메뉴">
+        {/* 좁은 화면 — 메뉴를 아랫줄에 펼친다. 스크롤 없이 전부 보인다 */}
+        <nav
+          className="-mx-1 flex flex-wrap items-center gap-1 pb-2.5 md:hidden"
+          aria-label="주요 메뉴"
+        >
+          <Nav />
+        </nav>
+      </div>
+    </header>
+  );
+
+  function Nav() {
+    return (
+      <>
           {items.map((it) => {
             const active = isActive(it.href);
             // 안내는 업무 메뉴가 아니다. 옅은 초록으로 눈에 띄게 하되,
@@ -134,10 +166,14 @@ export function AppHeader({
                 {it.label}
               </Link>
             );
-          })}
-        </nav>
+      })}
+      </>
+    );
+  }
 
-        <div ref={menuRef} className="relative shrink-0">
+  function UserMenu() {
+    return (
+      <div ref={menuRef} className="relative shrink-0">
           <button
             onClick={() => setOpen((v) => !v)}
             aria-haspopup="menu"
@@ -181,8 +217,7 @@ export function AppHeader({
               </button>
             </div>
           )}
-        </div>
       </div>
-    </header>
-  );
+    );
+  }
 }
