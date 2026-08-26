@@ -40,6 +40,7 @@ model Division {
   templates   Template[]
   submissions Submission[]
   mergeRuns   MergeRun[]
+  notifyLogs  NotifyLog[]
 }
 
 model User {
@@ -55,6 +56,9 @@ model User {
   /** DM-16 — 집계에서 뺀 이유. "휴직" · "부서장" 등. onRoster=false일 때만 뜻이 있다.
       빼는 것과 그 이유를 같이 적어두지 않으면, 몇 주 뒤에 왜 뺐는지 아무도 모른다 */
   rosterNote    String?
+  /** NT-01 — 사내 메신저 사번(RecvId). 없으면 알림을 보내지 않는다.
+      이메일과 별개다 — 메신저는 사번으로만 사람을 찾는다 */
+  employeeNo    String?
   sortOrder     Int      @default(100)
   createdAt     DateTime @default(now())
 
@@ -102,6 +106,7 @@ model WeekSlot {
 
   submissions Submission[]
   mergeRuns   MergeRun[]
+  notifyLogs  NotifyLog[]
 
   @@index([opensAt])
 }
@@ -199,4 +204,25 @@ model AuditLog {
 
   @@index([at])
   @@index([divisionId, at])
+}
+
+/** NT-12 — 보낸 알림의 기록. 같은 (부서, 주차, 종류)로 두 번 보내지 않기 위한 자물쇠이자
+    "왜 안 왔지"를 나중에 풀기 위한 근거다 */
+model NotifyLog {
+  id         String   @id @default(cuid())
+  divisionId String
+  weekSlotId String
+  /** "deadline_1h" 등 */
+  kind       String
+  /** JSON: 실제로 보낸 사번 목록 */
+  recipients String
+  /** JSON: 걸러진 대상·오류 등 */
+  detail     String?
+  sentAt     DateTime @default(now())
+
+  division Division @relation(fields: [divisionId], references: [id])
+  weekSlot WeekSlot @relation(fields: [weekSlotId], references: [id])
+
+  @@unique([divisionId, weekSlotId, kind])
+  @@index([sentAt])
 }

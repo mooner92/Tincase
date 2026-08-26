@@ -10,6 +10,23 @@ const schema = z.object({
   MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(20 * 1024 * 1024),
   // HM-24 — 병합 보조 모델. 비워두면 결정론 병합만 수행한다 (모델은 얹는 것이지 의존 대상이 아니다).
   MERGE_MODEL: z.string().default(''),
+
+  // ── 사내 메신저 알림 (NT-01~06) ────────────────────────────
+  /** 비어 있으면 알림 기능 전체가 꺼진다. 주소를 코드에 적지 않는다 (공개 저장소) */
+  MESSENGER_URL: z.string().default(''),
+  /**
+   * **실제로 발송되는 API다.** 이 목록에 있는 사번에게만 나간다.
+   * 비어 있으면 아무에게도 안 간다 — 실수로 337명에게 가는 일이 없도록
+   * 「열려 있음」이 아니라 「닫혀 있음」을 기본값으로 둔다 (NT-03).
+   *   MESSENGER_ALLOWLIST="21963"        테스트
+   *   MESSENGER_ALLOWLIST="*"            전원 발송 (의도적으로만)
+   */
+  MESSENGER_ALLOWLIST: z.string().default(''),
+  MESSENGER_SYSTEM_NAME: z.string().default('Tincase'),
+  MESSENGER_SENDER_ID: z.string().default('TINCASE'),
+  MESSENGER_SENDER_NAME: z.string().default('업무일지 수합'),
+  /** 알림에서 눌렀을 때 열리는 주소. 사내망 주소라 환경변수로 받는다 */
+  MESSENGER_LINK_BASE: z.string().default(''),
   MERGE_MODEL_URL: z.string().default('http://127.0.0.1:11434'),
   MERGE_MODEL_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   MERGE_MODEL_MAX_ROWS: z.coerce.number().int().positive().default(400),

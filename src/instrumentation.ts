@@ -1,4 +1,8 @@
-// HM-25 — 마감 자동 병합 스케줄러. 서버 기동 시 1회 등록된다 (Next.js instrumentation).
+// HM-25 · NT-10 — 마감 스케줄러. 서버 기동 시 1회 등록된다 (Next.js instrumentation).
+//
+// 두 가지를 같은 주기로 돌린다:
+//   마감 **1시간 전** → 미제출자에게 알림 한 번 (NT-10)
+//   마감 **후**       → 자동 병합 (HM-25)
 //
 // 외부 cron이 아니라 앱 안에서 도는 이유: 목요일 14:00 마감을 지키는 게 이 제품의 전부인데,
 // 그걸 호스트 crontab에 맡기면 배포·이관 때 조용히 빠진다. 앱과 함께 살고 함께 죽는 편이 낫다.
@@ -18,6 +22,7 @@ export async function register() {
   }
 
   const { runDueMerges } = await import('./server/merge/run');
+  const { runDueReminders } = await import('./server/notify/deadline-reminder');
 
   // 겹쳐 도는 걸 막는다. 한 번 실행이 5분을 넘길 수 있다 (부서 30개 × 모델 호출)
   let running = false;
@@ -26,6 +31,16 @@ export async function register() {
     if (running) return;
     running = true;
     try {
+      // 알림이 실패해도 병합은 돌아야 한다 — 본업이 남의 사정에 멈추지 않게 따로 감싼다
+      try {
+        const sent = await runDueReminders();
+        for (const r of sent) {
+          console.log(`[알림] 마감 1시간 전 — ${r.division} ${r.isoKey}: ${r.sent}/${r.targets}명 발송`);
+        }
+      } catch (e) {
+        console.error('[알림] 마감 전 알림 오류', e);
+      }
+
       const { ran } = await runDueMerges();
       if (ran > 0) console.log(`[merge] 자동 병합 ${ran}건 실행`);
     } catch (e) {
