@@ -24,6 +24,26 @@ export async function register() {
   const { runDueMerges } = await import('./server/merge/run');
   const { runDueReminders } = await import('./server/notify/deadline-reminder');
 
+  /*
+   * NT-32 — 기동할 때마다 **알림이 켜진 부서를 로그에 찍는다.**
+   *
+   * 「다른 부서는 꺼져 있겠지」를 믿고 넘어가면, 실수로 켠 날에도 아무도 모른다.
+   * 알림은 잘못 나가면 되돌릴 수 없으므로, 지금 무엇이 켜져 있는지는 **매번 보여야 한다**.
+   */
+  try {
+    const { prisma } = await import('./server/db');
+    const { messengerStatus } = await import('./server/messenger');
+    const on = await prisma.division.findMany({ where: { notifyEnabled: true }, select: { nameKo: true } });
+    const total = await prisma.division.count();
+    const st = messengerStatus();
+    console.log(
+      `[알림] ${st.enabled ? `켜짐 (수신 허용: ${st.allow})` : `꺼짐 — ${st.reason}`} · ` +
+        `발송 부서 ${on.length}/${total}개: ${on.map((d) => d.nameKo).join(', ') || '없음'}`,
+    );
+  } catch (e) {
+    console.error('[알림] 설정 확인 실패', e);
+  }
+
   // 겹쳐 도는 걸 막는다. 한 번 실행이 5분을 넘길 수 있다 (부서 30개 × 모델 호출)
   let running = false;
 
