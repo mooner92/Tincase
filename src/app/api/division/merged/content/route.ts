@@ -5,7 +5,7 @@
 // 화면에서 보고 고칠 수 있으면 한글을 열 일이 없다.
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
-import { requireScope, requireLead, resolveTargetDivision, requireMergedAccess, HttpError } from '@/server/authz';
+import { requireScope, requireOwnManager, resolveTargetDivision, requireMergedAccess, HttpError } from '@/server/authz';
 import { handler, json, rateLimit } from '@/server/http';
 import { audit } from '@/server/audit';
 import { readStoredFile, writeFileAtomic } from '@/server/storage';
@@ -36,11 +36,62 @@ async function locate(req: NextRequest, slugParam: string | null, isoKey: string
   return { scope, division, slot, run };
 }
 
+/**
+ * TACP-17 — 표별 작성자. **권한자에게만 계산한다** (호출부가 판정한 뒤 부른다).
+ *
+ * 병합 시점에는 행 순서와 작성자가 나란했지만, 그 뒤 담당자가 행을 지우거나 고치면
+ * 정렬이 어긋난다. 그래서 두 단계로 되찾는다:
+ *
+ *   1. 행 수가 같으면 → 인덱스 그대로 (수정이 없었거나 내용만 고친 경우)
+ *   2. 다르면 → **내용 대조**. 지워진 행 때문에 밀린 나머지는 이걸로 다시 붙는다
+ *
+ * 어느 쪽으로도 못 찾은 행은 **빈 배열**이다 — 모르는 것을 아는 척하지 않는다.
+ * 담당자가 새로 써 넣은 행에는 원래 작성자가 없는 게 맞다.
+ */
+function authorsFor(
+  reviewJson: string | null,
+  key: 'achievements' | 'plans' | 'notes',
+  rows: string[][],
+): string[][] {
+  const empty = () => rows.map(() => [] as string[]);
+  if (!reviewJson) return empty();
+
+  let stored: { c: string; a: string[] }[] = [];
+  try {
+    const parsed = JSON.parse(reviewJson) as { rowAuthors?: Record<string, { c: string; a: string[] }[]> };
+    stored = parsed.rowAuthors?.[key] ?? [];
+  } catch {
+    return empty(); // 옛 실행에는 rowAuthors가 없다 — 조용히 비운다
+  }
+  if (stored.length === 0) return empty();
+  if (stored.length === rows.length) return rows.map((_, i) => stored[i]?.a ?? []);
+
+  // 행 수가 달라졌다 → **병합 당시 내용**으로 다시 붙인다.
+  // 같은 내용이 여럿이면 앞에서부터 한 번씩 쓴다 (중복 행도 각자 작성자가 있다)
+  const byContent = new Map<string, string[][]>();
+  for (const s of stored) {
+    const c = s.c.trim();
+    if (!c) continue;
+    const list = byContent.get(c);
+    if (list) list.push(s.a);
+    else byContent.set(c, [s.a]);
+  }
+  return rows.map((r) => byContent.get((r[1] ?? '').trim())?.shift() ?? []);
+}
+
 export const GET = handler(async (req: NextRequest) => {
   const q = req.nextUrl.searchParams;
   const { scope, division, slot, run } = await locate(req, q.get('division'), q.get('isoKey'));
-  await requireMergedAccess(scope, division.id); // TACP §3.2 — 병합본은 담당자부터
+  await requireMergedAccess(scope, division.id); // TACP §3.2 — 병합본은 부서원 모두 (TACP-15)
   rateLimit(`merged-view:${scope.user.email}`, 40, 60_000);
+
+  /*
+   * TACP-17 — 작성자는 **부서 문서 담당자(lead·head)와 readAll에게만.**
+   *
+   * 화면에서 숨기는 게 아니라 **응답에 담지 않는다.** 숨기기는 개발자 도구로 뚫리고,
+   * 그 순간 «부서원은 남이 뭘 냈는지 모른다»(TACP-11)가 거짓말이 된다.
+   */
+  const canSeeAuthors = (division.id === scope.division.id && scope.isManager) || scope.readAll;
 
   const parsed = readWorklog(await readStoredFile(run.outputPath!));
   await audit(scope.user.email, 'preview', division.id, `merged:${slot.isoKey}`);
@@ -49,15 +100,21 @@ export const GET = handler(async (req: NextRequest) => {
     title: boardTitle(slot.month, slot.label, division.nameKo, slotKind(slot)),
     slot: { isoKey: slot.isoKey, label: slot.label, year: slot.year, kind: slotKind(slot) },
     editedAt: toKstIso(run.finishedAt ?? run.startedAt),
-    tables: parsed.tables.slice(0, 3).map((t, i) => ({
-      key: BUCKETS[i],
-      title: TABLE_TITLES[i] ?? `표 ${i + 1}`,
-      columns: [...TABLE_COLUMNS],
-      rows: tableGrid(t),
-      // API-53 — 붙여넣기용 표 폭. **양식에서 그대로 읽는다** (HWPUNIT).
-      // 코드에 비율을 박아 두면 부서가 양식을 바꾸는 순간 어긋난다
-      widths: columnWidths(t),
-    })),
+    canSeeAuthors,
+    tables: parsed.tables.slice(0, 3).map((t, i) => {
+      const grid = tableGrid(t);
+      return {
+        key: BUCKETS[i],
+        title: TABLE_TITLES[i] ?? `표 ${i + 1}`,
+        columns: [...TABLE_COLUMNS],
+        rows: grid,
+        // API-53 — 붙여넣기용 표 폭. **양식에서 그대로 읽는다** (HWPUNIT).
+        // 코드에 비율을 박아 두면 부서가 양식을 바꾸는 순간 어긋난다
+        widths: columnWidths(t),
+        // TACP-17 — 머리행을 뺀 본문과 나란하다. 권한이 없으면 아예 없다 (undefined)
+        ...(canSeeAuthors ? { authors: authorsFor(run.reviewJson, BUCKETS[i], grid.slice(1)) } : {}),
+      };
+    }),
   });
 });
 
@@ -69,8 +126,7 @@ export const PUT = handler(async (req: NextRequest) => {
   if (!body?.tables) throw new HttpError(422, 'invalid_request', '표 내용이 없습니다.');
 
   // TACP-6 — 쓰기는 신원의 부서에만. 슬러그로 남의 부서 병합본을 고칠 수 없다
-  const scope = await requireLead(req.headers);
-  if (!scope.isLead) throw new HttpError(404, 'not_found', '요청한 페이지를 찾을 수 없습니다');
+  const scope = await requireOwnManager(req.headers);
   rateLimit(`merged-edit:${scope.user.email}`, 20, 60_000);
   const { division, slot, run } = await locate(req, null, body.isoKey ?? null);
 

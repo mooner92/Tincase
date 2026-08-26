@@ -2,7 +2,7 @@
 // 문법이 없으므로 파싱 오류도 없다 (HM-18 v3). 길이·타입만 본다.
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
-import { requireLead, HttpError } from '@/server/authz';
+import { requireManager, HttpError } from '@/server/authz';
 import { handler, json } from '@/server/http';
 import { audit } from '@/server/audit';
 import { parseCategories } from '@/server/merge/rules';
@@ -13,7 +13,7 @@ const MAX_TEXT_BYTES = 10_000;
 const MAX_CATEGORY_BYTES = 500;
 
 export const GET = handler(async (req: NextRequest) => {
-  const d = (await requireLead(req.headers)).division;
+  const d = (await requireManager(req.headers)).division;
   return json({
     categories: d.mergeCategories,
     dedupe: d.mergeDedupe,
@@ -35,7 +35,9 @@ interface Body {
 
 export const PUT = handler(async (req: NextRequest) => {
   // TACP-6 — 쓰기 대상은 언제나 신원의 부서다. URL 슬러그는 관여하지 않는다
-  const scope = await requireLead(req.headers);
+  // TACP §3.1 — 내 부서 병합 규칙은 lead·head·coordinator·operator가 쓴다.
+  // 쓰기 대상은 언제나 `scope.division`이다 (TACP-6) — 슬러그는 관여하지 않는다
+  const scope = await requireManager(req.headers);
   const body = (await req.json().catch(() => null)) as Body | null;
   if (!body) throw new HttpError(422, 'invalid_rule', '요청 형식이 올바르지 않습니다.');
 

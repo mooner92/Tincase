@@ -15,7 +15,7 @@ export const GET = handler(async (req: NextRequest) => {
     include: { _count: { select: { users: { where: { isActive: true } } } } },
   });
   // 제출 이력이 있는 부서를 위로 — 온보딩 우선순위가 곧 이 순서다
-  const rank = { confirmed: 0, unclear: 1, none: 2 } as const;
+  const rank = { confirmed: 0, none: 1 } as const;
   const divisions = rows.sort(
     (a, b) =>
       (rank[a.boardStatus as keyof typeof rank] ?? 2) - (rank[b.boardStatus as keyof typeof rank] ?? 2) ||
@@ -83,7 +83,8 @@ export const PUT = handler(async (req: NextRequest) => {
   }
   if (body.shortSlug !== undefined) data.shortSlug = body.shortSlug || null;
   if (body.boardStatus !== undefined) {
-    if (!['confirmed', 'unclear', 'none'].includes(body.boardStatus)) {
+    // `unclear`는 폐기됐다 (v1.23.0, DM-15) — 새로 들어오는 값으로는 받지 않는다
+    if (!['confirmed', 'none'].includes(body.boardStatus)) {
       throw new HttpError(422, 'invalid_request', 'boardStatus 값이 올바르지 않습니다.');
     }
     data.boardStatus = body.boardStatus;

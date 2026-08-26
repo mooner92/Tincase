@@ -53,7 +53,7 @@ interface RosterUpdate {
   /** NT-22 — 운영자도 남의 알림을 끌 수 있다. 본인은 프로필 메뉴에서 (NT-21) */
   notifyEnabled?: boolean;
   sortOrder?: number;
-  divisionRole?: 'member' | 'lead';
+  divisionRole?: 'member' | 'lead' | 'head';
   isActive?: boolean;
 }
 
@@ -71,7 +71,8 @@ export const PUT = handler(async (req: NextRequest) => {
     throw new HttpError(409, 'conflict', '존재하지 않는 사용자가 포함되어 있습니다. 전체 변경을 취소했습니다.');
   }
   for (const u of body.updates) {
-    if (u.divisionRole && u.divisionRole !== 'member' && u.divisionRole !== 'lead') {
+    // TACP-16 — `head`(부서장) 추가. `isOperator`·`isCoordinator`는 여전히 이 API로 못 바꾼다 (TACP-2)
+    if (u.divisionRole && !['member', 'lead', 'head'].includes(u.divisionRole)) {
       throw new HttpError(422, 'invalid_request', `divisionRole 값이 올바르지 않습니다: ${u.divisionRole}`);
     }
     if (u.sortOrder !== undefined && (!Number.isInteger(u.sortOrder) || u.sortOrder < 0)) {

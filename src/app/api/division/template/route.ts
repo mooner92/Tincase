@@ -1,7 +1,7 @@
 // POST /api/division/template — 부서 양식 교체 (API-40/41, ST-19). lead 전용.
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
-import { requireLead, HttpError } from '@/server/authz';
+import { requireManager, HttpError } from '@/server/authz';
 import { handler, json, rateLimit } from '@/server/http';
 import { audit } from '@/server/audit';
 import { validateHwpUpload, UploadValidationError } from '@/lib/hwp/reader';
@@ -11,7 +11,8 @@ import { env } from '@/server/env';
 export const dynamic = 'force-dynamic';
 
 export const POST = handler(async (req: NextRequest) => {
-  const scope = await requireLead(req.headers);
+  // TACP §3.1 — 내 부서 양식은 lead·head·coordinator·operator가 등록한다 (TACP-6: 대상은 신원의 부서)
+  const scope = await requireManager(req.headers);
   rateLimit(`template:${scope.user.email}`, 5, 60_000);
 
   const form = await req.formData().catch(() => null);

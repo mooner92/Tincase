@@ -3,7 +3,7 @@
 // 설정을 고쳤거나, 자동 실행이 실패했거나, 늦게 낸 사람을 반영할 때.
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
-import { requireLead, HttpError } from '@/server/authz';
+import { requireManager, HttpError } from '@/server/authz';
 import { handler, json } from '@/server/http';
 import { audit } from '@/server/audit';
 import { runMergeRecorded } from '@/server/merge/run';
@@ -12,8 +12,9 @@ export const dynamic = 'force-dynamic';
 
 export const POST = handler(async (req: NextRequest) => {
   // TACP-6 — 병합 대상은 언제나 신원의 부서다. 슬러그로 남의 부서를 병합할 수 없다
-  const scope = await requireLead(req.headers);
-  if (!scope.isLead) throw new HttpError(404, 'not_found', '요청한 페이지를 찾을 수 없습니다');
+  // TACP §3.2 — 병합 **실행**은 lead·head·coordinator·operator (자기 부서).
+  // 「병합본 수정」과 다른 칸이다 — 그쪽은 coordinator가 빠진다 (requireOwnManager)
+  const scope = await requireManager(req.headers);
 
   const isoKey = String((await req.json().catch(() => ({})))?.isoKey ?? '');
   const slot = isoKey

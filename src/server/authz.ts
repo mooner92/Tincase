@@ -22,7 +22,18 @@ export const notFound = () => new HttpError(404, 'not_found', '요청한 페이�
 export interface Scope {
   user: User;
   division: Division;
+  /** 부서담당자 — 대외 제출까지 책임진다 */
   isLead: boolean;
+  /** TACP-16 — 부서장(실·본부·단·센터장) */
+  isHead: boolean;
+  /**
+   * TACP-16 — **부서 문서를 다루는 사람** = lead 또는 head.
+   *
+   * 문서 권한에서 둘은 구별되지 않는다. 차이는 권한이 아니라 알림 시점이므로,
+   * 게이트는 이 하나만 본다. `isLead`를 직접 비교하는 코드가 남으면 부서장이
+   * 화면은 보는데 저장은 404가 나는, 딱 v1.3.0과 같은 종류의 불일치가 생긴다.
+   */
+  isManager: boolean;
   /** AU-15·16 — operator(구축 단계) 또는 coordinator */
   readAll: boolean;
   /** 신원 출처 — 비밀번호 변경 강제 판단에 쓰인다 (AU-22) */
@@ -32,6 +43,11 @@ export interface Scope {
 /** AU-15·16 — 전 부서 읽기 판정. 축소 시 이 함수 한 곳만 바꾼다. */
 export function canReadAllDivisions(user: Pick<User, 'isOperator' | 'isCoordinator'>): boolean {
   return user.isOperator || user.isCoordinator;
+}
+
+/** TACP-16 — 부서 문서 담당 판정. lead·head를 가르는 유일한 곳 */
+export function isDocumentManager(user: Pick<User, 'divisionRole'>): boolean {
+  return user.divisionRole === 'lead' || user.divisionRole === 'head';
 }
 
 /** AU-04/04b — 신원 → 활성 사용자 + 부서. 신원 출처(세션/Cloudflare)는 여기서 흡수된다 */
@@ -55,17 +71,44 @@ export async function requireScope(headers: Headers): Promise<Scope> {
     user: rest as User,
     division,
     isLead: user.divisionRole === 'lead',
+    isHead: user.divisionRole === 'head',
+    isManager: isDocumentManager(user),
     readAll: canReadAllDivisions(user),
     source: identity.source,
   };
 }
 
-/** lead 전용 진입점 — member에게는 404 (존재 은닉, AU-06) */
-export async function requireLead(headers: Headers): Promise<Scope> {
+/**
+ * TACP-16 — **부서 문서 진입점.** lead·head 또는 readAll이면 통과. 그 외 404 (AU-06).
+ *
+ * `readAll`(총괄·운영자)을 통과시키는 것은 lead 전용 **화면**을 보게 하기 위함이지
+ * 남의 부서에 쓰라는 뜻이 아니다 (TACP-8). 쓰기에는 `requireOwnManager`를 쓴다.
+ */
+export async function requireManager(headers: Headers): Promise<Scope> {
   const scope = await requireScope(headers);
-  if (!scope.isLead && !scope.readAll) throw notFound();
+  if (!scope.isManager && !scope.readAll) throw notFound();
   return scope;
 }
+
+/**
+ * TACP §3.2 — **병합본 수정 진입점.** lead·head 또는 operator만.
+ *
+ * `requireManager`와 다른 점은 **coordinator를 빼는 것**이다. §3.2 표에서 「내 부서 병합본
+ * 수정」의 coordinator 칸은 `—`다 — 총괄이 필요한 것은 부서의 결론이지 그 부서 문서를
+ * 손보는 일이 아니다. 반면 §3.1의 양식·규칙은 coordinator도 `write`이므로 그쪽은
+ * `requireManager`를 쓴다. **두 표가 다르니 게이트도 둘이다.**
+ *
+ * operator를 넣는 이유는 §8과 같다 — 시스템 소유자는 DB에 직접 닿을 수 있으므로
+ * UI로 막아봐야 능력이 줄지 않는다. 막는 대신 감사 로그가 남는 경로를 준다.
+ */
+export async function requireOwnManager(headers: Headers): Promise<Scope> {
+  const scope = await requireScope(headers);
+  if (!scope.isManager && !scope.user.isOperator) throw notFound();
+  return scope;
+}
+
+/** @deprecated TACP-16 — `requireManager`를 쓸 것. 이름이 head를 빠뜨린다 */
+export const requireLead = requireManager;
 
 /**
  * API-45 — **제출 진입점.** 부서원이면 누구나 낼 수 있다.

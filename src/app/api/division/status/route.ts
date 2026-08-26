@@ -22,7 +22,7 @@ export const GET = handler(async (req: NextRequest) => {
   const deadline = effectiveDeadline(slot, scope.division);
   const locked = isLocked({ opensAt: slot.opensAt }, scope.division);
 
-  const full = scope.isLead || scope.readAll;
+  const full = scope.isManager || scope.readAll; // TACP-16 — 부서장도 부서 담당자와 같이 본다
 
   return json({
     slot: { isoKey: slot.isoKey, label: slot.label, year: slot.year, deadlineAt: toKstIso(deadline), locked },

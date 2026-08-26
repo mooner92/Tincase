@@ -23,7 +23,7 @@ export default async function OpsPage() {
         slug={ps.scope.division.slug}
         divisionName={ps.scope.division.nameKo}
         userName={ps.scope.user.name}
-        isLead={ps.scope.isLead || ps.scope.readAll}
+        isLead={ps.scope.isManager || ps.scope.readAll}
         isOperator
         viaCloudflare={ps.scope.source === 'cloudflare'}
         notifyEnabled={ps.scope.user.notifyEnabled}

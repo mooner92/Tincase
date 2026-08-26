@@ -3,7 +3,8 @@
 // 두 가지를 같은 주기로 돌린다:
 //   마감 **1시간 전**  → 미제출자에게 알림 한 번 (NT-10)
 //   마감 **후**        → 자동 병합 (HM-25)
-//   마감 **20분 후**   → 담당자에게 «병합 끝났습니다» (NT-40)
+//   마감 **+10분**     → 부서장에게 «검토해주세요» · 실패면 담당자에게 «병합본이 없어요» (NT-40)
+//   마감 **+30분**     → 담당자에게 «제출해주세요» (NT-40)
 //
 // 외부 cron이 아니라 앱 안에서 도는 이유: 목요일 14:00 마감을 지키는 게 이 제품의 전부인데,
 // 그걸 호스트 crontab에 맡기면 배포·이관 때 조용히 빠진다. 앱과 함께 살고 함께 죽는 편이 낫다.
@@ -24,7 +25,7 @@ export async function register() {
 
   const { runDueMerges } = await import('./server/merge/run');
   const { runDueReminders } = await import('./server/notify/deadline-reminder');
-  const { runDueMergeNotices } = await import('./server/notify/merge-done');
+  const { runDueMergeNotices } = await import('./server/notify/merge-notices');
 
   /*
    * NT-32 — 기동할 때마다 **알림이 켜진 부서를 로그에 찍는다.**
@@ -70,7 +71,10 @@ export async function register() {
       // 여기도 따로 감싼다: 알림이 실패해도 병합은 이미 끝났고, 그게 본업이다
       try {
         for (const r of await runDueMergeNotices()) {
-          console.log(`[알림] 병합 안내 — ${r.division} ${r.isoKey}(${r.status}): ${r.sent}/${r.targets}명`);
+          console.log(
+            `[알림] ${r.kind} — ${r.division} ${r.isoKey}(${r.status}): ${r.sent}/${r.targets}명` +
+              (r.blocked ? ` · 허용목록 밖 ${r.blocked}명` : ''),
+          );
         }
       } catch (e) {
         console.error('[알림] 병합 안내 오류', e);

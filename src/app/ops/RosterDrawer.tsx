@@ -7,7 +7,7 @@ export interface UserRow {
   id: string;
   name: string;
   email: string;
-  divisionRole: 'member' | 'lead';
+  divisionRole: 'member' | 'lead' | 'head';
   isOperator: boolean;
   isCoordinator: boolean;
   isActive: boolean;
@@ -124,8 +124,9 @@ export function RosterDrawer({
                       onChange={(e) => onPatch(u.id, { divisionRole: e.target.value })}
                       className="rounded border border-hairline px-1 py-0.5 text-xs"
                     >
-                      <option value="member">member</option>
-                      <option value="lead">lead (담당)</option>
+                      <option value="member">제출자</option>
+                      <option value="lead">담당자 (제출)</option>
+                      <option value="head">부서장 (검토)</option>
                     </select>
                   </td>
                   <td className="px-4 py-2 text-center">

@@ -63,6 +63,8 @@ export async function runMergeRecorded(
           model: outcome.model,
           categories: outcome.categories,
           missing: outcome.missing,
+          // TACP-17 — 행 순서와 나란한 작성자. 화면에서만 쓰고 문서에는 넣지 않는다
+          rowAuthors: outcome.rowAuthors,
         }),
         finishedAt: new Date(),
       },

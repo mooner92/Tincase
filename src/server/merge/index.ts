@@ -40,6 +40,17 @@ export interface MergeOutcome {
   categories: { used: boolean; reason: string | null; order: string[] } | null;
   sourceIds: string[];
   missing: string[];
+  /**
+   * TACP-17 — 표별 **행 순서와 나란한** 작성자. `rowAuthors.achievements[0]`은
+   * 실적 표 첫 행을 낸 사람들이다 (합쳐진 행은 2명 이상).
+   *
+   * 작성자만이 아니라 **그때의 내용(`c`)도 같이** 둔다. 나중에 담당자가 행을 지우면
+   * 인덱스가 밀리는데, 내용이 없으면 어느 작성자가 어느 행이었는지 되찾을 수 없다.
+   *
+   * 문서에는 들어가지 않는다 — 화면에서만 쓴다. 담당자·부서장이 잘못된 행을 봤을 때
+   * **누구와 이야기해야 하는지**가 필요해서 남긴다.
+   */
+  rowAuthors: Record<'achievements' | 'plans' | 'notes', { c: string; a: string[] }[]>;
 }
 
 /** 표 3종 각각을 이 구조로 다룬다 */
@@ -255,6 +266,13 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
       notes: grouped.notes.length,
     },
     mergedGroups: BUCKETS.flatMap((b) => grouped[b]).filter((g) => g.sources.length > 1),
+    // TACP-17 — `tableRows`와 **같은 순서로** 만든다. 위에서 `grouped[bucket]`을 그대로
+    // 훑어 표를 만들었으므로 인덱스가 곧 행 번호다. 특이사항 표를 지운 경우는 비운다
+    rowAuthors: {
+      achievements: grouped.achievements.map((g) => ({ c: g.row.content, a: g.authors })),
+      plans: grouped.plans.map((g) => ({ c: g.row.content, a: g.authors })),
+      notes: tableRows.notes.length === 0 ? [] : grouped.notes.map((g) => ({ c: g.row.content, a: g.authors })),
+    },
     warnings,
     model: {
       used: model.usedModel,

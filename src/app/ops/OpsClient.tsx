@@ -4,6 +4,7 @@ import Link from 'next/link';
 // 부서를 취합게시판 제출 이력으로 탭 분리한다 — 온보딩 우선순위가 곧 그 순서다 (DM-15).
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RosterDrawer, type UserRow } from './RosterDrawer';
+import { RosterSync } from './RosterSync';
 
 interface DivisionRow {
   id: string;
@@ -15,7 +16,7 @@ interface DivisionRow {
   deadlineTime: string;
   memberCount: number;
   hasTemplate: boolean;
-  boardStatus: 'confirmed' | 'unclear' | 'none';
+  boardStatus: 'confirmed' | 'none';
   boardNote: string;
 }
 
@@ -29,15 +30,23 @@ interface IssuedPassword {
 
 const DOW = ['', '월', '화', '수', '목', '금', '토', '일'];
 
+/*
+ * 「확인 필요」 탭은 없앴다 (v1.23.0).
+ *
+ * 조사 단계(R-002)에서는 게시판만 보고 판단해야 해서 «담당자는 있는데 제출은 못 봤다»는
+ * 중간 상태가 필요했다. 2026-08-26에 운영자가 게시판 답변일자로 **실제 담당자 11명**을
+ * 확정하면서 그 모호함이 사라졌다 — 나머지는 연구부서라 업무일지를 아예 쓰지 않는다.
+ *
+ * 답이 나온 뒤에도 «확인 필요»를 남겨두면, 볼 때마다 이미 끝난 확인을 다시 하게 된다.
+ */
 const TABS = [
   { key: 'confirmed', label: '제출 확인', hint: '취합게시판에 제출일이 확인된 부서 — 온보딩 1순위' },
-  { key: 'unclear', label: '확인 필요', hint: '담당자는 있으나 제출이 확인되지 않음 — 보고 단위 확인 후 판단' },
-  { key: 'none', label: '이력 없음', hint: '취합게시판에 나타나지 않음 — 상위 조직이 대표로 낼 가능성' },
+  { key: 'none', label: '이력 없음', hint: '업무일지를 쓰지 않는 부서 (대부분 연구부서) · 상위 조직이 대표로 내는 경우' },
 ] as const;
 
 export function OpsClient() {
   const [divisions, setDivisions] = useState<DivisionRow[]>([]);
-  const [tab, setTab] = useState<'confirmed' | 'unclear' | 'none'>('confirmed');
+  const [tab, setTab] = useState<'confirmed' | 'none'>('confirmed');
   const [selected, setSelected] = useState<string | null>(null);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
@@ -145,12 +154,15 @@ export function OpsClient() {
   const counts = useMemo(
     () => ({
       confirmed: divisions.filter((d) => d.boardStatus === 'confirmed').length,
-      unclear: divisions.filter((d) => d.boardStatus === 'unclear').length,
-      none: divisions.filter((d) => d.boardStatus === 'none').length,
+      none: divisions.filter((d) => d.boardStatus !== 'confirmed').length,
     }),
     [divisions],
   );
-  const shown = divisions.filter((d) => d.boardStatus === tab);
+  // 「이력 없음」은 «confirmed가 아닌 전부»다 — 옛 `unclear` 값이 남아 있어도
+  // 어느 탭에도 안 보이는 부서가 생기지 않는다
+  const shown = divisions.filter((d) =>
+    tab === 'confirmed' ? d.boardStatus === 'confirmed' : d.boardStatus !== 'confirmed',
+  );
   const selectedName = divisions.find((d) => d.id === selected)?.nameKo ?? null;
 
   return (
@@ -169,6 +181,9 @@ export function OpsClient() {
           </Link>
         </div>
       </div>
+
+      {/* RS-15 — 주 1회 하는 일이라 부서 목록보다 위에 둔다. 아래에 있으면 스크롤해야 보인다 */}
+      <RosterSync />
 
       {/* AU-27 — 발급된 임시 비밀번호. 화면을 벗어나면 다시 볼 수 없다 */}
       {issued.length > 0 && (
@@ -303,7 +318,6 @@ export function OpsClient() {
                     className="rounded border border-hairline px-1 py-0.5 text-xs"
                   >
                     <option value="confirmed">제출함 (집계)</option>
-                    <option value="unclear">불명확</option>
                     <option value="none">안 냄</option>
                   </select>
                 </td>

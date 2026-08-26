@@ -18,11 +18,18 @@ interface TableView {
   rows: string[][];
   /** 양식에서 읽은 칸 너비 (HWPUNIT = 1/7200 inch) */
   widths?: number[];
+  /**
+   * TACP-17 — 본문 행과 나란한 작성자. **권한이 없으면 서버가 아예 안 보낸다** —
+   * 화면에서 숨기는 게 아니므로 여기서 `undefined`면 정말로 모르는 것이다
+   */
+  authors?: string[][];
 }
 interface Content {
   title: string;
   slot: { isoKey: string; label: string; year: number; kind: 'weekly' | 'monthly' };
   tables: TableView[];
+  /** 서버가 작성자를 보냈는가 (TACP-17) */
+  canSeeAuthors?: boolean;
 }
 
 /** 헤더 행을 뺀 본문만. 서버가 준 격자는 첫 줄이 열 이름이다 */
@@ -47,6 +54,14 @@ export function MergedDrawer({
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
+  /*
+   * TACP-17 — 작성자 열은 **기본으로 접혀 있다.**
+   *
+   * 이 화면의 주된 쓰임은 «슥 보고 제출»이고, 그때 필요한 건 내용이지 사람이 아니다.
+   * 늘 켜 두면 표가 좁아지고 시선이 사람 이름으로 먼저 간다 — 검토가 «누가 뭘 냈나»로
+   * 바뀐다. 잘못된 행을 찾은 **그 순간에만** 펼치면 된다.
+   */
+  const [showAuthors, setShowAuthors] = useState(false);
   const bodyRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
@@ -210,6 +225,20 @@ export function MergedDrawer({
             hwp로 받기
           </a>
           <span className="text-sm text-muted">→ 한글에서 열어 표를 복사해 게시판에 붙여넣습니다</span>
+          {/* TACP-17 — 서버가 작성자를 보낸 사람에게만 보이는 토글 */}
+          {data?.canSeeAuthors && (
+            <button
+              onClick={() => setShowAuthors((v) => !v)}
+              aria-pressed={showAuthors}
+              className={`btn-sm rounded-lg border px-2.5 py-1 text-sm ${
+                showAuthors
+                  ? 'border-ink bg-ink text-canvas'
+                  : 'border-hairline bg-canvas text-body hover:border-ink'
+              }`}
+            >
+              작성자 {showAuthors ? '숨기기' : '보기'}
+            </button>
+          )}
           <span className="ml-auto text-sm">
             {copied && <span className="font-medium text-success">{copied} 복사됨</span>}
             {dirty && !copied && <span className="text-warning">저장하지 않은 수정</span>}
@@ -250,6 +279,7 @@ export function MergedDrawer({
                               {c}
                             </th>
                           ))}
+                          {showAuthors && <th className="w-[13%] px-3 py-2 font-medium">작성자</th>}
                           {canEdit && <th className="w-8" />}
                         </tr>
                       </thead>
@@ -276,6 +306,18 @@ export function MergedDrawer({
                                 )}
                               </td>
                             ))}
+                            {showAuthors && (
+                              <td className="px-3 py-1.5 align-top text-xs">
+                                {(t.authors?.[ri] ?? []).length === 0 ? (
+                                  // 담당자가 새로 써 넣었거나 대조하지 못한 행 — 모르는 걸 아는 척하지 않는다
+                                  <span className="text-muted-soft">—</span>
+                                ) : (
+                                  <span className={(t.authors![ri].length > 1 ? 'font-medium text-ink' : 'text-body')}>
+                                    {t.authors![ri].join(' + ')}
+                                  </span>
+                                )}
+                              </td>
+                            )}
                             {canEdit && (
                               <td className="px-1 py-0.5 align-top">
                                 <button

@@ -3,7 +3,7 @@
 //   POST — operator만 등록/교체 (기획조정실이 배포한 원본을 운영자가 올린다)
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
-import { HttpError, requireLead, requireOperator } from '@/server/authz';
+import { HttpError, requireManager, requireOperator } from '@/server/authz';
 import { handler, json } from '@/server/http';
 import { audit } from '@/server/audit';
 import { contentDisposition, readStoredFile, sha256, writeFileAtomic } from '@/server/storage';
@@ -17,7 +17,7 @@ const relPath = (version: number, active = false) =>
   path.join('templates', active ? 'standard.hwp' : `standard-v${version}.hwp`);
 
 export const GET = handler(async (req: NextRequest) => {
-  const scope = await requireLead(req.headers); // 양식을 만드는 사람만 필요 (부서원은 부서 양식을 받는다)
+  const scope = await requireManager(req.headers); // 양식을 만드는 사람만 필요 (부서원은 부서 양식을 받는다)
   const std = await prisma.standardTemplate.findFirst({ where: { isActive: true } });
   if (!std) {
     throw new HttpError(

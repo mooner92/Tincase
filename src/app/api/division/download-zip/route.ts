@@ -3,7 +3,7 @@ import { NextRequest } from 'next/server';
 import { ZipArchive } from 'archiver'; // archiver v8+ 클래스 API
 import { PassThrough, Readable } from 'node:stream';
 import { prisma } from '@/server/db';
-import { requireLead, resolveTargetDivision, HttpError } from '@/server/authz';
+import { requireManager, resolveTargetDivision, HttpError } from '@/server/authz';
 import { ensureCurrentSlot } from '@/server/worklog';
 import { resolveInRoot, contentDisposition } from '@/server/storage';
 import { zipName } from '@/lib/docname';
@@ -13,7 +13,7 @@ import { audit } from '@/server/audit';
 export const dynamic = 'force-dynamic';
 
 export const GET = handler(async (req: NextRequest) => {
-  const scope = await requireLead(req.headers); // member는 404 (AU-06)
+  const scope = await requireManager(req.headers); // member는 404 (AU-06)
   rateLimit(`zip:${scope.user.email}`, 3, 60_000);
 
   // 타 부서 zip은 readAll만. 파라미터가 없으면 내 부서 (기본이 안전한 쪽)

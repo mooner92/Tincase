@@ -14,7 +14,9 @@ export type AuditAction =
   | 'reject'
   | 'cross_division_read'
   | 'password_reset'
-  | 'notify_pref';
+  | 'notify_pref'
+  /** RS-13 — ERP 엑셀로 인원을 최신화했다. 누가·언제·몇 명을 바꿨는지 남는다 */
+  | 'roster_sync';
 
 export async function audit(
   actor: string,

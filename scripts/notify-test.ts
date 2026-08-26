@@ -4,6 +4,8 @@
  *   npx tsx scripts/notify-test.ts            # 상태만 보여주고 끝 (기본)
  *   npx tsx scripts/notify-test.ts --send     # 실제 발송
  *   npx tsx scripts/notify-test.ts --reminder # 마감 1시간 전 알림을 지금 강제로 한 번
+ *   npx tsx scripts/notify-test.ts --notices  # 마감 뒤 알림(+10 부서장 / +30 담당자)을 지금 한 번
+ *   npx tsx scripts/notify-test.ts --who      # 지금 누구에게 갈지만 계산해 보여준다 (발송 없음)
  *
  * 기본이 «상태만»인 이유: 이 스크립트를 무심코 실행해도 남의 화면에 팝업이 뜨지 않아야 한다.
  * 발송은 `--send`를 손으로 붙였을 때만 일어난다.
@@ -13,10 +15,14 @@
 import { env } from '../src/server/env';
 import { sendAlert, messengerStatus } from '../src/server/messenger';
 import { runDueReminders } from '../src/server/notify/deadline-reminder';
+import { runDueMergeNotices } from '../src/server/notify/merge-notices';
+import { previewNotifyTargets } from '../src/server/notify/preview';
 
 async function main() {
   const send = process.argv.includes('--send');
   const reminder = process.argv.includes('--reminder');
+  const notices = process.argv.includes('--notices');
+  const who = process.argv.includes('--who');
   const st = messengerStatus();
 
   console.log('메신저 알림 설정');
@@ -25,6 +31,30 @@ async function main() {
   console.log(`  보내는 이   ${env.MESSENGER_SENDER_NAME} (${env.MESSENGER_SENDER_ID}) · ${env.MESSENGER_SYSTEM_NAME}`);
   console.log(`  링크 기준   ${env.MESSENGER_LINK_BASE || '(없음 — 링크 없이 발송)'}`);
   console.log(`  상태        ${st.enabled ? `보낼 수 있음 (대상: ${st.allow})` : `꺼짐 — ${st.reason}`}`);
+
+  if (who) {
+    // 발송 없이 «지금 보내면 누구에게 가는가»만 계산한다.
+    // 실제로 보내 보는 것 말고 확인할 방법이 없으면, 확인하려다 알림을 보내게 된다
+    for (const d of await previewNotifyTargets()) {
+      console.log(`\n[${d.division}] ${d.isoKey} · 마감 ${d.deadlineKst} · 병합 ${d.mergeStatus}`);
+      console.log(`  마감 1시간 전 (${d.reminderKst})  미제출 ${d.reminder.length}명: ${d.reminder.join(', ') || '없음'}`);
+      console.log(`  +10분 검토   (${d.reviewKst})  부서장 ${d.heads.length}명: ${d.heads.join(', ') || '없음'}`);
+      console.log(`  +30분 제출   (${d.submitKst})  담당자 ${d.leads.length}명: ${d.leads.join(', ') || '없음'}`);
+      if (d.noEmployeeNo.length) console.log(`  ⚠ 사번 없어 못 받는 사람: ${d.noEmployeeNo.join(', ')}`);
+      if (d.notifyOff.length) console.log(`  · 알림 끔: ${d.notifyOff.join(', ')}`);
+    }
+    return;
+  }
+
+  if (notices) {
+    console.log('\n마감 뒤 알림(+10 부서장 / +30 담당자)을 지금 실행합니다…');
+    const out = await runDueMergeNotices();
+    if (out.length === 0) console.log('  보낼 대상 없음 (창 밖이거나, 이미 보냈거나, 받을 사람이 없음)');
+    out.forEach((r) =>
+      console.log(`  ${r.division} ${r.isoKey} [${r.kind}/${r.status}]: 대상 ${r.targets} · 발송 ${r.sent} · 차단 ${r.blocked}`),
+    );
+    return;
+  }
 
   if (reminder) {
     console.log('\n마감 1시간 전 알림을 지금 실행합니다…');

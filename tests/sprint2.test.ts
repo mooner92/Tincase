@@ -30,6 +30,8 @@ const ID = {
   lead: 'l@t.kei.re.kr',
   bLead: 'bl@t.kei.re.kr',
   op: 'op@t.kei.re.kr',
+  head: 'h@t.kei.re.kr',   // TACP-16 — A부서 부서장(실장)
+  coord: 'co@t.kei.re.kr', // A부서 소속 총괄 — readAll이지만 담당자는 아니다
 };
 
 function nx(url: string, identity?: string, init?: RequestInit) {
@@ -61,6 +63,8 @@ beforeAll(async () => {
   await prisma.user.create({ data: { email: ID.lead, name: 'l', divisionId: da.id, divisionRole: 'lead' } });
   await prisma.user.create({ data: { email: ID.bLead, name: 'bl', divisionId: db.id, divisionRole: 'lead' } });
   await prisma.user.create({ data: { email: ID.op, name: 'op', divisionId: da.id, isOperator: true } });
+  await prisma.user.create({ data: { email: ID.head, name: 'h', divisionId: da.id, divisionRole: 'head', jobTitle: '실장' } });
+  await prisma.user.create({ data: { email: ID.coord, name: 'co', divisionId: da.id, isCoordinator: true } });
 
   hwp = readFileSync(path.join(FIX, 'master-template.hwp'));
   filled = readFileSync(path.join(FIX, 'sample-filled-w2.hwp'));
@@ -521,5 +525,74 @@ d('병합본 접근', () => {
     const { GET } = await merged();
     const res = await GET(nx('/api/division/merged?isoKey=2020-W01', ID.lead));
     expect(res.status).toBe(404);
+  });
+});
+
+// ── TACP-16·17 — head(부서장) Principal · 병합본 작성자 ──────────
+// v1.3에서 다섯 번째 Principal이 생겼다. 부서 **문서**에 대해서는 lead와 같고,
+// 다른 것은 권한이 아니라 알림 시점이다 (ADR-0008).
+d('head Principal (TACP-16·17)', () => {
+  it('[AU-T30] head가 자기 부서 병합본을 수정한다 — 새로 허용된 것', async () => {
+    const { POST } = await import('@/app/api/division/merge/route');
+    await POST(nx('/api/division/merge', ID.lead, { method: 'POST' }));
+    const { PUT } = await import('@/app/api/division/merged/content/route');
+    const res = await PUT(
+      nx('/api/division/merged/content', ID.head, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tables: [{ key: 'achievements', rows: [['1-1', 'head가 고침', '', '', '']] }] }),
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('[AU-T30b] head가 병합을 실행한다 — lead와 같은 권한 (TACP-16)', async () => {
+    const { POST } = await import('@/app/api/division/merge/route');
+    const res = await POST(nx('/api/division/merge', ID.head, { method: 'POST' }));
+    expect(res.status).toBe(200);
+  });
+
+  it('[AU-T31] head의 타 부서 접근 → 404 — 새로 금지된 것 (lead와 같은 선)', async () => {
+    const { GET } = await import('@/app/api/division/merged/route');
+    const res = await GET(nx(`/api/division/merged?division=${B.slug}`, ID.head));
+    expect(res.status).toBe(404);
+  });
+
+  it('[AU-T32] head는 명단을 못 바꾼다 — 문서는 되어도 사람은 안 된다 (TACP-3)', async () => {
+    const { PUT } = await import('@/app/api/ops/roster/route');
+    const res = await PUT(
+      nx('/api/ops/roster', ID.head, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ updates: [{ userId: 'x', onRoster: false }] }),
+      }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it('[AU-T33] member 응답에는 작성자가 **없다** — 숨기는 게 아니라 안 보낸다 (TACP-17)', async () => {
+    const { GET } = await import('@/app/api/division/merged/content/route');
+    const asMember = await (await GET(nx('/api/division/merged/content', ID.member))).json();
+    expect(asMember.canSeeAuthors).toBe(false);
+    expect(asMember.tables.every((t: { authors?: unknown }) => t.authors === undefined)).toBe(true);
+
+    const asHead = await (await GET(nx('/api/division/merged/content', ID.head))).json();
+    expect(asHead.canSeeAuthors).toBe(true);
+    expect(Array.isArray(asHead.tables[0].authors)).toBe(true);
+  });
+
+  it('[AU-T34] coordinator는 병합본을 못 고치지만 병합 실행은 된다 — §3.2의 두 칸이 다르다', async () => {
+    const { PUT } = await import('@/app/api/division/merged/content/route');
+    const edit = await PUT(
+      nx('/api/division/merged/content', ID.coord, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tables: [{ key: 'achievements', rows: [['1-1', 'x', '', '', '']] }] }),
+      }),
+    );
+    expect(edit.status).toBe(404);
+
+    const { POST } = await import('@/app/api/division/merge/route');
+    expect((await POST(nx('/api/division/merge', ID.coord, { method: 'POST' }))).status).toBe(200);
   });
 });

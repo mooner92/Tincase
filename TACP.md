@@ -4,12 +4,14 @@
 > 코드·스펙·UI가 이 문서와 어긋나면 **문서가 아니라 코드가 틀린 것**이다.
 > 규칙을 바꾸려면 §10 절차를 따른다. 코드를 먼저 고치는 것은 위반이다.
 
-버전 1.2 · 2026-08-20 · 대상 코드 v1.17.0
-관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md)
+버전 1.3 · 2026-08-26 · 대상 코드 v1.23.0
+관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md) · [ADR-0008](docs/adr/0008-head-principal.md)
 
 변경 이력:
 - v1.1 — `delete` Action 신설, TACP-8에 예외 하나(TACP-14) 추가
 - v1.2 — §3.2 개정: 내 부서 병합본을 **member도 읽는다** (TACP-15)
+- v1.3 — **`head`(부서장) Principal 신설** (TACP-16). 부서 문서 권한은 lead와 동일,
+  다른 것은 권한이 아니라 **알림 시점**이다. 병합본 **작성자 열람**을 명문화 (TACP-17)
 
 ---
 
@@ -40,12 +42,13 @@ v1.3.0에서 레이아웃만 URL을 해석하고 페이지는 신원의 부서�
 
 ## 2. Principal
 
-Principal은 **네 가지**다. 조합해서 다섯 번째를 만들지 않는다.
+Principal은 **다섯 가지**다. 조합해서 여섯 번째를 만들지 않는다.
 
 | Principal | 우리말 | 판정식 | 무엇을 하는 사람인가 |
 |---|---|---|---|
 | `member` | **제출자** | 기본값 + `onRoster` | 자기 업무일지를 낸다 |
-| `lead` | **부서담당자** | `divisionRole === 'lead'` | 부서 **문서**를 책임진다 — 열람·양식·규칙·병합 |
+| `lead` | **부서담당자** | `divisionRole === 'lead'` | 부서 문서를 책임지고 **대외로 제출한다** |
+| `head` | **부서장** | `divisionRole === 'head'` | 실·본부·단·센터의 장. 병합본을 **검토한다** |
 | `coordinator` | **총괄담당** | `isCoordinator` | 전사 총괄(기획조정실). 전 부서를 **읽고**, 부서 병합본을 모아 전사본을 만든다 |
 | `operator` | **관리자** | `isOperator` | 시스템 소유자. 테넌시·인원 전권 + 전 부서 읽기 |
 
@@ -53,18 +56,47 @@ Principal은 **네 가지**다. 조합해서 다섯 번째를 만들지 않는�
 한 사람이 여러 모자를 쓰는 것이지 새 Principal이 생기는 게 아니다 — 판정은 언제나
 "이 행동에 필요한 권한을 가졌는가"이지 "이 사람이 누구인가"가 아니다.
 
-| 사람 | member | lead | coordinator | operator |
-|---|:---:|:---:|:---:|:---:|
-| 부서원 | ✓ | | | |
-| 부서담당자 | ✓ | ✓ | | |
-| 김민하 (총괄) | ✓ | | ✓ | |
-| Sean (운영자) | ✓ | ✓ | | ✓ |
+| 사람 | member | lead | head | coordinator | operator |
+|---|:---:|:---:|:---:|:---:|:---:|
+| 부서원 | ✓ | | | | |
+| 부서담당자 | ✓ | ✓ | | | |
+| 실장·본부장 | ✓ | | ✓ | | |
+| 김현우 (총괄) | ✓ | | | ✓ | |
+| Sean (운영자) | ✓ | ✓ | | | ✓ |
 
-파생 판정은 하나뿐이다:
+파생 판정은 **둘**이다:
 
 ```ts
-readAll = isOperator || isCoordinator     // canReadAllDivisions()
+readAll   = isOperator || isCoordinator          // canReadAllDivisions()
+isManager = divisionRole === 'lead' || 'head'    // 부서 문서를 다루는 사람
 ```
+
+### TACP-16 — head는 부서 문서에 대해 lead와 같다 (v1.3 신설)
+
+부서 **문서** 권한(열람·양식·규칙·병합 실행·병합본 수정)에서 `head`와 `lead`는 **구별되지 않는다.**
+그래서 게이트는 둘을 `isManager` 하나로 묶어 판정한다.
+
+**권한을 조각내지 않은 이유.** "볼 수는 있는데 못 고치는" 중간 단계를 만들면 행렬 칸이 늘고,
+정작 지켜지는 것이 없다 — 장이 담당자에게 "이거 좀 고쳐줘"라고 말하는 것과 직접 고치는 것
+사이에는 **보안 경계가 없다.** 어차피 같은 부서의 같은 문서다. 실제로 막아야 할 경계는
+부서 사이(TACP-4)와 문서/사람 사이(TACP-3)이지, 부서 안의 두 직책 사이가 아니다.
+
+**둘의 차이는 권한이 아니라 책임이며, 알림 시점으로 나타난다:**
+
+| | lead (담당자) | head (부서장) |
+|---|---|---|
+| 병합 성공 | **+30분** — 「최종 확인하고 제출해주세요」 | **+10분** — 「검토해주세요」 |
+| 병합 실패 | **+10분** — 「지금 병합을 눌러주세요」 | 보내지 않는다 |
+
+실패를 head에게 보내지 않는 것은 **고칠 수 없는 사람에게 가는 실패 통지는 소음**이기 때문이다.
+소음이 쌓이면 정작 중요한 알림도 안 읽힌다.
+
+`head`도 lead와 똑같이 **사람은 못 바꾸고**(TACP-3), **남의 제출물은 못 지우고**(TACP-14),
+**타 부서는 404다**(TACP-4·5). head는 자기 부서의 장이지 전사 역할이 아니다.
+
+역할의 출처는 ERP 인원 현황의 `직책`이다 — 실장·본부장·단장·센터장이 `head`가 된다.
+`lead`는 어떤 규칙으로도 유도되지 않고 **운영자가 직접 지정한다** (게시판 답변일자 기재자).
+한 사람이 둘 다에 해당하면 **lead가 이긴다** — 대외 제출 책임이 우선이다.
 
 **TACP-1 — Principal은 신원에서만 온다.**
 URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세션(또는 Cloudflare Access JWT)이
@@ -89,33 +121,65 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
 
 ### 3.1 내 부서 (own)
 
-| Resource | member | lead | coordinator | operator |
-|---|:---:|:---:|:---:|:---:|
-| 부서 페이지 · 제출 현황(이름·시각) | read | read | read | read |
-| 내 제출물 | read/write | read/write | read/write | read/write |
-| **내 제출물 삭제** | delete(마감 전) | delete(마감 전) | delete(마감 전) | delete |
-| **남의 제출물 내용** | — | read | read | read |
-| **남의 제출물 삭제** | — | — | — | delete |
-| 부서 양식 내려받기 | read | read | read | read |
-| 부서 양식 등록·교체 | — | write | write | write |
-| 작성 안내 · 병합 규칙 | read | write | write | write |
-| 병합 실행 | — | write | write | write |
-| 명단 · 역할 · 부서 활성화 | — | — | — | manage |
-| 감사 로그 | — | — | — | read |
+| Resource | member | lead | head | coordinator | operator |
+|---|:---:|:---:|:---:|:---:|:---:|
+| 부서 페이지 · 제출 현황(이름·시각) | read | read | read | read | read |
+| 내 제출물 | read/write | read/write | read/write | read/write | read/write |
+| **내 제출물 삭제** | delete(마감 전) | delete(마감 전) | delete(마감 전) | delete(마감 전) | delete |
+| **남의 제출물 내용** | — | read | read | read | read |
+| **남의 제출물 삭제** | — | — | — | — | delete |
+| 부서 양식 내려받기 | read | read | read | read | read |
+| 부서 양식 등록·교체 | — | write | write | write | write |
+| 작성 안내 · 병합 규칙 | read | write | write | write | write |
+| 병합 실행 | — | write | write | write | write |
+| 명단 · 역할 · 부서 활성화 | — | — | — | — | manage |
+| 감사 로그 | — | — | — | — | read |
 
 ### 3.2 병합본 (Resource: `MergeRun` · 결과 파일)
 
 부서 병합본은 **제출물과 다른 자원이다.** 개인 문서가 아니라 부서가 대외로 내보내는
 산출물이므로 공개 범위가 한 단계 넓다.
 
-| Action | member | lead | coordinator | operator |
-|---|:---:|:---:|:---:|:---:|
-| 내 부서 병합본 존재·상태 보기 | read | read | read | read |
-| 내 부서 병합본 **내려받기·열람** | **read** | read | read | read |
-| 내 부서 병합본 **수정** | — | write | — | write(자기 부서) |
-| 병합 **실행·재실행** | — | write | write(자기 부서) | write(자기 부서) |
-| **타 부서** 병합본 내려받기 | — | — | **read** | **read** |
-| 전사 병합 실행 | — | — | **write** | **write** |
+| Action | member | lead | head | coordinator | operator |
+|---|:---:|:---:|:---:|:---:|:---:|
+| 내 부서 병합본 존재·상태 보기 | read | read | read | read | read |
+| 내 부서 병합본 **내려받기·열람** | **read** | read | read | read | read |
+| 내 부서 병합본 **수정** | — | write | **write** | — | write(자기 부서) |
+| 내 부서 병합본 **작성자 보기** | — | read | **read** | read | read |
+| 병합 **실행·재실행** | — | write | **write** | write(자기 부서) | write(자기 부서) |
+| **타 부서** 병합본 내려받기 | — | — | — | **read** | **read** |
+| 전사 병합 실행 | — | — | — | **write** | **write** |
+
+### TACP-17 — 병합본의 **작성자**는 부서 문서 담당자만 본다 (v1.3 신설)
+
+병합본 화면에서 **각 행을 누가 냈는지** 볼 수 있다. `lead`·`head`·`readAll`만이다.
+
+**왜 필요한가.** 부서장이 병합본을 검토하다 잘못된 내용을 발견하면, 다음 행동은
+**그 사람과 이야기하는 것**이다. 누가 썼는지 모르면 그 행동을 시작할 수 없고,
+부서장은 결국 담당자에게 물어본다 — 담당자가 사람 찾아주는 중계기가 된다.
+
+**어디에 두는가 — 화면에만 둔다. 문서에는 넣지 않는다.**
+
+| | 작성자 표시 |
+|---|:---:|
+| Tincase 병합본 화면 — **lead·head·readAll** | **보인다** (기본은 접힘, 눌러서 편다) |
+| Tincase 병합본 화면 — **member** | **없다** (서버가 응답에 담지 않는다) |
+| 내려받은 hwp · 취합게시판에 올라가는 문서 | **없다** — 누가 받든 |
+
+**판정 기준은 화면이 아니라 사람이다.** 수합 관리든 보관함이든 같은 규칙이 걸린다 —
+담당자가 보관함에서 열면 작성자가 보이고, 부서원이 수합 관리를 열 수 있더라도 보이지 않는다.
+페이지마다 따로 판정하면 그중 하나를 빠뜨리게 되고, 그게 v1.3.0에서 실제로 일어난 일이다.
+
+문서에 넣지 않는 이유는 그 문서가 **전사에 공개**되기 때문이다. 부서 안에서 필요한
+정보(누가 썼나)와 부서 밖으로 나가는 문서(부서의 결론)는 공개 범위가 다르다.
+
+**TACP-15와 충돌하지 않는다.** TACP-15는 "병합본에는 작성자가 없으니 부서원 모두가 본다"고
+했는데, 그 근거는 **부서원이 보는 화면**에 대한 것이다. 작성자 정보는 그 화면에 나타나지 않는다 —
+`canSeeAuthors`가 거짓이면 서버가 **아예 내려보내지 않는다.** 화면에서 숨기는 것이 아니다.
+
+즉 같은 병합본이 보는 사람에 따라 두 가지로 보인다:
+부서원에게는 **부서의 결과물**, 담당자·부서장에게는 **검토 대상**이다.
+TACP-11(내용은 lead부터)이 지키려던 「누가 무엇을 썼는지」는 정확히 같은 선에 남아 있다.
 
 ### TACP-15 — 내 부서 병합본은 부서원 모두가 본다 (v1.2 개정)
 
@@ -153,16 +217,19 @@ v1.1까지 member는 병합본을 못 받았다. 근거는 "남의 업무 내용
 
 ### 3.3 타 부서 (foreign)
 
-| Resource | member | lead | coordinator | operator |
-|---|:---:|:---:|:---:|:---:|
-| **존재 여부조차** | — | — | read | read |
-| 부서 페이지 · 제출 현황 | — | — | read | read |
-| 제출물 내용 | — | — | read | read |
-| **제출물 삭제** | — | — | — | **delete** |
-| 양식 내려받기 | — | — | — | — |
-| 양식 · 규칙 변경 | — | — | — | — |
-| 제출 | — | — | — | — |
-| 명단 · 역할 | — | — | — | manage |
+| Resource | member | lead | head | coordinator | operator |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **존재 여부조차** | — | — | — | read | read |
+| 부서 페이지 · 제출 현황 | — | — | — | read | read |
+| 제출물 내용 | — | — | — | read | read |
+| **제출물 삭제** | — | — | — | — | **delete** |
+| 양식 내려받기 | — | — | — | — | — |
+| 양식 · 규칙 변경 | — | — | — | — | — |
+| 제출 | — | — | — | — | — |
+| 명단 · 역할 | — | — | — | — | manage |
+
+**`head`의 타 부서 열은 전부 `—` 다.** 부서장은 자기 부서의 장이지 전사 역할이 아니다 —
+`lead`와 같은 선에 선다.
 
 **타 부서 열에서 `lead`·`coordinator`는 `read` 아니면 `—` 다.**
 operator에게만 두 가지 예외가 있다 — 명단 관리(TACP-3, 문서가 아니라 사람에 대한 권한)와
@@ -282,7 +349,8 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | 게이트 | 하는 일 | 실패 시 |
 |---|---|---|
 | `requireScope(headers)` | 신원 → 활성 사용자 + 부서 + 역할 | 401 / 403 |
-| `requireLead(headers)` | lead 또는 readAll | **404** |
+| `requireManager(headers)` | lead·head 또는 readAll — **부서 문서 진입점** (§3.1, TACP-16) | **404** |
+| `requireOwnManager(headers)` | lead·head 또는 operator — **병합본 수정 전용** (§3.2, coordinator 제외) | **404** |
 | `requireOperator(headers)` | operator | **404** |
 | `resolveTargetDivision(scope, slug?)` | 대상 부서 해석 (TACP-7) | **404** |
 | `findAccessibleSubmission(scope, id)` | 제출물 **읽기** 판정 | **404** |
@@ -333,6 +401,11 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | ST-T31 | **lead의 같은 부서 타인 제출물 삭제 → 404** (읽기는 되는데 삭제는 안 된다) |
 | ST-T32 | coordinator의 타 부서 제출물 삭제 → 404 |
 | ST-T33 | operator의 타 부서·마감 후 삭제 → 허용 + 감사 로그 |
+| **AU-T30** | **head의 자기 부서 병합본 수정 → 허용** (새로 허용된 것) |
+| **AU-T31** | **head의 타 부서 접근 → 404** (새로 금지된 것 — lead와 같은 선) |
+| **AU-T32** | **head의 명단 변경 → 404** (TACP-3 — 문서는 되어도 사람은 안 된다) |
+| **AU-T33** | **member에게 병합본 작성자를 내려보내지 않는다** (TACP-17, 화면 숨김이 아니라 미전송) |
+| **AU-T34** | **coordinator의 병합본 수정 → 404, 병합 실행 → 허용** (§3.2 두 칸이 다르다) |
 
 새 Resource를 추가하면 **그 Resource의 격리 테스트를 같은 커밋에 넣는다.**
 
@@ -359,6 +432,7 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 |---|---|---|---|
 | 2026-08-14 | 레이아웃만 URL을 해석하고 페이지는 `scope.division` 사용 → 헤더/본문 부서 불일치 | TACP-7 | `resolveTargetDivision` 단일 출처 도입 (v1.3.1) |
 | 2026-08-14 | operator 판정이 **4개 라우트에 각각 복사**되어 있었음 (`ops/divisions`·`ops/roster`·`ops/password-reset`·`template/standard`). 손으로 3개를 찾고, 네 번째는 TACP-12 테스트가 찾아냈다 | TACP-12 | `requireOperator` 게이트로 통합 + 재발 방지 테스트 (v1.3.2) |
+| 2026-08-26 | 병합본 **수정** 판정이 라우트 안에 `if (!scope.isLead)`로 적혀 있었다 (`merged/content`·`merge` 2곳). §3.2에서 두 칸(수정·실행)의 coordinator 권한이 다른데 코드는 같은 식을 복사해 써서, 병합 **실행**이 문서보다 좁게(coordinator 불가) 동작했다 | TACP-12 | `requireOwnManager`(수정) / `requireManager`(실행) 두 게이트로 분리 (v1.23.0) |
 
 ---
 

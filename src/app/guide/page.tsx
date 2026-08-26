@@ -183,7 +183,7 @@ export default async function GuidePage() {
         slug={scope.division.slug}
         divisionName={scope.division.nameKo}
         userName={scope.user.name}
-        isLead={scope.isLead || scope.readAll}
+        isLead={scope.isManager || scope.readAll}
         isOperator={scope.user.isOperator}
         viaCloudflare={scope.source === 'cloudflare'}
         notifyEnabled={ps.scope.user.notifyEnabled}
