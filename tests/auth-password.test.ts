@@ -301,3 +301,48 @@ describe('로그아웃', () => {
     expect((await me.GET(nx('/api/me', { cookie }))).status).toBe(401);
   });
 });
+
+// ── AU-T39 — 「비밀번호 강제 변경」이 빠진 페이지가 없는가 ────────────
+//
+// 이 검사가 있는 이유: 판정이 페이지마다 복사돼 있었고, 실제로 갈라졌다.
+// `/guide` 하나에만 빠져서, 비밀번호를 초기화당한 사람이 그 페이지는 그대로 볼 수
+// 있었다 (2026-08-26 실측). 손으로 세어 찾은 게 아니라 이 검사를 만들고서 알았다.
+//
+// TACP-12가 라우트에 대해 하는 일과 같다 — 복사된 판정은 반드시 갈라지므로,
+// 「모든 곳에 있는가」를 사람 눈이 아니라 코드가 본다.
+describe('[AU-T39] 보호 페이지는 전부 비밀번호 강제 변경을 거친다', () => {
+  it('page.tsx·layout.tsx 어디에도 가드 누락이 없다', async () => {
+    const { readdirSync, readFileSync, statSync } = await import('node:fs');
+    const path = await import('node:path');
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((n) => {
+        const p = path.join(dir, n);
+        if (statSync(p).isDirectory()) return walk(p);
+        return /(?:^|\/)(page|layout)\.tsx$/.test(p) ? [p] : [];
+      });
+
+    // 면제 — 이유가 분명한 것만. 늘리려면 여기에 이유를 적는다
+    const EXEMPT: Record<string, string> = {
+      'src/app/layout.tsx': '루트 레이아웃 — 신원을 보지 않는다 (로그인 화면도 감싼다)',
+      'src/app/login/page.tsx': '로그인 자체',
+      'src/app/password/page.tsx': '**여기가 목적지다.** 가드를 걸면 무한 리다이렉트',
+    };
+
+    const offenders: string[] = [];
+    for (const file of walk('src/app')) {
+      const rel = file.replace(/\\/g, '/');
+      if (EXEMPT[rel]) continue;
+      const src = readFileSync(file, 'utf8');
+      // 둘 중 하나면 된다 — 표준 진입점을 쓰거나, 직접 판정하거나
+      const viaEntry = /requirePageScope\s*\(/.test(src);
+      const viaGuard = /mustChangePassword/.test(src);
+      // 부서 페이지는 레이아웃이 이미 막지만, 직접 열려도 막혀야 하므로 각자 갖는다
+      if (!viaEntry && !viaGuard) offenders.push(rel);
+    }
+
+    expect(
+      offenders,
+      `AU-22 누락 — 비밀번호를 초기화당한 사람이 이 페이지를 그대로 봅니다:\n${offenders.join('\n')}`,
+    ).toEqual([]);
+  });
+});

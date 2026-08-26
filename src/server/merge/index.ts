@@ -86,7 +86,16 @@ export function composeMergedHwp(templateBytes: Buffer, tableRows: Record<Bucket
       }
       return;
     }
-    if (tableRows[bucket].length === 0) return; // 표를 그대로 둔다 (빈 양식 그대로)
+    /*
+     * HM-32 — 빈 표도 **반드시 비운다.** 건너뛰면 안 된다.
+     *
+     * 여기 있던 「표를 그대로 둔다 (빈 양식 그대로)」는 **양식의 표가 비어 있다는 전제**였고,
+     * 그 전제가 틀렸다 — AI홍보전략실 양식의 실적 표에는 예시 4줄이 들어 있다
+     * («제10차 인사위원회» 등). 건너뛰면 그 예시가 부서 실적으로 병합본에 남고,
+     * 그대로 취합게시판에 올라간다. 아무도 쓰지 않은 일이 부서 실적이 되는 것이다.
+     *
+     * `fillTable(recs, i, [])`는 머리행만 남기고 본문을 지운다 (2026-08-26 실측).
+     */
     fillTable(recs, i, tableRows[bucket]);
   });
 

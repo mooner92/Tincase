@@ -258,3 +258,72 @@ describe('한글 클립보드 표', () => {
     expect(rows.map((r) => r.content)).toEqual(['업무 A', '업무 B']);
   });
 });
+
+// ── HM-32 · WA-08 — 빈 표는 **비워야** 한다 ──────────────────────
+//
+// 이 결함은 사용자가 찾았다. 실적을 비우고 계획만 적으면 「검증에 실패했습니다」가 떴고,
+// 그래서 부서원이 실적 칸에 «특이사항 없음»을 적어 우회했다.
+//
+// 원인은 검증이 아니라 **그 앞**이었다: 빈 표는 `fillTable`을 건너뛰었는데,
+// 「양식의 표는 비어 있다」는 그 전제가 틀렸다 — 실제 양식의 실적 표에는 예시 4줄이
+// 들어 있다(«제10차 인사위원회» 등). 건너뛰면 그 예시가 «내가 한 일»로 남는다.
+//
+// 검증은 제 일을 하고 있었다. 지우지 않은 쪽이 틀렸다.
+describe('HM-32 빈 표 처리 — 양식의 예시가 남지 않는다', () => {
+  const load = () => {
+    const { readFileSync } = require('node:fs') as typeof import('node:fs');
+    return readFileSync('fixtures/master-template.hwp');
+  };
+  const hasFix = (() => {
+    try {
+      load();
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  const t = hasFix ? it : it.skip;
+
+  t('[HM-T40] 양식 자체에 예시 행이 들어 있다 — 이 전제가 이 테스트의 이유다', async () => {
+    const { readWorklog } = await import('@/lib/hwp/reader');
+    expect(readWorklog(load()).worklog.achievements.length).toBeGreaterThan(0);
+  });
+
+  t('[HM-T41] 실적을 비우고 계획만 넣으면 **실적은 0행**이어야 한다', async () => {
+    const { composeMergedHwp } = await import('@/server/merge');
+    const { readWorklog } = await import('@/lib/hwp/reader');
+    const out = composeMergedHwp(load(), {
+      achievements: [],
+      plans: [['2-1', '알림 시스템 개발', '', '', '']],
+      notes: [],
+    });
+    const w = readWorklog(out.bytes).worklog;
+    expect(w.achievements, '양식의 예시가 실적으로 남았다').toHaveLength(0);
+    expect(w.plans).toHaveLength(1);
+    expect(w.plans[0].content).toBe('알림 시스템 개발');
+  });
+
+  t('[HM-T42] 세 표 중 어느 조합을 비워도 남는 것이 없다', async () => {
+    const { composeMergedHwp } = await import('@/server/merge');
+    const { readWorklog } = await import('@/lib/hwp/reader');
+    const one = (p: number) => [[`${p}-1`, `${p}번 표 내용`, '', '', '']];
+    for (const [a, p, n] of [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+      [1, 1, 0],
+      [0, 1, 1],
+      [1, 1, 1],
+    ] as const) {
+      const out = composeMergedHwp(load(), {
+        achievements: a ? one(1) : [],
+        plans: p ? one(2) : [],
+        notes: n ? one(3) : [],
+      });
+      const w = readWorklog(out.bytes).worklog;
+      expect(w.achievements, `실적 ${a}/${p}/${n}`).toHaveLength(a);
+      expect(w.plans, `계획 ${a}/${p}/${n}`).toHaveLength(p);
+      expect(w.notes, `특이 ${a}/${p}/${n}`).toHaveLength(n);
+    }
+  });
+});

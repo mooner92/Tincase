@@ -2,6 +2,7 @@
 // 실패를 throw가 아니라 판별 유니온으로 돌려서 페이지가 안내/리다이렉트를 고르게 한다.
 import { cache } from 'react';
 import { headers } from 'next/headers';
+import { redirect } from 'next/navigation';
 import { requireScope, resolveTargetDivision, HttpError, type Scope } from './authz';
 import { AuthError } from './auth';
 import type { Division } from '@prisma/client';
@@ -26,13 +27,29 @@ export const getPageScope = cache(async (): Promise<PageScope> => {
 });
 
 /**
- * 보호 페이지의 표준 진입점.
- * - 미인증 → /login
- * - 초기 비밀번호 미변경 → /password (AU-22)
- * 그 외 오류(미등록·미온보딩)는 안내 화면으로 내보내도록 PageScope를 그대로 돌려준다.
+ * AU-22 — **보호 페이지의 표준 진입점.** 여기서 실제로 내보낸다.
+ *
+ *   미인증            → `/login`
+ *   초기 비밀번호 미변경 → `/password?first=1`
+ *   그 외(미등록·미온보딩) → PageScope를 그대로 돌려준다 (페이지가 안내 화면을 고른다)
+ *
+ * v1.23.1까지 이 함수는 **위 주석대로 동작하지 않았다** — 그냥 `getPageScope()`를
+ * 돌려주기만 했고, 실제 리다이렉트는 페이지 11곳에 각각 복사돼 있었다.
+ * 그리고 갈라졌다: `/guide`에만 빠져서, 비밀번호를 초기화당한 사람이 그 페이지는
+ * 그대로 볼 수 있었다 (실측 확인 2026-08-26).
+ *
+ * 판정이 여러 곳에 복사되면 반드시 갈라진다 — TACP-12가 라우트에 대해 말하는 것과
+ * 같은 이야기다. 그래서 판정을 **여기 하나로** 모으고, 페이지는 이 함수만 부른다.
+ * 누락은 AU-T39가 소스에서 잡는다.
  */
 export async function requirePageScope(): Promise<PageScope> {
-  return getPageScope();
+  const ps = await getPageScope();
+  if (!ps.ok) {
+    if (ps.code === 'unauthenticated') redirect('/login');
+    return ps; // 미등록·미온보딩은 안내 화면이 낫다 — 리다이렉트하면 이유를 못 읽는다
+  }
+  if (ps.scope.user.mustChangePassword) redirect('/password?first=1');
+  return ps;
 }
 
 /**

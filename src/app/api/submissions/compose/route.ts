@@ -7,6 +7,7 @@ import { prisma } from '@/server/db';
 import { requireSubmitter, HttpError } from '@/server/authz';
 import { submissionName } from '@/lib/docname';
 import { handler, json } from '@/server/http';
+import { logger } from '@/server/logger';
 import { readStoredFile } from '@/server/storage';
 import { openHwp } from '@/lib/hwp/ole';
 import { parseRecords, serializeRecords } from '@/lib/hwp/record';
@@ -73,14 +74,34 @@ export const POST = handler(async (req: NextRequest) => {
 
   const base = await readStoredFile(template.filePath);
   const recs = parseRecords(openHwp(base).sections[0]);
-  [ach, plans, notes].forEach((rows, i) => {
-    if (rows.length > 0) fillTable(recs, i, rows);
-  });
+  /*
+   * WA-08 — 세 표를 **전부** 채운다. 빈 표라고 건너뛰지 않는다.
+   *
+   * 예전에는 `if (rows.length > 0)`로 걸렀는데, 그건 **양식의 표가 비어 있다는 전제**였다.
+   * 실제 양식(AI홍보전략실)의 실적 표에는 예시 4줄이 들어 있어서, 실적을 비우고 계획만
+   * 적으면 그 예시가 «내가 한 일»로 문서에 남았다. 검증이 그걸 잡아 500을 냈고,
+   * 사용자에게는 「검증에 실패했습니다」로만 보여 이유를 알 수 없었다 (2026-08-26).
+   *
+   * `fillTable(recs, i, [])`는 머리행만 남기고 본문을 지운다 — 안 적은 표는 빈 표가 된다.
+   */
+  [ach, plans, notes].forEach((rows, i) => fillTable(recs, i, rows));
   const bytes = packHwp(base, [serializeRecords(recs)]);
 
-  // WA-05 — 생성물도 자체 검증을 통과해야 한다. 우리가 만든 것이라고 봐주지 않는다
+  // WA-05 — 생성물도 자체 검증을 통과해야 한다. 우리가 만든 것이라고 봐주지 않는다.
+  // **세 표를 다 본다** — 실적만 보면 계획·특이사항이 어긋나도 통과한다
   const back = readWorklog(bytes);
-  if (back.worklog.achievements.length !== ach.length) {
+  const got = back.worklog;
+  const mismatch = [
+    ['실적', got.achievements.length, ach.length],
+    ['계획', got.plans.length, plans.length],
+    ['특이사항', got.notes.length, notes.length],
+  ].filter(([, a, b]) => a !== b);
+  if (mismatch.length > 0) {
+    // 무엇이 어긋났는지 로그에 남긴다 — 「검증 실패」만으로는 다음에도 못 고친다
+    logger.error(
+      { division: scope.division.nameKo, mismatch: mismatch.map(([k, a, b]) => `${k} ${b}행 요청 → ${a}행`) },
+      '[웹작성] 생성물 검증 실패',
+    );
     throw new HttpError(500, 'generate_failed', '문서를 만들었으나 검증에 실패했습니다. 담당자에게 알려 주세요.');
   }
 

@@ -6,7 +6,7 @@
 // 자료는 **데모 DB로 녹화한 것**이라 사람 이름·업무 내용이 전부 가공이다
 // (scripts/seed-demo.ts). 실제 화면을 찍어 두면 저장소가 public이라 개인정보가 남는다.
 import { redirect } from 'next/navigation';
-import { getPageScope } from '@/server/page-scope';
+import { requirePageScope } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
@@ -169,11 +169,10 @@ function monthlyExamples(now: Date): { month: string; range: string; note: strin
 }
 
 export default async function GuidePage() {
-  const ps = await getPageScope();
-  if (!ps.ok) {
-    if (ps.code === 'unauthenticated') redirect('/login');
-    return noticeFor(ps.code, ps.message);
-  }
+  // AU-22 — 표준 진입점. 미인증·초기 비밀번호 미변경은 여기서 내보낸다.
+  // 이 페이지만 `getPageScope()`를 직접 써서 비밀번호 강제 변경이 빠져 있었다 (v1.23.1에서 고침)
+  const ps = await requirePageScope();
+  if (!ps.ok) return noticeFor(ps.code, ps.message);
   const { scope } = ps;
   const examples = monthlyExamples(new Date());
 
