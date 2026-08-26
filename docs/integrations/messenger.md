@@ -28,7 +28,7 @@
 | `RecvId` | Y | **수신자 사번.** 여러 명은 콤마 (`21963,10196`) — 공백 금지 |
 | `Subject` · `Contents` | Y | 제목·본문 (본문은 `\n` 줄바꿈 지원) |
 | `URL` | N | 누르면 열릴 주소. 없으면 메신저 보관함이 열린다 |
-| `Option` | N | `WB=NEW,WA=DEFAULT` |
+| `Option` | N | `WB=NEW,WA=EDGE` (사내 샘플 값) |
 
 ### ★ 인코딩 — 가장 자주 틀리는 곳
 
@@ -97,7 +97,28 @@ npx tsx scripts/notify-test.ts --reminder  # 마감 전 알림 경로를 지금 
 **공통 원칙**: 알림은 **행동을 바꿀 수 있을 때만** 보낸다. 「알고만 있으세요」는 화면이 할 일이다.
 같은 말을 두 번 하지 않는다 — 두 번째부터 안 읽힌다.
 
-## 6. 문제 해결
+## 6. 사내 샘플 폼과의 대조 (2026-08-26)
+
+받은 원본 샘플(`UCM_알림_전송테스트.html`)의 폼 필드와 우리가 보내는 필드를
+기계적으로 대조했다 — **16개 필드가 완전히 일치**한다.
+
+```
+Action CMD Contents Contents_Encode Option RecvId SendID SendName
+SendName_Encode Subject Subject_Encode SystemName SystemName_Encode
+URL URL_Encode key
+```
+
+빠진 것도, 우리가 더 보내는 것도 없다. (`SendID`에는 `_Encode`가 없다 — 원본도 그렇다)
+
+한 가지만 달랐다: `Option`을 우리는 `WA=DEFAULT`로 두었는데 **사내 샘플은 `WA=EDGE`**다.
+샘플 값을 기본으로 바꿨다 — 우리가 「더 안전해 보이는」 값을 고르는 것보다
+**사내에서 실제로 동작을 확인한 값**을 따르는 편이 낫다.
+Edge가 없는 PC가 있으면 `MESSENGER_URL_OPTION=WB=NEW,WA=DEFAULT`로 바꾼다.
+
+> **원본 주석에 `<!-- NCP_TEST_Cluster -->`가 있다.** 이 엔드포인트는 **테스트 클러스터**일
+> 수 있다. 실제 운영 메신저 주소가 따로 있는지 확인이 필요하다.
+
+## 7. 문제 해결
 
 | 증상 | 원인 |
 |---|---|

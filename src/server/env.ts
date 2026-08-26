@@ -27,6 +27,12 @@ const schema = z.object({
   MESSENGER_SENDER_NAME: z.string().default('업무일지 수합'),
   /** 알림에서 눌렀을 때 열리는 주소. 사내망 주소라 환경변수로 받는다 */
   MESSENGER_LINK_BASE: z.string().default(''),
+  /**
+   * URL 클릭 시 브라우저 옵션. 기본값은 **사내 샘플 폼에 적힌 값 그대로**다 —
+   * 우리가 «더 안전해 보이는» 값을 고르는 것보다, 사내에서 실제로 동작을 확인한 값을
+   * 따르는 편이 낫다. Edge가 없는 PC가 있으면 `WB=NEW,WA=DEFAULT`로 바꾼다.
+   */
+  MESSENGER_URL_OPTION: z.string().default('WB=NEW,WA=EDGE'),
   MERGE_MODEL_URL: z.string().default('http://127.0.0.1:11434'),
   MERGE_MODEL_TIMEOUT_MS: z.coerce.number().int().positive().default(60_000),
   MERGE_MODEL_MAX_ROWS: z.coerce.number().int().positive().default(400),

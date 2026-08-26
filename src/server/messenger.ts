@@ -82,7 +82,7 @@ function buildForm(recvIds: string[], input: AlertInput): URLSearchParams {
   appendEncoded(form, 'Contents', input.contents);
   if (input.url) {
     appendEncoded(form, 'URL', input.url);
-    form.append('Option', 'WB=NEW,WA=DEFAULT'); // 특정 브라우저를 강제하지 않는다
+    form.append('Option', env.MESSENGER_URL_OPTION); // 기본값은 사내 샘플과 동일 (WB=NEW,WA=EDGE)
   }
   return form;
 }
