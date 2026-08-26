@@ -8,6 +8,7 @@ import { formatDeadlineKo, formatSubmittedKo, isLocked, slotKind, toKstIso } fro
 import { DeadlineCountdown } from '@/components/DeadlineCountdown';
 import { SubmitChoice } from '@/components/SubmitChoice';
 import { MySubmissionCard } from '@/components/MySubmissionCard';
+import { BellIcon } from '@/components/BellIcon';
 
 export const dynamic = 'force-dynamic';
 
@@ -216,11 +217,9 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
                         그래서 시각(제출)과 라벨(알림)로 **모양 자체를 다르게** 한다.
                       */
                       m.notifiedAtKst && (
-                        <span
-                          className="rounded-full border border-hairline px-1.5 py-px text-[10px] whitespace-nowrap text-muted-soft"
-                          title={`마감 알림을 보냈습니다 (${m.notifiedAtKst})`}
-                        >
-                          알림
+                        <span title={`마감 알림을 보냈습니다 (${m.notifiedAtKst})`} className="text-muted-soft">
+                          <BellIcon />
+                          <span className="sr-only">알림 보냄 {m.notifiedAtKst}</span>
                         </span>
                       )
                     )}

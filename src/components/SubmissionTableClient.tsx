@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FileDrawer, type DrawerMember } from './FileDrawer';
+import { BellIcon } from './BellIcon';
 
 export interface MemberRow {
   user: { id: string; name: string };
@@ -87,10 +88,11 @@ export function SubmissionTableClient({
                       ○ 미제출
                       {m.notifiedAtKst && (
                         <span
-                          className="ml-2 rounded-full border border-hairline px-1.5 py-px text-[10px] text-muted-soft"
                           title={`마감 알림을 보냈습니다 (${m.notifiedAtKst})`}
+                          className="ml-2 align-middle text-muted-soft"
                         >
-                          알림
+                          <BellIcon />
+                          <span className="sr-only">알림 보냄 {m.notifiedAtKst}</span>
                         </span>
                       )}
                     </span>
