@@ -9,6 +9,8 @@ export interface MemberRow {
   status: 'submitted' | 'missing';
   latest: { id: string; version: number; byteSize: number; uploadedAtKst: string } | null;
   versionCount: number;
+  /** NT-31 — 이 주차에 마감 알림을 받은 시각 (KST "13:00") */
+  notifiedAtKst?: string | null;
 }
 
 export function SubmissionTableClient({
@@ -81,7 +83,14 @@ export function SubmissionTableClient({
                   {m.status === 'submitted' ? (
                     <span className="font-medium text-success">● 제출</span>
                   ) : (
-                    <span className="text-muted-soft">○ 미제출</span>
+                    <span className="text-muted-soft">
+                      ○ 미제출
+                      {m.notifiedAtKst && (
+                        <span className="ml-1.5 text-xs text-muted-soft" title="마감 알림을 보냈습니다">
+                          · 알림 {m.notifiedAtKst}
+                        </span>
+                      )}
+                    </span>
                   )}
                 </td>
                 <td className="px-5 py-3 tabular-nums text-body">

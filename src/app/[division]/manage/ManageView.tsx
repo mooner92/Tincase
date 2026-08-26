@@ -183,6 +183,7 @@ export async function ManageView({
                 uploadedAtKst: toKstIso(m.latest.uploadedAt).slice(5, 16).replace('T', ' '),
               },
               versionCount: m.versionCount,
+              notifiedAtKst: m.notifiedAtKst,
             }))}
             canDelete={canDeleteAny}
           />

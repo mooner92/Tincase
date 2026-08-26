@@ -186,6 +186,7 @@ export default async function GuidePage() {
         isLead={scope.isLead || scope.readAll}
         isOperator={scope.user.isOperator}
         viaCloudflare={scope.source === 'cloudflare'}
+        notifyEnabled={ps.scope.user.notifyEnabled}
       />
 
       <main className="mx-auto w-full max-w-[1120px] flex-1 px-5 pt-10 pb-8">

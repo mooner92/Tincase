@@ -3,7 +3,7 @@ import type { Division, Submission, User, WeekSlot } from '@prisma/client';
 import { prisma } from './db';
 import { audit } from './audit';
 import { logger } from './logger';
-import { currentWeek, deadlineFor, isLocked } from '@/lib/week';
+import { currentWeek, deadlineFor, isLocked, toKstIso } from '@/lib/week';
 import { validateHwpUpload, UploadValidationError } from '@/lib/hwp/reader';
 import { env } from './env';
 import { HttpError } from './authz';
@@ -146,6 +146,8 @@ export interface MemberStatusRow {
   status: 'submitted' | 'missing';
   latest: Submission | null;
   versionCount: number;
+  /** NT-31 — 이 주차에 마감 알림을 받았는가 (받은 시각 KST "13:00"). 안 받았으면 null */
+  notifiedAtKst: string | null;
 }
 
 export async function divisionStatus(divisionId: string, slotId: string): Promise<{
@@ -170,6 +172,24 @@ export async function divisionStatus(divisionId: string, slotId: string): Promis
     byUser.set(s.userId, arr);
   }
 
+  /*
+   * NT-31 — 알림을 받은 사람. 담당자가 «독촉했는데도 안 냈나, 아직 안 알렸나»를
+   * 구분할 수 있어야 다음 행동이 정해진다. 발송 기록은 사번 목록으로 남으므로
+   * 사번 → 사용자로 되짚는다.
+   */
+  const notified = new Map<string, string>();
+  const logs = await prisma.notifyLog.findMany({ where: { divisionId, weekSlotId: slotId } });
+  if (logs.length > 0) {
+    const byEmpNo = new Map(users.filter((u) => u.employeeNo).map((u) => [u.employeeNo!, u.id]));
+    for (const log of logs) {
+      const at = toKstIso(log.sentAt).slice(11, 16);
+      for (const empNo of JSON.parse(log.recipients) as string[]) {
+        const uid = byEmpNo.get(empNo);
+        if (uid) notified.set(uid, at);
+      }
+    }
+  }
+
   const toRow = (u: (typeof users)[number]): MemberStatusRow => {
     const list = byUser.get(u.id) ?? [];
     return {
@@ -177,6 +197,7 @@ export async function divisionStatus(divisionId: string, slotId: string): Promis
       status: list.some((s) => s.isLatest) ? 'submitted' : 'missing',
       latest: list.find((s) => s.isLatest) ?? null,
       versionCount: list.length,
+      notifiedAtKst: notified.get(u.id) ?? null,
     };
   };
 

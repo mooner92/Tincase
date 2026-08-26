@@ -26,6 +26,7 @@ export default async function OpsPage() {
         isLead={ps.scope.isLead || ps.scope.readAll}
         isOperator
         viaCloudflare={ps.scope.source === 'cloudflare'}
+        notifyEnabled={ps.scope.user.notifyEnabled}
       />
       <main className="mx-auto w-full max-w-[1120px] flex-1 px-5 pt-10 pb-8">
         <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">운영</p>

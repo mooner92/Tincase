@@ -13,7 +13,8 @@ export type AuditAction =
   | 'template_update'
   | 'reject'
   | 'cross_division_read'
-  | 'password_reset';
+  | 'password_reset'
+  | 'notify_pref';
 
 export async function audit(
   actor: string,

@@ -42,6 +42,7 @@ export default async function DivisionLayout({
         isLead={view.canManage}
         isOperator={view.scope.user.isOperator}
         viaCloudflare={view.scope.source === 'cloudflare'}
+        notifyEnabled={view.scope.user.notifyEnabled}
         foreign={!view.isOwn}
       />
       <div className="mx-auto w-full max-w-[1120px] flex-1 px-5 pb-8">

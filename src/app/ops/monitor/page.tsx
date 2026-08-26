@@ -88,6 +88,7 @@ export default async function MonitorPage() {
         isLead={scope.isLead || scope.readAll}
         isOperator={scope.user.isOperator}
         viaCloudflare={scope.source === 'cloudflare'}
+        notifyEnabled={ps.scope.user.notifyEnabled}
       />
       <div className="mx-auto w-full max-w-[1120px] flex-1 px-5 pt-8 pb-8">
         <div className="mb-4 flex items-center justify-between">

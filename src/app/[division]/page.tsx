@@ -203,10 +203,20 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
                       {m.user.name}
                       {mine && ' (나)'}
                     </span>
-                    {m.latest && (
+                    {m.latest ? (
                       <span className="text-xs whitespace-nowrap text-muted-soft">
                         {formatSubmittedKo(m.latest.uploadedAt, now)}
                       </span>
+                    ) : (
+                      /* NT-31 — 안 낸 사람에게 «알림은 갔는지»를 같은 자리에 보여준다.
+                         벨 아이콘 대신 시각을 쓰는 이유: 제출자 줄과 자리·모양이 같아
+                         눈이 한 줄로 훑어진다. 아이콘은 「뭔가 있다」까지만 알려주고
+                         결국 마우스를 올려 봐야 한다 */
+                      m.notifiedAtKst && (
+                        <span className="text-xs whitespace-nowrap text-muted-soft" title="마감 알림을 보냈습니다">
+                          알림 {m.notifiedAtKst}
+                        </span>
+                      )
                     )}
                   </li>
                 );

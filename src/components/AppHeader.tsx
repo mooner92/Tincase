@@ -3,6 +3,7 @@
 // 비밀번호·로그아웃은 드롭다운으로 내려 상단을 행동 중심 메뉴만 남긴다.
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
+import { NotifyToggle } from './NotifyToggle';
 import { useEffect, useRef, useState } from 'react';
 
 export interface NavItem {
@@ -19,6 +20,7 @@ export function AppHeader({
   isLead,
   isOperator,
   viaCloudflare,
+  notifyEnabled,
   foreign = false,
 }: {
   slug: string | null; // null이면 부서 컨텍스트 없음 (/ops 단독 등)
@@ -27,6 +29,8 @@ export function AppHeader({
   isLead: boolean;
   isOperator: boolean;
   viaCloudflare: boolean;
+  /** NT-21 — 본인 알림 받기 상태. 드롭다운에서 바로 끌 수 있다 */
+  notifyEnabled?: boolean;
   /** 내 부서가 아닌 부서를 열람 중 (AU-15·16) — 배지로 명시 */
   foreign?: boolean;
 }) {
@@ -154,8 +158,12 @@ export function AppHeader({
           {open && (
             <div
               role="menu"
-              className="absolute right-0 mt-2 w-44 overflow-hidden rounded-2xl border border-hairline bg-canvas py-1.5 shadow-[0_8px_24px_rgba(10,10,10,0.08)]"
+              className="absolute right-0 mt-2 w-56 overflow-hidden rounded-2xl border border-hairline bg-canvas py-1.5 shadow-[0_8px_24px_rgba(10,10,10,0.08)]"
             >
+              {/* NT-21 — 알림을 끌 수 없으면 싫은 사람은 메신저에서 «차단»해 버린다.
+                  끄는 길을 열어두는 편이 알림 자체를 살린다 */}
+              {notifyEnabled !== undefined && <NotifyToggle initial={notifyEnabled} />}
+              <div className="my-1 border-t border-hairline-soft" />
               <Link
                 role="menuitem"
                 href="/password"

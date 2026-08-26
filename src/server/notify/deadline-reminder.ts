@@ -83,7 +83,9 @@ export async function runDueReminders(now = new Date()): Promise<ReminderOutcome
   const slot = await ensureCurrentSlot(now);
 
   const out: ReminderOutcome[] = [];
-  const divisions = await prisma.division.findMany({ where: { isActive: true } });
+  // NT-30 — 부서별 기능 플래그. 켜진 부서에만 나간다 (기본값 false).
+  // 이 층이 있어야 «우리 부서에서 먼저 써 보고 하나씩 확대»가 가능하다
+  const divisions = await prisma.division.findMany({ where: { isActive: true, notifyEnabled: true } });
 
   for (const division of divisions) {
     const deadline = effectiveDeadline(slot, division);
@@ -102,6 +104,7 @@ export async function runDueReminders(now = new Date()): Promise<ReminderOutcome
         divisionId: division.id,
         isActive: true,
         onRoster: true, // DM-16 — 집계 대상만. 부서장·휴직자에게 독촉하지 않는다
+        notifyEnabled: true, // NT-20 — 알림을 끈 사람은 뺀다 (제출 의무와는 별개다)
         submissions: { none: { weekSlotId: slot.id } },
       },
       select: { id: true, name: true, employeeNo: true },

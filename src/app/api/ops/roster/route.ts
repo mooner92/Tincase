@@ -24,6 +24,8 @@ export const GET = handler(async (req: NextRequest) => {
       isActive: true,
       onRoster: true,
       rosterNote: true,
+      employeeNo: true,
+      notifyEnabled: true,
       sortOrder: true,
       passwordHash: true, // 발급 여부만 쓴다 (해시 자체는 응답에 넣지 않는다)
       mustChangePassword: true,
@@ -46,6 +48,10 @@ interface RosterUpdate {
   onRoster?: boolean;
   /** DM-16 — 집계에서 뺀 이유("휴직" 등). 뺀 것과 이유를 같이 적어야 나중에 되돌릴 수 있다 */
   rosterNote?: string | null;
+  /** NT-22 — 사내 메신저 사번. 없으면 알림이 가지 않는다 */
+  employeeNo?: string | null;
+  /** NT-22 — 운영자도 남의 알림을 끌 수 있다. 본인은 프로필 메뉴에서 (NT-21) */
+  notifyEnabled?: boolean;
   sortOrder?: number;
   divisionRole?: 'member' | 'lead';
   isActive?: boolean;
@@ -80,6 +86,9 @@ export const PUT = handler(async (req: NextRequest) => {
         data: {
           ...(u.onRoster !== undefined && { onRoster: u.onRoster }),
           ...(u.rosterNote !== undefined && { rosterNote: u.rosterNote?.trim() || null }),
+          // 사번은 숫자·영문만 남긴다 — 공백이 섞이면 메신저가 사람을 못 찾는다 (문서 06 §3)
+          ...(u.employeeNo !== undefined && { employeeNo: u.employeeNo?.replace(/[^A-Za-z0-9]/g, '') || null }),
+          ...(u.notifyEnabled !== undefined && { notifyEnabled: u.notifyEnabled }),
           ...(u.sortOrder !== undefined && { sortOrder: u.sortOrder }),
           ...(u.divisionRole !== undefined && { divisionRole: u.divisionRole }),
           ...(u.isActive !== undefined && { isActive: u.isActive }),

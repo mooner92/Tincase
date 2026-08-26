@@ -13,6 +13,8 @@ export interface UserRow {
   isActive: boolean;
   onRoster: boolean;
   rosterNote?: string | null;
+  employeeNo?: string | null;
+  notifyEnabled?: boolean;
   sortOrder: number;
   hasPassword: boolean;
   mustChangePassword: boolean;
@@ -95,6 +97,8 @@ export function RosterDrawer({
                 <th className="px-4 py-2 font-medium">이메일</th>
                 <th className="px-4 py-2 font-medium">역할</th>
                 <th className="px-4 py-2 font-medium">제출 대상</th>
+                <th className="px-4 py-2 font-medium">사번</th>
+                <th className="px-4 py-2 font-medium">알림</th>
                 <th className="px-4 py-2 font-medium">정렬</th>
                 <th className="px-4 py-2 font-medium">비밀번호</th>
                 <th className="px-4 py-2 font-medium">계정</th>
@@ -147,6 +151,30 @@ export function RosterDrawer({
                         className="mt-1 w-24 rounded border border-hairline px-1 py-0.5 text-xs"
                       />
                     )}
+                  </td>
+                  {/* NT-22 — 사번과 알림. 사번이 없으면 알림은 켜 있어도 나가지 않는다 */}
+                  <td className="px-4 py-2">
+                    <input
+                      aria-label={`${u.name} 사번`}
+                      defaultValue={u.employeeNo ?? ''}
+                      placeholder="사번"
+                      disabled={busy}
+                      onBlur={(e) =>
+                        e.target.value.trim() !== (u.employeeNo ?? '') &&
+                        onPatch(u.id, { employeeNo: e.target.value })
+                      }
+                      className="w-20 rounded border border-hairline px-1 py-0.5 text-xs tabular-nums"
+                    />
+                  </td>
+                  <td className="px-4 py-2 text-center">
+                    <input
+                      aria-label={`${u.name} 알림 받기`}
+                      type="checkbox"
+                      checked={u.notifyEnabled ?? true}
+                      disabled={busy || !u.employeeNo}
+                      title={u.employeeNo ? '알림 받기' : '사번을 먼저 넣어야 합니다'}
+                      onChange={(e) => onPatch(u.id, { notifyEnabled: e.target.checked })}
+                    />
                   </td>
                   <td className="px-4 py-2">
                     <input

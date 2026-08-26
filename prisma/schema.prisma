@@ -35,6 +35,11 @@ model Division {
   boardStatus String @default("none") // "confirmed" | "unclear" | "none"
   boardNote   String @default("") // 관찰 근거 (제출일·특이사항)
 
+  /** NT-30 — 이 부서에 알림을 보낼 것인가. **기본값 false** —
+      새 부서가 온보딩되자마자 모르는 사람에게 알림이 가면 안 된다.
+      우리 부서에서 충분히 써 본 뒤 부서별로 하나씩 켠다 */
+  notifyEnabled Boolean @default(false)
+
   createdAt   DateTime     @default(now())
   users       User[]
   templates   Template[]
@@ -59,6 +64,9 @@ model User {
   /** NT-01 — 사내 메신저 사번(RecvId). 없으면 알림을 보내지 않는다.
       이메일과 별개다 — 메신저는 사번으로만 사람을 찾는다 */
   employeeNo    String?
+  /** NT-20 — 알림 받기. 본인이 끌 수 있고 운영자도 바꿀 수 있다.
+      끄면 마감 전 알림이 가지 않는다 — 제출 의무는 그대로다 */
+  notifyEnabled Boolean  @default(true)
   sortOrder     Int      @default(100)
   createdAt     DateTime @default(now())
 
