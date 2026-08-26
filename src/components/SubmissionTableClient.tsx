@@ -86,8 +86,11 @@ export function SubmissionTableClient({
                     <span className="text-muted-soft">
                       ○ 미제출
                       {m.notifiedAtKst && (
-                        <span className="ml-1.5 text-xs text-muted-soft" title="마감 알림을 보냈습니다">
-                          · 알림 {m.notifiedAtKst}
+                        <span
+                          className="ml-2 rounded-full border border-hairline px-1.5 py-px text-[10px] text-muted-soft"
+                          title={`마감 알림을 보냈습니다 (${m.notifiedAtKst})`}
+                        >
+                          알림
                         </span>
                       )}
                     </span>

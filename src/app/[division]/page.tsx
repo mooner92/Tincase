@@ -208,13 +208,19 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
                         {formatSubmittedKo(m.latest.uploadedAt, now)}
                       </span>
                     ) : (
-                      /* NT-31 — 안 낸 사람에게 «알림은 갔는지»를 같은 자리에 보여준다.
-                         벨 아이콘 대신 시각을 쓰는 이유: 제출자 줄과 자리·모양이 같아
-                         눈이 한 줄로 훑어진다. 아이콘은 「뭔가 있다」까지만 알려주고
-                         결국 마우스를 올려 봐야 한다 */
+                      /*
+                        NT-31 — 안 낸 사람에게 «알림은 갔는지»를 보여준다.
+                        **시각은 빼고 표식만** 남긴다: 알림은 부서 전원에게 같은 시각(마감 1시간 전)에
+                        한 번 나가므로 사람마다 다르지 않다 — 시각을 적으면 제출 시각과 같은 회색·같은
+                        자리에 놓여 눈이 헷갈린다. 알아야 할 것은 «갔다/안 갔다»뿐이다.
+                        그래서 시각(제출)과 라벨(알림)로 **모양 자체를 다르게** 한다.
+                      */
                       m.notifiedAtKst && (
-                        <span className="text-xs whitespace-nowrap text-muted-soft" title="마감 알림을 보냈습니다">
-                          알림 {m.notifiedAtKst}
+                        <span
+                          className="rounded-full border border-hairline px-1.5 py-px text-[10px] whitespace-nowrap text-muted-soft"
+                          title={`마감 알림을 보냈습니다 (${m.notifiedAtKst})`}
+                        >
+                          알림
                         </span>
                       )
                     )}
