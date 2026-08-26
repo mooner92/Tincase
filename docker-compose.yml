@@ -22,6 +22,8 @@ services:
       MERGE_MODEL: hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M
       MERGE_MODEL_URL: http://host.docker.internal:11437
       # CF_ACCESS_AUD는 .env.production(env_file)에서. 누락 시 앱 env 가드가 기동 거부 (OPS-06)
+      # NT-01 — 메신저 주소·허용 사번도 .env.production에서 받는다.
+      # 사내 IP를 여기 적지 않는 이유: 이 파일은 커밋된다 (공개 저장소).
     extra_hosts:
       - "host.docker.internal:host-gateway"   # 컨테이너 → 호스트 ollama (서브넷 변경에 안전)
     env_file:

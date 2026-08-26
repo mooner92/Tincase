@@ -26,17 +26,35 @@ export interface ReminderOutcome {
   skipped?: string;
 }
 
-function buildMessage(divisionName: string, slotLabel: string, monthly: boolean, deadline: Date) {
+/**
+ * NT-14 — 알림 문구. **한 사람에게 하는 말투**로 쓴다.
+ *
+ * 「제출되지 않았습니다」 같은 공지문은 읽는 사람이 자기 얘기로 안 받는다.
+ * 이름을 부르고, 무엇을 언제까지 하면 되는지만 남긴다 — 그게 행동으로 이어진다.
+ *
+ * 사번을 앞에 붙이는 이유: 메신저 알림함에 여러 시스템 알림이 섞이는데,
+ * 자기 사번이 보이면 «나한테 온 것»이 한눈에 들어온다.
+ *
+ * ★ **본문은 평문이다.** 「Tincase」에 링크를 걸어 보려고 두 가지를 실측했는데 둘 다 실패했다:
+ *   `<a href=…>Tincase</a>` → 태그가 **글자 그대로** 보인다 (본문 HTML 미지원)
+ *   `Tincase(http://…)`     → 주소만 길게 늘어지고 **클릭도 안 된다**
+ * 링크는 `URL` 필드 하나뿐이고, 그건 **제목**에 걸려 알림을 누르면 열린다.
+ * 그래서 본문에는 아무 표식도 넣지 않는다 — 억지로 넣으면 더 지저분해질 뿐이다.
+ */
+function buildMessage(
+  user: { name: string; employeeNo: string },
+  slotLabel: string,
+  monthly: boolean,
+  deadline: Date,
+) {
   const kind = monthly ? '월간' : '주간';
   return {
-    subject: `[Tincase] ${slotLabel} ${kind} 업무일지 마감 1시간 전`,
+    subject: `[Tincase] ${slotLabel} ${kind} 업무일지 마감 1시간 전이에요`,
     contents: [
-      `${divisionName} ${slotLabel} ${kind} 업무일지가 아직 제출되지 않았습니다.`,
+      `[${user.employeeNo}]${user.name}님 아직 업무일지가 제출되지 않았어요.`,
       '',
-      `마감: ${formatDeadlineKo(deadline)}`,
-      monthly ? '이번 주는 한 달치를 정리하는 월간입니다.' : '',
-      '',
-      '아래를 눌러 바로 제출하실 수 있습니다.',
+      `Tincase에서 ${formatDeadlineKo(deadline)} 전에 제출해주세요.`,
+      monthly ? '이번 주는 한 달치를 정리하는 월간이에요.' : '',
     ]
       .filter((l) => l !== '')
       .join('\n'),
@@ -100,12 +118,27 @@ export async function runDueReminders(now = new Date()): Promise<ReminderOutcome
     }
 
     const monthly = slotKind(slot) === 'monthly';
-    const msg = buildMessage(division.nameKo, slot.label, monthly, deadline);
-    const res = await sendAlert({
-      recvIds: withNo.map((u) => u.employeeNo!),
-      ...msg,
-      url: env.MESSENGER_LINK_BASE ? `${env.MESSENGER_LINK_BASE}/${division.slug}` : undefined,
-    });
+    const url = env.MESSENGER_LINK_BASE ? `${env.MESSENGER_LINK_BASE}/${division.slug}` : undefined;
+
+    /*
+     * 문구에 **이름이 들어가므로 한 사람씩 보낸다.** 여러 명을 콤마로 묶으면
+     * 한 통을 여러 명이 받아 남의 이름이 보인다 — 그건 알림이 아니라 명단 공개다.
+     * 미제출자는 많아야 부서당 수십 명이라 요청 수는 문제되지 않는다.
+     */
+    const sent: string[] = [];
+    const blocked: string[] = [];
+    const errors: string[] = [];
+    for (const u of withNo) {
+      const r = await sendAlert({
+        recvIds: [u.employeeNo!],
+        ...buildMessage({ name: u.name, employeeNo: u.employeeNo! }, slot.label, monthly, deadline),
+        url,
+      });
+      sent.push(...r.sent);
+      blocked.push(...r.blocked);
+      errors.push(...r.errors);
+    }
+    const res = { sent, blocked, errors };
 
     // 보낸 뒤에 기록한다 — 실패했는데 «보냈음»으로 남으면 다음 주기에 재시도할 길이 막힌다.
     // 반대로 한 명이라도 나갔으면 기록한다: 재시도가 그 사람에게 두 번 가는 것보다 낫다
