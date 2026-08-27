@@ -29,6 +29,10 @@ model Division {
   mergeDedupe     Boolean @default(true) // 중복 묶기
   mergeDropNotes  Boolean @default(true) // 특이사항이 비면 3번 표 삭제
   mergeRuleText   String  @default("") // 담당자가 쓰는 자연어 지침 — 모델에 그대로 전달
+  /** HM-33 — 「내용이 없다」는 뜻으로 보이는 낱말. 쉼표 구분. **비면 검사하지 않는다.**
+      기본이 꺼짐인 이유: 이건 한 부서에서 실제로 겪은 일이라 전사 규칙이 아니다.
+      찾기만 하고 **지우지 않는다** — 담당자 알림과 화면에 「확인해 주세요」로만 뜬다 */
+  emptyWords      String  @default("")
   guideText       String  @default("") // 업로드 화면 작성 안내 (CP-21)
 
   // 취합게시판 제출 이력 (R-002 관찰) — 온보딩 우선순위 판단용. 운영자가 갱신 가능 (DM-15)

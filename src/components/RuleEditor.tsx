@@ -1,8 +1,17 @@
 'use client';
-// CP-78~81 — 부서 병합 설정. 문법 없음 (HM-18 v3).
+// CP-78~82 — 부서 병합 설정. 문법 없음 (HM-18 v3).
 // 부서마다 업무가 천차만별이라 분류는 각 부서가 자기 말로 적는다. 안 적으면 제출자 순서.
+//
+// **화면 원칙 (v1.24.0 개편).** 「여기가 뭐 하는 곳인지 모르겠다」는 실제 피드백에서 고쳤다.
+//
+//   1. 설명을 **입력칸 아래가 아니라 제목 옆**에 한 줄로 둔다. 칸마다 두세 줄씩 붙어 있으면
+//      읽을 것이 설정보다 많아지고, 그러면 아무것도 안 읽는다
+//   2. 입력칸은 **눌러 들어간 것처럼** 그린다 (안쪽 그림자 + 흰 바탕). 평평하면 어디가
+//      쓰는 곳인지 훑어서 알 수 없다
+//   3. 각 설정은 **자기 카드**를 갖는다. 한 카드에 다 넣으면 어디까지가 한 설정인지 모른다
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { parseFlagWords } from '@/lib/empty-content';
 
 /** 서버의 parseCategories와 같은 규칙 — 입력하는 즉시 해석 결과를 보여주기 위해 */
 function preview(raw: string): string[] {
@@ -15,12 +24,39 @@ function preview(raw: string): string[] {
     .slice(0, 12);
 }
 
+/** 눌러 들어간 입력칸 — 어디에 쓰는지 훑어서 보이게 (화면 원칙 2) */
+const FIELD =
+  'w-full rounded-xl border border-hairline bg-canvas px-3.5 py-2.5 text-sm leading-6 text-ink ' +
+  'shadow-[inset_0_1px_2px_rgba(10,10,10,0.06)] transition-colors ' +
+  'placeholder:text-muted-soft focus:border-ink focus:outline-none';
+
+function Card({
+  title,
+  hint,
+  children,
+}: {
+  title: string;
+  hint: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-2xl border border-hairline bg-surface-soft/50 px-5 py-4">
+      <h3 className="text-sm font-semibold text-ink">
+        {title}
+        <span className="ml-2 text-xs font-normal text-muted">{hint}</span>
+      </h3>
+      <div className="mt-2.5">{children}</div>
+    </section>
+  );
+}
+
 export interface RuleEditorProps {
   initialCategories: string;
   initialDedupe: boolean;
   initialDropNotes: boolean;
   initialRule: string;
   initialGuide: string;
+  initialEmptyWords: string;
 }
 
 export function RuleEditor(props: RuleEditorProps) {
@@ -29,6 +65,7 @@ export function RuleEditor(props: RuleEditorProps) {
   const [dropNotes, setDropNotes] = useState(props.initialDropNotes);
   const [rule, setRule] = useState(props.initialRule);
   const [guide, setGuide] = useState(props.initialGuide);
+  const [emptyWords, setEmptyWords] = useState(props.initialEmptyWords);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const router = useRouter();
@@ -38,9 +75,11 @@ export function RuleEditor(props: RuleEditorProps) {
     dedupe !== props.initialDedupe ||
     dropNotes !== props.initialDropNotes ||
     rule !== props.initialRule ||
-    guide !== props.initialGuide;
+    guide !== props.initialGuide ||
+    emptyWords !== props.initialEmptyWords;
 
   const parsed = useMemo(() => preview(categories), [categories]);
+  const words = useMemo(() => parseFlagWords(emptyWords), [emptyWords]);
 
   // CP-81 — 저장 전 이탈 방지
   useEffect(() => {
@@ -56,7 +95,7 @@ export function RuleEditor(props: RuleEditorProps) {
     fetch('/api/division/rule', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ categories, dedupe, dropNotes, ruleText: rule, guideText: guide }),
+      body: JSON.stringify({ categories, dedupe, dropNotes, ruleText: rule, guideText: guide, emptyWords }),
     })
       .then(async (r) => {
         const body = await r.json();
@@ -68,112 +107,112 @@ export function RuleEditor(props: RuleEditorProps) {
   };
 
   return (
-    <div className="space-y-6">
-      {/* ── 분류 순서 ── */}
-      <div>
-        <label htmlFor="cats" className="mb-1 block text-xs font-medium text-body">
-          분류 순서 <span className="font-normal text-muted-soft">— 병합본을 이 순서로 묶습니다</span>
-        </label>
+    <div className="space-y-3">
+      <Card title="분류 순서" hint="병합본을 이 순서로 묶습니다">
         <input
-          id="cats"
           value={categories}
           onChange={(e) => setCategories(e.target.value)}
-          className="input"
-          placeholder="예) AI-홍보(정간물 포함)-시스템-도서관"
+          className={FIELD}
+          placeholder="AI-홍보-시스템-도서관   (쉼표·가운뎃점·하이픈 아무거나)"
         />
-        <div className="mt-1.5 flex flex-wrap items-center gap-1.5 text-[11px] text-muted">
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted">
           {parsed.length === 0 ? (
-            <span>비워두면 제출자 순서로 넣습니다.</span>
+            <span>비우면 제출자 순서로 넣습니다.</span>
           ) : (
             <>
-              <span>이렇게 나뉩니다:</span>
               {parsed.map((c) => (
-                <span key={c} className="badge-pill bg-surface-card px-2 py-0.5 text-[11px]">
+                <span key={c} className="badge-pill bg-canvas px-2 py-0.5 text-[11px]">
                   {c}
                 </span>
               ))}
-              <span className="badge-pill bg-surface-soft px-2 py-0.5 text-[11px] text-muted-soft">기타</span>
+              <span className="badge-pill bg-surface-card px-2 py-0.5 text-[11px] text-muted-soft">기타</span>
             </>
           )}
         </div>
-        <p className="mt-1 text-[11px] leading-4 text-muted-soft">
-          쉼표·가운뎃점·하이픈 아무거나 써도 됩니다. 분류 이름은 문서에 나타나지 않고 순서에만 쓰입니다.
-        </p>
-      </div>
+      </Card>
 
-      {/* ── 켜고 끄는 것 ── */}
-      <fieldset className="space-y-2">
-        <legend className="mb-1 text-xs font-medium text-body">병합 동작</legend>
-        <label className="flex items-start gap-2 text-sm text-body">
-          <input type="checkbox" checked={dedupe} onChange={(e) => setDedupe(e.target.checked)} className="mt-0.5" />
-          <span>
-            중복 묶기
-            <span className="ml-1 text-xs text-muted-soft">
-              — 여러 사람이 같은 업무를 적었으면 한 줄로 합칩니다 (원문 중 정보가 가장 많은 것을 남깁니다)
+      <Card title="병합 동작" hint="자동으로 할 일">
+        <div className="space-y-2">
+          <label className="flex items-start gap-2.5 text-sm text-body">
+            <input type="checkbox" checked={dedupe} onChange={(e) => setDedupe(e.target.checked)} className="mt-1" />
+            <span>
+              <span className="font-medium text-ink">중복 묶기</span>
+              <span className="ml-1.5 text-xs text-muted">여러 사람이 같은 업무를 적었으면 한 줄로</span>
             </span>
-          </span>
-        </label>
-        <label className="flex items-start gap-2 text-sm text-body">
-          <input
-            type="checkbox"
-            checked={dropNotes}
-            onChange={(e) => setDropNotes(e.target.checked)}
-            className="mt-0.5"
-          />
-          <span>
-            특이사항이 비면 3번 표를 비워둠
-            <span className="ml-1 text-xs text-muted-soft">— 부서 관례에 맞춥니다</span>
-          </span>
-        </label>
-      </fieldset>
+          </label>
+          <label className="flex items-start gap-2.5 text-sm text-body">
+            <input
+              type="checkbox"
+              checked={dropNotes}
+              onChange={(e) => setDropNotes(e.target.checked)}
+              className="mt-1"
+            />
+            <span>
+              <span className="font-medium text-ink">특이사항 없으면 3번 표 비우기</span>
+            </span>
+          </label>
+        </div>
+      </Card>
 
-      {/* ── 자연어 지침 ── */}
-      <div>
-        <label htmlFor="rule" className="mb-1 block text-xs font-medium text-body">
-          병합 지침 <span className="font-normal text-muted-soft">(선택)</span>
-        </label>
+      {/*
+        HM-33 — 「내용 없음」 낱말. **부서마다 다르다.**
+        한 부서원이 실적 칸에 「특이사항 없음」을 적어 낸 일에서 나왔는데, 그건 그 부서 사정이지
+        전사 규칙이 아니다. 비워두면 이 기능은 아예 없는 것과 같다.
+      */}
+      <Card title="확인할 낱말" hint="이 낱말이 든 줄을 병합 후 알려줍니다 (지우지는 않습니다)">
+        <input
+          value={emptyWords}
+          onChange={(e) => setEmptyWords(e.target.value)}
+          className={FIELD}
+          placeholder="없음   (비우면 검사하지 않습니다)"
+        />
+        <p className="mt-2 text-xs text-muted">
+          {words.length === 0 ? (
+            '검사하지 않습니다.'
+          ) : (
+            <>
+              <span className="text-ink">{words.map((w) => `「${w}」`).join(' ')}</span>이 들어간 줄을 찾아 담당자
+              알림과 수합 관리 화면에 띄웁니다. <strong className="font-medium">문서는 그대로 둡니다</strong> —
+              뺄지는 사람이 정합니다.
+            </>
+          )}
+        </p>
+      </Card>
+
+      <Card title="병합 지침" hint="선택 · 평소 말하듯 적으면 됩니다">
         <textarea
-          id="rule"
           value={rule}
           onChange={(e) => setRule(e.target.value)}
-          rows={3}
-          className="w-full rounded-xl border border-hairline px-3 py-2 text-sm leading-6"
-          placeholder={'평소 말하듯 적으면 됩니다.\n예) 도서관 업무는 맨 뒤로 / 같은 회의 참석은 묶어주세요'}
+          rows={2}
+          className={FIELD}
+          placeholder="도서관 업무는 맨 뒤로 / 같은 회의 참석은 묶어주세요"
         />
-        <p className="mt-1 text-[11px] leading-4 text-muted-soft">
-          정해진 문법이 없습니다. 병합할 때 참고용으로 함께 읽힙니다.
-        </p>
-      </div>
+      </Card>
 
-      {/* ── 작성 안내 (부서원에게 보이는 것) ── */}
-      <div>
-        <label htmlFor="guide" className="mb-1 block text-xs font-medium text-body">
-          작성 안내 <span className="font-normal text-muted-soft">— 부서원 제출 화면에 그대로 보입니다</span>
-        </label>
+      <Card title="작성 안내" hint="부서원 제출 화면에 그대로 보입니다">
         <textarea
-          id="guide"
           value={guide}
           onChange={(e) => setGuide(e.target.value)}
-          rows={4}
-          className="w-full rounded-xl border border-hairline px-3 py-2 text-sm leading-6"
-          placeholder={'한 줄에 하나씩.\n예) 상시 반복 업무는 일자를 공란으로 둡니다'}
+          rows={3}
+          className={FIELD}
+          placeholder="한 줄에 하나씩&#10;상시 반복 업무는 일자를 공란으로 둡니다"
         />
-      </div>
+      </Card>
 
-      {/* PG-26 — 절대 규칙 안내 상시 노출 */}
-      <p className="rounded-xl bg-surface-soft px-3 py-2 text-[11px] leading-5 text-muted">
-        표 규격 보존 · 내용 무손실 · 원본 불변은 시스템 절대 규칙입니다 — 어떤 설정으로도 바꿀 수 없습니다.
-        병합은 제출된 원문 글자를 그대로 옮기며, 무엇도 새로 쓰지 않습니다.
-      </p>
-
-      <div className="flex items-center gap-3">
-        <button onClick={save} disabled={saving || !dirty} className="btn-primary btn-sm">
+      <div className="flex items-center gap-3 pt-1">
+        <button onClick={save} disabled={saving || !dirty} className="btn-primary">
           {saving ? '저장 중…' : '저장'}
         </button>
-        <span aria-live="polite" className={`text-xs ${msg?.ok ? 'text-success' : 'text-error'}`}>
+        <span aria-live="polite" className={`text-sm ${msg?.ok ? 'text-success' : 'text-error'}`}>
           {msg?.text}
         </span>
+        {dirty && !msg && <span className="text-xs text-warning">저장하지 않은 변경</span>}
       </div>
+
+      {/* PG-26 — 절대 규칙은 상시 노출하되, 설정이 아니므로 맨 아래 작게 */}
+      <p className="pt-1 text-[11px] leading-5 text-muted-soft">
+        표 규격·내용·원본은 어떤 설정으로도 바꿀 수 없습니다. 병합은 제출된 글자를 그대로 옮깁니다.
+      </p>
     </div>
   );
 }

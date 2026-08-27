@@ -15,6 +15,8 @@ interface ReviewPayload {
   model: { used: boolean; reason: string | null };
   categories: { order: string[] } | null;
   missing: string[];
+  /** HM-33 — 확인이 필요한 행. 옛 실행에는 없다 */
+  flagged?: MergeStateView['flagged'];
 }
 
 export async function ManageView({
@@ -69,6 +71,7 @@ export async function ManageView({
     categoryOrder: review?.categories?.order ?? [],
     sourceCount: lastRun?.sourceIds ? (JSON.parse(lastRun.sourceIds) as string[]).length : 0,
     missing: review?.missing ?? [],
+    flagged: review?.flagged ?? [],
   };
 
   const deadline = effectiveDeadline(slot, division);

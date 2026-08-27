@@ -9,10 +9,13 @@ export function SubmitChoice({
   hasPrevious,
   isoKey,
   guideLines,
+  emptyWordsRaw,
 }: {
   hasPrevious: boolean;
   isoKey: string;
   guideLines: string[];
+  /** HM-33 — 부서가 정한 「내용 없음」 낱말. 비면 검사하지 않는다 */
+  emptyWordsRaw?: string;
 }) {
   const [mode, setMode] = useState<'upload' | 'web'>('upload');
   const [composing, setComposing] = useState(false);
@@ -46,7 +49,12 @@ export function SubmitChoice({
         </div>
       )}
 
-      {composing && <WebComposer isoKey={isoKey} guideLines={guideLines} onClose={() => setComposing(false)} />}
+      {composing && <WebComposer
+          isoKey={isoKey}
+          guideLines={guideLines}
+          emptyWordsRaw={emptyWordsRaw}
+          onClose={() => setComposing(false)}
+        />}
     </div>
   );
 }

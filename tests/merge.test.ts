@@ -327,3 +327,108 @@ describe('HM-32 빈 표 처리 — 양식의 예시가 남지 않는다', () => 
     }
   });
 });
+
+// ── HM-33 — 「없음」 탐지. **지우지 않고 알린다** ──────────────────
+//
+// 사용자가 제안한 설계다. 처음에 나는 «고정 목록으로 자동 제외»를 제안했는데,
+// 사용자가 «감지해서 알림으로만 알려달라»고 했고 그쪽이 옳다:
+// **처분이 알림 한 줄이면 오탐 비용이 거의 없어서, 탐지를 느슨하게 잡아도 안전하다.**
+// 판정을 정확하게 만드는 대신 **틀려도 싼 자리**로 옮긴 것이다.
+describe('HM-33 「없음」 탐지', () => {
+  /** 부서가 정한 낱말. 설정이 비면 아무것도 걸리지 않는다 (HM-T56) */
+  const WORDS = ['없음'];
+
+  it('[HM-T50] 실제 사고 문구를 잡는다', async () => {
+    const { flagWordOf } = await import('@/lib/empty-content');
+    for (const c of ['특이사항 없음', '없음', '해당 없음', '특이사항없음', ' 없음 ']) {
+      expect(flagWordOf(c, WORDS), c).toBe('없음');
+    }
+  });
+
+  it('[HM-T51] **정상 업무를 잡지 않는다** — 실측 45행 중 오탐 0건이었다', async () => {
+    const { flagWordOf } = await import('@/lib/empty-content');
+    const real = [
+      '보도자료 배포',
+      '대담 영상 촬영',
+      '글로벌환경동향지 제출',
+      '국문 리플렛 업데이트',
+      '정기간행물 발간 진행(9건)',
+      '온라인 홍보 콘텐츠 제작 및 등록',
+      '(더민주) 한민수 의원 국저감사 요구자료 제출 -2022년 ~ 현재까지 최근 5년간 기록물 관리 현황(생산, 이관, 폐기)',
+      '공공데이터 업무 범위 확정을 위한 유관기관 담당자 미팅',
+    ];
+    for (const c of real) expect(flagWordOf(c, WORDS), c).toBeNull();
+  });
+
+  it('[HM-T52] 빈 칸은 잡지 않는다 — 안 쓴 것과 「없음」이라 쓴 것은 다르다', async () => {
+    const { flagWordOf } = await import('@/lib/empty-content');
+    expect(flagWordOf('', WORDS)).toBeNull();
+    expect(flagWordOf('   ', WORDS)).toBeNull();
+  });
+
+  it('[HM-T53] 표·행 번호가 화면과 같아야 담당자가 그 행을 찾는다', async () => {
+    const { findFlaggedRows } = await import('@/lib/empty-content');
+    const row = (content: string) => ({ content, date: '', place: '', attendee: '' });
+    const found = findFlaggedRows({
+      achievements: [
+        { row: row('보도자료 배포'), authors: ['장혜정'] },
+        { row: row('특이사항 없음'), authors: ['김영인'] },
+      ],
+      plans: [{ row: row('없음'), authors: ['김정두'] }],
+      notes: [],
+    }, WORDS);
+    expect(found).toHaveLength(2);
+    expect(found[0]).toMatchObject({ bucket: 'achievements', no: '1-2', who: '김영인', word: '없음' });
+    expect(found[1]).toMatchObject({ bucket: 'plans', no: '2-1', who: '김정두' });
+  });
+
+  it('[HM-T54] 알림 한 줄은 «어디·누구·무엇»을 담는다 — 받고 바로 찾을 수 있어야 한다', async () => {
+    const { describeFlagged } = await import('@/lib/empty-content');
+    expect(
+      describeFlagged({ bucket: 'achievements', no: '1-6', who: '김영인', content: '특이사항 없음', word: '없음' }),
+    ).toBe('실적 1-6 김영인 「특이사항 없음」');
+  });
+
+  it('[HM-T55] **병합이 행을 지우지 않는다** — 탐지는 알림용이고 문서는 그대로다', async () => {
+    const { composeMergedHwp } = await import('@/server/merge');
+    const { readWorklog } = await import('@/lib/hwp/reader');
+    const { readFileSync } = await import('node:fs');
+    let base: Buffer;
+    try {
+      base = readFileSync('fixtures/master-template.hwp');
+    } catch {
+      return; // 픽스처 없는 환경
+    }
+    const out = composeMergedHwp(base, {
+      achievements: [
+        ['1-1', '보도자료 배포', '', '', ''],
+        ['1-2', '특이사항 없음', '', '', ''],
+      ],
+      plans: [],
+      notes: [],
+    });
+    const w = readWorklog(out.bytes).worklog;
+    expect(w.achievements).toHaveLength(2); // 지우지 않는다
+    expect(w.achievements[1].content).toBe('특이사항 없음');
+  });
+});
+
+// 부서별 설정 — 남의 부서에 우리 습관을 강요하지 않는다
+describe('HM-33 부서별 설정', () => {
+  it('[HM-T56] **설정이 비면 아무것도 걸리지 않는다** — 기본은 꺼짐이다', async () => {
+    const { flagWordOf, findFlaggedRows } = await import('@/lib/empty-content');
+    expect(flagWordOf('특이사항 없음', [])).toBeNull();
+    const row = (c: string) => ({ content: c, date: '', place: '', attendee: '' });
+    expect(
+      findFlaggedRows({ achievements: [{ row: row('없음'), authors: ['갑'] }], plans: [], notes: [] }, []),
+    ).toEqual([]);
+  });
+
+  it('[HM-T57] 부서가 자기 낱말을 정한다 — 쉼표·가운뎃점 아무거나', async () => {
+    const { parseFlagWords, flagWordOf } = await import('@/lib/empty-content');
+    expect(parseFlagWords('없음, 해당사항없음 · 생략')).toEqual(['없음', '해당사항없음', '생략']);
+    expect(parseFlagWords('')).toEqual([]);
+    expect(parseFlagWords('없음,없음,없음')).toEqual(['없음']); // 중복은 하나로
+    expect(flagWordOf('업무 생략', parseFlagWords('없음·생략'))).toBe('생략');
+  });
+});

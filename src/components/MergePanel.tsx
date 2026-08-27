@@ -29,6 +29,8 @@ export interface MergeStateView {
   categoryOrder: string[];
   sourceCount: number;
   missing: string[];
+  /** HM-33 — 확인이 필요한 행 (「없음」 등). 지우지 않고 보여준다 */
+  flagged: { no: string; who: string; content: string; bucket: string }[];
 }
 
 export function MergePanel({
@@ -139,6 +141,35 @@ export function MergePanel({
 
       {done && (
         <>
+          {/*
+            HM-33 — 「없음」처럼 내용이 비어 보이는 행.
+            **지우지 않고 보여준다** — 지우려면 판정이 정확해야 하고, 정확하지 않으면
+            남의 한 주가 조용히 사라진다. 기계는 «이거 보세요»까지만 한다.
+            합쳐진 행보다 위에 둔다: 이건 **손대야 하는 것**이고 그건 확인만 하면 된다.
+          */}
+          {state.flagged.length > 0 && (
+            <div className="mt-5 rounded-xl border border-warning/40 bg-warning/5 px-4 py-3">
+              <p className="text-sm font-semibold text-ink">
+                확인이 필요한 내용 {state.flagged.length}건
+              </p>
+              <ul className="mt-1.5 space-y-1 text-sm text-body">
+                {state.flagged.map((f, i) => (
+                  <li key={i}>
+                    <span className="tabular-nums text-muted">
+                      {({ achievements: '실적', plans: '계획', notes: '특이사항' } as Record<string, string>)[f.bucket] ?? ''} {f.no}
+                    </span>
+                    {f.who && <span className="ml-1.5 font-medium text-ink">{f.who}</span>}
+                    <span className="ml-1.5">「{f.content}」</span>
+                  </li>
+                ))}
+              </ul>
+              <p className="mt-1.5 text-[11px] text-muted-soft">
+                내용이 비어 있는 것처럼 보입니다. 빼야 할 것 같으면 [내용 보기]에서 그 행을 지우고 저장하세요 —
+                <strong className="font-medium"> 제출자가 올린 원본은 그대로입니다.</strong>
+              </p>
+            </div>
+          )}
+
           {/* 확인이 필요한 것만 */}
           {state.groups.length > 0 && (
             <div className="mt-5">

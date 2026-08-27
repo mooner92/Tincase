@@ -44,7 +44,10 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
   return (
     <main className="mt-6 space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-lg font-bold text-ink">부서 설정</h1>
+        <div>
+          <h1 className="text-xl font-bold text-ink">부서 설정</h1>
+          <p className="mt-0.5 text-sm text-muted">양식·병합 방식·작성 안내를 정합니다. 부서원에게 바로 반영됩니다.</p>
+        </div>
         <Link href={`/${division.slug}/manage`} className="text-sm text-ink underline underline-offset-2 hover:text-ink-active">
           ← 수합 관리로
         </Link>
@@ -52,7 +55,8 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
 
       {/* ② 부서 양식 (PG-28~30) */}
       <section className="card px-5 py-4">
-        <h2 className="mb-3 text-sm font-semibold text-muted">부서 양식</h2>
+        <h2 className="text-base font-semibold text-ink">부서 양식</h2>
+        <p className="mt-0.5 mb-3.5 text-xs text-muted">부서원이 받아서 쓰는 hwp 원본입니다.</p>
         {isOwn ? (
         <TemplateManager
           hasStandard={!!standard}
@@ -73,7 +77,8 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
 
       {/* ① 작성 안내 + 병합 규칙 (PG-25~27) */}
       <section className="card px-5 py-4">
-        <h2 className="mb-3 text-sm font-semibold text-muted">병합 설정 · 작성 안내</h2>
+        <h2 className="text-base font-semibold text-ink">병합 설정</h2>
+        <p className="mt-0.5 mb-3.5 text-xs text-muted">마감 후 자동 병합이 어떻게 돌지 정합니다.</p>
         {isOwn ? (
           <RuleEditor
             initialCategories={division.mergeCategories}
@@ -81,6 +86,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
             initialDropNotes={division.mergeDropNotes}
             initialRule={division.mergeRuleText}
             initialGuide={division.guideText}
+            initialEmptyWords={division.emptyWords}
           />
         ) : (
           <div className="space-y-3">
@@ -101,7 +107,8 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
 
       {/* ③ 제출 대상 — 읽기 전용 (PG-31/32, DM-04) */}
       <section className="card px-5 py-4">
-        <h2 className="mb-2 text-sm font-semibold text-muted">제출 대상</h2>
+        <h2 className="text-base font-semibold text-ink">제출 대상</h2>
+        <p className="mt-0.5 mb-3 text-xs text-muted">집계에 드는 사람입니다. 취소선은 제외된 사람입니다.</p>
         <ul className="grid grid-cols-2 gap-x-6 gap-y-1 text-sm sm:grid-cols-3">
           {users.map((u) => (
             <li key={u.id} className={u.onRoster ? 'text-ink' : 'text-muted-soft line-through'}>

@@ -80,21 +80,21 @@ export function TemplateManager({
       />
 
       {/* ST-20 — 전사 표준 양식을 시작점으로 제공 */}
-      <div className="rounded-xl bg-surface-soft px-4 py-3 text-xs leading-5 text-body">
-        <p className="font-medium text-body">부서 양식 만드는 법</p>
-        <p className="mt-1">
-          전사 표준 양식을 받아 <strong>우리 부서 부분만 남기고</strong> 저장한 뒤, 위에서 등록하세요.
-          부서원은 여기 등록된 양식을 받아 작성합니다.
-        </p>
+      {/*
+        ST-20 — 전사 표준 양식을 시작점으로. 설명은 **한 줄**로 줄였다 (v1.24.0) —
+        세 줄짜리 안내는 처음 한 번만 필요한데 매번 자리를 차지한다.
+      */}
+      <p className="text-xs leading-5 text-muted">
+        전사 표준 양식에서 <strong className="font-medium text-body">우리 부서 부분만 남겨</strong> 등록하세요.
         {hasStandard ? (
           /* eslint-disable-next-line @next/next/no-html-link-for-pages -- 파일 다운로드 */
-          <a href="/api/template/standard" className="mt-2 inline-block font-medium text-ink underline underline-offset-2 hover:text-ink-active">
-            전사 표준 양식 받기 →
+          <a href="/api/template/standard" className="ml-1.5 font-medium text-ink underline underline-offset-2 hover:text-ink-active">
+            표준 양식 받기 →
           </a>
         ) : (
-          <p className="mt-2 text-muted-soft">전사 표준 양식이 아직 등록되지 않았습니다. 운영자에게 요청하세요.</p>
+          <span className="ml-1.5 text-muted-soft">표준 양식 미등록 — 운영자에게 요청하세요.</span>
         )}
-      </div>
+      </p>
       <div aria-live="polite">
         {st.kind === 'done' && (
           <div className="rounded-xl bg-brand-soft px-4 py-3 text-sm text-ink">

@@ -20,6 +20,7 @@ import { env } from '../env';
 import { sendAlert, messengerStatus } from '../messenger';
 import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
 import { slotKind } from '@/lib/week';
+import { describeFlagged, type FlaggedRow } from '@/lib/empty-content';
 
 /** 스케줄러가 5분 주기이므로 창은 그보다 넉넉해야 반드시 한 번 걸린다 */
 const WINDOW_MINUTES = 12;
@@ -48,6 +49,23 @@ interface MergeFacts {
   ok: boolean;
   sources: number;
   counts: { achievements: number; plans: number; notes: number } | null;
+  /** HM-33 — 확인이 필요한 행 (「없음」 등). 지우지 않고 알린다 */
+  flagged: FlaggedRow[];
+}
+
+/** 알림에 몇 줄까지 적을 것인가. 팝업이라 길면 안 읽힌다 */
+const FLAG_LINES = 3;
+
+/**
+ * HM-33 — 「확인해 주세요」 문단. 걸린 게 없으면 **아무 줄도 넣지 않는다** —
+ * 「0건입니다」는 매주 오면 소음이고, 소음이 쌓이면 정작 있을 때도 안 읽힌다.
+ */
+function flagBlock(flagged: FlaggedRow[]): string[] {
+  if (flagged.length === 0) return [];
+  const head = `확인이 필요한 내용이 ${flagged.length}건 있어요.`;
+  const lines = flagged.slice(0, FLAG_LINES).map((f) => `· ${describeFlagged(f)}`);
+  if (flagged.length > FLAG_LINES) lines.push(`· 외 ${flagged.length - FLAG_LINES}건`);
+  return ['', head, ...lines];
 }
 
 /** 창 안에 들어왔는가. `[+n, +n+12분]`을 한 번 지나면 참 */
@@ -78,6 +96,8 @@ function compose(kind: NoticeKind, who: Person, slotLabel: string, monthly: bool
         `${head} ${label} 업무일지 병합본이 준비됐어요.`,
         '',
         rowsLine(f),
+        '',
+        ...flagBlock(f.flagged),
         '',
         'Tincase에서 내용을 확인하고 고칠 부분을 알려주세요.',
         '각 항목을 누가 냈는지도 함께 보입니다.',
@@ -117,6 +137,7 @@ function compose(kind: NoticeKind, who: Person, slotLabel: string, monthly: bool
       `${head} ${label} 병합본이 준비됐어요.`,
       '',
       rowsLine(f),
+      ...flagBlock(f.flagged),
       '',
       'Tincase에서 hwp로 받아 취합게시판에 올리고',
       '웹디스크에 업로드해주세요.',
@@ -213,7 +234,15 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
         where: { divisionId: division.id, weekSlotId: slot.id, status: 'succeeded', outputPath: { not: null } },
         orderBy: { startedAt: 'desc' },
       });
+      // HM-33 — 병합이 남긴 것을 그대로 읽는다. 여기서 다시 계산하면 화면과 갈라진다
+      let flagged: FlaggedRow[] = [];
+      try {
+        flagged = run?.reviewJson ? ((JSON.parse(run.reviewJson).flagged ?? []) as FlaggedRow[]) : [];
+      } catch {
+        flagged = []; // 옛 실행에는 없다 — 알림이 그것 때문에 멈추면 안 된다
+      }
       const facts: MergeFacts = {
+        flagged,
         ok: !!run,
         sources: run ? (JSON.parse(run.sourceIds) as string[]).length : 0,
         counts: run?.rowCounts ? JSON.parse(run.rowCounts) : null,

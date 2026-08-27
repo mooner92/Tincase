@@ -65,6 +65,8 @@ export async function runMergeRecorded(
           missing: outcome.missing,
           // TACP-17 — 행 순서와 나란한 작성자. 화면에서만 쓰고 문서에는 넣지 않는다
           rowAuthors: outcome.rowAuthors,
+          // HM-33 — 확인이 필요한 행. 알림과 화면이 같은 것을 읽는다
+          flagged: outcome.flagged,
         }),
         finishedAt: new Date(),
       },

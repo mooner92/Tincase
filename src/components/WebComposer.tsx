@@ -6,6 +6,7 @@
 // 칸 너비도 비슷하게 맞춘다.
 //
 // `구분`은 시스템이 다시 매기므로(ABS-5) 입력칸이 아니라 **번호 표시**로 둔다.
+import { flagWordOf, parseFlagWords } from '@/lib/empty-content';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { parseClipboardTable } from '@/lib/paste-table';
@@ -33,12 +34,16 @@ export function WebComposer({
   guideLines,
   initial,
   onClose,
+  emptyWordsRaw = '',
 }: {
   isoKey: string;
   guideLines: string[];
   initial?: Record<Bucket, ComposerRow[]> | null;
   onClose: () => void;
+  /** HM-33 — 부서가 정한 「내용 없음」 낱말 (`Division.emptyWords`). 비면 검사하지 않는다 */
+  emptyWordsRaw?: string;
 }) {
+  const emptyWords = useMemo(() => parseFlagWords(emptyWordsRaw), [emptyWordsRaw]);
   const [data, setData] = useState<Record<Bucket, ComposerRow[]>>(() => {
     if (initial?.achievements?.length || initial?.plans?.length || initial?.notes?.length) {
       return {
@@ -236,6 +241,17 @@ export function WebComposer({
                   // 비어 있는 구역의 첫 칸이 곧 "여기에 붙여넣으세요"다.
                   // 한 줄이라도 채워지면 안내는 방해가 되므로 사라진다
                   const isPasteTarget = i === 0 && filled[s.key] === 0;
+                  /*
+                   * HM-33 — 「특이사항 없음」처럼 **비었다는 뜻으로 쓴 글자**를 알아보고 귀띔한다.
+                   *
+                   * 한 부서원이 실적 칸에 그렇게 적어 냈고 그대로 병합본에 들어갔다.
+                   * 그 습관의 절반은 우리가 만든 것이다 — 어제까지 실적을 비우면 제출이 안 됐다.
+                   * 그건 고쳤으니 이제 **안 써도 된다는 걸 알려주는 일**이 남았다.
+                   *
+                   * **막지 않는다.** 정말 그렇게 쓰고 싶으면 쓸 수 있어야 한다 —
+                   * 사람이 쓴 글을 화면이 거부하기 시작하면 다음엔 우회로를 찾는다.
+                   */
+                  const looksEmpty = flagWordOf(row.content, emptyWords) !== null;
                   const no = row.content.trim()
                     ? `${s.no}-${data[s.key].slice(0, i + 1).filter((r) => r.content.trim()).length}`
                     : '';
@@ -252,10 +268,13 @@ export function WebComposer({
                         onChange={(e) => set(s.key, i, 'content', e.target.value)}
                         onPaste={(e) => onPaste(s.key, i, e)}
                         placeholder={isPasteTarget ? '여기에 한글 표를 붙여넣으세요 (Ctrl+V) · 직접 입력해도 됩니다' : ''}
+                        aria-describedby={looksEmpty ? `empty-hint-${s.key}-${i}` : undefined}
                         className={`${cell} flex-1 ${
                           isPasteTarget
                             ? 'border-2 border-dashed border-brand bg-brand-soft placeholder:text-body-strong'
-                            : ''
+                            : looksEmpty
+                              ? 'border border-warning/50 bg-warning/5'
+                              : ''
                         }`}
                       />
                       <input
@@ -287,6 +306,16 @@ export function WebComposer({
                     </div>
                   );
                 })}
+                {/*
+                  HM-33 — 표 아래 한 줄로만 귀띔한다. 칸마다 말풍선을 띄우면 잔소리가 되고,
+                  잔소리는 다음부터 안 읽힌다. 「비워두셔도 됩니다」가 이 안내의 전부다.
+                */}
+                {emptyWords.length > 0 && data[s.key].some((r) => flagWordOf(r.content, emptyWords)) && (
+                  <p className="px-2.5 py-1.5 text-xs leading-5 text-body">
+                    <span className="font-medium text-ink">「없음」이라고 적으신 칸이 있어요.</span>{' '}
+                    적을 내용이 없으면 <strong className="font-medium">비워두셔도 됩니다</strong> — 그대로 두셔도 제출은 됩니다.
+                  </p>
+                )}
               </div>
             </section>
           ))}

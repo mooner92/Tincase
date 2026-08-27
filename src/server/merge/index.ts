@@ -13,6 +13,7 @@ import { fillTable, packHwp } from '@/lib/hwp/writer';
 import { toPlan, orderPeople } from './rules';
 import { groupDuplicates, MergeRow, GroupingResult } from './model';
 import { classifyRows, sortByCategory, OTHER } from './classify';
+import { findFlaggedRows, parseFlagWords, type FlaggedRow } from '@/lib/empty-content';
 export { mergedName as mergedFileName } from '@/lib/docname';
 import type { WorklogRow } from '@/lib/hwp/reader';
 
@@ -51,6 +52,11 @@ export interface MergeOutcome {
    * **누구와 이야기해야 하는지**가 필요해서 남긴다.
    */
   rowAuthors: Record<'achievements' | 'plans' | 'notes', { c: string; a: string[] }[]>;
+  /**
+   * HM-33 — 「내용이 없다」는 뜻으로 보이는 행. **지우지 않고 알린다.**
+   * 담당자·부서장 알림과 병합 패널이 **이걸 함께 읽는다** — 따로 계산하면 갈라진다.
+   */
+  flagged: FlaggedRow[];
 }
 
 /** 표 3종 각각을 이 구조로 다룬다 */
@@ -277,6 +283,8 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
     mergedGroups: BUCKETS.flatMap((b) => grouped[b]).filter((g) => g.sources.length > 1),
     // TACP-17 — `tableRows`와 **같은 순서로** 만든다. 위에서 `grouped[bucket]`을 그대로
     // 훑어 표를 만들었으므로 인덱스가 곧 행 번호다. 특이사항 표를 지운 경우는 비운다
+    // HM-33 — 표에 들어간 최종 순서 그대로 본다. 구분 번호가 화면과 같아야 바로 찾는다
+    flagged: findFlaggedRows(grouped, parseFlagWords(division.emptyWords)),
     rowAuthors: {
       achievements: grouped.achievements.map((g) => ({ c: g.row.content, a: g.authors })),
       plans: grouped.plans.map((g) => ({ c: g.row.content, a: g.authors })),

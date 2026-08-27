@@ -127,7 +127,12 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
                   담당자 화면에 «추가 제출»로 표시되며 병합에도 들어갑니다.
                 </p>
               )}
-              <SubmitChoice hasPrevious={!!mySubmission} isoKey={slot.isoKey} guideLines={guideLines} />
+              <SubmitChoice
+                hasPrevious={!!mySubmission}
+                isoKey={slot.isoKey}
+                guideLines={guideLines}
+                emptyWordsRaw={view.division.emptyWords}
+              />
             </section>
           ) : !isOwn ? (
             <section className="card px-6 py-5 text-sm text-muted">

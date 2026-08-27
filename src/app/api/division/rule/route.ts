@@ -31,6 +31,7 @@ interface Body {
   dropNotes?: unknown;
   ruleText?: unknown;
   guideText?: unknown;
+  emptyWords?: unknown;
 }
 
 export const PUT = handler(async (req: NextRequest) => {
@@ -43,7 +44,7 @@ export const PUT = handler(async (req: NextRequest) => {
 
   const data: Record<string, string | boolean> = {};
 
-  const text = (key: 'categories' | 'ruleText' | 'guideText', col: string, max: number) => {
+  const text = (key: 'categories' | 'ruleText' | 'guideText' | 'emptyWords', col: string, max: number) => {
     const v = body[key];
     if (v === undefined) return;
     if (typeof v !== 'string') throw new HttpError(422, 'invalid_rule', `${key}는 문자열이어야 합니다.`);
@@ -60,6 +61,8 @@ export const PUT = handler(async (req: NextRequest) => {
   };
 
   text('categories', 'mergeCategories', MAX_CATEGORY_BYTES);
+  // HM-33 — 부서가 정하는 「내용 없음」 낱말. 분류 순서와 같은 길이 제한이면 충분하다
+  text('emptyWords', 'emptyWords', MAX_CATEGORY_BYTES);
   text('ruleText', 'mergeRuleText', MAX_TEXT_BYTES);
   text('guideText', 'guideText', MAX_TEXT_BYTES);
   flag('dedupe', 'mergeDedupe');
