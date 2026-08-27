@@ -39,6 +39,22 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
   ]);
 
   const guideLines = division.guideText.split('\n').filter(Boolean);
+
+  /*
+   * WA-10 — **지난번에 낸 것**. 「지난주」가 아니다 — 휴가로 한 주 걸렀으면
+   * 그 전 것을 보여줘야 한다. 이번 주 실적은 대개 지난번 계획에 적은 그 일이다.
+   */
+  const previousSubmission = canSubmit
+    ? await prisma.submission.findFirst({
+        where: {
+          userId: scope.user.id,
+          isLatest: true,
+          weekSlot: { opensAt: { lt: slot.opensAt } },
+        },
+        include: { weekSlot: true },
+        orderBy: { weekSlot: { opensAt: 'desc' } },
+      })
+    : null;
   // WS-14 — 그 달 마지막 주에는 월간 업무일지를 낸다. 주차는 그대로이고 '무엇을 내는가'가 바뀐다
   const monthly = slotKind(slot) === 'monthly';
   const submitted = members.filter((m) => m.status === 'submitted').length;
@@ -165,15 +181,27 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
         {/* 우측 5 — 양식·부서 현황 */}
         <div className="space-y-6 lg:col-span-5">
           <section className="card px-7 py-6">
-            <h2 className="display text-lg">빈 양식 받기</h2>
+            {/* WA-10 — 「빈 양식」이었으나 지난번 낸 것도 여기서 받는다. 제목이 내용을 덮어야 한다 */}
+            <h2 className="display text-lg">양식 받기</h2>
             <p className="mt-1 text-sm text-muted">파일명에 이번 주차가 자동으로 들어갑니다.</p>
             {!template ? (
               <p className="mt-4 text-sm font-medium text-body-strong">아직 등록된 양식이 없습니다.</p>
             ) : isOwn ? (
-              /* eslint-disable-next-line @next/next/no-html-link-for-pages -- 파일 다운로드, 클라이언트 내비게이션 아님 */
-              <a href="/api/template" className="btn-primary mt-4">
-                양식 다운로드
-              </a>
+              <div className="mt-4 flex flex-wrap items-center gap-2.5">
+                {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- 파일 다운로드, 클라이언트 내비게이션 아님 */}
+                <a href="/api/template" className="btn-primary">
+                  양식 다운로드
+                </a>
+                {/* WA-10 — 지난번 낸 것. 없으면 아예 렌더하지 않는다 (빈 안내는 자리만 먹는다) */}
+                {previousSubmission && (
+                  <a
+                    href={`/api/submissions/${previousSubmission.id}/download`}
+                    className="btn-secondary btn-sm"
+                  >
+                    지난 {previousSubmission.weekSlot.label} 받기
+                  </a>
+                )}
+              </div>
             ) : (
               <p className="mt-4 text-sm font-medium text-body-strong">
                 등록됨 — 양식 내려받기는 소속 부서원만 가능합니다.

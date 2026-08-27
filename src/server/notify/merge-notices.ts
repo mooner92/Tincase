@@ -1,6 +1,6 @@
 // NT-40~48 — 마감 뒤 알림. **받는 사람마다 할 일이 다르고, 그래서 시각도 다르다.**
 //
-//   마감      →  자동 병합 (HM-25)
+//   마감 +1분  →  자동 병합 시작 (HM-25·HM-35)
 //   마감 +10분 →  부서장(head): «병합본 준비됐어요, 검토 부탁드려요»   [성공했을 때만]
 //   마감 +10분 →  담당자(lead): «병합본이 아직 없어요»                [실패했을 때만]
 //   마감 +30분 →  담당자(lead): «최종 확인하고 제출해주세요»          [성공/실패 모두]
@@ -51,6 +51,15 @@ interface MergeFacts {
   counts: { achievements: number; plans: number; notes: number } | null;
   /** HM-33 — 확인이 필요한 행 (「없음」 등). 지우지 않고 알린다 */
   flagged: FlaggedRow[];
+  /**
+   * HM-34 — 병합본이 만들어진 **뒤에** 낸 사람 수.
+   *
+   * 0이 아니면 이 병합본은 낡았다. 그런데도 알림은 «준비됐어요»라고 말한다 —
+   * 2026-08-27에 실장이 세 명 빠진 문서를 온전한 것으로 알고 받은 게 그것이다.
+   * 병합 스케줄러 쪽은 고쳤지만(마감 전 실행은 미리보기로 친다), 담당자가 마감 후에
+   * 손으로 병합한 뒤 누가 늦게 내는 길은 남는다. **그때는 알림이 말해야 한다.**
+   */
+  stale: number;
 }
 
 /** 알림에 몇 줄까지 적을 것인가. 팝업이라 길면 안 읽힌다 */
@@ -66,6 +75,16 @@ function flagBlock(flagged: FlaggedRow[]): string[] {
   const lines = flagged.slice(0, FLAG_LINES).map((f) => `· ${describeFlagged(f)}`);
   if (flagged.length > FLAG_LINES) lines.push(`· 외 ${flagged.length - FLAG_LINES}건`);
   return ['', head, ...lines];
+}
+
+/**
+ * HM-34 — 「낡음」 한 줄. 0이면 아무 줄도 넣지 않는다 (flagBlock과 같은 이유).
+ * 문구가 «확인해보세요»가 아니라 **누를 버튼 이름**인 것은 의도다 — 읽고 나서
+ * 무엇을 해야 하는지 한 번 더 생각하게 만들면 그 알림은 대체로 안 눌린다.
+ */
+function staleBlock(stale: number, action: string): string[] {
+  if (stale === 0) return [];
+  return ['', `병합한 뒤에 ${stale}명이 더 냈어요 — 이 병합본에는 빠져 있어요.`, action];
 }
 
 /** 창 안에 들어왔는가. `[+n, +n+12분]`을 한 번 지나면 참 */
@@ -96,6 +115,7 @@ function compose(kind: NoticeKind, who: Person, slotLabel: string, monthly: bool
         `${head} ${label} 업무일지 병합본이 준비됐어요.`,
         '',
         rowsLine(f),
+        ...staleBlock(f.stale, '담당자에게 다시 병합을 요청해주세요.'),
         '',
         ...flagBlock(f.flagged),
         '',
@@ -137,6 +157,7 @@ function compose(kind: NoticeKind, who: Person, slotLabel: string, monthly: bool
       `${head} ${label} 병합본이 준비됐어요.`,
       '',
       rowsLine(f),
+      ...staleBlock(f.stale, 'Tincase 수합 관리에서 [다시 병합]을 눌러주세요.'),
       ...flagBlock(f.flagged),
       '',
       'Tincase에서 hwp로 받아 취합게시판에 올리고',
@@ -225,15 +246,51 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
 
   for (const division of divisions) {
     try {
-      const passed = (now.getTime() - effectiveDeadline(slot, division).getTime()) / 60_000;
+      const deadline = effectiveDeadline(slot, division);
+      const passed = (now.getTime() - deadline.getTime()) / 60_000;
+      // 창 밖이면 아무것도 조회하지 않고 빠져나온다 — 1분마다 도는 루프다 (HM-35)
       const atReview = inWindow(passed, REVIEW_MINUTES);
       const atSubmit = inWindow(passed, SUBMIT_MINUTES);
       if (!atReview && !atSubmit) continue;
 
+      /*
+       * HM-34 — **최종본만 본다.** `startedAt >= 마감`이 그 조건이다.
+       *
+       * 예전에는 성공한 실행 중 가장 최근 것을 그냥 집어 왔다. 그러면 마감 전에 담당자가
+       * 돌려본 미리보기가 «병합본 준비됐어요»로 나간다 — 2026-08-27에 실장이 세 명 빠진
+       * 문서를 받은 게 정확히 그것이다. 미리보기는 최종본이 아니므로 여기서도 세지 않는다.
+       */
       const run = await prisma.mergeRun.findFirst({
-        where: { divisionId: division.id, weekSlotId: slot.id, status: 'succeeded', outputPath: { not: null } },
+        where: {
+          divisionId: division.id,
+          weekSlotId: slot.id,
+          status: 'succeeded',
+          outputPath: { not: null },
+          startedAt: { gte: deadline },
+        },
         orderBy: { startedAt: 'desc' },
       });
+
+      /*
+       * HM-35 — **아직 돌고 있으면 기다린다.**
+       *
+       * 병합은 모델 호출까지 수 분이 걸릴 수 있다. 14:10에 아직 running인데 «병합본이
+       * 아직 없어요»를 보내면, 담당자는 멀쩡히 되고 있는 걸 다시 누르러 간다 —
+       * 그리고 그 알림은 `NotifyLog`에 «보냄»으로 박혀서 진짜 검토 요청이 못 나간다.
+       * 창이 12분이므로 1분 주기로 최대 열두 번 다시 본다. 창을 넘기면 그때는 실패로 친다.
+       */
+      if (!run) {
+        const inFlight = await prisma.mergeRun.findFirst({
+          where: {
+            divisionId: division.id,
+            weekSlotId: slot.id,
+            status: 'running',
+            startedAt: { gte: deadline },
+          },
+          select: { id: true },
+        });
+        if (inFlight) continue;
+      }
       // HM-33 — 병합이 남긴 것을 그대로 읽는다. 여기서 다시 계산하면 화면과 갈라진다
       let flagged: FlaggedRow[] = [];
       try {
@@ -241,10 +298,22 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
       } catch {
         flagged = []; // 옛 실행에는 없다 — 알림이 그것 때문에 멈추면 안 된다
       }
+      // HM-34 — 병합본에 안 들어간 최신 제출이 몇 건인가. 병합이 남긴 sourceIds와 대조한다
+      const used = new Set<string>(run ? (JSON.parse(run.sourceIds) as string[]) : []);
+      const stale = run
+        ? (
+            await prisma.submission.findMany({
+              where: { divisionId: division.id, weekSlotId: slot.id, isLatest: true },
+              select: { id: true },
+            })
+          ).filter((s) => !used.has(s.id)).length
+        : 0;
+
       const facts: MergeFacts = {
         flagged,
+        stale,
         ok: !!run,
-        sources: run ? (JSON.parse(run.sourceIds) as string[]).length : 0,
+        sources: used.size,
         counts: run?.rowCounts ? JSON.parse(run.rowCounts) : null,
       };
       const base = env.MESSENGER_LINK_BASE ? `${env.MESSENGER_LINK_BASE}/${division.slug}` : undefined;

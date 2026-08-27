@@ -513,3 +513,219 @@ d('health (API-T10)', () => {
     expect(text).not.toContain('부서'); // 부서명 없음 (라벨 제외)
   });
 });
+
+/**
+ * HM-34 — **마감은 이벤트다.** 14:00이 지나면 그때까지 제출된 것으로 최종본을 한 번 만든다.
+ *
+ * 이 스위트는 2026-08-27 AI홍보전략실에서 실제로 난 사고를 그대로 재현한다:
+ * 담당자가 10:37에 «미리 한번» 병합해 봤고, 그 성공 기록 때문에 14:00 자동 병합이
+ * 스스로 빠졌다. 13시 이후 낸 세 명이 통째로 빠진 문서를 실장이 검토했다.
+ *
+ * 병합 본체(양식·모델)를 타지 않고 **판정만** 확인한다 — 버그가 살던 자리가 거기다.
+ */
+describe('HM-34 마감 이벤트 — 미리보기는 최종본을 대신하지 못한다', () => {
+  const 마감 = new Date('2026-08-27T05:00:00.000Z'); // 목 14:00 KST
+
+  async function fixture() {
+    const { prisma } = await import('@/server/db');
+    const div = await prisma.division.findFirstOrThrow({ where: { slug: A.slug } });
+    const slot = await prisma.weekSlot.upsert({
+      where: { isoKey: 'HM34-W35' },
+      update: {},
+      create: {
+        isoKey: 'HM34-W35',
+        label: '8월 4주차',
+        year: 2026,
+        month: 8,
+        weekOfMonth: 4,
+        opensAt: new Date('2026-08-24T00:00:00.000Z'),
+      },
+    });
+    await prisma.mergeRun.deleteMany({ where: { weekSlotId: slot.id } });
+    return { prisma, div, slot };
+  }
+
+  const 실행 = (startedAt: Date, status: string) => ({
+    status,
+    startedAt,
+    sourceIds: '[]',
+    ruleSnapshot: '{}',
+  });
+
+  it('[HM-T40] 마감 **전** 수동 병합은 최종본이 아니다 — 이게 그날의 버그다', async () => {
+    const { prisma, div, slot } = await fixture();
+    const { hasFinalMerge } = await import('@/server/merge/run');
+
+    // 10:37 KST — 담당자가 미리 돌려본 그 실행
+    await prisma.mergeRun.create({
+      data: { divisionId: div.id, weekSlotId: slot.id, ...실행(new Date('2026-08-27T01:37:00.000Z'), 'succeeded') },
+    });
+
+    expect(await hasFinalMerge(div.id, slot.id, 마감)).toBe(false);
+  });
+
+  it('[HM-T41] 마감 **후** 성공한 실행이 최종본이다 — 두 번 만들지 않는다', async () => {
+    const { prisma, div, slot } = await fixture();
+    const { hasFinalMerge } = await import('@/server/merge/run');
+
+    await prisma.mergeRun.create({
+      data: { divisionId: div.id, weekSlotId: slot.id, ...실행(new Date('2026-08-27T05:02:00.000Z'), 'succeeded') },
+    });
+
+    expect(await hasFinalMerge(div.id, slot.id, 마감)).toBe(true);
+  });
+
+  it('[HM-T42] 마감 정각의 실행은 최종본이다 (경계는 포함)', async () => {
+    const { prisma, div, slot } = await fixture();
+    const { hasFinalMerge } = await import('@/server/merge/run');
+
+    await prisma.mergeRun.create({
+      data: { divisionId: div.id, weekSlotId: slot.id, ...실행(마감, 'succeeded') },
+    });
+
+    expect(await hasFinalMerge(div.id, slot.id, 마감)).toBe(true);
+  });
+
+  it('[HM-T43] 마감 후 **실패**는 최종본이 아니다 — 다음 주기가 다시 시도한다', async () => {
+    const { prisma, div, slot } = await fixture();
+    const { hasFinalMerge } = await import('@/server/merge/run');
+
+    await prisma.mergeRun.create({
+      data: { divisionId: div.id, weekSlotId: slot.id, ...실행(new Date('2026-08-27T05:02:00.000Z'), 'failed') },
+    });
+
+    expect(await hasFinalMerge(div.id, slot.id, 마감)).toBe(false);
+  });
+
+  it('[HM-T44] 남의 부서 최종본은 우리 부서를 「됐다」로 만들지 않는다', async () => {
+    const { prisma, div, slot } = await fixture();
+    const { hasFinalMerge } = await import('@/server/merge/run');
+    const other = await prisma.division.findFirstOrThrow({ where: { slug: B.slug } });
+
+    await prisma.mergeRun.create({
+      data: { divisionId: other.id, weekSlotId: slot.id, ...실행(new Date('2026-08-27T05:02:00.000Z'), 'succeeded') },
+    });
+
+    expect(await hasFinalMerge(div.id, slot.id, 마감)).toBe(false);
+    expect(await hasFinalMerge(other.id, slot.id, 마감)).toBe(true);
+  });
+});
+
+/**
+ * WA-10/12 — 「지난번에 낸 것」. **본인 것만** 나와야 한다.
+ *
+ * 이 경로는 `findAccessibleSubmission`을 거치지 않고 `userId`를 신원에서 박아 조회한다.
+ * 그 설계가 실제로 지켜지는지 — 특히 **남의 `submissionId`를 넣었을 때** — 를 여기서 잡는다.
+ * 격리는 코드를 읽어 안심할 것이 아니라 테스트가 시도해 보고 실패해야 하는 것이다 (TACP §2).
+ *
+ * **자기 데이터를 직접 만든다.** 앞선 테스트의 업로드에 기대면 `-t`로 하나만 돌릴 때 깨지고,
+ * 그러면 정작 이 격리 검사를 급할 때 못 돌린다. 양식(hwp)은 필요 없다 — 파일을 못 읽어도
+ * 목록과 권한은 답해야 하고, 그게 이 스위트가 보는 것이다.
+ */
+describe('WA-10 지난번에 낸 것 (api/my/previous)', () => {
+  const WA = {
+    me: 'wa-me@test.kei.re.kr',
+    other: 'wa-other@test.kei.re.kr',
+    none: 'wa-none@test.kei.re.kr',
+  };
+  let 내_이전: string;
+  let 남의_것: string;
+  let 이번주키: string;
+
+  beforeAll(async () => {
+    const { prisma } = await import('@/server/db');
+    const da = await prisma.division.findFirstOrThrow({ where: { slug: A.slug } });
+    const db = await prisma.division.findFirstOrThrow({ where: { slug: B.slug } });
+
+    const slot = async (isoKey: string, label: string, nth: number, opensAt: string) =>
+      prisma.weekSlot.upsert({
+        where: { isoKey },
+        update: {},
+        create: { isoKey, label, year: 2026, month: 7, weekOfMonth: nth, opensAt: new Date(opensAt) },
+      });
+    const s1 = await slot('WA-W01', '7월 1주차', 1, '2026-06-29T00:00:00.000Z');
+    const s2 = await slot('WA-W02', '7월 2주차', 2, '2026-07-06T00:00:00.000Z');
+    const s3 = await slot('WA-W03', '7월 3주차', 3, '2026-07-13T00:00:00.000Z');
+    이번주키 = s3.isoKey;
+
+    const user = (email: string, divisionId: string) =>
+      prisma.user.create({ data: { email, name: email.split('@')[0], divisionId } });
+    const me = await user(WA.me, da.id);
+    const other = await user(WA.other, db.id);
+    await user(WA.none, da.id);
+
+    const sub = (u: string, div: string, slotId: string, n: number) =>
+      prisma.submission.create({
+        data: {
+          userId: u,
+          divisionId: div,
+          weekSlotId: slotId,
+          filePath: `wa/${n}.hwp`, // 실재하지 않는다 — rows는 null로 떨어지고 그게 정상 경로다
+          originalName: `wa-${n}.hwp`,
+          byteSize: 1,
+          sha256: `wa${n}`,
+          version: 1,
+          isLatest: true,
+        },
+      });
+    const a1 = await sub(me.id, da.id, s1.id, 1);
+    const a2 = await sub(me.id, da.id, s2.id, 2);
+    await sub(me.id, da.id, s3.id, 3); // 이번 주 것 — 목록에 섞이면 안 된다
+    const b1 = await sub(other.id, db.id, s2.id, 4);
+    내_이전 = a2.id;
+    남의_것 = b1.id;
+    expect(a1.id).toBeTruthy();
+  });
+
+  it('[WA-T10] 낸 적이 없으면 found:false — 화면은 아무것도 그리지 않는다', async () => {
+    const { GET } = await import('@/app/api/my/previous/route');
+    const res = await GET(nx('/api/my/previous', WA.none));
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.found).toBe(false);
+    expect(body.items).toEqual([]);
+  });
+
+  it('[WA-T11] 최근 순으로 나오고, 기본은 가장 최근 것', async () => {
+    const { GET } = await import('@/app/api/my/previous/route');
+    const body = await (await GET(nx('/api/my/previous', WA.me))).json();
+    expect(body.found).toBe(true);
+    expect(body.items.map((i: { isoKey: string }) => i.isoKey)).toEqual(['WA-W03', 'WA-W02', 'WA-W01']);
+    expect(body.submissionId).toBe(body.items[0].submissionId);
+  });
+
+  it('[WA-T12] 이번 주차보다 앞선 것만 — 방금 낸 이번 주 것이 섞이지 않는다', async () => {
+    const { GET } = await import('@/app/api/my/previous/route');
+    const body = await (await GET(nx(`/api/my/previous?isoKey=${이번주키}`, WA.me))).json();
+    expect(body.items.map((i: { isoKey: string }) => i.isoKey)).toEqual(['WA-W02', 'WA-W01']);
+    expect(body.slot.isoKey).toBe('WA-W02'); // 바로 전 주가 기본
+  });
+
+  it('[WA-T13] 주차를 골라 볼 수 있다', async () => {
+    const { GET } = await import('@/app/api/my/previous/route');
+    const body = await (await GET(nx(`/api/my/previous?submissionId=${내_이전}`, WA.me))).json();
+    expect(body.submissionId).toBe(내_이전);
+    expect(body.slot.isoKey).toBe('WA-W02');
+  });
+
+  it('[WA-T14] 남의 submissionId를 넣어도 남의 것이 나오지 않는다', async () => {
+    const { GET } = await import('@/app/api/my/previous/route');
+    const body = await (await GET(nx(`/api/my/previous?submissionId=${남의_것}`, WA.me))).json();
+    // 조용히 무시하고 **내 것**을 돌려준다 — 남의 id가 통했다는 신호조차 주지 않는다
+    expect(body.submissionId).not.toBe(남의_것);
+    expect(body.items.map((i: { submissionId: string }) => i.submissionId)).not.toContain(남의_것);
+  });
+
+  it('[WA-T15] 파일을 못 읽어도 목록과 「받기」는 살아 있다', async () => {
+    const { GET } = await import('@/app/api/my/previous/route');
+    const body = await (await GET(nx('/api/my/previous', WA.me))).json();
+    expect(body.rows).toBeNull(); // 실재하지 않는 파일 — 화면이 「받기만 됩니다」로 안내한다
+    expect(body.submissionId).toBeTruthy();
+  });
+
+  it('[WA-T16] 무인증은 열리지 않는다', async () => {
+    const { GET } = await import('@/app/api/my/previous/route');
+    const res = await GET(nx('/api/my/previous'));
+    expect([401, 403, 404]).toContain(res.status);
+  });
+});

@@ -133,6 +133,33 @@ export function deadlineFor(slot: { opensAt: Date }, div: DeadlinePolicy): Date 
 }
 
 /**
+ * NT-41 — 마감 **전날**의 어느 시각(KST). 「하루 전 알림」이 나갈 순간을 구한다.
+ *
+ * 24시간을 빼지 않고 **달력 날짜**로 하루를 물린다. 마감이 목 14:00인데 알림은
+ * 수 11:45라 두 시각의 간격은 24시간이 아니라 26시간 15분이다 — 뺄셈으로 적으면
+ * 마감 시각이 바뀔 때마다 그 상수를 같이 고쳐야 하고, 그건 언젠가 잊는다.
+ *
+ * 부서마다 마감 요일·시각이 다르므로(DM-10) 「수요일 11:45」로 박아 둘 수도 없다.
+ * 「그 부서 마감의 전날 11:45」가 부서 수와 무관하게 맞는 유일한 표현이다.
+ */
+export function dayBeforeAt(deadline: Date, hhmm: string): Date {
+  const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(hhmm);
+  if (!m) throw new Error(`invalid time: ${hhmm}`);
+  const k = new TZDate(deadline.getTime(), KST);
+  const d = new TZDate(
+    k.getFullYear(),
+    k.getMonth(),
+    k.getDate() - 1, // TZDate가 월·연 경계를 알아서 넘긴다 (3월 1일 → 2월 28/29일)
+    Number(m[1]),
+    Number(m[2]),
+    0,
+    0,
+    KST,
+  );
+  return new Date(d.getTime());
+}
+
+/**
  * DM-10 — 마감 정책 저장 시점 검증.
  * dow=1 + "00:00"은 마감=개시가 되는 퇴화 정책이므로 거부한다 (WS-13).
  */
