@@ -12,8 +12,10 @@ import { parseRecords, serializeRecords } from '@/lib/hwp/record';
 import { fillTable, packHwp } from '@/lib/hwp/writer';
 import { toPlan, orderPeople } from './rules';
 import { groupDuplicates, MergeRow, GroupingResult } from './model';
+import type { RowGroup } from './dedupe';
 import { classifyRows, sortByCategory, OTHER } from './classify';
 import { findFlaggedRows, parseFlagWords, type FlaggedRow } from '@/lib/empty-content';
+import { pickRepresentative } from '@/lib/merge-rows';
 export { mergedName as mergedFileName } from '@/lib/docname';
 import type { WorklogRow } from '@/lib/hwp/reader';
 
@@ -27,6 +29,10 @@ export interface MergedGroup {
   /** 원문들 (검토 화면에서 나란히 보여준다) */
   sources: { who: string; content: string }[];
   reason: string;
+  /** HM-36 — `sources` 중 문서에 들어간 것의 자리 */
+  keptIndex: number;
+  /** HM-36 — 원문이 글자까지 똑같았는가. 참이면 잃은 것이 없어 확인할 것도 없다 */
+  identical: boolean;
 }
 
 export interface MergeOutcome {
@@ -184,7 +190,13 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
 
     const result = plan.dedupe
       ? await groupDuplicates(mine, division.mergeRuleText)
-      : { groups: mine.map((r) => ({ ids: [r.id], reason: '' })), usedModel: false, fallbackReason: '중복묶기 꺼짐', elapsedMs: 0, rejected: [] };
+      : {
+          groups: mine.map((r) => ({ ids: [r.id], reason: '' }) as RowGroup),
+          usedModel: false,
+          fallbackReason: '중복묶기 꺼짐',
+          elapsedMs: 0,
+          rejected: [],
+        };
 
     // 가장 정보가 많은 실행 결과를 대표로 남긴다 (실적 표가 보통 제일 크다)
     if (result.elapsedMs >= model.elapsedMs) model = result;
@@ -196,13 +208,17 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
       // 대표 행은 **가장 정보가 많은 것**을 고른다 — 원문 중 하나를 고르는 것이지
       // 새로 쓰는 게 아니다. "보도자료 배포"와 "보도자료 배포(2건) 8/13"이 묶이면
       // 후자를 남겨야 읽는 사람이 잃는 게 없다.
-      const best = members.reduce((a, b) => (fillCount(b) > fillCount(a) ? b : a));
+      const best = pickRepresentative(members);
       grouped[bucket].push({
         row: best.raw,
         authors: [...new Set(members.map((m) => m.who))],
         category: '',
         sources: members.map((m) => ({ who: m.who, content: m.content })),
         reason: members.length > 1 ? g.reason : '',
+        // HM-36 — 화면이 «어느 줄이 문서에 들어갔나»를 글자 비교로 짐작하지 않게 한다.
+        // 두 사람이 똑같이 적으면 글자 비교로는 둘 다 «남김»이 되어 «합쳤다»와 모순된다
+        keptIndex: members.indexOf(best),
+        identical: g.identical ?? new Set(members.map((m) => m.content.trim())).size === 1,
       });
     }
   }
@@ -316,10 +332,6 @@ export class MergeFailed extends Error {
   }
 }
 
-/** 채워진 칸 수 — 대표 행 선택 기준 */
-function fillCount(m: { content: string; date: string; place: string; attendee: string }): number {
-  return [m.content, m.date, m.place, m.attendee].filter((x) => x.trim()).length;
-}
 
 function countTables(recs: ReturnType<typeof parseRecords>): number {
   // locateTables를 쓰지 않고 세는 이유: 여기서는 개수만 필요하고, 편집 전후로 불린다

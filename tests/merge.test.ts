@@ -5,7 +5,7 @@ import { parseCategories, toPlan, orderPeople } from '@/server/merge/rules';
 import { sortByCategory, OTHER } from '@/server/merge/order';
 import { parseTablePaste, parseHtmlTable, parseClipboardTable } from '@/lib/paste-table';
 import { exactDuplicates, validateGroups, type MergeRow } from '@/server/merge/dedupe';
-import { moveItem, rowNo } from '@/lib/merge-rows';
+import { moveItem, rowNo, pickRepresentative, contentCovered } from '@/lib/merge-rows';
 
 const row = (id: number, who: string, content: string, date = '', place = ''): MergeRow => ({
   id,
@@ -481,5 +481,135 @@ describe('CP-90 행 순서 바꾸기', () => {
     expect(rowNo('plans', 2)).toBe('2-3');
     // 특이사항 표만 남아도 앞자리는 3이다 — 서버의 채번과 같은 함수라 저장 후에도 같다
     expect(rowNo('notes', 0)).toBe('3-1');
+  });
+});
+
+/**
+ * HM-36 — 합쳐진 행의 **대표 선택**과 **표시**.
+ *
+ * 2026-08-27 AI홍보전략실에서 실제로 난 일을 그대로 재현한다:
+ *
+ *   김민정  온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건, SNS 1건)
+ *   장혜정  온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)
+ *
+ * 정규화가 괄호를 털어내 둘은 같은 묶음이 됐다. 묶은 것까지는 맞다.
+ * 그런데 대표 선택 기준이 **채워진 칸 수만** 세어서 동점이 났고, 동점이면 먼저 온 쪽이
+ * 남는다 — 짧은 쪽이 남고 **「SNS 1건」이 문서에서 사라졌다.**
+ * 그러고도 화면은 「내용이 같습니다」라고 말했다. 같지 않았다.
+ */
+describe('HM-36 합쳐진 행 — 잃은 것을 잃었다고 말한다', () => {
+  const 김민정 = row(1, '김민정', '온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건, SNS 1건)');
+  const 장혜정 = row(2, '장혜정', '온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)');
+
+  it('[HM-T50] 괄호 안이 달라도 묶는다 — 묶는 것 자체는 맞다', () => {
+    const g = exactDuplicates([김민정, 장혜정]);
+    expect(g).toHaveLength(1);
+    expect(g[0].ids).toEqual([1, 2]);
+  });
+
+  it('[HM-T51] 그런데 「내용이 같습니다」라고 하지 않는다 — 같지 않았다', () => {
+    const [g] = exactDuplicates([김민정, 장혜정]);
+    expect(g.identical).toBe(false);
+    expect(g.reason).toContain('괄호·기호가 다릅니다');
+    expect(g.reason).not.toContain('내용이 같습니다');
+  });
+
+  it('[HM-T52] 글자까지 똑같으면 「내용이 같습니다」가 맞다', () => {
+    const 같음 = [row(1, '김민정', '온라인 홍보 콘텐츠 제작 및 등록'),
+                  row(2, '장혜정', '온라인 홍보 콘텐츠 제작 및 등록')];
+    const [g] = exactDuplicates(같음);
+    expect(g.identical).toBe(true);
+    expect(g.reason).toContain('내용이 같습니다');
+  });
+
+  it('[HM-T53] 괄호만 다른 두 건도 여전히 한 줄로 묶인다 (원래 의도를 깨지 않는다)', () => {
+    // 「정기간행물 발간 진행(10건)」/「(8건)」 — 같은 업무를 다르게 센 것이다
+    const g = exactDuplicates([
+      row(1, '가', '정기간행물 발간 진행(10건)'),
+      row(2, '나', '정기간행물 발간 진행(8건)'),
+    ]);
+    expect(g).toHaveLength(1);
+    expect(g[0].identical).toBe(false);
+  });
+
+  it('[HM-T54] 다른 업무를 묶지는 않는다', () => {
+    expect(exactDuplicates([row(1, '가', '보도자료 배포'), row(2, '나', '언론 모니터링')])).toEqual([]);
+  });
+});
+
+/**
+ * HM-36 — **대표 선택.** 여기가 「SNS 1건」이 사라진 자리다.
+ *
+ * 잘못 고르면 조용하다: 문서는 멀쩡해 보이고, 사라진 사람만 나중에 안다.
+ * 그래서 「긴 쪽이 남는다」를 규칙으로 못박고 테스트가 지킨다.
+ */
+describe('HM-36 대표 행 선택', () => {
+  const r = (content: string, date = '', place = '', attendee = '') => ({ content, date, place, attendee });
+
+  it('[HM-T55] 그날 사라진 「SNS 1건」이 이제 남는다', () => {
+    // 실제 원본: 김민정은 내용이 길고 일자가 없다, 장혜정은 짧고 일자가 있다.
+    // 칸 수로 고르면 장혜정이 이겨서 「SNS 1건」이 문서에서 사라진다 — 그게 그날 일어난 일이다.
+    const 김민정 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건, SNS 1건)');
+    const 장혜정 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)', '8/27');
+    expect(pickRepresentative([김민정, 장혜정])).toBe(김민정);
+    expect(pickRepresentative([장혜정, 김민정])).toBe(김민정); // 순서에 좌우되지 않는다
+  });
+
+  it('[HM-T56] 품고 있지 않으면 칸 수로 정한다 — 「(10건)」과 「(8건)」은 서로를 품지 못한다', () => {
+    const 가 = r('정기간행물 발간 진행(10건)');
+    const 나 = r('정기간행물 발간 진행(8건)', '8/27');
+    expect(pickRepresentative([가, 나])).toBe(나);
+  });
+
+  it('[HM-T57] 원래 의도는 그대로 — 칸도 많고 내용도 긴 쪽이 이긴다', () => {
+    const 짧음 = r('보도자료 배포');
+    const 자세함 = r('보도자료 배포(2건)', '8/13', '본원', '원장 외 3명');
+    expect(pickRepresentative([짧음, 자세함])).toBe(자세함);
+  });
+
+  it('[HM-T58] 완전히 같으면 먼저 온 것 — 제출자 순서를 흔들지 않는다', () => {
+    const a = r('보도자료 배포');
+    const b = r('보도자료 배포');
+    expect(pickRepresentative([a, b])).toBe(a);
+  });
+
+  it('[HM-T59] 앞뒤 공백·기호만 다른 것을 「더 말한다」고 보지 않는다', () => {
+    const a = r('보도자료 배포', '8/13');
+    const b = r('  보도자료·배포  ');
+    expect(pickRepresentative([a, b])).toBe(a);
+  });
+
+  it('[HM-T60] 셋 이상에서도 가장 많이 품은 줄이 남는다', () => {
+    const 가 = r('정기간행물 발간');
+    const 나 = r('정기간행물 발간 진행');
+    const 다 = r('정기간행물 발간 진행(8건)');
+    expect(pickRepresentative([가, 나, 다])).toBe(다);
+    expect(pickRepresentative([다, 가, 나])).toBe(다);
+  });
+});
+
+/**
+ * HM-36 — 「빠짐」은 정말 빠졌을 때만 쓴다.
+ *
+ * 확인할 것이 없는데 「확인하세요」를 띄우면, 쌓여서 정작 진짜 빠진 것도 안 보게 된다.
+ * 「없음」 탐지에서 0건이면 아무 줄도 안 넣기로 한 것과 같은 이유다.
+ */
+describe('HM-36 「빠짐」과 「안 씀」', () => {
+  it('[HM-T61] 버린 줄의 말이 남긴 줄에 다 있으면 빠진 게 아니다', () => {
+    expect(
+      contentCovered('온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건, SNS 1건)', '온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)'),
+    ).toBe(true);
+  });
+
+  it('[HM-T62] 버린 쪽에만 있는 말이 있으면 빠진 것이다', () => {
+    expect(contentCovered('정기간행물 발간 진행(8건)', '정기간행물 발간 진행(10건)')).toBe(false);
+  });
+
+  it('[HM-T63] 공백·기호 차이는 「빠졌다」로 세지 않는다', () => {
+    expect(contentCovered('보도자료 배포', '  보도자료·배포  ')).toBe(true);
+  });
+
+  it('[HM-T64] 빈 줄은 「다 들어 있다」고 하지 않는다 — 아무 말도 안 한 것이다', () => {
+    expect(contentCovered('보도자료 배포', '   ')).toBe(false);
   });
 });

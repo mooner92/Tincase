@@ -72,6 +72,9 @@ export async function runMergeRecorded(
             reason: g.reason,
             sources: g.sources,
             kept: g.row.content,
+            // HM-36 — 화면이 «어느 줄이 들어갔나»를 글자 비교로 짐작하지 않게 한다
+            keptIndex: g.keptIndex,
+            identical: g.identical,
           })),
           model: outcome.model,
           categories: outcome.categories,

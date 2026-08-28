@@ -7,6 +7,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MergedDrawer } from './MergedDrawer';
+import { contentCovered } from '@/lib/merge-rows';
 
 export interface MergeGroupView {
   authors: string[];
@@ -14,6 +15,10 @@ export interface MergeGroupView {
   reason: string;
   sources: { who: string; content: string }[];
   kept: string;
+  /** HM-36 — `sources` 중 문서에 들어간 것의 자리. 옛 실행에는 없다 */
+  keptIndex?: number;
+  /** HM-36 — 원문이 글자까지 똑같았는가. 참이면 잃은 것이 없다 */
+  identical?: boolean;
 }
 
 export interface MergeStateView {
@@ -170,8 +175,33 @@ export function MergePanel({
             </div>
           )}
 
-          {/* 확인이 필요한 것만 */}
-          {state.groups.length > 0 && (
+          {/*
+            HM-36 — 합쳐진 행. **두 경우를 나눠 보여준다.**
+
+            처음에는 둘을 한 모양으로 그렸고, 「어느 줄이 들어갔나」를 `s.content === g.kept`,
+            즉 **글자 비교**로 정했다. 그래서 두 사람이 똑같이 적으면 두 줄 다 「← 남김」이
+            붙었다 — 「합쳤다」고 해 놓고 둘 다 남았다고 하니 읽는 사람이 이해할 수가 없다.
+            (실제 피드백: 「내용이 같은데 왜 둘 다 남김이 떠있는거야?」)
+
+            나눠 놓고 보면 둘은 아예 다른 일이다:
+              **똑같이 적음** — 잃은 것이 없다. 확인할 것도 없다. 한 줄로 조용히 적는다
+              **달라서 하나가 빠짐** — 여기가 위험한 곳이다. 빠진 글자를 눈에 띄게 보여준다
+          */}
+          {state.groups.length > 0 && (() => {
+            /*
+              옛 실행에는 `identical`이 없다. 그렇다고 전부 「확인 필요」로 몰면 잃은 것이
+              없는 묶음까지 「빠짐」이라고 말하게 된다 — 없던 문제를 만들어 보여주는 셈이다.
+              `sources`만 있으면 여기서 되짚을 수 있으므로 되짚는다.
+            */
+            const isSame = (g: MergeGroupView) =>
+              g.identical ?? new Set(g.sources.map((s) => s.content.trim())).size === 1;
+            const 확인 = state.groups.filter((g) => !isSame(g));
+            const 동일 = state.groups.filter(isSame);
+            /** 문서에 들어간 줄의 자리. 옛 실행에는 keptIndex가 없어 글자로 되짚는다 */
+            const keptAt = (g: MergeGroupView) =>
+              g.keptIndex ?? Math.max(0, g.sources.findIndex((s) => s.content === g.kept));
+
+            return (
             <div className="mt-5">
               <button
                 onClick={() => setOpenGroups((v) => !v)}
@@ -180,7 +210,11 @@ export function MergePanel({
               >
                 <span>
                   합쳐진 행 {state.groups.length}건
-                  <span className="ml-2 font-normal text-muted">— 여기만 확인하면 됩니다</span>
+                  <span className="ml-2 font-normal text-muted">
+                    {확인.length === 0
+                      ? '— 모두 똑같이 적은 것이라 확인할 것이 없습니다'
+                      : `— 그중 ${확인.length}건은 내용이 달라 확인이 필요합니다`}
+                  </span>
                 </span>
                 <span aria-hidden className="text-xs text-muted">
                   {openGroups ? '접기 ▲' : '펼치기 ▼'}
@@ -188,28 +222,71 @@ export function MergePanel({
               </button>
               {openGroups && (
                 <ul className="mt-2 space-y-2">
-                  {state.groups.map((g, i) => (
-                    <li key={i} className="rounded-xl bg-canvas/70 px-4 py-3 text-sm">
-                      <div className="flex flex-wrap items-center gap-2">
+                  {/* 확인이 필요한 것 먼저 — 아래로 내려가면 안 보고 넘어간다 */}
+                  {확인.map((g, i) => {
+                    const ki = keptAt(g);
+                    return (
+                      <li key={`d${i}`} className="rounded-xl border border-warning/40 bg-warning-soft px-4 py-3 text-sm">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="font-semibold text-ink">{g.authors.join(' + ')}</span>
+                          {g.category && (
+                            <span className="badge-pill bg-canvas py-0 text-[11px]">{g.category}</span>
+                          )}
+                          <span className="text-xs text-muted">{g.reason}</span>
+                        </div>
+                        <ul className="mt-2 space-y-1">
+                          {g.sources.map((s, k) => {
+                            // 버린 줄의 말이 남긴 줄에 다 들어 있으면 「빠짐」이 아니다
+                            const covered = k !== ki && contentCovered(g.kept, s.content);
+                            return (
+                              <li key={k} className="flex flex-wrap items-baseline gap-x-2">
+                                <span
+                                  className={`shrink-0 rounded px-1.5 py-0.5 text-[11px] font-semibold ${
+                                    k === ki
+                                      ? 'bg-ink text-canvas'
+                                      : covered
+                                        ? 'bg-canvas text-muted'
+                                        : 'bg-canvas text-error'
+                                  }`}
+                                >
+                                  {k === ki ? '문서에 들어감' : covered ? '안 씀' : '빠짐'}
+                                </span>
+                                <span className="text-xs text-muted">{s.who}</span>
+                                <span className={k === ki ? 'text-ink' : 'text-body'}>{s.content}</span>
+                                {covered && (
+                                  <span className="text-xs text-muted-soft">— 이 내용은 위에 다 들어 있습니다</span>
+                                )}
+                              </li>
+                            );
+                          })}
+                        </ul>
+                        <p className="mt-2 text-xs text-muted">
+                          {g.sources.some((s, k) => k !== ki && !contentCovered(g.kept, s.content))
+                            ? '「빠짐」 쪽에만 있는 내용이 있으면 [내용 보기]에서 그 행을 고쳐 주세요.'
+                            : '내용은 다 들어갔습니다. 일자·장소가 다르면 [내용 보기]에서 확인해 주세요.'}
+                        </p>
+                      </li>
+                    );
+                  })}
+
+                  {/* 똑같이 적은 것 — 잃은 것이 없으므로 한 줄로 조용히 */}
+                  {동일.map((g, i) => (
+                    <li key={`s${i}`} className="rounded-xl bg-canvas/70 px-4 py-2.5 text-sm">
+                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                         <span className="font-semibold text-ink">{g.authors.join(' + ')}</span>
-                        {g.category && <span className="badge-pill bg-surface-card py-0 text-[11px]">{g.category}</span>}
-                        {g.reason && <span className="text-xs text-muted">{g.reason}</span>}
+                        {g.category && (
+                          <span className="badge-pill bg-surface-card py-0 text-[11px]">{g.category}</span>
+                        )}
+                        <span className="text-xs text-muted">똑같이 적어서 한 줄로 합쳤습니다</span>
                       </div>
-                      <ul className="mt-1.5 space-y-0.5 text-body">
-                        {g.sources.map((s, k) => (
-                          <li key={k} className={s.content === g.kept ? 'font-medium text-ink' : 'text-muted-soft'}>
-                            <span className="mr-1.5 text-xs text-muted">{s.who}</span>
-                            {s.content}
-                            {s.content === g.kept && <span className="ml-1.5 text-xs text-success">← 남김</span>}
-                          </li>
-                        ))}
-                      </ul>
+                      <p className="mt-0.5 text-body">{g.kept}</p>
                     </li>
                   ))}
                 </ul>
               )}
             </div>
-          )}
+            );
+          })()}
 
           {/* 기계가 한 일을 숨기지 않는다 */}
           <p className="mt-4 text-[11px] leading-5 text-muted">

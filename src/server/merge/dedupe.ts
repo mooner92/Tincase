@@ -16,6 +16,17 @@ export interface MergeRow {
 export interface RowGroup {
   ids: number[];
   reason: string;
+  /**
+   * HM-36 — 원문이 **글자까지 똑같은가.**
+   *
+   * 정규화가 괄호를 털어내므로 「…(유튜브 1건, SNS 1건)」과 「…(유튜브 1건)」이 같은 묶음이
+   * 된다. 묶는 것 자체는 맞지만 **「내용이 같습니다」라고 말하면 거짓**이고, 담당자는
+   * 확인할 필요가 없다고 읽고 넘어간다. 실제로 그렇게 「SNS 1건」이 문서에서 사라졌다.
+   *
+   * 모델이 낸 묶음에는 없다(undefined) — 모델은 애초에 «같은 업무»를 묶지 «같은 글자»를
+   * 묶지 않으므로, 모르는 것을 참으로 적지 않는다.
+   */
+  identical?: boolean;
 }
 
 /**
@@ -47,10 +58,16 @@ export function exactDuplicates(rows: readonly MergeRow[]): RowGroup[] {
   }
   return [...byKey.values()]
     .filter((list) => list.length > 1)
-    .map((list) => ({
-      ids: list.map((r) => r.id),
-      reason: `내용이 같습니다 (${[...new Set(list.map((r) => r.who))].join('·')})`,
-    }));
+    .map((list) => {
+      const who = [...new Set(list.map((r) => r.who))].join('·');
+      // 정규화 전 원문이 하나뿐이면 진짜로 같은 것이고, 아니면 괄호·기호만 다른 것이다
+      const identical = new Set(list.map((r) => r.content.trim())).size === 1;
+      return {
+        ids: list.map((r) => r.id),
+        identical,
+        reason: identical ? `내용이 같습니다 (${who})` : `괄호·기호가 다릅니다 (${who})`,
+      };
+    });
 }
 
 /**
