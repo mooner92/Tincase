@@ -5,6 +5,7 @@ import { parseCategories, toPlan, orderPeople } from '@/server/merge/rules';
 import { sortByCategory, OTHER } from '@/server/merge/order';
 import { parseTablePaste, parseHtmlTable, parseClipboardTable } from '@/lib/paste-table';
 import { exactDuplicates, validateGroups, type MergeRow } from '@/server/merge/dedupe';
+import { moveItem, rowNo } from '@/lib/merge-rows';
 
 const row = (id: number, who: string, content: string, date = '', place = ''): MergeRow => ({
   id,
@@ -430,5 +431,55 @@ describe('HM-33 부서별 설정', () => {
     expect(parseFlagWords('')).toEqual([]);
     expect(parseFlagWords('없음,없음,없음')).toEqual(['없음']); // 중복은 하나로
     expect(flagWordOf('업무 생략', parseFlagWords('없음·생략'))).toBe('생략');
+  });
+});
+
+/**
+ * CP-90 — 병합본 행 순서 바꾸기.
+ *
+ * 여기서 지키는 것은 「순서가 바뀐다」가 아니라 **「작성자가 제 행을 따라간다」**이다.
+ * 작성자 배열은 본문 행과 나란해서(TACP-17) 한쪽만 옮기면 한 칸씩 밀리는데,
+ * 그 화면은 멀쩡해 보인다 — 부서장이 엉뚱한 사람에게 「이거 고쳐주세요」라고 말하고 나서야
+ * 드러난다. 눈으로는 못 잡는 종류라 테스트가 잡아야 한다.
+ */
+describe('CP-90 행 순서 바꾸기', () => {
+  const 행 = ['가', '나', '다', '라'];
+  const 작성자 = [['A'], ['B'], ['C'], ['D']];
+
+  it('[CP-T90] 위로 옮기면 그 자리에 들어가고 나머지가 밀린다', () => {
+    expect(moveItem(행, 2, 0)).toEqual(['다', '가', '나', '라']);
+  });
+
+  it('[CP-T91] 아래로 옮기면 대상 아래에 놓인다', () => {
+    expect(moveItem(행, 0, 2)).toEqual(['나', '다', '가', '라']);
+  });
+
+  it('[CP-T92] **작성자가 제 행을 따라간다** — 같은 (from,to)로 두 번 부른다', () => {
+    const from = 3;
+    const to = 1;
+    const r = moveItem(행, from, to);
+    const a = moveItem(작성자, from, to);
+    // 옮긴 뒤에도 「라」의 작성자는 여전히 D여야 한다
+    expect(r.map((v, i) => `${v}:${a[i][0]}`)).toEqual(['가:A', '라:D', '나:B', '다:C']);
+  });
+
+  it('[CP-T93] 제자리·범위 밖은 아무것도 바꾸지 않는다 (조용히 자르지 않는다)', () => {
+    expect(moveItem(행, 1, 1)).toEqual(행);
+    expect(moveItem(행, -1, 2)).toEqual(행);
+    expect(moveItem(행, 0, 4)).toEqual(행);
+    expect(moveItem([], 0, 0)).toEqual([]);
+  });
+
+  it('[CP-T94] 원본을 건드리지 않는다 — 상태를 직접 고치면 React가 다시 그리지 않는다', () => {
+    const 원본 = [...행];
+    moveItem(원본, 0, 3);
+    expect(원본).toEqual(행);
+  });
+
+  it('[CP-T95] 구분 번호는 표 위치가 아니라 key로 매긴다 (표가 빠져도 어긋나지 않는다)', () => {
+    expect(rowNo('achievements', 0)).toBe('1-1');
+    expect(rowNo('plans', 2)).toBe('2-3');
+    // 특이사항 표만 남아도 앞자리는 3이다 — 서버의 채번과 같은 함수라 저장 후에도 같다
+    expect(rowNo('notes', 0)).toBe('3-1');
   });
 });

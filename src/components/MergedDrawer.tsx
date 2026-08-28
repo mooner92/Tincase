@@ -7,9 +7,18 @@
 //
 // 붙여넣기는 `text/html`로 쓴다 — 한글도 게시판 편집기도 HTML 표를 받으면
 // 표 그대로 들어간다. text/plain만 쓰면 줄글로 쏟아진다 (붙여넣기 파싱에서 배운 것과 같은 이유).
+//
+// **행 순서 바꾸기 (CP-90).** 부서장이 검토하면서 «이건 위로 올려야지»를 하는데, 지금은
+// 칸 내용을 서로 오려 붙이는 수밖에 없다 — 다섯 칸짜리 행 하나를 옮기려고 다섯 번 오려 붙인다.
+// 왼쪽 손잡이를 끌어 옮긴다. 손잡이만 `draggable`이고 행이 아니다 —
+// 행을 통째로 draggable로 만들면 칸 안에서 글자를 선택하는 것부터 안 된다.
+//
+// 손가락(터치)에서는 HTML5 끌어놓기가 동작하지 않는다. 그래서 손잡이에 **↑/↓ 키**를 함께 붙였다.
+// 보기·고치기·지우기는 터치에서 그대로 되고, 순서 바꾸기만 마우스·키보드다.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { copyText } from '@/lib/clipboard';
+import { moveItem, rowNo } from '@/lib/merge-rows';
 
 interface TableView {
   key: string;
@@ -34,6 +43,20 @@ interface Content {
 
 /** 헤더 행을 뺀 본문만. 서버가 준 격자는 첫 줄이 열 이름이다 */
 const bodyRows = (t: TableView) => t.rows.slice(1);
+
+/** 여섯 점 손잡이 — 노션의 그것. 「여기를 잡으면 옮겨진다」를 글자 없이 말하는 관용 표현이다 */
+function GripIcon() {
+  return (
+    <svg viewBox="0 0 10 16" width="10" height="16" aria-hidden fill="currentColor">
+      {[3, 8, 13].map((cy) => (
+        <g key={cy}>
+          <circle cx="2.5" cy={cy} r="1.3" />
+          <circle cx="7.5" cy={cy} r="1.3" />
+        </g>
+      ))}
+    </svg>
+  );
+}
 
 export function MergedDrawer({
   open,
@@ -62,6 +85,13 @@ export function MergedDrawer({
    * 바뀐다. 잘못된 행을 찾은 **그 순간에만** 펼치면 된다.
    */
   const [showAuthors, setShowAuthors] = useState(false);
+  /** CP-90 — 끌고 있는 행. `over`는 지금 가리키는 자리(놓으면 여기로 간다) */
+  const [drag, setDrag] = useState<{ ti: number; from: number; over: number } | null>(null);
+  /**
+   * 키보드로 옮긴 뒤 **손잡이에 초점을 되돌린다** — 안 그러면 ↓를 두 번 못 누른다.
+   * 상태가 아니라 ref다: 이 값은 그리는 데 쓰이지 않으므로 바뀐다고 다시 그릴 이유가 없다.
+   */
+  const refocusRef = useRef<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
 
@@ -86,6 +116,13 @@ export function MergedDrawer({
   // 값이 밖에서 바뀌는 경우(불러오기·저장 후 재조회)도 다시 맞춘다
   useLayoutEffect(() => {
     bodyRef.current?.querySelectorAll('textarea').forEach((el) => fit(el as HTMLTextAreaElement));
+  }, [data]);
+
+  useLayoutEffect(() => {
+    const key = refocusRef.current;
+    if (!key) return;
+    refocusRef.current = null;
+    bodyRef.current?.querySelector<HTMLButtonElement>(`[data-grip="${key}"]`)?.focus();
   }, [data]);
 
   // 상태 변경은 전부 비동기 콜백 안에서. `alive`는 드로어를 빨리 여닫았을 때
@@ -134,11 +171,39 @@ export function MergedDrawer({
     setDirty(true);
   };
 
+  /*
+   * TACP-17 — **작성자는 행과 나란한 배열이다.** `authors[ri]`가 `bodyRows[ri]`를 가리킨다.
+   * 행을 지우거나 옮기면서 작성자를 같이 옮기지 않으면 **한 칸씩 밀려 남의 이름이 붙는다** —
+   * 그 화면을 보고 부서장이 엉뚱한 사람에게 «이거 고쳐주세요»라고 말하게 된다.
+   * (저장하면 서버가 내용으로 다시 맞추지만, 잘못 보는 것은 저장 전이다.)
+   */
+  const withoutAt = <T,>(a: T[] | undefined, i: number) => (a ? a.filter((_, j) => j !== i) : a);
+
   const removeRow = (ti: number, ri: number) => {
     if (!data) return;
     const tables = data.tables.map((t, i) =>
-      i !== ti ? t : { ...t, rows: t.rows.filter((_, j) => j !== ri + 1) },
+      i !== ti
+        ? t
+        : { ...t, rows: t.rows.filter((_, j) => j !== ri + 1), authors: withoutAt(t.authors, ri) },
     );
+    setData({ ...data, tables });
+    setDirty(true);
+  };
+
+  /** CP-90 — `from`번째 행을 `to` 자리로. 범위를 벗어나면 아무 일도 하지 않는다 */
+  const moveRow = (ti: number, from: number, to: number) => {
+    if (!data || from === to) return;
+    const tables = data.tables.map((t, i) => {
+      if (i !== ti) return t;
+      const body = bodyRows(t);
+      if (to < 0 || to >= body.length) return t;
+      return {
+        ...t,
+        rows: [t.rows[0], ...moveItem(body, from, to)],
+        // 같은 (from, to)로 한 번 더 — 이게 작성자가 제 행을 따라가는 유일한 방법이다
+        authors: t.authors ? moveItem(t.authors, from, to) : t.authors,
+      };
+    });
     setData({ ...data, tables });
     setDirty(true);
   };
@@ -268,6 +333,8 @@ export function MergedDrawer({
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="table-head border-b border-hairline">
+                          {/* CP-90 — 손잡이 자리. 노션처럼 표 왼쪽 여백에 둔다 */}
+                          {canEdit && <th className="w-7" />}
                           {t.columns.map((c, i) => (
                             <th
                               key={c}
@@ -284,8 +351,58 @@ export function MergedDrawer({
                         </tr>
                       </thead>
                       <tbody>
-                        {rows.map((r, ri) => (
-                          <tr key={ri} className="border-b border-hairline-soft last:border-0">
+                        {rows.map((r, ri) => {
+                          const dragging = drag?.ti === ti && drag.from === ri;
+                          // 놓을 자리 표시: 아래로 옮기는 중이면 아래 모서리, 위로면 위 모서리
+                          const marked = drag?.ti === ti && drag.over === ri && drag.from !== ri;
+                          const edge = marked ? (drag!.from < ri ? 'border-b-2 border-b-ink' : 'border-t-2 border-t-ink') : '';
+                          return (
+                          <tr
+                            key={ri}
+                            onDragOver={(e) => {
+                              if (drag?.ti !== ti) return; // 다른 표로는 옮기지 않는다 (실적↔계획은 뜻이 다르다)
+                              e.preventDefault();
+                              e.dataTransfer.dropEffect = 'move';
+                              if (drag.over !== ri) setDrag({ ...drag, over: ri });
+                            }}
+                            onDrop={(e) => {
+                              if (drag?.ti !== ti) return;
+                              e.preventDefault();
+                              moveRow(ti, drag.from, ri);
+                              setDrag(null);
+                            }}
+                            className={`border-b border-hairline-soft last:border-0 ${edge} ${
+                              dragging ? 'opacity-40' : ''
+                            }`}
+                          >
+                            {canEdit && (
+                              <td className="px-0.5 py-0.5 align-top">
+                                <button
+                                  data-grip={`${ti}-${ri}`}
+                                  draggable
+                                  onDragStart={(e) => {
+                                    e.dataTransfer.effectAllowed = 'move';
+                                    // 손잡이만 끌리면 무엇을 옮기는지 안 보인다 — 행 전체를 끌리는 그림으로
+                                    const tr = e.currentTarget.closest('tr');
+                                    if (tr) e.dataTransfer.setDragImage(tr, 12, 12);
+                                    setDrag({ ti, from: ri, over: ri });
+                                  }}
+                                  onDragEnd={() => setDrag(null)}
+                                  onKeyDown={(e) => {
+                                    const to = e.key === 'ArrowUp' ? ri - 1 : e.key === 'ArrowDown' ? ri + 1 : null;
+                                    if (to === null || to < 0 || to >= rows.length) return;
+                                    e.preventDefault();
+                                    moveRow(ti, ri, to);
+                                    refocusRef.current = `${ti}-${to}`;
+                                  }}
+                                  aria-label={`${rowNo(t.key, ri)}행 옮기기 — 끌거나 위·아래 화살표`}
+                                  title="끌어서 옮기기 · ↑↓ 키로도 됩니다"
+                                  className="cursor-grab rounded px-1 py-1.5 text-muted-soft hover:bg-surface-soft hover:text-body focus:text-body focus:outline-none focus-visible:ring-2 focus-visible:ring-ink active:cursor-grabbing"
+                                >
+                                  <GripIcon />
+                                </button>
+                              </td>
+                            )}
                             {r.map((cell, ci) => (
                               <td key={ci} className="px-1 py-0.5 align-top">
                                 {canEdit && ci > 0 ? (
@@ -301,7 +418,13 @@ export function MergedDrawer({
                                   />
                                 ) : (
                                   <span className="block px-2 py-1.5 whitespace-nowrap tabular-nums text-body">
-                                    {cell}
+                                    {/*
+                                      구분 번호는 **자리로 계산한다** (canEdit일 때).
+                                      서버가 준 값을 그대로 두면 순서를 바꾸거나 행을 지운 뒤
+                                      «1-3, 1-1, 1-2»가 되어, 저장 전까지 화면이 거짓을 보여준다.
+                                      서버의 채번 규칙(ABS-5)과 같은 식이라 저장하면 그대로 굳는다.
+                                    */}
+                                    {canEdit && ci === 0 ? rowNo(t.key, ri) : cell}
                                   </span>
                                 )}
                               </td>
@@ -330,7 +453,8 @@ export function MergedDrawer({
                               </td>
                             )}
                           </tr>
-                        ))}
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>

@@ -17,7 +17,7 @@ import { slotKind, toKstIso } from '@/lib/week';
 
 export const dynamic = 'force-dynamic';
 
-const BUCKETS = ['achievements', 'plans', 'notes'] as const;
+import { BUCKETS, rowNo } from '@/lib/merge-rows';
 const MAX_CELL = 500;
 const MAX_ROWS = 200;
 
@@ -156,13 +156,13 @@ export const PUT = handler(async (req: NextRequest) => {
   for (const t of body.tables) {
     const key = BUCKETS.find((b) => b === t.key);
     if (!key) continue;
-    // ABS-5 — 구분 채번은 언제나 시스템이 다시 만든다. 사람이 고친 번호는 버린다
-    const prefix = BUCKETS.indexOf(key) + 1;
+    // ABS-5 — 구분 채번은 언제나 시스템이 다시 만든다. 사람이 고친 번호는 버린다.
+    // 화면도 같은 `rowNo`를 부른다 — 저장 전에 보여준 번호가 저장 후와 어긋나지 않는다
     tableRows[key] = (t.rows ?? [])
       .slice(0, MAX_ROWS)
       .map((r) => [clean(r[1]), clean(r[2]), clean(r[3]), clean(r[4])])
       .filter((r) => r.some(Boolean))
-      .map((r, i) => [`${prefix}-${i + 1}`, ...r]);
+      .map((r, i) => [rowNo(key, i), ...r]);
   }
 
   const composed = composeMergedHwp(await readStoredFile(template.filePath), tableRows);
