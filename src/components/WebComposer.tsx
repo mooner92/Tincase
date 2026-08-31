@@ -174,8 +174,15 @@ export function WebComposer({
       .finally(() => setBusy(false));
   };
 
+  /*
+   * 입력칸 테두리는 **hairline이 아니라 border-strong**이다 (v1.28.0).
+   * hairline(1.67:1)은 카드 바깥선용이고, 「여기에 적는다」를 알려야 하는 경계는
+   * 그보다 진해야 한다 — WCAG 1.4.11이 조작 요소 경계에 3:1을 요구하는 이유다.
+   * 연한 칸이 스무 개 늘어서 있으면 표가 아니라 회색 얼룩으로 보인다.
+   */
   const cell =
-    'h-8 rounded-md border border-hairline bg-canvas px-2 text-[13px] text-ink focus:border-ink focus:outline-none';
+    'h-8 rounded-md border border-border-strong bg-canvas px-2 text-[13px] text-ink ' +
+    'focus:border-ink focus:ring-1 focus:ring-ink focus:outline-none';
 
   return (
     <div className="fixed inset-0 z-40 h-screen">
@@ -207,8 +214,8 @@ export function WebComposer({
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline-soft bg-brand-soft px-7 py-2.5 text-xs text-body-strong">
           <span className="font-semibold">한글 표를 그대로 붙여넣을 수 있습니다</span>
           <span className="text-body">
-            한글에서 표를 드래그 → <kbd className="rounded border border-hairline bg-canvas px-1">Ctrl</kbd>
-            <kbd className="ml-0.5 rounded border border-hairline bg-canvas px-1">C</kbd> → 아래 첫 칸에 붙여넣기
+            한글에서 표를 드래그 → <kbd className="rounded border border-border-strong bg-canvas px-1 font-sans">Ctrl</kbd>
+            <kbd className="ml-0.5 rounded border border-border-strong bg-canvas px-1 font-sans">C</kbd> → 아래 첫 칸에 붙여넣기
           </span>
           {pasted && <span className="ml-auto font-semibold text-success">{pasted}</span>}
         </div>
@@ -287,7 +294,7 @@ export function WebComposer({
                       key={i}
                       className={`flex items-center gap-1.5 px-2.5 py-1 ${i % 2 ? 'bg-surface-soft/60' : ''}`}
                     >
-                      <span className="w-9 shrink-0 text-center font-mono text-[10px] tabular-nums text-muted-soft">
+                      <span className="w-9 shrink-0 text-center text-[10px] tabular-nums text-muted">
                         {no}
                       </span>
                       <input
@@ -325,7 +332,7 @@ export function WebComposer({
                       <button
                         onClick={() => removeRow(s.key, i)}
                         aria-label={`${i + 1}번째 줄 지우기`}
-                        className="w-5 shrink-0 rounded text-base leading-none text-hairline hover:text-error"
+                        className="w-5 shrink-0 rounded text-base leading-none text-muted-soft hover:text-error"
                         title="이 줄 지우기"
                       >
                         ×

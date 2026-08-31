@@ -229,7 +229,7 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
                         ●
                       </span>
                     ) : (
-                      <span className="text-hairline" aria-hidden>
+                      <span className="text-border-strong" aria-hidden>
                         ○
                       </span>
                     )}

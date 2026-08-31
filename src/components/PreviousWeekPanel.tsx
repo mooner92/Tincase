@@ -8,7 +8,9 @@
 // **보여주기만 하면 절반이다.** 보고 나서 손으로 옮겨 적어야 하면 결국 한글에서 복사하던
 // 것과 같은 수고다. 그래서 **옮기는 버튼**까지 둔다:
 //
-//   행마다 「＋」        같은 표로 (상시 반복 업무 — 「정기간행물 발간 진행」 같은 것)
+//   행마다 「+」         같은 표로 (상시 반복 업무 — 「정기간행물 발간 진행」 같은 것)
+//                       ★ 반각이다. 전각 더하기(U+FF0B)는 페이퍼로지에 없어서
+//                         그 글자만 시스템 글꼴로 새고, 한 줄 안에서 서체가 바뀐다 (UI-T90)
 //   계획 표에 「실적으로」 지난주 계획을 **이번 주 실적으로** 통째로 (이게 주된 동선이다)
 //
 // **주차를 고를 수 있다 (WA-12).** 기본은 가장 최근 것이지만, 휴가로 한 주 걸렀거나
@@ -242,9 +244,9 @@ export function PreviousWeekPanel({
                             }}
                             aria-label={`${s.title}에 「${r.content}」 넣기`}
                             title={`${s.title}에 이 줄 넣기`}
-                            className="shrink-0 rounded border border-hairline bg-canvas px-1.5 py-0.5 text-[11px] font-medium text-muted-soft hover:border-ink hover:text-ink group-hover:text-muted"
+                            className="shrink-0 rounded border border-hairline bg-canvas px-1.5 py-0.5 text-[11px] font-medium text-muted hover:border-ink hover:text-ink"
                           >
-                            ＋
+                            +
                           </button>
                         </li>
                       ))}

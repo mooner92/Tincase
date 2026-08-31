@@ -108,7 +108,7 @@ export function RosterDrawer({
               {users.map((u) => (
                 <tr
                   key={u.id}
-                  className={`border-b border-hairline-soft last:border-0 ${u.isActive ? '' : 'text-hairline'}`}
+                  className={`border-b border-hairline-soft last:border-0 ${u.isActive ? '' : 'text-muted-soft'}`}
                 >
                   <td className="whitespace-nowrap px-4 py-2 font-medium">
                     {u.name}
