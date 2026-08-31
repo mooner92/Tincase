@@ -221,18 +221,20 @@ export function WebComposer({
           </ul>
         )}
 
-        {/*
-          WA-11 — 지난번 낸 내용. 안내 아래·본문 위에 둔다.
-          기본은 접힘이라 한 줄만 차지하고, 펼치면 그 자리에서 본다.
-        */}
-        <PreviousWeekPanel
-          isoKey={isoKey}
-          onCopyRow={(bucket, row) => appendRows(bucket, [row])}
-          onCopyPlansToAchievements={(rows) => appendRows('achievements', rows)}
-        />
-
         {/* 본문 */}
         <div className="flex-1 overflow-y-auto px-7 py-5">
+          {/*
+            WA-13 — 지난번 낸 내용. **본문 맨 위**다.
+
+            처음에는 안내 띠들 사이에 끼워 뒀는데 「이런게 있는지도 잘 모르겠어」였다.
+            머리 영역에 두면 그 높이만큼 쓸 칸이 영영 밀리므로, 본문 첫 자리에 둔다 —
+            열자마자 제일 먼저 보이고, 쓰기 시작하면 스크롤로 비켜난다.
+          */}
+          <PreviousWeekPanel
+            isoKey={isoKey}
+            onCopyRow={(bucket, row) => appendRows(bucket, [row])}
+            onCopyPlansToAchievements={(rows) => appendRows('achievements', rows)}
+          />
           {SECTIONS.map((s) => (
             <section key={s.key} className="mb-5">
               <div className="mb-2 flex items-baseline gap-2">

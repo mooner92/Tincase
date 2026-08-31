@@ -497,7 +497,12 @@ d('병합본 접근', () => {
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toBe('application/x-hwp');
     const cd = res.headers.get('content-disposition') ?? '';
-    expect(decodeURIComponent(cd)).toContain('주간업무.hwp');
+    /*
+     * **「주간」을 박아 두면 한 달에 한 주씩 깨진다.** 그 달 마지막 주에는 월간을 내므로
+     * 파일명이 `…_월간업무.hwp`가 된다 (WS-14). 실제로 2026-08-31(8월 5주차)에 깨졌다.
+     * 여기서 지킬 것은 낱말이 아니라 **게시판에 그대로 올릴 수 있는 꼴인가**이다.
+     */
+    expect(decodeURIComponent(cd)).toMatch(/2026_\d+월_\d+주차_.+_(주간|월간)업무\.hwp$/);
     expect(Number(res.headers.get('content-length'))).toBeGreaterThan(0);
   });
 
