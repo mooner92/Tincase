@@ -11,7 +11,7 @@
 //   그 달 마지막 주(월간, WS-14)   → 한 달치를 정리하는데 한 주만 보이면 나머지는 한글로 연다
 //   상시 반복 업무                 → 몇 주 전에 쓴 표현을 그대로 다시 쓴다
 //
-// 그래서 **최근 몇 주치 목록**을 주고, 기본으로 가장 최근 것을 펼친다.
+// 그래서 **직전 3주 목록**을 주고(WA-14), 기본으로 가장 최근 것을 펼친다.
 // 목록은 슬롯 정보만이라 싸다 — **파일은 고른 한 건만 읽는다.**
 //
 // 권한: 본인 것만이다. TACP를 건드리지 않는다 — 자기 제출물 열람은 원래 열려 있다(§3.1).
@@ -29,10 +29,16 @@ import { toKstIso } from '@/lib/week';
 export const dynamic = 'force-dynamic';
 
 /**
- * 몇 주치를 목록에 올릴 것인가. 월간이 한 달(4~5주)을 훑으므로 그보다 넉넉하게 잡되,
- * 칩이 한 줄을 넘기지 않을 만큼만 — 더 뒤는 「내 이력」에서 본다.
+ * **직전 3주까지만** 본다 (WA-14). 이번이 N주차면 N-1 · N-2 · N-3.
+ *
+ * 「그 전 건 어차피 안 볼 것 같다」는 판단이고, 맞다 — 참고의 값은 최근일수록 크고
+ * 칩이 늘어나면 고르는 일 자체가 일이 된다. 더 뒤는 「내 이력」에서 본다.
+ *
+ * **「최근 제출 3건」이 아니라 「직전 3주」다.** 한 주 걸렀으면 그 주는 그냥 빈다 —
+ * 3주 창이면 한 주쯤 건너뛴 경우는 창 안에서 저절로 흡수되고, 그보다 오래된 것은
+ * 애초에 볼 일이 없다.
  */
-const MAX_ITEMS = 6;
+const WEEKS_BACK = 3;
 
 export const GET = handler(async (req: NextRequest) => {
   const scope = await requireScope(req.headers);
@@ -40,19 +46,39 @@ export const GET = handler(async (req: NextRequest) => {
 
   const isoKey = req.nextUrl.searchParams.get('isoKey');
   const pick = req.nextUrl.searchParams.get('submissionId');
-  const current = isoKey ? await prisma.weekSlot.findUnique({ where: { isoKey } }) : null;
+  /*
+   * **기준 주차가 있어야 「직전 3주」가 정해진다.** 화면은 늘 `isoKey`를 보내지만,
+   * 없으면 가장 최근 주차를 기준으로 삼는다 — 여기서 슬롯을 만들지는 않는다.
+   * GET이 쓰기를 하면 «보기만 했는데 데이터가 생기는» 경로가 된다.
+   */
+  const current = isoKey
+    ? await prisma.weekSlot.findUnique({ where: { isoKey } })
+    : await prisma.weekSlot.findFirst({ orderBy: { opensAt: 'desc' } });
 
-  // 이번 주(또는 지정 주차)보다 **앞선** 주차에서 내가 낸 것들, 최근 순
-  const subs = await prisma.submission.findMany({
-    where: {
-      userId: scope.user.id,
-      isLatest: true,
-      ...(current ? { weekSlot: { opensAt: { lt: current.opensAt } } } : {}),
-    },
-    include: { weekSlot: true },
-    orderBy: { weekSlot: { opensAt: 'desc' } },
-    take: MAX_ITEMS,
-  });
+  /*
+   * 먼저 **주차를 정하고**, 그 안에서 내 제출을 찾는다. 순서가 중요하다 —
+   * 제출을 먼저 3건 집으면 「직전 3주」가 아니라 「최근 제출 3건」이 되어,
+   * 두 달 전 것이 딸려 올라온다.
+   *
+   * 슬롯은 지연 생성이라(WS-11) 아무도 안 들어온 주는 레코드가 없는데, 그 주에는
+   * 제출도 있을 수 없으므로 결과가 달라지지 않는다.
+   */
+  const slots = current
+    ? await prisma.weekSlot.findMany({
+        where: { opensAt: { lt: current.opensAt } },
+        orderBy: { opensAt: 'desc' },
+        take: WEEKS_BACK,
+        select: { id: true },
+      })
+    : [];
+
+  const subs = slots.length
+    ? await prisma.submission.findMany({
+        where: { userId: scope.user.id, isLatest: true, weekSlotId: { in: slots.map((s) => s.id) } },
+        include: { weekSlot: true },
+        orderBy: { weekSlot: { opensAt: 'desc' } },
+      })
+    : [];
 
   if (subs.length === 0) return json({ found: false, items: [] });
 

@@ -630,23 +630,36 @@ describe('WA-10 지난번에 낸 것 (api/my/previous)', () => {
   };
   let 내_이전: string;
   let 남의_것: string;
-  let 이번주키: string;
 
+  /*
+   * 주차 다섯 개를 깔고 **W05·W04·W02·W01에만 낸다** (W03은 거른 주).
+   * 기준을 W05로 잡으면 창은 W04·W03·W02이고, 그 안에 든 것은 W04와 W02뿐이다.
+   *
+   * 이 배치가 「직전 3주」와 「최근 3건」을 갈라낸다 — 후자였다면 W01이 딸려 온다.
+   */
   beforeAll(async () => {
     const { prisma } = await import('@/server/db');
     const da = await prisma.division.findFirstOrThrow({ where: { slug: A.slug } });
     const db = await prisma.division.findFirstOrThrow({ where: { slug: B.slug } });
 
-    const slot = async (isoKey: string, label: string, nth: number, opensAt: string) =>
+    const slot = (n: number, opensAt: string) =>
       prisma.weekSlot.upsert({
-        where: { isoKey },
+        where: { isoKey: `WA-W0${n}` },
         update: {},
-        create: { isoKey, label, year: 2026, month: 7, weekOfMonth: nth, opensAt: new Date(opensAt) },
+        create: {
+          isoKey: `WA-W0${n}`,
+          label: `7월 ${n}주차`,
+          year: 2026,
+          month: 7,
+          weekOfMonth: n,
+          opensAt: new Date(opensAt),
+        },
       });
-    const s1 = await slot('WA-W01', '7월 1주차', 1, '2026-06-29T00:00:00.000Z');
-    const s2 = await slot('WA-W02', '7월 2주차', 2, '2026-07-06T00:00:00.000Z');
-    const s3 = await slot('WA-W03', '7월 3주차', 3, '2026-07-13T00:00:00.000Z');
-    이번주키 = s3.isoKey;
+    const s1 = await slot(1, '2026-06-29T00:00:00.000Z');
+    const s2 = await slot(2, '2026-07-06T00:00:00.000Z');
+    await slot(3, '2026-07-13T00:00:00.000Z'); // 거른 주 — 슬롯은 있고 제출이 없다
+    const s4 = await slot(4, '2026-07-20T00:00:00.000Z');
+    const s5 = await slot(5, '2026-07-27T00:00:00.000Z');
 
     const user = (email: string, divisionId: string) =>
       prisma.user.create({ data: { email, name: email.split('@')[0], divisionId } });
@@ -668,62 +681,69 @@ describe('WA-10 지난번에 낸 것 (api/my/previous)', () => {
           isLatest: true,
         },
       });
-    const a1 = await sub(me.id, da.id, s1.id, 1);
+    await sub(me.id, da.id, s1.id, 1);
     const a2 = await sub(me.id, da.id, s2.id, 2);
-    await sub(me.id, da.id, s3.id, 3); // 이번 주 것 — 목록에 섞이면 안 된다
-    const b1 = await sub(other.id, db.id, s2.id, 4);
+    await sub(me.id, da.id, s4.id, 4);
+    await sub(me.id, da.id, s5.id, 5); // 기준 주차 — 목록에 섞이면 안 된다
+    const b1 = await sub(other.id, db.id, s4.id, 6);
     내_이전 = a2.id;
     남의_것 = b1.id;
-    expect(a1.id).toBeTruthy();
   });
+
+  const get = async (q = '') => {
+    const { GET } = await import('@/app/api/my/previous/route');
+    return (await GET(nx(`/api/my/previous${q}`, WA.me))).json();
+  };
+  const keys = (b: { items: { isoKey: string }[] }) => b.items.map((i) => i.isoKey);
 
   it('[WA-T10] 낸 적이 없으면 found:false — 화면은 아무것도 그리지 않는다', async () => {
     const { GET } = await import('@/app/api/my/previous/route');
-    const res = await GET(nx('/api/my/previous', WA.none));
+    const res = await GET(nx('/api/my/previous?isoKey=WA-W05', WA.none));
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.found).toBe(false);
     expect(body.items).toEqual([]);
   });
 
-  it('[WA-T11] 최근 순으로 나오고, 기본은 가장 최근 것', async () => {
-    const { GET } = await import('@/app/api/my/previous/route');
-    const body = await (await GET(nx('/api/my/previous', WA.me))).json();
+  it('[WA-T11] **직전 3주만** 나온다 — 그보다 오래된 것은 빠진다 (WA-14)', async () => {
+    const body = await get('?isoKey=WA-W05');
     expect(body.found).toBe(true);
-    expect(body.items.map((i: { isoKey: string }) => i.isoKey)).toEqual(['WA-W03', 'WA-W02', 'WA-W01']);
+    // 창은 W04·W03·W02. W03은 거른 주라 비고, W01은 창 밖이다
+    expect(keys(body)).toEqual(['WA-W04', 'WA-W02']);
+  });
+
+  it('[WA-T12] 「최근 3건」이 아니다 — 한 주 걸러도 창을 넓히지 않는다', async () => {
+    // 제출 기준으로 3건을 집었다면 W01이 딸려 온다. 그게 이 테스트가 막는 것이다
+    expect(keys(await get('?isoKey=WA-W05'))).not.toContain('WA-W01');
+  });
+
+  it('[WA-T13] 기준 주차 것은 섞이지 않는다 — 이번 주에 이미 낸 것은 「지난번」이 아니다', async () => {
+    expect(keys(await get('?isoKey=WA-W05'))).not.toContain('WA-W05');
+  });
+
+  it('[WA-T14] 기본은 가장 최근 것, 주차를 골라 볼 수 있다', async () => {
+    const body = await get('?isoKey=WA-W05');
+    expect(body.slot.isoKey).toBe('WA-W04');
     expect(body.submissionId).toBe(body.items[0].submissionId);
+
+    const 고른것 = await get(`?isoKey=WA-W05&submissionId=${내_이전}`);
+    expect(고른것.slot.isoKey).toBe('WA-W02');
   });
 
-  it('[WA-T12] 이번 주차보다 앞선 것만 — 방금 낸 이번 주 것이 섞이지 않는다', async () => {
-    const { GET } = await import('@/app/api/my/previous/route');
-    const body = await (await GET(nx(`/api/my/previous?isoKey=${이번주키}`, WA.me))).json();
-    expect(body.items.map((i: { isoKey: string }) => i.isoKey)).toEqual(['WA-W02', 'WA-W01']);
-    expect(body.slot.isoKey).toBe('WA-W02'); // 바로 전 주가 기본
-  });
-
-  it('[WA-T13] 주차를 골라 볼 수 있다', async () => {
-    const { GET } = await import('@/app/api/my/previous/route');
-    const body = await (await GET(nx(`/api/my/previous?submissionId=${내_이전}`, WA.me))).json();
-    expect(body.submissionId).toBe(내_이전);
-    expect(body.slot.isoKey).toBe('WA-W02');
-  });
-
-  it('[WA-T14] 남의 submissionId를 넣어도 남의 것이 나오지 않는다', async () => {
-    const { GET } = await import('@/app/api/my/previous/route');
-    const body = await (await GET(nx(`/api/my/previous?submissionId=${남의_것}`, WA.me))).json();
+  it('[WA-T15] 남의 submissionId를 넣어도 남의 것이 나오지 않는다', async () => {
+    const body = await get(`?isoKey=WA-W05&submissionId=${남의_것}`);
     // 조용히 무시하고 **내 것**을 돌려준다 — 남의 id가 통했다는 신호조차 주지 않는다
     expect(body.submissionId).not.toBe(남의_것);
     expect(body.items.map((i: { submissionId: string }) => i.submissionId)).not.toContain(남의_것);
   });
 
-  it('[WA-T15] 파일을 못 읽어도 목록과 「받기」는 살아 있다', async () => {
-    const { GET } = await import('@/app/api/my/previous/route');
-    const body = await (await GET(nx('/api/my/previous', WA.me))).json();
+  it('[WA-T16] 파일을 못 읽어도 목록과 「받기」는 살아 있다', async () => {
+    const body = await get('?isoKey=WA-W05');
     expect(body.rows).toBeNull(); // 실재하지 않는 파일 — 화면이 「받기만 됩니다」로 안내한다
     expect(body.submissionId).toBeTruthy();
   });
 
-  it('[WA-T16] 무인증은 열리지 않는다', async () => {
+  it('[WA-T17] 무인증은 열리지 않는다', async () => {
     const { GET } = await import('@/app/api/my/previous/route');
     const res = await GET(nx('/api/my/previous'));
     expect([401, 403, 404]).toContain(res.status);

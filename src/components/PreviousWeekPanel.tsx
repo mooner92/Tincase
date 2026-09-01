@@ -8,10 +8,11 @@
 // **보여주기만 하면 절반이다.** 보고 나서 손으로 옮겨 적어야 하면 결국 한글에서 복사하던
 // 것과 같은 수고다. 그래서 **옮기는 버튼**까지 둔다:
 //
-//   행마다 「+」         같은 표로 (상시 반복 업무 — 「정기간행물 발간 진행」 같은 것)
-//                       ★ 반각이다. 전각 더하기(U+FF0B)는 페이퍼로지에 없어서
-//                         그 글자만 시스템 글꼴로 새고, 한 줄 안에서 서체가 바뀐다 (UI-T90)
-//   계획 표에 「실적으로」 지난주 계획을 **이번 주 실적으로** 통째로 (이게 주된 동선이다)
+//   줄마다 「+실적」 「+계획」  **넣을 곳을 골라서** 한 줄씩 (WA-15)
+//   머리줄의 「계획 N줄을 …」   지난주 계획을 이번 주 실적으로 통째로 (이게 주된 동선이다)
+//
+//   ★ 「+」는 반각이다. 전각 더하기(U+FF0B)는 페이퍼로지에 없어서 그 글자만
+//     시스템 글꼴로 새고, 한 줄 안에서 서체가 바뀐다 (UI-T90)
 //
 // **주차를 고를 수 있다 (WA-12).** 기본은 가장 최근 것이지만, 휴가로 한 주 걸렀거나
 // 월간(한 달치 정리)을 쓸 때는 더 뒤를 봐야 한다. 칩을 누르면 그 주차만 새로 읽는다 —
@@ -202,6 +203,11 @@ export function PreviousWeekPanel({
               )}
             </div>
 
+            <p className="mb-1.5 text-[11px] text-muted">
+              줄 오른쪽에서 <strong className="font-medium text-body">넣을 곳</strong>을 고르세요 — 같은 일이라도
+              이번 주에는 실적일 수도, 계획일 수도 있습니다.
+            </p>
+
             {/* 지난주가 길어도 표를 덮지 않게 묶는다 */}
             <div className="max-h-56 overflow-y-auto">
               {!rows ? (
@@ -231,23 +237,44 @@ export function PreviousWeekPanel({
                             )}
                           </span>
                           {/*
-                            반복 업무를 같은 표로 한 줄씩.
+                            WA-15 — **넣을 곳을 고른다.**
 
-                            **항상 보인다.** 처음엔 hover에서만 나타나게 했는데, 휴대폰·태블릿에는
-                            hover가 없어서 그 버튼에 영영 닿을 수 없다 — 있는 줄도 모른다.
-                            대신 평소엔 흐리게 두고 가리킬 때 진해진다.
+                            처음에는 `+` 하나로 **같은 표**에 넣었다. 그런데 지난주 계획을 다시
+                            계획에 넣는 건 대개 뜻이 안 맞고, 반대로 이런 경우들이 있다:
+
+                              지난주에 못 끝냈다        → 계획 → **계획**
+                              지난주 실적인데 보강한다  → 실적 → **계획**
+                              지난주 계획대로 했다      → 계획 → **실적**  (제일 흔하다)
+
+                            어느 쪽이 맞는지는 **적는 사람만 안다.** 기계가 고르면 절반은 틀리고,
+                            틀린 줄을 지우는 수고가 직접 적는 것보다 크다.
+
+                            그래서 **버튼 두 개**다. 메뉴를 열게 하지 않는다 — 한 줄 옮기는 데
+                            두 번 누르게 하면 그냥 손으로 적는 편이 빠르고, 그러면 안 쓴다.
+                            특이사항은 넣을 곳으로 두지 않았다: 휴가·출장이라 지난주 것을
+                            그대로 옮길 일이 없다.
                           */}
-                          <button
-                            onClick={() => {
-                              onCopyRow(s.key, r);
-                              say('한 줄 넣었습니다');
-                            }}
-                            aria-label={`${s.title}에 「${r.content}」 넣기`}
-                            title={`${s.title}에 이 줄 넣기`}
-                            className="shrink-0 rounded border border-hairline bg-canvas px-1.5 py-0.5 text-[11px] font-medium text-muted hover:border-ink hover:text-ink"
-                          >
-                            +
-                          </button>
+                          <span className="flex shrink-0 gap-1">
+                            {(
+                              [
+                                ['achievements', '실적'],
+                                ['plans', '계획'],
+                              ] as [Bucket, string][]
+                            ).map(([bucket, label]) => (
+                              <button
+                                key={bucket}
+                                onClick={() => {
+                                  onCopyRow(bucket, r);
+                                  say(`${label}에 넣었습니다`);
+                                }}
+                                aria-label={`「${r.content}」을 이번 주 ${label}에 넣기`}
+                                title={`이번 주 ${label}에 넣기`}
+                                className="rounded border border-hairline bg-canvas px-1.5 py-0.5 text-[11px] font-medium text-muted hover:border-ink hover:text-ink"
+                              >
+                                +{label}
+                              </button>
+                            ))}
+                          </span>
                         </li>
                       ))}
                     </ul>
