@@ -6,7 +6,7 @@ import { parseCategories, toPlan, orderPeople } from '@/server/merge/rules';
 import { sortByCategory, OTHER } from '@/server/merge/order';
 import { parseTablePaste, parseHtmlTable, parseClipboardTable } from '@/lib/paste-table';
 import { exactDuplicates, validateGroups, type MergeRow } from '@/server/merge/dedupe';
-import { moveItem, rowNo, pickRepresentative, contentCovered } from '@/lib/merge-rows';
+import { moveItem, rowNo, pickRepresentative, contentCovered, mergeRowCells } from '@/lib/merge-rows';
 import { parseEmphasisWords, stripEmphasisMarker } from '@/lib/emphasis-marker';
 
 const row = (id: number, who: string, content: string, date = '', place = ''): MergeRow => ({
@@ -554,16 +554,55 @@ describe('HM-36 대표 행 선택', () => {
     expect(pickRepresentative([장혜정, 김민정])).toBe(김민정); // 순서에 좌우되지 않는다
   });
 
-  it('[HM-T56] 품고 있지 않으면 칸 수로 정한다 — 「(10건)」과 「(8건)」은 서로를 품지 못한다', () => {
-    const 가 = r('정기간행물 발간 진행(10건)');
-    const 나 = r('정기간행물 발간 진행(8건)', '8/27');
-    expect(pickRepresentative([가, 나])).toBe(나);
+  /*
+   * HM-40 — 2026-09-03에 **한 겹 안쪽에서 같은 일이 또 났다.**
+   *
+   *   김민정  온라인 홍보 콘텐츠 제작 및 등록(유튜브 2건, SNS 7건)   일자 없음
+   *   장혜정  온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)            일자 8/18
+   *
+   * 「2건」과 「1건」이 달라 품기 판정에 안 걸렸고, 그 다음 기준이 「채워진 칸 수」였다.
+   * 일자 하나 때문에 짧은 쪽이 이겨서 「SNS 7건」이 사라졌다.
+   * 내용과 곁칸은 경쟁 관계가 아니다 — 일자는 따로 모아 오면 된다.
+   */
+  it('[HM-T56] 일자가 있다고 짧은 내용이 이기지 않는다 — 그날의 버그다', () => {
+    const 김민정 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 2건, SNS 7건)');
+    const 장혜정 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)', '8/18');
+    expect(pickRepresentative([김민정, 장혜정])).toBe(김민정);
+    expect(pickRepresentative([장혜정, 김민정])).toBe(김민정);
   });
 
-  it('[HM-T57] 원래 의도는 그대로 — 칸도 많고 내용도 긴 쪽이 이긴다', () => {
-    const 짧음 = r('보도자료 배포');
-    const 자세함 = r('보도자료 배포(2건)', '8/13', '본원', '원장 외 3명');
-    expect(pickRepresentative([짧음, 자세함])).toBe(자세함);
+  it('[HM-T57] 그래도 일자는 살아남는다 — 곁칸은 묶음 전체에서 모은다', () => {
+    const 김민정 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 2건, SNS 7건)');
+    const 장혜정 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)', '8/18');
+    expect(mergeRowCells([김민정, 장혜정], 김민정)).toEqual({
+      content: '온라인 홍보 콘텐츠 제작 및 등록(유튜브 2건, SNS 7건)',
+      date: '8/18', // 대표가 안 적었지만 같은 업무의 일자다
+      place: '',
+      attendee: '',
+    });
+  });
+
+  it('[HM-T57b] 대표가 이미 적었으면 덮어쓰지 않는다 — 다르면 사람이 볼 일이다', () => {
+    const 가 = r('회의 개최', '9/1', '본원');
+    const 나 = r('회의 개최', '9/2', '세종');
+    expect(mergeRowCells([가, 나], 가)).toEqual({
+      content: '회의 개최',
+      date: '9/1',
+      place: '본원',
+      attendee: '',
+    });
+  });
+
+  it('[HM-T57c] 곁칸은 서로 다른 사람에게서 와도 된다 — 각각 채워진 첫 값', () => {
+    const 대표 = r('행사 진행');
+    const 나 = r('행사 진행', '9/5');
+    const 다 = r('행사 진행', '', '대회의실', '원장 외 2명');
+    expect(mergeRowCells([대표, 나, 다], 대표)).toEqual({
+      content: '행사 진행',
+      date: '9/5',
+      place: '대회의실',
+      attendee: '원장 외 2명',
+    });
   });
 
   it('[HM-T58] 완전히 같으면 먼저 온 것 — 제출자 순서를 흔들지 않는다', () => {

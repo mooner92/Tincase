@@ -17,7 +17,7 @@ import type { RowGroup } from './dedupe';
 import { classifyRows, sortByCategory, OTHER } from './classify';
 import { findFlaggedRows, parseFlagWords, type FlaggedRow } from '@/lib/empty-content';
 import { parseEmphasisWords, stripEmphasisMarker } from '@/lib/emphasis-marker';
-import { pickRepresentative } from '@/lib/merge-rows';
+import { mergeRowCells, pickRepresentative } from '@/lib/merge-rows';
 export { mergedName as mergedFileName } from '@/lib/docname';
 import type { WorklogRow } from '@/lib/hwp/reader';
 
@@ -270,9 +270,15 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
        * HM-36에서 「잃는 쪽이 늘 더 나쁘다」고 정한 것과 같은 이유다.
        */
       const emphasized = members.some((m) => m.raw.emphasis === true);
+      /*
+       * HM-40 — 내용은 대표 줄의 것, **곁칸은 묶음 전체에서 모은다.**
+       * 대표가 일자를 안 적었는데 다른 사람이 적었으면 그 일자가 들어간다 —
+       * 일자를 지키자고 내용을 버리는 일이 없어진다.
+       */
+      const cells = mergeRowCells(members, best);
       grouped[bucket].push({
         emphasis: emphasized,
-        row: best.raw,
+        row: { ...best.raw, ...cells },
         authors: [...new Set(members.map((m) => m.who))],
         category: '',
         sources: members.map((m) => ({ who: m.who, content: m.content })),

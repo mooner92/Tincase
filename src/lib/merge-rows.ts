@@ -58,30 +58,27 @@ function compare(a: readonly number[], b: readonly number[]): number {
 const squash = (s: string) => s.replace(/[\s·,./\-–—~"'“”‘’()[\]]/g, '').toLowerCase();
 
 /**
- * HM-36 — 합쳐진 묶음에서 **문서에 남길 한 줄**을 고른다.
+ * HM-36/40 — 합쳐진 묶음에서 **문서에 남길 내용**을 고른다.
  * 원문 중 하나를 고르는 것이지 새로 쓰는 것이 아니다.
  *
  * 순서대로 본다:
  *
  *   1. **다른 줄의 내용을 통째로 품고 있는가.** 품고 있으면 그 줄을 남겨도 잃는 말이 없다
- *   2. 채워진 칸 수 (일자·장소·참석자)
- *   3. 내용 길이
- *   4. 그래도 같으면 먼저 온 것 — 제출자 순서를 흔들지 않는다
+ *   2. 내용 길이
+ *   3. 그래도 같으면 먼저 온 것 — 제출자 순서(ABS-6)를 흔들지 않는다
  *
- * **1이 2보다 앞서는 이유.** 처음엔 칸 수만 셌고, 그래서 이런 일이 났다
- * (2026-08-27 AI홍보전략실):
+ * **일자·장소·참석자는 여기서 보지 않는다 (HM-40).** 예전에는 「채워진 칸 수」가
+ * 길이보다 앞이었고, 그래서 이런 일이 났다 (2026-09-03 AI홍보전략실):
  *
- *   김민정  온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건, SNS 1건)   일자 없음
- *   장혜정  온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)            일자 8/27
+ *   김민정  온라인 홍보 콘텐츠 제작 및 등록(유튜브 2건, SNS 7건)   일자 없음
+ *   장혜정  온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)            일자 8/18
  *
- * 칸 수로는 장혜정이 이기고, **「SNS 1건」이 문서에서 사라졌다.** 그런데 이 부서의 작성
- * 안내에는 「상시 반복 업무는 일자를 공란으로 둡니다」라고 적혀 있다 — **일자 공란은
- * 정상이고 내용이 빠지는 것은 손실이다.** 비어 있는 것이 정상인 칸을 근거로 실제 내용을
- * 버리면 안 된다.
+ * 일자 하나가 있다고 장혜정 줄이 이겨서 **「SNS 7건」이 문서에서 사라졌다.**
+ * 8월 27일에 고친 것과 같은 실패인데, 그때는 한쪽이 다른 쪽을 품고 있어서 1번에서
+ * 걸렸고 이번에는 「2건」과 「1건」이 달라 걸리지 않았다.
  *
- * 서로 품지 못하는 경우(「(10건)」과 「(8건)」)는 어느 쪽도 더 말하지 않으므로 2로 넘어간다.
- * 그때는 무엇을 고르든 한쪽을 잃는데, 그건 기계가 정할 일이 아니라서
- * **수합 관리 화면이 두 줄을 나란히 보여주고 사람이 고친다** (HM-36 화면).
+ * **내용과 곁칸은 경쟁 관계가 아니다.** 일자를 지키자고 내용을 버릴 이유가 없다 —
+ * 곁칸은 `mergeRowCells`가 따로 모아 오므로 여기서는 내용만 보면 된다.
  */
 export function pickRepresentative<T extends RowLike>(members: readonly T[]): T {
   const squashed = members.map((m) => squash(m.content));
@@ -89,10 +86,7 @@ export function pickRepresentative<T extends RowLike>(members: readonly T[]): T 
   const covers = (i: number) =>
     squashed.reduce((n, other, j) => (j !== i && other && squashed[i].includes(other) ? n + 1 : n), 0);
 
-  const rank = (m: T, i: number): [number, number, number] => {
-    const cells = [m.content, m.date, m.place, m.attendee].filter((x) => x.trim()).length;
-    return [covers(i), cells, m.content.trim().length];
-  };
+  const rank = (m: T, i: number): [number, number] => [covers(i), m.content.trim().length];
 
   let best = 0;
   let bestRank = rank(members[0], 0);
@@ -105,6 +99,32 @@ export function pickRepresentative<T extends RowLike>(members: readonly T[]): T 
     }
   }
   return members[best];
+}
+
+/**
+ * HM-40 — 합쳐진 줄의 **곁칸(일자·장소·참석자)을 모은다.**
+ *
+ * 대표 줄에 비어 있으면 같은 묶음의 다른 줄에서 **채워진 첫 값**을 가져온다.
+ * 같은 업무를 적은 사람들이니 그 일자는 그 업무의 일자다 — 한 명이 안 적었다고
+ * 버릴 이유가 없다.
+ *
+ * **비어 있는 칸만 채운다.** 대표 줄에 값이 있으면 그대로 둔다 — 둘 다 적었는데 다르면
+ * 어느 쪽이 맞는지 기계는 모르고, 그건 수합 관리 화면이 두 줄을 나란히 보여주는 이유다.
+ *
+ * 새 글자를 쓰지 않는다는 원칙은 그대로다 (HM-ABS). 칸마다 **누군가 낸 원문 그대로**다.
+ */
+export function mergeRowCells<T extends RowLike>(members: readonly T[], best: T): RowLike {
+  const pick = (field: 'date' | 'place' | 'attendee'): string => {
+    if (best[field].trim()) return best[field];
+    const found = members.find((m) => m[field].trim());
+    return found ? found[field] : best[field];
+  };
+  return {
+    content: best.content,
+    date: pick('date'),
+    place: pick('place'),
+    attendee: pick('attendee'),
+  };
 }
 
 /**
