@@ -16,6 +16,7 @@ import { groupDuplicates, MergeRow, GroupingResult } from './model';
 import type { RowGroup } from './dedupe';
 import { classifyRows, sortByCategory, OTHER } from './classify';
 import { findFlaggedRows, parseFlagWords, type FlaggedRow } from '@/lib/empty-content';
+import { parseEmphasisWords, stripEmphasisMarker } from '@/lib/emphasis-marker';
 import { pickRepresentative } from '@/lib/merge-rows';
 export { mergedName as mergedFileName } from '@/lib/docname';
 import type { WorklogRow } from '@/lib/hwp/reader';
@@ -186,6 +187,9 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
   // 제출자 순서 — 명단은 운영자 소관이므로 sortOrder를 그대로 따른다 (TACP-3)
   const ordered = orderPeople(submissions.map((s) => ({ ...s, name: s.user.name, sortOrder: s.user.sortOrder })));
 
+  // HM-38 — 부서가 정한 강조 표시 낱말. 비우면 아무것도 떼지 않는다
+  const emphasisWords = parseEmphasisWords(division.emphasisWords);
+
   // ── 1. 수집 — 한 명이 깨져도 나머지로 계속한다 (HM-21) ──
   const rows: Tagged[] = [];
   const usedIds: string[] = [];
@@ -201,15 +205,28 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
     usedIds.push(sub.id);
     for (const bucket of BUCKETS) {
       for (const raw of parsed.worklog[bucket]) {
+        /*
+         * HM-38 — 글로 적은 강조 표시를 여기서 뗀다.
+         *
+         * **수집 단계에서** 떼는 이유: 중복 묶기가 글자로 비교하는데(HM-36),
+         * 한 사람은 「…개최 (하이라이트)」, 다른 사람은 「…개최」로 적으면 표시 때문에
+         * 서로 다른 업무가 된다. 떼고 나서 비교해야 같은 일이 같은 일로 묶인다.
+         *
+         * 원본 파일은 그대로다 (ABS-3) — 병합본에 들어갈 글자만 바뀐다.
+         */
+        const stripped = stripEmphasisMarker(raw.content, emphasisWords);
+        const row = stripped.marked
+          ? { ...raw, content: stripped.content, emphasis: true }
+          : raw;
         rows.push({
           id: nextId++,
           who: sub.user.name,
-          content: raw.content,
-          date: raw.date,
-          place: raw.place,
-          attendee: raw.attendee,
+          content: row.content,
+          date: row.date,
+          place: row.place,
+          attendee: row.attendee,
           bucket,
-          raw,
+          raw: row,
         });
       }
     }

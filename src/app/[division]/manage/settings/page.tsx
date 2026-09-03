@@ -87,6 +87,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
             initialRule={division.mergeRuleText}
             initialGuide={division.guideText}
             initialEmptyWords={division.emptyWords}
+            initialEmphasisWords={division.emphasisWords}
           />
         ) : (
           <div className="space-y-3">

@@ -7,6 +7,7 @@ import { sortByCategory, OTHER } from '@/server/merge/order';
 import { parseTablePaste, parseHtmlTable, parseClipboardTable } from '@/lib/paste-table';
 import { exactDuplicates, validateGroups, type MergeRow } from '@/server/merge/dedupe';
 import { moveItem, rowNo, pickRepresentative, contentCovered } from '@/lib/merge-rows';
+import { parseEmphasisWords, stripEmphasisMarker } from '@/lib/emphasis-marker';
 
 const row = (id: number, who: string, content: string, date = '', place = ''): MergeRow => ({
   id,
@@ -609,5 +610,63 @@ describe('HM-36 「빠짐」과 「안 씀」', () => {
 
   it('[HM-T64] 빈 줄은 「다 들어 있다」고 하지 않는다 — 아무 말도 안 한 것이다', () => {
     expect(contentCovered('보도자료 배포', '   ')).toBe(false);
+  });
+});
+
+/**
+ * HM-38 — 글로 적은 강조 표시.
+ *
+ * 2026-09-03에 실제로 들어온 줄에서 나왔다:
+ *   「2026년 제4차 발간위원회 개최 (하이라이트)」
+ *
+ * 이 스위트의 핵심은 **괄호가 없으면 건드리지 않는다**이다. 원문 글자를 지우는 처분이라
+ * 오탐 값이 비싸고, 「하이라이트 영상 제작」 같은 업무명이 실제로 있을 수 있다.
+ */
+describe('HM-38 괄호로 적은 공유 표시', () => {
+  const W = ['하이라이트'];
+
+  it('[HM-T80] 그날 들어온 줄 — 표시를 떼고 공유로 바꾼다', () => {
+    const r = stripEmphasisMarker('2026년 제4차 발간위원회 개최 (하이라이트)', W);
+    expect(r).toEqual({ content: '2026년 제4차 발간위원회 개최', marked: true });
+  });
+
+  it('[HM-T81] **괄호가 없으면 건드리지 않는다** — 업무 이름일 수 있다', () => {
+    // 홍보 부서에서 충분히 나올 수 있는 업무다. 잡으면 낱말이 지워지고 엉뚱한 줄이 파래진다
+    expect(stripEmphasisMarker('하이라이트 영상 제작', W)).toEqual({
+      content: '하이라이트 영상 제작',
+      marked: false,
+    });
+  });
+
+  it('[HM-T82] 대괄호·꺾쇠도 받는다 — 사람마다 다르게 적는다', () => {
+    // 전각 괄호 — 한글에서 친 글에 흔히 섞인다 (소스에는 escape로 적는다, UI-T90)
+    const 전각 = `회의 개최 \uFF08하이라이트\uFF09`;
+    for (const raw of ['회의 개최 [하이라이트]', '회의 개최 〔하이라이트〕', '회의 개최 <하이라이트>', 전각]) {
+      expect(stripEmphasisMarker(raw, W), raw).toEqual({ content: '회의 개최', marked: true });
+    }
+  });
+
+  it('[HM-T83] 뗀 자리의 공백을 정리한다 — 문서에 꼬리 공백이 남으면 안 된다', () => {
+    expect(stripEmphasisMarker('앞 (하이라이트) 뒤', W).content).toBe('앞 뒤');
+    expect(stripEmphasisMarker('( 하이라이트 ) 회의', W).content).toBe('회의');
+  });
+
+  it('[HM-T84] 설정을 비우면 아무것도 안 한다', () => {
+    expect(stripEmphasisMarker('회의 (하이라이트)', [])).toEqual({
+      content: '회의 (하이라이트)',
+      marked: false,
+    });
+  });
+
+  it('[HM-T85] 표시가 없는 줄은 원문 그대로 — 새 문자열을 만들지 않는다', () => {
+    const src = '오늘의 환경뉴스 발송 및 언론 모니터링';
+    expect(stripEmphasisMarker(src, W).content).toBe(src);
+  });
+
+  it('[HM-T86] 낱말 설정은 emptyWords와 같은 규칙 — 배울 게 늘지 않는다', () => {
+    expect(parseEmphasisWords('하이라이트, 중요')).toEqual(['하이라이트', '중요']);
+    expect(parseEmphasisWords('하이라이트·공유')).toEqual(['하이라이트', '공유']);
+    expect(parseEmphasisWords('')).toEqual([]);
+    expect(parseEmphasisWords('가, 가, 나')).toEqual(['가', '나']);
   });
 });

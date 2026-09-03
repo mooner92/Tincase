@@ -33,6 +33,8 @@ model Division {
       기본이 꺼짐인 이유: 이건 한 부서에서 실제로 겪은 일이라 전사 규칙이 아니다.
       찾기만 하고 **지우지 않는다** — 담당자 알림과 화면에 「확인해 주세요」로만 뜬다 */
   emptyWords      String  @default("")
+  /// HM-38 — 괄호로 감싸 적은 강조 표시. 병합이 떼어내고 「공유」로 바꾼다
+  emphasisWords   String  @default("하이라이트")
   guideText       String  @default("") // 업로드 화면 작성 안내 (CP-21)
 
   // 취합게시판 제출 이력 (R-002 관찰) — 온보딩 우선순위 판단용. 운영자가 갱신 가능 (DM-15)

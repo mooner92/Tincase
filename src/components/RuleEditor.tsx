@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { parseFlagWords } from '@/lib/empty-content';
+import { parseEmphasisWords } from '@/lib/emphasis-marker';
 
 /** 서버의 parseCategories와 같은 규칙 — 입력하는 즉시 해석 결과를 보여주기 위해 */
 function preview(raw: string): string[] {
@@ -57,6 +58,7 @@ export interface RuleEditorProps {
   initialRule: string;
   initialGuide: string;
   initialEmptyWords: string;
+  initialEmphasisWords: string;
 }
 
 export function RuleEditor(props: RuleEditorProps) {
@@ -66,6 +68,7 @@ export function RuleEditor(props: RuleEditorProps) {
   const [rule, setRule] = useState(props.initialRule);
   const [guide, setGuide] = useState(props.initialGuide);
   const [emptyWords, setEmptyWords] = useState(props.initialEmptyWords);
+  const [emphasisWords, setEmphasisWords] = useState(props.initialEmphasisWords);
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const router = useRouter();
@@ -76,10 +79,12 @@ export function RuleEditor(props: RuleEditorProps) {
     dropNotes !== props.initialDropNotes ||
     rule !== props.initialRule ||
     guide !== props.initialGuide ||
-    emptyWords !== props.initialEmptyWords;
+    emptyWords !== props.initialEmptyWords ||
+    emphasisWords !== props.initialEmphasisWords;
 
   const parsed = useMemo(() => preview(categories), [categories]);
   const words = useMemo(() => parseFlagWords(emptyWords), [emptyWords]);
+  const marks = useMemo(() => parseEmphasisWords(emphasisWords), [emphasisWords]);
 
   // CP-81 — 저장 전 이탈 방지
   useEffect(() => {
@@ -95,7 +100,15 @@ export function RuleEditor(props: RuleEditorProps) {
     fetch('/api/division/rule', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ categories, dedupe, dropNotes, ruleText: rule, guideText: guide, emptyWords }),
+      body: JSON.stringify({
+        categories,
+        dedupe,
+        dropNotes,
+        ruleText: rule,
+        guideText: guide,
+        emptyWords,
+        emphasisWords,
+      }),
     })
       .then(async (r) => {
         const body = await r.json();
@@ -174,6 +187,30 @@ export function RuleEditor(props: RuleEditorProps) {
               <span className="text-ink">{words.map((w) => `「${w}」`).join(' ')}</span>이 들어간 줄을 찾아 담당자
               알림과 수합 관리 화면에 띄웁니다. <strong className="font-medium">문서는 그대로 둡니다</strong> —
               뺄지는 사람이 정합니다.
+            </>
+          )}
+        </p>
+      </Card>
+
+      {/*
+        HM-38 — 글로 적은 강조 표시. 한글로 작성해 올리는 사람에게는 「공유」 버튼이 없어서
+        괄호로 적어 온다 (「…개최 (하이라이트)」). 병합이 그걸 떼고 파란색으로 바꾼다.
+      */}
+      <Card title="공유 표시 낱말" hint="괄호로 적은 이 낱말을 「공유」로 바꿉니다">
+        <input
+          value={emphasisWords}
+          onChange={(e) => setEmphasisWords(e.target.value)}
+          className={FIELD}
+          placeholder="하이라이트   (비우면 바꾸지 않습니다)"
+        />
+        <p className="mt-2 text-xs text-muted">
+          {marks.length === 0 ? (
+            '바꾸지 않습니다.'
+          ) : (
+            <>
+              <span className="text-ink">{marks.map((w) => `「(${w})」`).join(' ')}</span>처럼{' '}
+              <strong className="font-medium">괄호로 감싼</strong> 것만 찾아 지우고 그 줄을 파란색으로
+              냅니다. 괄호 없는 낱말은 업무 이름일 수 있어 건드리지 않습니다.
             </>
           )}
         </p>
