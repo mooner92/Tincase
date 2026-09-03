@@ -17,6 +17,15 @@ export interface ComposerRow {
   date: string;
   place: string;
   attendee: string;
+  /**
+   * HM-37 — 「전체 공유·전달이 필요한 주요 사항」.
+   *
+   * 기획조정실 규칙이 「주요 사항에는 파란색으로 작성」인데, 웹에서 적는 사람에게
+   * 「파란색으로 칠하세요」라고 할 수는 없다 — 색은 **수단**이지 뜻이 아니다.
+   * 그래서 화면에서는 **체크 하나**로 받고, 문서로 나갈 때 파란색이 된다.
+   * 규칙이 바뀌어 색이 달라져도 적는 사람은 아무것도 다시 배우지 않는다.
+   */
+  emphasis?: boolean;
 }
 
 type Bucket = 'achievements' | 'plans' | 'notes';
@@ -27,7 +36,7 @@ const SECTIONS: { key: Bucket; no: number; title: string; hint: string }[] = [
   { key: 'notes', no: 3, title: '기타 특이사항', hint: '휴가·출장 등 · 없으면 비워 두세요' },
 ];
 
-const blank = (): ComposerRow => ({ content: '', date: '', place: '', attendee: '' });
+const blank = (): ComposerRow => ({ content: '', date: '', place: '', attendee: '', emphasis: false });
 const draftKey = (isoKey: string) => `tincase.compose.${isoKey}`;
 
 export function WebComposer({
@@ -94,6 +103,15 @@ export function WebComposer({
       const rows = [...d[bucket]];
       rows[i] = { ...rows[i], [field]: v };
       if (i === rows.length - 1 && v.trim() && rows.length < 200) rows.push(blank());
+      return { ...d, [bucket]: rows };
+    });
+  }, []);
+
+  /** HM-37 — 「공유」 표시 켜고 끄기 */
+  const toggleEmphasis = useCallback((bucket: Bucket, i: number) => {
+    setData((d) => {
+      const rows = [...d[bucket]];
+      rows[i] = { ...rows[i], emphasis: !rows[i].emphasis };
       return { ...d, [bucket]: rows };
     });
   }, []);
@@ -329,6 +347,25 @@ export function WebComposer({
                         placeholder={i === 0 ? '원장 외 3명' : ''}
                         className={`${cell} w-28 shrink-0`}
                       />
+                      {/*
+                        HM-37 — 「공유」. 켜면 이 줄이 병합본에 **파란색**으로 나간다.
+                        체크박스가 아니라 **누르는 표식**인 것은 의도다 — 체크박스 스무 개가
+                        칸 옆에 늘어서면 적는 칸보다 체크박스가 먼저 보인다.
+                        켜진 줄만 눈에 띄면 된다.
+                      */}
+                      <button
+                        onClick={() => toggleEmphasis(s.key, i)}
+                        aria-pressed={row.emphasis === true}
+                        aria-label={`${i + 1}번째 줄 공유 표시`}
+                        title="전체 공유·전달이 필요한 주요 사항 — 병합본에 파란색으로 나갑니다"
+                        className={`shrink-0 rounded border px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap transition-colors ${
+                          row.emphasis
+                            ? 'border-[#0000ff] bg-[#0000ff] text-white'
+                            : 'border-hairline bg-canvas text-muted-soft hover:border-ink hover:text-ink'
+                        }`}
+                      >
+                        공유
+                      </button>
                       <button
                         onClick={() => removeRow(s.key, i)}
                         aria-label={`${i + 1}번째 줄 지우기`}

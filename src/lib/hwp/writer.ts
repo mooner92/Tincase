@@ -283,6 +283,15 @@ function plainCharShapeOf(recs: HwpRecord[], t: TableSpan): number | null {
   return null;
 }
 
+/**
+ * HM-37 — 그 표의 **보통 서식** 번호. 강조 서식을 만들 때 «무엇을 복제할지»가 이것이다.
+ * 병합·작성 경로가 DocInfo를 고치려면 이 번호를 먼저 알아야 해서 밖으로 연다.
+ */
+export function plainShapeIdOf(recs: readonly HwpRecord[], tableOrdinal: number): number | null {
+  const t = locateTables(recs)[tableOrdinal];
+  return t ? plainCharShapeOf(recs as HwpRecord[], t) : null;
+}
+
 /** 그 셀의 모든 글자 구간을 한 가지 서식으로 통일한다 (기울임·굵게가 섞여 들어오지 않게) */
 function normalizeCharShape(recs: HwpRecord[], cell: CellSpan, shapeId: number): void {
   for (let k = cell.start; k < cell.end && k < recs.length; k++) {
@@ -314,7 +323,23 @@ function clearShrinkToFit(recs: HwpRecord[], headerIdx: number): void {
   recs[headerIdx] = { ...r, data: d };
 }
 
-export function fillTable(recs: HwpRecord[], tableOrdinal: number, rows: readonly (readonly string[])[]): void {
+/** HM-37 — 강조 행에 쓸 서식. `fillTable` 밖에서 DocInfo에 만들어 번호로 넘긴다 */
+export interface FillOptions {
+  /** 행별 강조 여부 (rows와 같은 길이·순서) */
+  emphasis?: readonly boolean[];
+  /** 강조 행의 내용 칸에 쓸 서식번호. null이면 강조를 적용하지 않는다 */
+  emphasisShapeId?: number | null;
+}
+
+/** 내용 칸 — 강조는 여기에만 건다 */
+const CONTENT_COL = 1;
+
+export function fillTable(
+  recs: HwpRecord[],
+  tableOrdinal: number,
+  rows: readonly (readonly string[])[],
+  opts: FillOptions = {},
+): void {
   const found = locateTables(recs)[tableOrdinal];
   if (!found) throw new HwpWriteError(`${tableOrdinal + 1}번째 표가 없습니다`);
   const t = resizeTable(recs, found, rows.length);
@@ -324,7 +349,21 @@ export function fillTable(recs: HwpRecord[], tableOrdinal: number, rows: readonl
   for (const cell of ordered) {
     const text = rows[cell.row - 1]?.[cell.col] ?? '';
     clearShrinkToFit(recs, cell.start); // cell.start = 그 셀의 LIST_HEADER
-    if (plain !== null) normalizeCharShape(recs, cell, plain);
+
+    /*
+     * HM-37 — 강조는 **내용 칸에만** 건다.
+     *
+     * 규칙이 「주요 사항에는 파란색으로 작성」이고, 그 «사항»은 내용 칸에 적힌 글이다.
+     * 일자·장소까지 물들이면 강조가 아니라 그 줄이 통째로 다른 문서처럼 보인다.
+     * 읽을 때도 내용 칸만 보므로(reader.rowEmphasis) 양쪽 판정이 같은 자리를 가리킨다.
+     */
+    const emph =
+      cell.col === CONTENT_COL &&
+      opts.emphasis?.[cell.row - 1] === true &&
+      opts.emphasisShapeId != null;
+    const shape = emph ? opts.emphasisShapeId! : plain;
+
+    if (shape !== null && shape !== undefined) normalizeCharShape(recs, cell, shape);
     setCellText(recs, cell, text);
   }
 }
@@ -332,12 +371,16 @@ export function fillTable(recs: HwpRecord[], tableOrdinal: number, rows: readonl
 /**
  * 원본 파일의 모든 것(서식·글꼴·미리보기·스크립트)을 유지한 채
  * BodyText 섹션만 갈아 끼운다.
+ *
+ * HM-37 — `docInfo`를 주면 그것도 갈아 끼운다. 강조 서식을 새로 만들었을 때만 필요하다.
+ * 안 주면 원본 그대로 둔다 — **바꿀 이유가 없으면 건드리지 않는다**가 이 함수의 원칙이다.
  */
-export function packHwp(original: Buffer, sections: readonly Buffer[]): Buffer {
+export function packHwp(original: Buffer, sections: readonly Buffer[], docInfo?: Buffer): Buffer {
   const cf = CFB.read(original, { type: 'buffer' });
   sections.forEach((sec, n) => {
     CFB.utils.cfb_add(cf, `/BodyText/Section${n}`, deflateRawSync(sec, { level: 9 }));
   });
+  if (docInfo) CFB.utils.cfb_add(cf, '/DocInfo', deflateRawSync(docInfo, { level: 9 }));
   // 센티널을 떼어낸다 -- 한글이 낯선 스트림을 만나면 문서를 열지 못한다 (HM-08a)
   return stripCfbSentinel(Buffer.from(CFB.write(cf, { type: 'buffer' }) as Uint8Array));
 }

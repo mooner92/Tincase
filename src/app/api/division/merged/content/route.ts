@@ -122,6 +122,14 @@ export const GET = handler(async (req: NextRequest) => {
         // API-53 — 붙여넣기용 표 폭. **양식에서 그대로 읽는다** (HWPUNIT).
         // 코드에 비율을 박아 두면 부서가 양식을 바꾸는 순간 어긋난다
         widths: columnWidths(t),
+        /*
+         * HM-37 — 행별 강조(파란색). 본문과 나란하다.
+         *
+         * `worklog[bucket]`은 위 `grid` 필터와 **같은 조건**으로 빈 행을 뺀 목록이라
+         * 자리가 어긋나지 않는다 (reader.gridToRows). 다른 조건으로 걸렀다면 여기서
+         * 한 칸씩 밀렸을 것이다 — 그러면 엉뚱한 줄이 파랗게 보인다.
+         */
+        emphasis: (parsed.worklog[BUCKETS[i]] ?? []).map((r) => r.emphasis === true),
         // TACP-17 — 머리행을 뺀 본문과 나란하다. 권한이 없으면 아예 없다 (undefined)
         ...(canSeeAuthors ? { authors: authorsFor(run.reviewJson, BUCKETS[i], grid.slice(1)) } : {}),
       };
@@ -132,7 +140,7 @@ export const GET = handler(async (req: NextRequest) => {
 /** API-50 — 담당자가 고친 내용으로 병합본을 **다시 쓴다**. 원본 제출물은 건드리지 않는다 */
 export const PUT = handler(async (req: NextRequest) => {
   const body = (await req.json().catch(() => null)) as
-    | { isoKey?: string; tables?: { key: string; rows: string[][] }[] }
+    | { isoKey?: string; tables?: { key: string; rows: string[][]; emphasis?: boolean[] }[] }
     | null;
   if (!body?.tables) throw new HttpError(422, 'invalid_request', '표 내용이 없습니다.');
 
@@ -153,19 +161,28 @@ export const PUT = handler(async (req: NextRequest) => {
       .slice(0, MAX_CELL);
 
   const tableRows = { achievements: [] as string[][], plans: [] as string[][], notes: [] as string[][] };
+  const rowEmphasis = { achievements: [] as boolean[], plans: [] as boolean[], notes: [] as boolean[] };
   for (const t of body.tables) {
     const key = BUCKETS.find((b) => b === t.key);
     if (!key) continue;
     // ABS-5 — 구분 채번은 언제나 시스템이 다시 만든다. 사람이 고친 번호는 버린다.
     // 화면도 같은 `rowNo`를 부른다 — 저장 전에 보여준 번호가 저장 후와 어긋나지 않는다
-    tableRows[key] = (t.rows ?? [])
+    /*
+     * HM-37 — 강조를 **행과 같이** 걸러낸다. 빈 행을 버리면서 강조 배열만 그대로 두면
+     * 한 칸씩 밀려서, 담당자가 한 줄 지웠을 뿐인데 엉뚱한 줄이 파랗게 나간다.
+     */
+    const kept = (t.rows ?? [])
       .slice(0, MAX_ROWS)
-      .map((r) => [clean(r[1]), clean(r[2]), clean(r[3]), clean(r[4])])
-      .filter((r) => r.some(Boolean))
-      .map((r, i) => [rowNo(key, i), ...r]);
+      .map((r, i) => ({
+        cells: [clean(r[1]), clean(r[2]), clean(r[3]), clean(r[4])],
+        emphasis: t.emphasis?.[i] === true,
+      }))
+      .filter((r) => r.cells.some(Boolean));
+    tableRows[key] = kept.map((r, i) => [rowNo(key, i), ...r.cells]);
+    rowEmphasis[key] = kept.map((r) => r.emphasis);
   }
 
-  const composed = composeMergedHwp(await readStoredFile(template.filePath), tableRows);
+  const composed = composeMergedHwp(await readStoredFile(template.filePath), tableRows, rowEmphasis);
   await writeFileAtomic(run.outputPath!, composed.bytes);
 
   const rowCounts = {

@@ -1,6 +1,7 @@
 // S-08 §6 — 병합 규칙 파서(HM-18)와 모델 하네스(HM-24).
 // 모델 호출 자체는 테스트하지 않는다 (외부 프로세스). **하네스가 모델을 못 믿는지**를 테스트한다.
 import { describe, expect, it } from 'vitest';
+import { readFileSync } from 'node:fs';
 import { parseCategories, toPlan, orderPeople } from '@/server/merge/rules';
 import { sortByCategory, OTHER } from '@/server/merge/order';
 import { parseTablePaste, parseHtmlTable, parseClipboardTable } from '@/lib/paste-table';
@@ -271,10 +272,7 @@ describe('한글 클립보드 표', () => {
 //
 // 검증은 제 일을 하고 있었다. 지우지 않은 쪽이 틀렸다.
 describe('HM-32 빈 표 처리 — 양식의 예시가 남지 않는다', () => {
-  const load = () => {
-    const { readFileSync } = require('node:fs') as typeof import('node:fs');
-    return readFileSync('fixtures/master-template.hwp');
-  };
+  const load = () => readFileSync('fixtures/master-template.hwp');
   const hasFix = (() => {
     try {
       load();

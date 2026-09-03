@@ -71,6 +71,7 @@ d('읽기 규칙 (HM-T04/T05, HM-15)', () => {
       date: '8/12',
       place: '오송앤세종컨퍼런스회의실',
       attendee: '',
+      emphasis: false, // HM-37 — 이 파일은 색 표시가 없다
     });
   });
   it('[HM-15g] 자리표시자 OO/OO는 빈 값', () => {
@@ -173,7 +174,9 @@ d('writer — 표 편집', () => {
     fillTable(recs, 0, [['1-1', '단독 업무', '', '', '']]);
     const back = readWorklog(packHwp(src(), [serializeRecords(recs)]));
     expect(back.tables[0].rows).toBe(2);
-    expect(back.worklog.achievements).toEqual([{ content: '단독 업무', date: '', place: '', attendee: '' }]);
+    expect(back.worklog.achievements).toEqual([
+      { content: '단독 업무', date: '', place: '', attendee: '', emphasis: false },
+    ]);
   });
 
   it('[HM-T23] 빈 셀에도 글자를 넣을 수 있다 (PARA_TEXT 레코드가 없는 셀)', () => {
@@ -186,7 +189,7 @@ d('writer — 표 편집', () => {
     ]);
     const back = readWorklog(packHwp(src(), [serializeRecords(recs)]));
     expect(back.worklog.achievements[2]).toEqual({
-      content: '셋째', date: '8/13', place: '대회의실', attendee: '연구진',
+      content: '셋째', date: '8/13', place: '대회의실', attendee: '연구진', emphasis: false,
     });
   });
 
@@ -205,8 +208,12 @@ d('writer — 표 편집', () => {
     fillTable(recs, 2, [['3-1', '특이 하나', '', '', '']]);
     const back = readWorklog(packHwp(src(), [serializeRecords(recs)]));
     expect(back.worklog.achievements.length).toBe(15);
-    expect(back.worklog.plans).toEqual([{ content: '계획 하나', date: '', place: '', attendee: '' }]);
-    expect(back.worklog.notes).toEqual([{ content: '특이 하나', date: '', place: '', attendee: '' }]);
+    expect(back.worklog.plans).toEqual([
+      { content: '계획 하나', date: '', place: '', attendee: '', emphasis: false },
+    ]);
+    expect(back.worklog.notes).toEqual([
+      { content: '특이 하나', date: '', place: '', attendee: '', emphasis: false },
+    ]);
   });
 });
 

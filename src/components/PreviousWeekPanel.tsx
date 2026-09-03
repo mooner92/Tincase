@@ -37,6 +37,8 @@ export interface PrevRow {
   date: string;
   place: string;
   attendee: string;
+  /** HM-37 — 지난번에 「공유」로 낸 줄이면 옮길 때도 따라온다 */
+  emphasis?: boolean;
 }
 export interface PrevItem {
   submissionId: string;

@@ -11,7 +11,8 @@ import { logger } from '@/server/logger';
 import { readStoredFile } from '@/server/storage';
 import { openHwp } from '@/lib/hwp/ole';
 import { parseRecords, serializeRecords } from '@/lib/hwp/record';
-import { fillTable, packHwp } from '@/lib/hwp/writer';
+import { fillTable, packHwp, plainShapeIdOf } from '@/lib/hwp/writer';
+import { BLUE, ensureColorShape } from '@/lib/hwp/charshape';
 import { uploadSubmission, ensureCurrentSlot } from '@/server/worklog';
 import { readWorklog } from '@/lib/hwp/reader';
 
@@ -25,6 +26,8 @@ interface Row {
   date?: unknown;
   place?: unknown;
   attendee?: unknown;
+  /** HM-37 — 「전체 공유·전달이 필요한 주요 사항」 — 문서에 파란색으로 나간다 */
+  emphasis?: unknown;
 }
 interface Body {
   achievements?: Row[];
@@ -42,15 +45,25 @@ function clean(v: unknown): string {
     .slice(0, MAX_CELL);
 }
 
-function toRows(list: Row[] | undefined, prefix: number): string[][] {
-  const rows = (list ?? [])
-    .map((r) => [clean(r.content), clean(r.date), clean(r.place), clean(r.attendee)])
-    .filter((r) => r.some(Boolean)); // 전부 빈 줄은 버린다
-  if (rows.length > MAX_ROWS) {
+/**
+ * HM-37 — 표 하나를 셀 격자 + **행별 강조**로. 둘을 같이 만드는 이유는 빈 줄을 버릴 때
+ * 두 배열의 길이가 어긋나면 안 되기 때문이다 — 따로 만들면 언젠가 한 칸씩 밀린다.
+ */
+function toRows(list: Row[] | undefined, prefix: number): { cells: string[][]; emphasis: boolean[] } {
+  const kept = (list ?? [])
+    .map((r) => ({
+      cells: [clean(r.content), clean(r.date), clean(r.place), clean(r.attendee)],
+      emphasis: r.emphasis === true,
+    }))
+    .filter((r) => r.cells.some(Boolean)); // 전부 빈 줄은 버린다
+  if (kept.length > MAX_ROWS) {
     throw new HttpError(422, 'too_many_rows', `한 표에 ${MAX_ROWS}행까지만 넣을 수 있습니다.`);
   }
-  // ABS-5 — 구분 채번은 언제나 시스템이 다시 만든다
-  return rows.map((r, i) => [`${prefix}-${i + 1}`, ...r]);
+  return {
+    // ABS-5 — 구분 채번은 언제나 시스템이 다시 만든다
+    cells: kept.map((r, i) => [`${prefix}-${i + 1}`, ...r.cells]),
+    emphasis: kept.map((r) => r.emphasis),
+  };
 }
 
 export const POST = handler(async (req: NextRequest) => {
@@ -63,7 +76,7 @@ export const POST = handler(async (req: NextRequest) => {
   const ach = toRows(body.achievements, 1);
   const plans = toRows(body.plans, 2);
   const notes = toRows(body.notes, 3);
-  if (ach.length === 0 && plans.length === 0 && notes.length === 0) {
+  if (ach.cells.length === 0 && plans.cells.length === 0 && notes.cells.length === 0) {
     throw new HttpError(422, 'empty_content', '내용을 한 줄 이상 적어 주세요.');
   }
 
@@ -73,7 +86,8 @@ export const POST = handler(async (req: NextRequest) => {
   if (!template) throw new HttpError(409, 'no_template', '등록된 부서 양식이 없습니다. 담당자에게 요청해 주세요.');
 
   const base = await readStoredFile(template.filePath);
-  const recs = parseRecords(openHwp(base).sections[0]);
+  const file = openHwp(base);
+  const recs = parseRecords(file.sections[0]);
   /*
    * WA-08 — 세 표를 **전부** 채운다. 빈 표라고 건너뛰지 않는다.
    *
@@ -84,17 +98,33 @@ export const POST = handler(async (req: NextRequest) => {
    *
    * `fillTable(recs, i, [])`는 머리행만 남기고 본문을 지운다 — 안 적은 표는 빈 표가 된다.
    */
-  [ach, plans, notes].forEach((rows, i) => fillTable(recs, i, rows));
-  const bytes = packHwp(base, [serializeRecords(recs)]);
+  /*
+   * HM-37 — 강조(파란색)가 하나라도 있으면 그 서식을 DocInfo에 만들어 넣는다.
+   * 없으면 DocInfo를 손대지 않는다 — 바꿀 이유가 없으면 건드리지 않는다.
+   */
+  const wantEmphasis = [ach, plans, notes].some((t) => t.emphasis.some(Boolean));
+  let docInfoOut: Buffer | undefined;
+  let blueShapeId: number | null = null;
+  if (wantEmphasis) {
+    const diRecs = parseRecords(file.docInfo);
+    const plain = plainShapeIdOf(recs, 0);
+    blueShapeId = plain === null ? null : ensureColorShape(diRecs, plain, BLUE);
+    if (blueShapeId !== null) docInfoOut = serializeRecords(diRecs);
+  }
+
+  [ach, plans, notes].forEach((t, i) =>
+    fillTable(recs, i, t.cells, { emphasis: t.emphasis, emphasisShapeId: blueShapeId }),
+  );
+  const bytes = packHwp(base, [serializeRecords(recs)], docInfoOut);
 
   // WA-05 — 생성물도 자체 검증을 통과해야 한다. 우리가 만든 것이라고 봐주지 않는다.
   // **세 표를 다 본다** — 실적만 보면 계획·특이사항이 어긋나도 통과한다
   const back = readWorklog(bytes);
   const got = back.worklog;
   const mismatch = [
-    ['실적', got.achievements.length, ach.length],
-    ['계획', got.plans.length, plans.length],
-    ['특이사항', got.notes.length, notes.length],
+    ['실적', got.achievements.length, ach.cells.length],
+    ['계획', got.plans.length, plans.cells.length],
+    ['특이사항', got.notes.length, notes.cells.length],
   ].filter(([, a, b]) => a !== b);
   if (mismatch.length > 0) {
     // 무엇이 어긋났는지 로그에 남긴다 — 「검증 실패」만으로는 다음에도 못 고친다
@@ -118,6 +148,6 @@ export const POST = handler(async (req: NextRequest) => {
   return json({
     ok: true,
     version: result.submission.version,
-    rows: { achievements: ach.length, plans: plans.length, notes: notes.length },
+    rows: { achievements: ach.cells.length, plans: plans.cells.length, notes: notes.cells.length },
   });
 });

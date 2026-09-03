@@ -11,6 +11,12 @@ export interface HwpCell {
   width: number;
   /** 다중 문단은 \n으로 join (HM-13) */
   text: string;
+  /**
+   * HM-37 — 이 셀 글자에 쓰인 **서식번호들**. 색은 여기 없다 —
+   * 번호를 색으로 바꾸려면 DocInfo가 필요하고, 그건 이 층이 모르는 것이다.
+   * 그래서 번호만 올려 보내고 해석은 reader가 한다.
+   */
+  shapeIds: number[];
 }
 
 export interface HwpTable {
@@ -42,11 +48,12 @@ export function extractTables(records: readonly HwpRecord[]): HwpTable[] {
     let rows = 0;
     let cols = 0;
     const cells: HwpCell[] = [];
-    let current: { cell: Omit<HwpCell, 'text'>; paras: string[] } | null = null;
+    let current: { cell: Omit<HwpCell, 'text' | 'shapeIds'>; paras: string[]; shapeIds: Set<number> } | null =
+      null;
 
     const flush = () => {
       if (!current) return;
-      cells.push({ ...current.cell, text: current.paras.join('\n') });
+      cells.push({ ...current.cell, text: current.paras.join('\n'), shapeIds: [...current.shapeIds] });
       current = null;
     };
 
@@ -69,10 +76,14 @@ export function extractTables(records: readonly HwpRecord[]): HwpTable[] {
               width: s.data.length >= 20 ? s.data.readUInt32LE(16) : 0,
             },
             paras: [],
+            shapeIds: new Set<number>(),
           };
         }
       } else if (s.tag === TAG.PARA_TEXT && current) {
         current.paras.push(paraText(s.data));
+      } else if (s.tag === TAG.PARA_CHAR_SHAPE && current) {
+        // (글자위치, 서식번호) 8바이트 쌍의 목록
+        for (let o = 0; o + 8 <= s.data.length; o += 8) current.shapeIds.add(s.data.readUInt32LE(o + 4));
       } else if (s.tag === TAG.CTRL_HEADER && ctrlId(s.data) === 'tbl ') {
         // 셀 안 중첩 표 — 이 양식엔 없어야 정상. 방어적으로 그 서브트리는 건너뛴다.
         let k = j + 1;

@@ -32,6 +32,14 @@ interface TableView {
    * 화면에서 숨기는 게 아니므로 여기서 `undefined`면 정말로 모르는 것이다
    */
   authors?: string[][];
+  /**
+   * HM-37 — 행별 강조(파란색). 본문 행과 나란하다.
+   *
+   * 「전체 공유·전달이 필요한 주요 사항」 표시다. 담당자가 여기서 보고 켜고 끌 수 있어야
+   * 하는 이유: 낸 사람이 표시를 빠뜨렸거나, 반대로 다 파랗게 칠해 놓아 강조가 강조를
+   * 잃은 경우를 **제출 직전에** 고칠 수 있는 유일한 자리가 여기다.
+   */
+  emphasis?: boolean[];
 }
 interface Content {
   title: string;
@@ -184,8 +192,27 @@ export function MergedDrawer({
     const tables = data.tables.map((t, i) =>
       i !== ti
         ? t
-        : { ...t, rows: t.rows.filter((_, j) => j !== ri + 1), authors: withoutAt(t.authors, ri) },
+        : {
+            ...t,
+            rows: t.rows.filter((_, j) => j !== ri + 1),
+            authors: withoutAt(t.authors, ri),
+            emphasis: withoutAt(t.emphasis, ri),
+          },
     );
+    setData({ ...data, tables });
+    setDirty(true);
+  };
+
+  /** HM-37 — 강조 켜고 끄기 */
+  const toggleEmphasis = (ti: number, ri: number) => {
+    if (!data) return;
+    const tables = data.tables.map((t, i) => {
+      if (i !== ti) return t;
+      const next = [...(t.emphasis ?? [])];
+      while (next.length < bodyRows(t).length) next.push(false);
+      next[ri] = !next[ri];
+      return { ...t, emphasis: next };
+    });
     setData({ ...data, tables });
     setDirty(true);
   };
@@ -202,6 +229,8 @@ export function MergedDrawer({
         rows: [t.rows[0], ...moveItem(body, from, to)],
         // 같은 (from, to)로 한 번 더 — 이게 작성자가 제 행을 따라가는 유일한 방법이다
         authors: t.authors ? moveItem(t.authors, from, to) : t.authors,
+        // HM-37 — 강조도 같이 옮긴다. 안 옮기면 순서를 바꾼 순간 엉뚱한 줄이 파래진다
+        emphasis: t.emphasis ? moveItem(t.emphasis, from, to) : t.emphasis,
       };
     });
     setData({ ...data, tables });
@@ -215,7 +244,10 @@ export function MergedDrawer({
     const res = await fetch('/api/division/merged/content', {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isoKey, tables: data.tables.map((t) => ({ key: t.key, rows: bodyRows(t) })) }),
+      body: JSON.stringify({
+        isoKey,
+        tables: data.tables.map((t) => ({ key: t.key, rows: bodyRows(t), emphasis: t.emphasis ?? [] })),
+      }),
     });
     if (!res.ok) {
       setErr((await res.json().catch(() => ({}))).message ?? '저장하지 못했습니다.');
@@ -347,6 +379,7 @@ export function MergedDrawer({
                             </th>
                           ))}
                           {showAuthors && <th className="w-[15%] px-3 py-2 font-medium whitespace-nowrap">작성자</th>}
+                          <th className="w-16 px-1 py-2 text-center font-medium whitespace-nowrap">공유</th>
                           {canEdit && <th className="w-8" />}
                         </tr>
                       </thead>
@@ -414,10 +447,22 @@ export function MergedDrawer({
                                       fit(e.target);
                                       edit(ti, ri, ci, e.target.value);
                                     }}
-                                    className="block w-full resize-none overflow-hidden rounded border border-transparent bg-transparent px-2 py-1.5 text-sm leading-snug text-ink hover:border-hairline focus:border-ink focus:bg-canvas focus:outline-none"
+                                    /*
+                                      HM-37 — 강조 줄의 내용 칸은 **화면에서도 파랗게** 보인다.
+                                      문서에서 파란색인 것을 화면에서는 회색 배지로만 알리면,
+                                      담당자가 «제출본이 어떻게 보이는지»를 확인할 길이 없다.
+                                      실제 색(#0000ff)을 그대로 쓴다 — 비슷한 파랑이 아니라.
+                                    */
+                                    className={`block w-full resize-none overflow-hidden rounded border border-transparent bg-transparent px-2 py-1.5 text-sm leading-snug hover:border-hairline focus:border-ink focus:bg-canvas focus:outline-none ${
+                                      ci === 1 && t.emphasis?.[ri] ? 'font-medium text-[#0000ff]' : 'text-ink'
+                                    }`}
                                   />
                                 ) : (
-                                  <span className="block px-2 py-1.5 whitespace-nowrap tabular-nums text-body">
+                                  <span
+                                    className={`block px-2 py-1.5 whitespace-nowrap tabular-nums ${
+                                      ci === 1 && t.emphasis?.[ri] ? 'font-medium text-[#0000ff]' : 'text-body'
+                                    }`}
+                                  >
                                     {/*
                                       구분 번호는 **자리로 계산한다** (canEdit일 때).
                                       서버가 준 값을 그대로 두면 순서를 바꾸거나 행을 지운 뒤
@@ -441,6 +486,25 @@ export function MergedDrawer({
                                 )}
                               </td>
                             )}
+                            <td className="px-1 py-0.5 text-center align-top">
+                              {canEdit ? (
+                                <button
+                                  onClick={() => toggleEmphasis(ti, ri)}
+                                  aria-pressed={t.emphasis?.[ri] === true}
+                                  aria-label={`${rowNo(t.key, ri)}행 공유 표시`}
+                                  title="전체 공유·전달이 필요한 주요 사항 — 문서에 파란색으로 나갑니다"
+                                  className={`rounded border px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap transition-colors ${
+                                    t.emphasis?.[ri]
+                                      ? 'border-[#0000ff] bg-[#0000ff] text-white'
+                                      : 'border-hairline bg-canvas text-muted-soft hover:border-ink hover:text-ink'
+                                  }`}
+                                >
+                                  공유
+                                </button>
+                              ) : t.emphasis?.[ri] ? (
+                                <span className="text-[11px] font-semibold text-[#0000ff]">공유</span>
+                              ) : null}
+                            </td>
                             {canEdit && (
                               <td className="px-1 py-0.5 align-top">
                                 <button

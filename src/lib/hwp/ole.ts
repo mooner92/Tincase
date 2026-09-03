@@ -27,6 +27,13 @@ export interface HwpFile {
   compressed: boolean;
   /** BodyText/Section{n} 압축 해제된 레코드 스트림, n 오름차순 */
   sections: Buffer[];
+  /**
+   * DocInfo 압축 해제 스트림 (HM-37).
+   *
+   * 글자 서식(색·굵기·글꼴)은 본문이 아니라 **여기**에 있다. 본문은 「몇 번 서식」이라는
+   * 번호만 들고 있어서, 파란 글자를 알아보려면 이 스트림을 같이 읽어야 한다.
+   */
+  docInfo: Buffer;
   /** PrvText 평문 (있으면) — 디버깅·폴백용, 정본 아님 */
   previewText: string | null;
 }
@@ -99,8 +106,21 @@ export function openHwp(buf: Buffer): HwpFile {
     }
   }
 
+  const diRaw = streamOf(cf, 'DocInfo');
+  if (!diRaw) throw new HwpFormatError('no_body', 'DocInfo가 없습니다');
+  let docInfo: Buffer;
+  if (compressed) {
+    try {
+      docInfo = inflateRawSync(diRaw);
+    } catch {
+      throw new HwpFormatError('decompress_failed', 'DocInfo 압축 해제에 실패했습니다');
+    }
+  } else {
+    docInfo = diRaw;
+  }
+
   const prv = streamOf(cf, 'PrvText');
   const previewText = prv ? prv.toString('utf16le').replace(/\0+$/, '') : null;
 
-  return { version, compressed, sections, previewText };
+  return { version, compressed, sections, docInfo, previewText };
 }

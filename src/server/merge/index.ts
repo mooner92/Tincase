@@ -9,7 +9,8 @@ import { readStoredFile, writeFileAtomic, sanitizeSegment } from '../storage';
 import { readWorklog } from '@/lib/hwp/reader';
 import { openHwp } from '@/lib/hwp/ole';
 import { parseRecords, serializeRecords } from '@/lib/hwp/record';
-import { fillTable, packHwp } from '@/lib/hwp/writer';
+import { fillTable, packHwp, plainShapeIdOf } from '@/lib/hwp/writer';
+import { BLUE, ensureColorShape } from '@/lib/hwp/charshape';
 import { toPlan, orderPeople } from './rules';
 import { groupDuplicates, MergeRow, GroupingResult } from './model';
 import type { RowGroup } from './dedupe';
@@ -29,6 +30,8 @@ export interface MergedGroup {
   /** 원문들 (검토 화면에서 나란히 보여준다) */
   sources: { who: string; content: string }[];
   reason: string;
+  /** HM-37 — 이 줄이 「전체 공유·전달이 필요한 주요 사항」인가 */
+  emphasis: boolean;
   /** HM-36 — `sources` 중 문서에 들어간 것의 자리 */
   keptIndex: number;
   /** HM-36 — 원문이 글자까지 똑같았는가. 참이면 잃은 것이 없어 확인할 것도 없다 */
@@ -81,15 +84,41 @@ interface Tagged extends MergeRow {
  * 두 곳이 각자 만들면 "병합한 것"과 "고친 것"의 결과가 미묘하게 달라진다 —
  * 표를 지우는 조건, 채번 방식 같은 것들이 갈라진다. 그래서 여기 하나로 모은다.
  */
-export function composeMergedHwp(templateBytes: Buffer, tableRows: Record<Bucket, string[][]>): {
+export function composeMergedHwp(
+  templateBytes: Buffer,
+  tableRows: Record<Bucket, string[][]>,
+  /** HM-37 — 표별 행 강조 여부. 안 주면 전부 보통 */
+  emphasis?: Partial<Record<Bucket, boolean[]>>,
+): {
   bytes: Buffer;
   tableCount: number;
   warnings: string[];
 } {
   const warnings: string[] = [];
-  const section = openHwp(templateBytes).sections[0];
-  const recs = parseRecords(section);
+  const file = openHwp(templateBytes);
+  const recs = parseRecords(file.sections[0]);
   const tableCount = countTables(recs);
+
+  /*
+   * HM-37 — 강조 서식은 **필요할 때만** 만든다.
+   *
+   * 강조가 하나도 없는 주에까지 DocInfo를 건드리면, 바꿀 이유가 없는데 바꾸는 것이다 —
+   * 그런 변경은 언젠가 조용히 뭔가를 깨뜨린다. 그래서 `docInfoOut`은 기본이 undefined이고,
+   * 그 경우 `packHwp`가 원본 DocInfo를 그대로 둔다.
+   */
+  const wantEmphasis = BUCKETS.some((b) => emphasis?.[b]?.some(Boolean));
+  let docInfoOut: Buffer | undefined;
+  let blueShapeId: number | null = null;
+  if (wantEmphasis) {
+    const diRecs = parseRecords(file.docInfo);
+    const plain = plainShapeIdOf(recs, 0);
+    blueShapeId = plain === null ? null : ensureColorShape(diRecs, plain, BLUE);
+    if (blueShapeId === null) {
+      warnings.push('강조(파란색) 서식을 만들지 못해 강조 없이 병합했습니다.');
+    } else {
+      docInfoOut = serializeRecords(diRecs);
+    }
+  }
 
   BUCKETS.forEach((bucket, i) => {
     if (i >= tableCount) {
@@ -108,10 +137,17 @@ export function composeMergedHwp(templateBytes: Buffer, tableRows: Record<Bucket
      *
      * `fillTable(recs, i, [])`는 머리행만 남기고 본문을 지운다 (2026-08-26 실측).
      */
-    fillTable(recs, i, tableRows[bucket]);
+    fillTable(recs, i, tableRows[bucket], {
+      emphasis: emphasis?.[bucket],
+      emphasisShapeId: blueShapeId,
+    });
   });
 
-  return { bytes: packHwp(templateBytes, [serializeRecords(recs)]), tableCount, warnings };
+  return {
+    bytes: packHwp(templateBytes, [serializeRecords(recs)], docInfoOut),
+    tableCount,
+    warnings,
+  };
 }
 
 export function mergedRelPath(divisionSlug: string, year: number, weekLabel: string): string {
@@ -209,7 +245,16 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
       // 새로 쓰는 게 아니다. "보도자료 배포"와 "보도자료 배포(2건) 8/13"이 묶이면
       // 후자를 남겨야 읽는 사람이 잃는 게 없다.
       const best = pickRepresentative(members);
+      /*
+       * HM-37 — **한 사람이라도 강조했으면 강조로 남는다.**
+       *
+       * 두 사람이 같은 일을 적었는데 한 명만 파랗게 표시했다면, 그 표시는 «이건 공유돼야
+       * 한다»는 판단이다. 대표로 안 뽑힌 쪽의 표시라고 버리면 그 판단이 사라진다 —
+       * HM-36에서 「잃는 쪽이 늘 더 나쁘다」고 정한 것과 같은 이유다.
+       */
+      const emphasized = members.some((m) => m.raw.emphasis === true);
       grouped[bucket].push({
+        emphasis: emphasized,
         row: best.raw,
         authors: [...new Set(members.map((m) => m.who))],
         category: '',
@@ -255,6 +300,7 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
   const src = await readStoredFile(template.filePath);
 
   const tableRows: Record<Bucket, string[][]> = { achievements: [], plans: [], notes: [] };
+  const rowEmphasis: Record<Bucket, boolean[]> = { achievements: [], plans: [], notes: [] };
   BUCKETS.forEach((bucket, tableIdx) => {
     const prefix = tableIdx + 1;
     const body = grouped[bucket].map((g, i) => [
@@ -265,12 +311,16 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
       g.row.attendee,
     ]);
     tableRows[bucket] = body;
+    rowEmphasis[bucket] = grouped[bucket].map((g) => g.emphasis);
   });
 
   // 특이사항이 비면 3번 표를 지운다 — 실제 제출물의 관례 (sample-filled-w1에 3번 표가 없다)
-  if (plan.dropEmptyNotes && grouped.notes.length === 0) tableRows.notes = [];
+  if (plan.dropEmptyNotes && grouped.notes.length === 0) {
+    tableRows.notes = [];
+    rowEmphasis.notes = [];
+  }
 
-  const composed = composeMergedHwp(src, tableRows);
+  const composed = composeMergedHwp(src, tableRows, rowEmphasis);
   warnings.push(...composed.warnings);
   const out = composed.bytes;
   const tableCount = composed.tableCount;
