@@ -251,3 +251,53 @@ d('HM-37 병합까지 살아남는가 — 끝에서 끝까지', () => {
     expect(readWorklog(twice.bytes).worklog.achievements[0].emphasis).toBe(true);
   });
 });
+
+/**
+ * HM-39 — 한 칸에 **두 줄**을 적은 제출물.
+ *
+ * 2026-09-03 14:01, 자동 병합이 1분마다 재시도하며 계속 실패했다:
+ *   「결과 검증 실패 — 1번 표 24행의 내용이 다릅니다」
+ *
+ * 한 부서원이 낸 칸이 두 줄이었다. 읽으면 `\n`이 들어오는데(HM-13), 그걸 그대로 써 넣으면
+ * 0x0A로 저장되고, **다시 읽을 때 다른 제어 문자와 같이 버려졌다.** 그래서 자체 점검이
+ * 「내용이 다르다」로 판단하고 그 주 병합이 통째로 멈췄다.
+ *
+ * 아무도 코드를 건드리지 않았는데 **어느 주 갑자기 멈추는** 종류다 — 두 줄짜리 칸을
+ * 낸 사람이 그날 처음 있었을 뿐이다. 그래서 왕복으로 못박는다.
+ */
+d('HM-39 한 칸 두 줄 — 줄바꿈이 살아남는다', () => {
+  const two = '국립세종도서관 정책정보종합목록 구축 자료 제공\n2026년 1월~현재 도서관 소장자료';
+
+  function roundTrip(text: string): string {
+    const src = readFileSync(TEMPLATE);
+    const recs = parseRecords(openHwp(src).sections[0]);
+    fillTable(recs, 0, [['1-1', text, '', '', '']]);
+    return readWorklog(packHwp(src, [serializeRecords(recs)])).worklog.achievements[0].content;
+  }
+
+  it('[HM-T90] 줄바꿈이 든 칸이 **그대로** 왕복한다 — 이게 그날의 버그다', () => {
+    expect(roundTrip(two)).toBe(two);
+  });
+
+  it('[HM-T91] 줄바꿈이 없는 칸은 전과 같다', () => {
+    expect(roundTrip('보통 한 줄짜리 업무')).toBe('보통 한 줄짜리 업무');
+  });
+
+  it('[HM-T92] 세 줄도 된다 — 두 줄만 맞춘 것이 아니다', () => {
+    const three = '첫 줄\n둘째 줄\n셋째 줄';
+    expect(roundTrip(three)).toBe(three);
+  });
+
+  it('[HM-T93] 줄바꿈 + 강조가 함께 살아남는다', () => {
+    const src = readFileSync(TEMPLATE);
+    const file = openHwp(src);
+    const recs = parseRecords(file.sections[0]);
+    const diRecs = parseRecords(file.docInfo);
+    const blue = ensureColorShape(diRecs, plainShapeIdOf(recs, 0)!, BLUE);
+    fillTable(recs, 0, [['1-1', two, '', '', '']], { emphasis: [true], emphasisShapeId: blue });
+    const back = readWorklog(packHwp(src, [serializeRecords(recs)], serializeRecords(diRecs)))
+      .worklog.achievements[0];
+    expect(back.content).toBe(two);
+    expect(back.emphasis).toBe(true);
+  });
+});
