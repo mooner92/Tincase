@@ -4,6 +4,9 @@ import { prisma } from '@/server/db';
 import type { Division } from '@prisma/client';
 import { divisionStatus, divisionSlots, effectiveDeadline, ensureCurrentSlot } from '@/server/worklog';
 import { formatDeadlineKo, isLocked, toKstIso, currentWeek, slotKind } from '@/lib/week';
+import { isOpenNow, OPEN_MINUTES } from '@/lib/deadline';
+import { openingOf } from '@/server/deadline';
+import { DeadlineOpener } from '@/components/DeadlineOpener';
 import { CopyMissingButton } from '@/components/CopyMissingButton';
 import { SlotSelector } from '@/components/SlotSelector';
 import { SubmissionTableClient, type MemberRow } from '@/components/SubmissionTableClient';
@@ -75,7 +78,12 @@ export async function ManageView({
   };
 
   const deadline = effectiveDeadline(slot, division);
-  const locked = isLocked({ opensAt: slot.opensAt }, division, now);
+  const closed = isLocked({ opensAt: slot.opensAt }, division, now);
+  // DM-20 — 담당자가 잠시 열어 두었는가
+  const opening = await openingOf(division.id, slot.id);
+  const opened = isOpenNow(opening, now);
+  const locked = closed && !opened;
+  const openUntilKo = opening ? toKstIso(opening.openUntil).slice(11, 16) : null;
   const missing = members.filter((m) => m.status === 'missing').map((m) => m.user.name);
   const pct = summary.roster > 0 ? Math.round((summary.submitted / summary.roster) * 100) : 0;
   // DM-17 — 병합·zip은 **모인 파일 전부**를 다룬다 (명단 밖 제출 포함).
@@ -146,11 +154,32 @@ export async function ManageView({
                 locked ? 'bg-white/10 text-white/70' : 'bg-white/15 text-brand-tint'
               }`}
             >
-              {locked ? '마감됨' : '진행 중'} · {formatDeadlineKo(deadline)}
+              {/* 열려 있을 땐 원래 마감 날짜가 아니라 **언제까지인지**가 알아야 할 것이다 */}
+              {opened
+                ? `열어 둠 · ${openUntilKo}까지`
+                : `${locked ? '마감됨' : '진행 중'} · ${formatDeadlineKo(deadline)}`}
             </span>
             <CopyMissingButton names={missing} />
+            {/*
+              DM-20 — 마감이 지난 뒤에만 보인다. 마감 전에는 누구나 낼 수 있으므로
+              열 것이 없고, 그때 버튼이 있으면 «지금도 잠겨 있나?»로 읽힌다 (TACP-9).
+            */}
+            {canMerge && closed && (
+              <DeadlineOpener
+                open={opened}
+                openUntilKo={openUntilKo}
+                openedBy={opening?.openedBy ?? null}
+                minutes={OPEN_MINUTES}
+              />
+            )}
           </div>
         </div>
+        {opened && (
+          <p className="mt-4 rounded-xl bg-white/15 px-4 py-2.5 text-sm text-white">
+            <strong className="font-semibold">마감을 열어 두었습니다</strong> — {openUntilKo}까지 부서원 누구나
+            제출할 수 있습니다. 시각이 지나면 저절로 닫히고, 닫힌 뒤 병합이 한 번 더 돕니다.
+          </p>
+        )}
         <div
           className="mt-5 h-2 w-full overflow-hidden rounded-full bg-white/15"
           role="progressbar"

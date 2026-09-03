@@ -16,7 +16,10 @@ export type AuditAction =
   | 'password_reset'
   | 'notify_pref'
   /** RS-13 — ERP 엑셀로 인원을 최신화했다. 누가·언제·몇 명을 바꿨는지 남는다 */
-  | 'roster_sync';
+  | 'roster_sync'
+  /** DM-20 — 담당자가 마감을 잠시 열었다·닫았다. **예외에는 언제나 이름이 붙는다** */
+  | 'deadline_open'
+  | 'deadline_close';
 
 export async function audit(
   actor: string,

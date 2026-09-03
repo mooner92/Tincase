@@ -5,6 +5,8 @@ import { getPageScope, getDivisionView } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { ensureCurrentSlot, effectiveDeadline, divisionStatus } from '@/server/worklog';
 import { formatDeadlineKo, formatSubmittedKo, isLocked, slotKind, toKstIso } from '@/lib/week';
+import { isOpenNow } from '@/lib/deadline';
+import { openingOf } from '@/server/deadline';
 import { DeadlineCountdown } from '@/components/DeadlineCountdown';
 import { SubmitChoice } from '@/components/SubmitChoice';
 import { MySubmissionCard } from '@/components/MySubmissionCard';
@@ -27,7 +29,13 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
 
   const slot = await ensureCurrentSlot(now);
   const deadline = effectiveDeadline(slot, division);
-  const locked = isLocked({ opensAt: slot.opensAt }, division, now);
+  /*
+   * DM-20 — 담당자가 마감을 잠시 열어 두었으면 낼 수 있다.
+   * **부서원 화면에도 보여야 한다** — 열어 놓고 알리지 않으면 아무도 안 낸다.
+   */
+  const opening = await openingOf(division.id, slot.id);
+  const opened = isOpenNow(opening, now);
+  const locked = isLocked({ opensAt: slot.opensAt }, division, now) && !opened;
   const nextOpens = new Date(slot.opensAt.getTime() + 7 * 86400_000);
 
   const [mySubmission, template, { members, extras }] = await Promise.all([
@@ -79,6 +87,11 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
         <div className="flex items-center gap-2 pb-1.5">
           {locked ? (
             <span className="badge-pill bg-surface-strong">마감됨 · {formatDeadlineKo(deadline)}</span>
+          ) : opened ? (
+            /* 마감은 지났지만 담당자가 열어 두었다 — 언제까지인지가 제일 중요하다 */
+            <span className="badge-pill border-warning/50 bg-warning-soft text-ink">
+              마감 후 열림 · {opening ? toKstIso(opening.openUntil).slice(11, 16) : ''}까지
+            </span>
           ) : (
             <>
               <span className="badge-pill">마감 {formatDeadlineKo(deadline)}</span>

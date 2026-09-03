@@ -4,7 +4,8 @@ import type { Division, User } from '@prisma/client';
 import { verifyAccess } from './auth';
 import { prisma } from './db';
 import { audit } from './audit';
-import { isLocked } from '@/lib/week';
+import { openingOf } from './deadline';
+import { isSubmissionLocked } from '@/lib/deadline';
 
 export class HttpError extends Error {
   constructor(
@@ -191,7 +192,9 @@ export async function requireDeletableSubmission(scope: Scope, submissionId: str
   // 여기부터는 본인만이다. lead·coordinator는 남의 것을 읽어도 지우지 못한다
   if (sub.userId !== scope.user.id) throw notFound();
 
-  if (isLocked({ opensAt: sub.weekSlot.opensAt }, sub.division)) {
+  const open = await openingOf(sub.division.id, sub.weekSlot.id);
+  // DM-20 — 열려 있으면 지우기도 열린다. 「제출할 수 있는데 못 지우는」 상태는 설명이 안 된다
+  if (isSubmissionLocked({ opensAt: sub.weekSlot.opensAt }, sub.division, open)) {
     throw new HttpError(
       409,
       'slot_locked',

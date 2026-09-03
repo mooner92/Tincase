@@ -3,10 +3,12 @@ import type { Division, Submission, User, WeekSlot } from '@prisma/client';
 import { prisma } from './db';
 import { audit } from './audit';
 import { logger } from './logger';
-import { currentWeek, deadlineFor, isLocked, toKstIso } from '@/lib/week';
+import { currentWeek, deadlineFor, toKstIso } from '@/lib/week';
 import { validateHwpUpload, UploadValidationError } from '@/lib/hwp/reader';
 import { env } from './env';
 import { HttpError } from './authz';
+import { openingOf } from './deadline';
+import { isSubmissionLocked } from '@/lib/deadline';
 import { resolveInRoot, sha256, submissionRelPath, writeFileAtomic } from './storage';
 import { unlink } from 'node:fs/promises';
 
@@ -53,8 +55,15 @@ export async function uploadSubmission(input: UploadInput, now = new Date()): Pr
 
   const slot = await ensureCurrentSlot(now);
 
-  // API-11 — 마감은 서버가 최종 판정. 예외 경로 없음
-  if (isLocked({ opensAt: slot.opensAt }, division, now)) {
+  /*
+   * API-11 — 마감은 서버가 최종 판정.
+   *
+   * DM-20 — 예외는 **하나뿐이다**: 담당자가 그 주차를 잠시 열어 둔 경우.
+   * 그때도 내는 사람은 본인이고 시각이 지나면 저절로 닫힌다 — 「예외 없음」이
+   * 「담당자가 이름을 걸고 연 30분」으로 바뀐 것이지 사라진 게 아니다.
+   */
+  const open = await openingOf(division.id, slot.id);
+  if (isSubmissionLocked({ opensAt: slot.opensAt }, division, open, now)) {
     await audit(user.email, 'reject', division.id, `slot:${slot.isoKey}`, { reason: 'slot_locked' });
     throw new HttpError(409, 'slot_locked', '마감되어 제출되지 않았습니다. 다음 주차에 제출해 주세요.');
   }

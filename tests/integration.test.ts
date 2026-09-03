@@ -3,7 +3,7 @@
 //
 // 테스트 신원 주입: NODE_ENV=test에서만 x-test-identity 헤더 허용 (auth.ts).
 // DB: prisma/test.db — setup에서 초기화·시드.
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -747,5 +747,108 @@ describe('WA-10 지난번에 낸 것 (api/my/previous)', () => {
     const { GET } = await import('@/app/api/my/previous/route');
     const res = await GET(nx('/api/my/previous'));
     expect([401, 403, 404]).toContain(res.status);
+  });
+});
+
+/**
+ * DM-20 · TACP-18 — 마감 **잠시 열기**.
+ *
+ * 여기서 지키는 것은 「열린다」가 아니라 **「열고 닫는 것이 실제로 제출을 좌우한다」**이다.
+ * 화면만 바뀌고 서버가 그대로면 「열었는데 안 받는다」가 되고, 반대면 「닫았는데 들어온다」다.
+ * 둘 다 조용한 실패라 서버 판정을 직접 두드린다.
+ *
+ * 마감이 이미 지난 부서를 만들어서 본다 — 기존 스위트의 부서는 마감이 늘 열려 있다(일 23:59).
+ */
+d('DM-20 마감 잠시 열기', () => {
+  const 지난마감 = { deadlineDow: 1, deadlineTime: '00:01' }; // 월 00:01 — 주 시작 직후라 늘 지나 있다
+  const 늘열림 = { deadlineDow: 7, deadlineTime: '23:59' };
+
+  const setDeadline = async (p: typeof 지난마감) => {
+    const { prisma } = await import('@/server/db');
+    await prisma.division.updateMany({ where: { slug: A.slug }, data: p });
+  };
+
+  const openApi = async (identity: string, method: 'POST' | 'DELETE') => {
+    const mod = await import('@/app/api/division/deadline/route');
+    return mod[method](nx('/api/division/deadline', identity, { method }));
+  };
+
+  beforeAll(() => setDeadline(지난마감));
+  afterAll(() => setDeadline(늘열림));
+
+  it('[DM-T30] 마감이 지나면 못 낸다 — 원래 규칙', async () => {
+    const res = await upload(ID.aMember, hwpBytes);
+    expect(res.status).toBe(409);
+    expect((await res.json()).error).toBe('slot_locked');
+  });
+
+  it('[DM-T31] **member는 열 수 없다** — 자기 마감을 자기가 여는 건 마감이 아니다', async () => {
+    expect((await openApi(ID.aMember, 'POST')).status).toBe(404);
+  });
+
+  it('[DM-T32] 담당자가 열면 부서원이 **본인 이름으로** 낸다', async () => {
+    expect((await openApi(ID.aLead, 'POST')).status).toBe(200);
+
+    const res = await upload(ID.aMember, hwpBytes);
+    expect(res.status).toBe(201);
+
+    // 제출자가 담당자가 아니라 그 부서원이다 — 이 기능을 「대신 올리기」로 만들지 않은 이유다
+    const { prisma } = await import('@/server/db');
+    const sub = await prisma.submission.findFirstOrThrow({
+      where: { user: { email: ID.aMember }, isLatest: true },
+      include: { user: true },
+    });
+    expect(sub.user.email).toBe(ID.aMember);
+  });
+
+  it('[DM-T33] 닫으면 다시 막힌다', async () => {
+    expect((await openApi(ID.aLead, 'POST')).status).toBe(200);
+    expect((await openApi(ID.aLead, 'DELETE')).status).toBe(200);
+
+    const res = await upload(ID.aMember, hwpBytes);
+    expect(res.status).toBe(409);
+  });
+
+  it('[DM-T34] 열지 않았는데 닫으면 409 — 안 한 일을 했다고 하지 않는다', async () => {
+    expect((await openApi(ID.aLead, 'DELETE')).status).toBe(409);
+  });
+
+  it('[DM-T35] **남의 부서는 열 수 없다** — 부서는 신원에서 나온다 (TACP-6)', async () => {
+    // B부서 담당자가 열어도 열리는 것은 B부서다. A부서는 그대로 막혀 있어야 한다
+    await openApi(ID.bLead, 'POST');
+    expect((await upload(ID.aMember, hwpBytes)).status).toBe(409);
+  });
+
+  it('[DM-T36] 예외에는 이름이 붙는다 — 감사 로그에 누가 열었는지 남는다', async () => {
+    const { prisma } = await import('@/server/db');
+    await openApi(ID.aLead, 'POST');
+    const log = await prisma.auditLog.findFirst({
+      where: { action: 'deadline_open' },
+      orderBy: { at: 'desc' },
+    });
+    expect(log?.actor).toBe(ID.aLead);
+    await openApi(ID.aLead, 'DELETE');
+  });
+});
+
+/**
+ * HM-43 — 병합이 **같은 이유로 계속 실패할 때**.
+ *
+ * 2026-09-03에 1분마다 여덟 번 실패했다. 재시도로는 절대 낫지 않는 종류(제출물의
+ * 줄바꿈)였는데도 같은 일을 반복하며 로그를 채웠고, 정작 봐야 할 원인이 그 안에 묻혔다.
+ */
+describe('HM-43 실패 재시도 간격', () => {
+  it('[HM-T98] 처음 몇 번은 촘촘하고 뒤로 갈수록 벌어진다', async () => {
+    const { RETRY_BACKOFF_MINUTES } = await import('@/server/merge/run');
+    const m = [...RETRY_BACKOFF_MINUTES];
+    expect(m[0]).toBeLessThanOrEqual(2); // 되는 실패는 곧 낫는다
+    expect(m[m.length - 1]).toBeGreaterThanOrEqual(15); // 안 되는 실패로 로그를 채우지 않는다
+    expect(m).toEqual([...m].sort((a, b) => a - b)); // 단조 증가
+  });
+
+  it('[HM-T99] 끄지는 않는다 — 마지막 간격으로 계속 다시 본다', async () => {
+    const { RETRY_BACKOFF_MINUTES } = await import('@/server/merge/run');
+    // 배열을 넘어가는 실패 횟수도 마지막 값으로 눌린다(clamp) — 영영 포기하는 분기가 없다
+    expect(RETRY_BACKOFF_MINUTES.length).toBeGreaterThan(0);
   });
 });

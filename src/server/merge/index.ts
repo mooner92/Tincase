@@ -412,6 +412,30 @@ function countTables(recs: ReturnType<typeof parseRecords>): number {
 }
 
 /**
+ * HM-41 — 어긋난 곳을 사람이 읽을 수 있게. 「누가·무엇이·어떻게」 셋 다 넣는다.
+ *
+ * 제어 문자는 보이지 않아서 **이름으로 적는다** — 오늘 사고가 정확히 눈에 안 보이는
+ * 글자(줄바꿈) 때문이었고, 원문을 그대로 찍었어도 화면에서는 똑같아 보였을 것이다.
+ */
+function describeMismatch(g: MergedGroup, got: string | undefined): string {
+  const who = g.authors.join('·') || '작성자 미상';
+  if (got === undefined) return `${who} 님의 줄이 아예 빠졌습니다`;
+
+  const show = (t: string) =>
+    t
+      .replace(/\n/g, '⏎')
+      .replace(/\t/g, '⇥')
+      .replace(/[\u0000-\u001f]/g, (c) => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`)
+      .slice(0, 60);
+
+  // 처음으로 갈라지는 자리 — 긴 줄에서 어디가 문제인지 바로 보이게
+  let i = 0;
+  while (i < g.row.content.length && i < got.length && g.row.content[i] === got[i]) i++;
+  const 자리 = `${i + 1}번째 글자부터`;
+  return `${who} 님, ${자리} 「${show(g.row.content.slice(i))}」가 「${show(got.slice(i))}」로 바뀌었습니다`;
+}
+
+/**
  * HM-22 — 저장 전 자체 점검. **4번(내용 무손실)이 핵심이다.**
  * 실패하면 저장하지 않는다. 잘못된 병합본이 나가는 것보다 안 나가는 편이 낫다.
  */
@@ -431,7 +455,17 @@ function verifyMerged(out: Buffer, grouped: Record<Bucket, MergedGroup[]>, table
     const got = back.worklog[bucket];
     for (const [k, g] of want.entries()) {
       if (got[k]?.content !== g.row.content) {
-        return `${i + 1}번 표 ${k + 1}행의 내용이 다릅니다`;
+        /*
+         * HM-41 — **누구의 어느 글자가 어긋났는지까지 말한다.**
+         *
+         * 예전 문구는 「1번 표 24행의 내용이 다릅니다」였다. 2026-09-03에 이 문구만 보고는
+         * 아무도 원인을 알 수 없었고(줄바꿈이 든 칸이었다), 그동안 자동 병합이 1분마다
+         * 재시도하며 그 주 병합이 통째로 멈춰 있었다.
+         *
+         * 담당자가 화면에서 이 문장 하나로 **그 사람에게 연락할 수 있어야** 한다.
+         * 진단이 안 되는 오류 메시지는 오류를 두 번 나게 한다.
+         */
+        return `${i + 1}번 표 ${k + 1}행이 그대로 들어가지 않았습니다 — ${describeMismatch(g, got[k]?.content)}`;
       }
     }
     if (got.length < want.length) return `${i + 1}번 표에서 행이 사라졌습니다 (${want.length} → ${got.length})`;

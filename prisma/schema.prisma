@@ -49,9 +49,10 @@ model Division {
   createdAt   DateTime     @default(now())
   users       User[]
   templates   Template[]
-  submissions Submission[]
-  mergeRuns   MergeRun[]
-  notifyLogs  NotifyLog[]
+  submissions  Submission[]
+  mergeRuns    MergeRun[]
+  notifyLogs   NotifyLog[]
+  slotOpenings SlotOpening[]
 }
 
 model User {
@@ -122,9 +123,10 @@ model WeekSlot {
   opensAt     DateTime // 월 00:00 KST (UTC 저장)
   createdAt   DateTime @default(now())
 
-  submissions Submission[]
-  mergeRuns   MergeRun[]
-  notifyLogs  NotifyLog[]
+  submissions  Submission[]
+  mergeRuns    MergeRun[]
+  notifyLogs   NotifyLog[]
+  slotOpenings SlotOpening[]
 
   @@index([opensAt])
 }
@@ -189,6 +191,24 @@ model StandardTemplate {
 }
 
 // Phase 2 선반영 (마이그레이션 1회 절약)
+/// DM-20 — 담당자가 **그 주차 마감을 잠시 연** 기록 (TACP-18).
+/// 부서·주차마다 하나. 늦게 낸 사람이 **본인 이름으로** 낼 수 있게 하는 유일한 길이다.
+model SlotOpening {
+  id          String   @id @default(cuid())
+  divisionId  String
+  weekSlotId  String
+  /// 이 시각까지 열려 있다. 「지금 닫기」는 이 값을 현재로 당긴다
+  openUntil   DateTime
+  /// 누가 열었나 — 예외에는 언제나 이름이 붙는다
+  openedBy    String
+  openedAt    DateTime @default(now())
+
+  division Division @relation(fields: [divisionId], references: [id])
+  weekSlot WeekSlot @relation(fields: [weekSlotId], references: [id])
+
+  @@unique([divisionId, weekSlotId])
+}
+
 model MergeRun {
   id           String    @id @default(cuid())
   divisionId   String

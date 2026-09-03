@@ -15,10 +15,16 @@
 
 import { prisma } from '../db';
 import { runMerge, MergeUnavailable, MergeFailed, type MergeOutcome } from './index';
-import { effectiveDeadline } from '../worklog';
+import { mergeGateOf } from '../deadline';
 
 /** HM-35 — 마감 후 이만큼 지나서 시작한다. 마감 정각에 들어온 제출이 커밋될 시간 */
 export const MERGE_DELAY_MINUTES = 1;
+
+/**
+ * HM-43 — 연속 실패 n번째 뒤 **다음 시도까지 기다리는 분**.
+ * 되는 실패(모델 시간 초과)는 곧 낫고, 안 되는 실패(제출물 문제)는 사람이 봐야 한다.
+ */
+export const RETRY_BACKOFF_MINUTES = [1, 5, 15, 30] as const;
 
 export interface MergeRunResult {
   runId: string;
@@ -140,7 +146,12 @@ export async function runDueMerges(now = new Date()): Promise<{ ran: number; ski
   let skipped = 0;
 
   for (const division of divisions) {
-    const deadline = effectiveDeadline(slot, division);
+    /*
+     * DM-20 — 담당자가 마감을 잠시 열었으면 **닫히는 시각이 새 마감 이벤트**다.
+     * 열려 있는 동안에는 돌지 않고(받는 중에 만들 이유가 없다), 닫히면 1분 뒤 한 번 돈다.
+     * 그래야 늦게 받은 제출이 병합본에 들어간다 — 담당자가 [다시 병합]을 기억할 필요가 없다.
+     */
+    const deadline = await mergeGateOf(division, slot);
     const startAt = new Date(deadline.getTime() + MERGE_DELAY_MINUTES * 60_000);
     if (now < startAt) {
       skipped++;
@@ -160,6 +171,35 @@ export async function runDueMerges(now = new Date()): Promise<{ ran: number; ski
       skipped++;
       continue; // 마감 후에 됐다 — 재실행은 담당자가 버튼으로
     }
+    /*
+     * HM-43 — **같은 이유로 계속 실패하면 간격을 벌린다.**
+     *
+     * 2026-09-03에 자동 병합이 1분마다 여덟 번 실패했다. 원인은 한 사람의 칸에 든
+     * 줄바꿈이었고, 재시도로는 절대 낫지 않는 종류였다. 그런데도 1분마다 같은 일을 하며
+     * 로그를 채웠다 — 정작 봐야 할 「무엇이 잘못됐나」가 그 안에 묻힌다.
+     *
+     * 그렇다고 한 번 실패하고 포기하면 안 된다: 모델 호출 시간 초과처럼 **다음에는 되는**
+     * 실패도 있다. 그래서 끄지 않고 **뒤로 미룬다** — 1·5·15·30분, 그 뒤로는 30분마다.
+     * 담당자는 그동안 [지금 병합]으로 언제든 직접 돌릴 수 있다 (그 길은 막지 않는다).
+     */
+    const failures = await prisma.mergeRun.count({
+      where: { divisionId: division.id, weekSlotId: slot.id, status: 'failed', startedAt: { gte: deadline } },
+    });
+    if (failures > 0) {
+      const last = await prisma.mergeRun.findFirst({
+        where: { divisionId: division.id, weekSlotId: slot.id, startedAt: { gte: deadline } },
+        orderBy: { startedAt: 'desc' },
+        select: { startedAt: true, status: true },
+      });
+      if (last?.status === 'failed') {
+        const waitMin = RETRY_BACKOFF_MINUTES[Math.min(failures - 1, RETRY_BACKOFF_MINUTES.length - 1)];
+        if (now.getTime() - last.startedAt.getTime() < waitMin * 60_000) {
+          skipped++;
+          continue;
+        }
+      }
+    }
+
     const submissions = await prisma.submission.count({
       where: { divisionId: division.id, weekSlotId: slot.id, isLatest: true },
     });
@@ -171,7 +211,9 @@ export async function runDueMerges(now = new Date()): Promise<{ ran: number; ski
     const result = await runMergeRecorded(division.id, slot.id, 'auto');
     ran++;
     if (result.status === 'failed') {
-      console.warn(`[merge] 자동 병합 실패 — ${division.nameKo} / ${slot.isoKey}: ${result.errorText}`);
+      console.warn(
+        `[merge] 자동 병합 실패(${failures + 1}회) — ${division.nameKo} / ${slot.isoKey}: ${result.errorText}`,
+      );
     }
   }
   return { ran, skipped };

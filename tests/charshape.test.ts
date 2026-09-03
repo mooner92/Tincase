@@ -301,3 +301,63 @@ d('HM-39 한 칸 두 줄 — 줄바꿈이 살아남는다', () => {
     expect(back.emphasis).toBe(true);
   });
 });
+
+/**
+ * HM-42 — **왕복 불변식**: 셀에 넣은 글자는 그대로 다시 읽혀야 한다.
+ *
+ * 2026-09-03에 줄바꿈 하나 때문에 그 주 병합이 통째로 멈췄다. 고쳤지만 문제는
+ * 「줄바꿈」이 아니라 **「reader가 만들 수 있는 글자를 writer가 못 지키는 경우가 있다」**였다.
+ * 다음 주에는 다른 글자로 같은 일이 난다.
+ *
+ * 그래서 낱개 버그가 아니라 **불변식**을 지킨다. 사람이 실제로 한글에 치는 것들 —
+ * 눈에 안 보이는 제어 문자, 전각, 따옴표, 아주 긴 줄, 이모지 — 을 한 번에 두드린다.
+ * 새 글자가 문제를 일으키면 여기에 한 줄 더한다.
+ */
+d('HM-42 셀 글자 왕복 — 넣은 대로 읽힌다', () => {
+  const CASES: [string, string][] = [
+    ['보통', '보도자료 배포 및 인포그래픽 제작'],
+    ['줄바꿈', '첫 줄\n둘째 줄'],
+    ['줄바꿈 여러 번', 'ㄱ\nㄴ\nㄷ\nㄹ'],
+    ['탭 → 공백', '앞\t뒤'],
+    ['괄호·기호', '정기간행물 발간(10건) · 진행 [8건] ※ 확인'],
+    ['따옴표', '큐레이션 뉴스레터 “KEI 북 큐레이션” 제2호 발행'],
+    ['전각', 'ＡＩ 홍보（정간물 포함）'],
+    ['물결·화살표', '2026년 1월~현재 → 배포 완료'],
+    ['숫자·기호 섞임', 'ScienceDirect/Scopus 온라인 교육(9/2~9/3)'],
+    ['이모지', '완료 ✅ 진행 ▶ 보류 ⏸'],
+    ['아주 긴 줄', '가나다라마바사아자차카타파하'.repeat(20)],
+    ['앞뒤 공백', '  앞뒤 공백  '],
+    ['한 글자', '가'],
+  ];
+
+  function roundTrip(text: string): string {
+    const src = readFileSync(TEMPLATE);
+    const recs = parseRecords(openHwp(src).sections[0]);
+    fillTable(recs, 0, [['1-1', text, '', '', '']]);
+    return readWorklog(packHwp(src, [serializeRecords(recs)])).worklog.achievements[0]?.content ?? '(사라짐)';
+  }
+
+  /** writer가 넣을 수 없는 글자는 바꾼다 — 그 규칙까지가 불변식이다 (HM-42) */
+  const expected = (t: string) => t.replace(/\t/g, ' ').trim();
+
+  for (const [name, text] of CASES) {
+    it(`[HM-T95] ${name}`, () => {
+      // reader가 앞뒤 공백을 다듬으므로(HM-15g) 비교도 다듬은 값으로 한다
+      expect(roundTrip(text)).toBe(expected(text));
+    });
+  }
+
+  it('[HM-T97] 눈에 안 보이는 제어 문자는 버린다 — 문서를 깨뜨리는 대신', () => {
+    // 붙여넣기로 섞여 들어오는 것들. 그대로 쓰면 한글이 8유닛 컨트롤로 읽어 뒤 글자를 삼킨다
+    expect(roundTrip('앞\u0001\u0002\u001f뒤')).toBe('앞뒤');
+  });
+
+  it('[HM-T96] 여러 줄을 한꺼번에 넣어도 각자 제자리로', () => {
+    const src = readFileSync(TEMPLATE);
+    const recs = parseRecords(openHwp(src).sections[0]);
+    const rows = CASES.map(([, t], i) => [`1-${i + 1}`, t, '', '', '']);
+    fillTable(recs, 0, rows);
+    const back = readWorklog(packHwp(src, [serializeRecords(recs)])).worklog.achievements;
+    expect(back.map((r) => r.content)).toEqual(CASES.map(([, t]) => expected(t)));
+  });
+});

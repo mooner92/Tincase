@@ -99,6 +99,33 @@ export function locateTables(recs: readonly HwpRecord[]): TableSpan[] {
  * 셀의 글자를 바꾼다. 문단 끝 표시(CR 등)는 원본 꼬리를 그대로 이어붙여 보존한다.
  * PARA_HEADER의 글자 수도 같이 고친다 — 안 고치면 한글이 문단을 잘라 읽는다.
  */
+/**
+ * HM-42 — **문서에 넣을 수 있는 글자만 남긴다.** writer의 마지막 방어선이다.
+ *
+ * HWP 본문에서 1유닛이 아닌 제어 문자(탭 9, 그 밖의 0~31)를 그냥 써 넣으면, 한글은 그것을
+ * **8유닛짜리 컨트롤의 머리**로 읽는다 — 뒤 글자 일곱 개를 통째로 삼키거나 문단이 깨진다.
+ * 눈에 보이지 않는 글자라 화면에서는 멀쩡해 보이고, 병합 자체 점검(HM-22)에서야
+ * 「내용이 다르다」로 터진다. 2026-09-03에 줄바꿈으로 그 주 병합이 멈춘 것이 그 종류였다.
+ *
+ * 그래서 **낱개로 막지 않고 여기서 한 번에** 거른다. 위층이 무엇을 보내든
+ * 「넣은 대로 다시 읽힌다」가 성립하게 만드는 것이 이 함수의 일이다 (`[HM-T95]`).
+ *
+ *   줄바꿈(10)  남긴다 — 한 칸에 두 줄을 적는 것은 정상이다 (HM-39)
+ *   탭(9)       공백으로 — 표 칸에서 탭은 뜻이 없고, 그대로 두면 문서가 깨진다
+ *   그 밖 0~31  버린다
+ */
+export function sanitizeCellText(text: string): string {
+  let out = '';
+  for (const ch of text) {
+    const c = ch.charCodeAt(0);
+    if (c === 10) out += '\n';
+    else if (c === 9) out += ' ';
+    else if (c < 32) continue;
+    else out += ch;
+  }
+  return out;
+}
+
 export function setCellText(recs: HwpRecord[], cell: CellSpan, text: string): number {
   /*
    * HM-28 — **줄 배치 캐시(PARA_LINE_SEG)를 버린다.**
@@ -182,7 +209,7 @@ export function setCellText(recs: HwpRecord[], cell: CellSpan, text: string): nu
     tail = old.slice(bodyLen);
   }
 
-  const next = Buffer.from(text + tail, 'ucs2');
+  const next = Buffer.from(sanitizeCellText(text) + tail, 'ucs2');
   recs[textIdx] = { ...recs[textIdx], data: next };
   setNChars(recs, headerIdx, next.length / 2);
   return delta; // 레코드 수 변화 — 호출자가 인덱스를 다시 잡아야 한다
