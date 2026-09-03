@@ -20,7 +20,7 @@ describe('DM-20 마감 잠시 열기', () => {
   });
 
   it('[DM-T21] 열어 두면 그 시각까지 낼 수 있다', () => {
-    const open = { openUntil: at(14, 40), openedBy: '최명헌' };
+    const open = { openUntil: at(14, 40), openedBy: '담당자' };
     expect(isSubmissionLocked(slot, 목14시마감, open, at(14, 30))).toBe(false);
     expect(isSubmissionLocked(slot, 목14시마감, open, at(14, 40))).toBe(false); // 정각까지 (WS-06과 같은 결)
   });
@@ -28,13 +28,13 @@ describe('DM-20 마감 잠시 열기', () => {
   it('[DM-T22] **잊어도 닫힌다** — 시각이 지나면 저절로 잠긴다', () => {
     // 이 기능의 유일한 위험이 「열어 두고 잊는 것」이다. 사람이 기억해야 지켜지는 규칙은
     // 언젠가 안 지켜지므로, 여는 것이 아니라 「언제까지」를 정하는 것으로 만들었다
-    const open = { openUntil: at(14, 40), openedBy: '최명헌' };
+    const open = { openUntil: at(14, 40), openedBy: '담당자' };
     expect(isSubmissionLocked(slot, 목14시마감, open, at(14, 41))).toBe(true);
     expect(isOpenNow(open, at(14, 41))).toBe(false);
   });
 
   it('[DM-T23] 마감 전이면 열림 여부와 무관하게 낼 수 있다', () => {
-    const 지난주에_열었던것 = { openUntil: at(9, 0), openedBy: '최명헌' };
+    const 지난주에_열었던것 = { openUntil: at(9, 0), openedBy: '담당자' };
     expect(isSubmissionLocked(slot, 목14시마감, 지난주에_열었던것, at(11, 0))).toBe(false);
   });
 
@@ -55,19 +55,19 @@ describe('DM-20 · HM-34 열었다 닫으면 새 마감 이벤트다', () => {
   });
 
   it('[DM-T26] 열어 두면 **닫히는 시각**이 새 기준이 된다', () => {
-    const open = { openUntil: at(14, 40), openedBy: '최명헌' };
+    const open = { openUntil: at(14, 40), openedBy: '담당자' };
     expect(mergeGate(마감, open).getTime()).toBe(at(14, 40).getTime());
   });
 
   it('[DM-T27] 열려 있는 동안에는 병합이 돌지 않는다 — 받는 중에 만들 이유가 없다', () => {
-    const open = { openUntil: at(14, 40), openedBy: '최명헌' };
+    const open = { openUntil: at(14, 40), openedBy: '담당자' };
     const gate = mergeGate(마감, open);
     expect(at(14, 20).getTime()).toBeLessThan(gate.getTime());
   });
 
   it('[DM-T28] 이미 지난 열림은 기준을 되돌리지 않는다', () => {
     // 마감보다 이른 시각에 닫힌 기록이 남아 있어도 마감이 앞당겨지면 안 된다
-    const 옛것 = { openUntil: at(9, 0), openedBy: '최명헌' };
+    const 옛것 = { openUntil: at(9, 0), openedBy: '담당자' };
     expect(mergeGate(마감, 옛것).getTime()).toBe(마감.getTime());
   });
 });

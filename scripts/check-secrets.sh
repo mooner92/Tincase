@@ -49,6 +49,22 @@ report "Cloudflare 실제 ID" "$(files | xargs -0 grep -nIE '\b[0-9a-f]{32}\b' 2
 # ⑤ 개인정보가 든 산출물이 실수로 추적되고 있지 않은가
 report "docs/private 추적 여부" "$(git ls-files 'docs/private/*' || true)"
 
+# ⑥ 동료 실명 (2026-09-03 신설)
+#
+# 저장소가 public인데 실명이 60곳 가까이 들어가 있었다. 이름만이면 그나마인데
+# 「누가 무엇을 어떻게 적었는지」가 붙어 있었다 — 특정 개인의 업무 행동이
+# 검색 가능한 형태로 남는다. 커밋은 되돌리기 어려우므로 나가기 전에 막는다.
+#
+# 명단 자체가 개인정보라 **검사 목록도 저장소에 두지 않는다** (docs/private/names.txt).
+# 파일이 없으면 이 검사는 조용히 건너뛴다 — 새 기기에서 검사 전체가 멈추는 것보다 낫다.
+NAMES_FILE="docs/private/names.txt"
+if [ -s "$NAMES_FILE" ]; then
+  pattern=$(grep -vE '^\s*(#|$)' "$NAMES_FILE" | paste -sd'|' -)
+  report "동료 실명" "$(files | xargs -0 grep -nIE "$pattern" 2>/dev/null | grep -v "^$me:" || true)"
+else
+  echo "  — 동료 실명 (건너뜀: $NAMES_FILE 없음)"
+fi
+
 if [ $fail -ne 0 ]; then
   echo
   echo "커밋하지 말 것. 자리표시자(<서버-내부-IP> 등)로 바꾸거나 docs/private/ 로 옮기세요."

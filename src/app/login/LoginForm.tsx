@@ -77,7 +77,7 @@ export function LoginForm() {
         {busy ? '로그인 중…' : '로그인'}
       </button>
       <p className="text-center text-xs text-muted-soft">
-        비밀번호를 모르거나 잊으셨다면 운영자(AI홍보전략실 최명헌)에게 재발급을 요청하세요.
+        비밀번호를 모르거나 잊으셨다면 AI홍보전략실 운영자에게 재발급을 요청하세요.
       </p>
     </form>
   );

@@ -99,7 +99,7 @@ export function findFlaggedRows(
   return out;
 }
 
-/** 알림·화면이 함께 쓰는 한 줄 요약 (「실적 1-6 김영인 「특이사항 없음」」) */
+/** 알림·화면이 함께 쓰는 한 줄 요약 (「실적 1-6 한 부서원 「특이사항 없음」」) */
 export function describeFlagged(f: FlaggedRow): string {
   const label = { achievements: '실적', plans: '계획', notes: '특이사항' }[f.bucket];
   return `${label} ${f.no} ${f.who ? f.who + ' ' : ''}「${f.content}」`;

@@ -102,10 +102,10 @@ describe('HM-27 분류 정렬', () => {
 
 describe('HM-24 모델 하네스', () => {
   const rows = [
-    row(1, '최명헌', '정기간행물 발간 진행(10건)'),
-    row(2, '최명헌', '보도자료 배포'),
-    row(3, '김영인', '정기간행물 발간 진행 (10건)'), // 괄호·공백만 다름
-    row(4, '김영인', '데이터기반행정 평가 컨설팅'),
+    row(1, '가', '정기간행물 발간 진행(10건)'),
+    row(2, '가', '보도자료 배포'),
+    row(3, '나', '정기간행물 발간 진행 (10건)'), // 괄호·공백만 다름
+    row(4, '나', '데이터기반행정 평가 컨설팅'),
   ];
 
   it('[HM-T35] 결정론 중복 — 정규화 후 같은 행만 묶는다 (모델 없이)', () => {
@@ -371,22 +371,22 @@ describe('HM-33 「없음」 탐지', () => {
     const row = (content: string) => ({ content, date: '', place: '', attendee: '' });
     const found = findFlaggedRows({
       achievements: [
-        { row: row('보도자료 배포'), authors: ['장혜정'] },
-        { row: row('특이사항 없음'), authors: ['김영인'] },
+        { row: row('보도자료 배포'), authors: ['나'] },
+        { row: row('특이사항 없음'), authors: ['나'] },
       ],
-      plans: [{ row: row('없음'), authors: ['김정두'] }],
+      plans: [{ row: row('없음'), authors: ['다'] }],
       notes: [],
     }, WORDS);
     expect(found).toHaveLength(2);
-    expect(found[0]).toMatchObject({ bucket: 'achievements', no: '1-2', who: '김영인', word: '없음' });
-    expect(found[1]).toMatchObject({ bucket: 'plans', no: '2-1', who: '김정두' });
+    expect(found[0]).toMatchObject({ bucket: 'achievements', no: '1-2', who: '나', word: '없음' });
+    expect(found[1]).toMatchObject({ bucket: 'plans', no: '2-1', who: '다' });
   });
 
   it('[HM-T54] 알림 한 줄은 «어디·누구·무엇»을 담는다 — 받고 바로 찾을 수 있어야 한다', async () => {
     const { describeFlagged } = await import('@/lib/empty-content');
     expect(
-      describeFlagged({ bucket: 'achievements', no: '1-6', who: '김영인', content: '특이사항 없음', word: '없음' }),
-    ).toBe('실적 1-6 김영인 「특이사항 없음」');
+      describeFlagged({ bucket: 'achievements', no: '1-6', who: '나', content: '특이사항 없음', word: '없음' }),
+    ).toBe('실적 1-6 나 「특이사항 없음」');
   });
 
   it('[HM-T55] **병합이 행을 지우지 않는다** — 탐지는 알림용이고 문서는 그대로다', async () => {
@@ -488,8 +488,8 @@ describe('CP-90 행 순서 바꾸기', () => {
  *
  * 2026-08-27 AI홍보전략실에서 실제로 난 일을 그대로 재현한다:
  *
- *   김민정  온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건, SNS 1건)
- *   장혜정  온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)
+ *   부서원 가  온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건, SNS 1건)
+ *   부서원 나  온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)
  *
  * 정규화가 괄호를 털어내 둘은 같은 묶음이 됐다. 묶은 것까지는 맞다.
  * 그런데 대표 선택 기준이 **채워진 칸 수만** 세어서 동점이 났고, 동점이면 먼저 온 쪽이
@@ -497,25 +497,25 @@ describe('CP-90 행 순서 바꾸기', () => {
  * 그러고도 화면은 「내용이 같습니다」라고 말했다. 같지 않았다.
  */
 describe('HM-36 합쳐진 행 — 잃은 것을 잃었다고 말한다', () => {
-  const 김민정 = row(1, '김민정', '온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건, SNS 1건)');
-  const 장혜정 = row(2, '장혜정', '온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)');
+  const 자세한줄 = row(1, '가', '온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건, SNS 1건)');
+  const 짧은줄 = row(2, '나', '온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)');
 
   it('[HM-T50] 괄호 안이 달라도 묶는다 — 묶는 것 자체는 맞다', () => {
-    const g = exactDuplicates([김민정, 장혜정]);
+    const g = exactDuplicates([자세한줄, 짧은줄]);
     expect(g).toHaveLength(1);
     expect(g[0].ids).toEqual([1, 2]);
   });
 
   it('[HM-T51] 그런데 「내용이 같습니다」라고 하지 않는다 — 같지 않았다', () => {
-    const [g] = exactDuplicates([김민정, 장혜정]);
+    const [g] = exactDuplicates([자세한줄, 짧은줄]);
     expect(g.identical).toBe(false);
     expect(g.reason).toContain('괄호·기호가 다릅니다');
     expect(g.reason).not.toContain('내용이 같습니다');
   });
 
   it('[HM-T52] 글자까지 똑같으면 「내용이 같습니다」가 맞다', () => {
-    const 같음 = [row(1, '김민정', '온라인 홍보 콘텐츠 제작 및 등록'),
-                  row(2, '장혜정', '온라인 홍보 콘텐츠 제작 및 등록')];
+    const 같음 = [row(1, '가', '온라인 홍보 콘텐츠 제작 및 등록'),
+                  row(2, '나', '온라인 홍보 콘텐츠 제작 및 등록')];
     const [g] = exactDuplicates(같음);
     expect(g.identical).toBe(true);
     expect(g.reason).toContain('내용이 같습니다');
@@ -546,35 +546,35 @@ describe('HM-36 대표 행 선택', () => {
   const r = (content: string, date = '', place = '', attendee = '') => ({ content, date, place, attendee });
 
   it('[HM-T55] 그날 사라진 「SNS 1건」이 이제 남는다', () => {
-    // 실제 원본: 김민정은 내용이 길고 일자가 없다, 장혜정은 짧고 일자가 있다.
-    // 칸 수로 고르면 장혜정이 이겨서 「SNS 1건」이 문서에서 사라진다 — 그게 그날 일어난 일이다.
-    const 김민정 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건, SNS 1건)');
-    const 장혜정 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)', '8/27');
-    expect(pickRepresentative([김민정, 장혜정])).toBe(김민정);
-    expect(pickRepresentative([장혜정, 김민정])).toBe(김민정); // 순서에 좌우되지 않는다
+    // 실제 원본: 한쪽은 내용이 길고 일자가 없다, 다른 쪽은 짧고 일자가 있다.
+    // 칸 수로 고르면 짧은 쪽이 이겨서 「SNS 1건」이 문서에서 사라진다 — 그게 그날 일어난 일이다.
+    const 자세한줄 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건, SNS 1건)');
+    const 짧은줄 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)', '8/27');
+    expect(pickRepresentative([자세한줄, 짧은줄])).toBe(자세한줄);
+    expect(pickRepresentative([짧은줄, 자세한줄])).toBe(자세한줄); // 순서에 좌우되지 않는다
   });
 
   /*
    * HM-40 — 2026-09-03에 **한 겹 안쪽에서 같은 일이 또 났다.**
    *
-   *   김민정  온라인 홍보 콘텐츠 제작 및 등록(유튜브 2건, SNS 7건)   일자 없음
-   *   장혜정  온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)            일자 8/18
+   *   부서원 가  온라인 홍보 콘텐츠 제작 및 등록(유튜브 2건, SNS 7건)   일자 없음
+   *   부서원 나  온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)            일자 8/18
    *
    * 「2건」과 「1건」이 달라 품기 판정에 안 걸렸고, 그 다음 기준이 「채워진 칸 수」였다.
    * 일자 하나 때문에 짧은 쪽이 이겨서 「SNS 7건」이 사라졌다.
    * 내용과 곁칸은 경쟁 관계가 아니다 — 일자는 따로 모아 오면 된다.
    */
   it('[HM-T56] 일자가 있다고 짧은 내용이 이기지 않는다 — 그날의 버그다', () => {
-    const 김민정 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 2건, SNS 7건)');
-    const 장혜정 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)', '8/18');
-    expect(pickRepresentative([김민정, 장혜정])).toBe(김민정);
-    expect(pickRepresentative([장혜정, 김민정])).toBe(김민정);
+    const 자세한줄 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 2건, SNS 7건)');
+    const 짧은줄 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)', '8/18');
+    expect(pickRepresentative([자세한줄, 짧은줄])).toBe(자세한줄);
+    expect(pickRepresentative([짧은줄, 자세한줄])).toBe(자세한줄);
   });
 
   it('[HM-T57] 그래도 일자는 살아남는다 — 곁칸은 묶음 전체에서 모은다', () => {
-    const 김민정 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 2건, SNS 7건)');
-    const 장혜정 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)', '8/18');
-    expect(mergeRowCells([김민정, 장혜정], 김민정)).toEqual({
+    const 자세한줄 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 2건, SNS 7건)');
+    const 짧은줄 = r('온라인 홍보 콘텐츠 제작 및 등록(유튜브 1건)', '8/18');
+    expect(mergeRowCells([자세한줄, 짧은줄], 자세한줄)).toEqual({
       content: '온라인 홍보 콘텐츠 제작 및 등록(유튜브 2건, SNS 7건)',
       date: '8/18', // 대표가 안 적었지만 같은 업무의 일자다
       place: '',

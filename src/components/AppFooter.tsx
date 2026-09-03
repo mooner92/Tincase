@@ -9,7 +9,7 @@ export function AppFooter() {
         <span>
           문의{' '}
           <a href="mailto:mhchoi@kei.re.kr" className="text-body underline-offset-2 hover:underline">
-            AI홍보전략실 최명헌
+            AI홍보전략실 운영자
           </a>
         </span>
       </div>

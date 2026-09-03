@@ -7,18 +7,28 @@
 출력은 개인정보(이메일 포함)를 담으므로 반드시 docs/private/ (git 제외)에만 쓴다.
 휴대전화·내선·사번·호실은 어떤 경우에도 추출하지 않는다.
 """
-import sys, json
+import sys, json, os
 import openpyxl
 
-# 취합게시판 답변작성자로 확인된 실무자 (연구조사 002 §4, xlsx 성명 기준)
-KNOWN_LEADS = {
-    '김수빈', '김현우', '윤민지', '전진우', '황인혁', '김민하',
-    '김예진', '김용구', '이지예', '신예린', '최명헌', '장혜정',
-}
+# 역할 명단은 **실명이라 저장소에 두지 않는다** (docs/private/, git 제외).
+# 이 파일의 맨 위 규칙("개인정보는 docs/private/에만")이 정작 이 스크립트 자신에게는
+# 지켜지지 않고 있었다 — 담당자 12명 이름이 여기 박혀 공개 저장소에 올라가 있었다.
+#
+#   docs/private/roles.json
+#   { "leads": ["..."], "coordinators": ["..."], "operators": ["..."] }
+_ROLES_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                           'docs', 'private', 'roles.json')
+try:
+    with open(_ROLES_PATH, encoding='utf-8') as _f:
+        _roles = json.load(_f)
+except FileNotFoundError:
+    print(f'경고: {_ROLES_PATH} 가 없어 역할을 비워 둡니다 '
+          '(담당자·총괄·운영자가 지정되지 않습니다).', file=sys.stderr)
+    _roles = {}
 
-# 전사 총괄 (AU-16) · 최종 관리자 (AU-15)
-KNOWN_COORDINATORS = {'김민하'}
-KNOWN_OPERATORS = {'최명헌'}
+KNOWN_LEADS = set(_roles.get('leads', []))
+KNOWN_COORDINATORS = set(_roles.get('coordinators', []))
+KNOWN_OPERATORS = set(_roles.get('operators', []))
 
 # onRoster 기본 제외 직책 (DM-04: "팀장(실장)은 제외")
 LEADERSHIP_TITLES = {'실장', '단장', '본부장', '센터장', '원장', '부원장', '감사'}

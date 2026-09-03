@@ -119,7 +119,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
           ))}
         </ul>
         <p className="mt-3 text-xs text-muted-soft">
-          명단·순서 변경은 운영자 소관입니다 — 운영자(최명헌)에게 요청하세요. {/* PG-32 */}
+          명단·순서 변경은 운영자 소관입니다 — 운영자에게 요청하세요. {/* PG-32 */}
         </p>
       </section>
     </main>
