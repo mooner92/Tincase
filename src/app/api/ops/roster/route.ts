@@ -4,6 +4,7 @@ import { prisma } from '@/server/db';
 import { HttpError, requireOperator } from '@/server/authz';
 import { handler, json } from '@/server/http';
 import { audit } from '@/server/audit';
+import { offboardUser } from '@/server/offboard';
 
 export const dynamic = 'force-dynamic';
 
@@ -80,23 +81,35 @@ export const PUT = handler(async (req: NextRequest) => {
     }
   }
 
-  await prisma.$transaction(
-    body.updates.map((u) =>
-      prisma.user.update({
-        where: { id: u.userId },
-        data: {
-          ...(u.onRoster !== undefined && { onRoster: u.onRoster }),
-          ...(u.rosterNote !== undefined && { rosterNote: u.rosterNote?.trim() || null }),
-          // 사번은 숫자·영문만 남긴다 — 공백이 섞이면 메신저가 사람을 못 찾는다 (문서 06 §3)
-          ...(u.employeeNo !== undefined && { employeeNo: u.employeeNo?.replace(/[^A-Za-z0-9]/g, '') || null }),
-          ...(u.notifyEnabled !== undefined && { notifyEnabled: u.notifyEnabled }),
-          ...(u.sortOrder !== undefined && { sortOrder: u.sortOrder }),
-          ...(u.divisionRole !== undefined && { divisionRole: u.divisionRole }),
-          ...(u.isActive !== undefined && { isActive: u.isActive }),
-        },
-      }),
-    ),
-  );
+  const updates = body.updates;
+  await prisma.$transaction(async (tx) => {
+    for (const u of updates) {
+      /*
+       * AU-31 — **계정을 닫는 것은 다른 일이다.** 다른 필드처럼 `isActive: false`만
+       * 쓰면 비밀번호·세션·미사용 설정 링크가 그대로 남는다. 그 절차는
+       * `offboardUser` 한 곳에만 있고 엑셀 최신화도 같은 것을 부른다 —
+       * 두 곳에 적으면 반드시 갈라진다 (TACP-12).
+       */
+      if (u.isActive === false) {
+        await offboardUser(tx, u.userId);
+      }
+
+      const data = {
+        ...(u.onRoster !== undefined && { onRoster: u.onRoster }),
+        ...(u.rosterNote !== undefined && { rosterNote: u.rosterNote?.trim() || null }),
+        // 사번은 숫자·영문만 남긴다 — 공백이 섞이면 메신저가 사람을 못 찾는다 (문서 06 §3)
+        ...(u.employeeNo !== undefined && { employeeNo: u.employeeNo?.replace(/[^A-Za-z0-9]/g, '') || null }),
+        ...(u.notifyEnabled !== undefined && { notifyEnabled: u.notifyEnabled }),
+        ...(u.sortOrder !== undefined && { sortOrder: u.sortOrder }),
+        ...(u.divisionRole !== undefined && { divisionRole: u.divisionRole }),
+        // 켜는 것은 여기서. 끄는 것은 위 offboardUser가 이미 했다
+        ...(u.isActive === true && { isActive: true }),
+      };
+      if (Object.keys(data).length > 0) {
+        await tx.user.update({ where: { id: u.userId }, data });
+      }
+    }
+  });
 
   await audit(scope.user.email, 'rule_update', null, 'ops:roster', { count: body.updates.length });
   return json({ ok: true, updated: body.updates.length });

@@ -11,6 +11,7 @@
 //   3. 사람이 정한 값은 엑셀이 덮지 않는다 — 담당자·집계여부·알림설정·비밀번호
 //   4. 담당자가 사라지면 **반드시 알린다** — 조용히 넘어가면 그 부서가 무주공산이 된다
 import type { PrismaClient } from '@prisma/client';
+import { offboardUser } from '../offboard';
 
 /** ERP 엑셀에서 반드시 있어야 하는 열 */
 export const REQUIRED_COLUMNS = ['상위부서', '부서', '사번', '성명', '직책', 'E-MAIL'] as const;
@@ -390,9 +391,18 @@ export async function applyRosterSync(
         });
         created++;
       } else if (c.userId) {
-        await tx.user.update({ where: { id: c.userId }, data });
-        if (c.kind === 'deactivate') deactivated++;
-        else updated++;
+        if (c.kind === 'deactivate') {
+          /*
+           * AU-31 — 계정을 닫을 때는 **끄기만 하면 안 된다.** 비밀번호·세션·미사용 링크를
+           * 같이 정리해야 한다. 그 절차는 `offboardUser` 한 곳에만 있다 —
+           * 여기와 운영 화면 두 곳에 적으면 반드시 갈라진다 (TACP-12에서 겪은 것과 같다).
+           */
+          await offboardUser(tx, c.userId);
+          deactivated++;
+        } else {
+          await tx.user.update({ where: { id: c.userId }, data });
+          updated++;
+        }
       }
     }
   });

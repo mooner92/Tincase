@@ -136,3 +136,93 @@ describe('AU-30 비밀번호 정책은 그대로 적용된다', () => {
     expect(validatePasswordPolicy('한글로만든충분히긴비밀번호')).toBeNull();
   });
 });
+
+/**
+ * AU-31 — **퇴사 처리.**
+ *
+ * 계정을 닫을 때 「끄기」만 하면 비밀번호·세션·미사용 설정 링크가 그대로 남는다.
+ * 접근은 `isActive` 검사가 막지만, **「퇴사자 정보는 정리했다」고 말하려면** 실제로
+ * 정리돼야 한다. 그리고 살아 있는 설정 링크는 그 자체가 열쇠다.
+ *
+ * 여기서 같이 지키는 것: **지우면 안 되는 것을 지우지 않는다.** 제출물·이름·감사 기록은
+ * 남아야 지난 주 병합본이 거짓이 되지 않는다.
+ */
+describe('AU-31 퇴사 처리', () => {
+  const 퇴사자 = async () => {
+    const { hashPassword } = await import('@/server/password');
+    const div = await db.division.findFirstOrThrow({ where: { slug: 'S_Div' } });
+    return db.user.create({
+      data: {
+        email: `leaver-${Math.random().toString(36).slice(2, 8)}@test.kei.re.kr`,
+        name: '떠난사람',
+        divisionId: div.id,
+        employeeNo: '99999',
+        passwordHash: await hashPassword('LeaverPass-2026'),
+        mustChangePassword: false,
+      },
+    });
+  };
+
+  it('[AU-T70] 비밀번호·세션·미사용 링크가 사라진다', async () => {
+    const { offboardUser } = await import('@/server/offboard');
+    const { issueSetupToken } = await import('@/server/setup-token');
+    const u = await 퇴사자();
+    await db.session.create({
+      data: { tokenHash: `s-${u.id}`, userId: u.id, expiresAt: new Date(Date.now() + 86400_000) },
+    });
+    await issueSetupToken(u.id, 'ops@test.kei.re.kr', new Date(), db);
+
+    const r = await offboardUser(db, u.id);
+    expect(r.hadPassword).toBe(true);
+    expect(r.sessions).toBe(1);
+    expect(r.setupTokens).toBe(1);
+
+    const after = await db.user.findUniqueOrThrow({ where: { id: u.id } });
+    expect(after.isActive).toBe(false);
+    expect(after.passwordHash).toBeNull();
+    expect(await db.session.count({ where: { userId: u.id } })).toBe(0);
+    expect(await db.setupToken.count({ where: { userId: u.id, usedAt: null } })).toBe(0);
+  });
+
+  it('[AU-T71] **살아 있던 설정 링크가 죽는다** — 링크는 그 자체가 열쇠다', async () => {
+    const { offboardUser } = await import('@/server/offboard');
+    const { issueSetupToken, readSetupToken } = await import('@/server/setup-token');
+    const u = await 퇴사자();
+    const { token } = await issueSetupToken(u.id, 'ops@test.kei.re.kr', new Date(), db);
+    expect((await readSetupToken(token, new Date(), db)).ok).toBe(true);
+
+    await offboardUser(db, u.id);
+    expect((await readSetupToken(token, new Date(), db)).ok).toBe(false);
+  });
+
+  it('[AU-T72] **지난 기록은 남는다** — 지우면 지난 주 병합본이 거짓이 된다', async () => {
+    const { offboardUser } = await import('@/server/offboard');
+    const u = await 퇴사자();
+    await offboardUser(db, u.id);
+
+    const after = await db.user.findUnique({ where: { id: u.id } });
+    expect(after).not.toBeNull(); // 계정 행 자체를 지우지 않는다
+    expect(after!.name).toBe('떠난사람'); // 병합본 작성자 표시(TACP-17)가 이것을 가리킨다
+    expect(after!.employeeNo).toBe('99999');
+  });
+
+  it('[AU-T73] 다시 켜면 「미발급」으로 보인다 — 링크를 보내야 한다는 신호', async () => {
+    const { offboardUser } = await import('@/server/offboard');
+    const u = await 퇴사자();
+    await offboardUser(db, u.id);
+    await db.user.update({ where: { id: u.id }, data: { isActive: true } });
+
+    const back = await db.user.findUniqueOrThrow({ where: { id: u.id } });
+    expect(back.passwordHash).toBeNull(); // 화면에서 「미발급」
+    expect(back.mustChangePassword).toBe(true);
+  });
+
+  it('[AU-T74] 두 번 불러도 안전하다 — 이미 닫힌 계정을 또 닫아도 터지지 않는다', async () => {
+    const { offboardUser } = await import('@/server/offboard');
+    const u = await 퇴사자();
+    await offboardUser(db, u.id);
+    const 두번째 = await offboardUser(db, u.id);
+    expect(두번째.hadPassword).toBe(false);
+    expect(두번째.sessions).toBe(0);
+  });
+});
