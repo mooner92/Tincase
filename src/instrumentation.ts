@@ -66,7 +66,7 @@ export async function register() {
       try {
         const sent = await runDueReminders();
         for (const r of sent) {
-          const when = r.kind === 'deadline_1d' ? '마감 하루 전' : '마감 1시간 전';
+          const when = { deadline_1d: '마감 하루 전', deadline_1h: '마감 1시간 전', deadline_10m: '마감 10분 전' }[r.kind];
           console.log(`[알림] ${when} — ${r.division} ${r.isoKey}: ${r.sent}/${r.targets}명 발송`);
         }
       } catch (e) {

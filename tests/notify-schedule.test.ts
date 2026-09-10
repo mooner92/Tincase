@@ -9,6 +9,7 @@ import { TZDate } from '@date-fns/tz';
 import { dayBeforeAt, deadlineFor, KST } from '@/lib/week';
 import { MERGE_DELAY_MINUTES } from '@/server/merge/run';
 import { REVIEW_MINUTES, SUBMIT_MINUTES } from '@/server/notify/merge-notices';
+import { LAST_CALL_MINUTES, LAST_CALL_WINDOW } from '@/server/notify/deadline-reminder';
 
 /** KST 벽시계로 읽어 "8/26(수) 11:45" 꼴로 — 실패 메시지가 UTC면 사람이 못 읽는다 */
 function kst(d: Date): string {
@@ -97,5 +98,40 @@ describe('HM-35 마감 후 타임라인', () => {
   it('[HM-T48] 담당자 알림 뒤에도 대외 마감(15:00)까지 여유가 있다', () => {
     // 부서 마감 14:00 → 대외 마감 15:00. 담당자가 받고 나서 쓸 수 있는 시간
     expect(60 - SUBMIT_MINUTES).toBeGreaterThanOrEqual(20);
+  });
+});
+
+/**
+ * NT-42 — **최후 알림** (마감 10분 전).
+ *
+ * 같은 사람에게 가는 세 번째 알림이다. 여기서 지킬 것은 문구가 아니라 **창**이다:
+ * 창이 마감을 넘으면 「10분 남았습니다」가 마감 뒤에 나간다 — 거짓말이고,
+ * 이미 못 내게 된 사람을 재촉하는 꼴이다. 그 어긋남은 그 주에 늦게 낸 사람이 있어야만
+ * 드러나서 몇 주 동안 아무도 모를 수 있다.
+ */
+describe('NT-42 최후 알림 창', () => {
+  it('[NT-T42] **창이 마감을 넘지 않는다** — 넘으면 마감 뒤에 「10분 남았습니다」가 간다', () => {
+    // 창 = [마감-10분, 마감-10분+폭]. 끝이 마감보다 앞이려면 폭 < 10이어야 한다
+    expect(LAST_CALL_WINDOW).toBeLessThan(LAST_CALL_MINUTES);
+  });
+
+  it('[NT-T43] 1분 주기 스케줄러가 반드시 한 번은 창을 지난다', () => {
+    expect(LAST_CALL_WINDOW).toBeGreaterThanOrEqual(2);
+  });
+
+  it('[NT-T44] 세 단계가 시간 순서대로다 — 전날 → 1시간 전 → 10분 전', () => {
+    const slot = { opensAt: new Date(new TZDate(2026, 7, 31, 0, 0, 0, 0, KST).getTime()) };
+    const 마감 = deadlineFor(slot, { deadlineDow: 4, deadlineTime: '14:00' });
+    const 전날 = dayBeforeAt(마감, '11:45').getTime();
+    const 한시간 = 마감.getTime() - 60 * 60_000;
+    const 십분 = 마감.getTime() - LAST_CALL_MINUTES * 60_000;
+    expect(전날).toBeLessThan(한시간);
+    expect(한시간).toBeLessThan(십분);
+    expect(십분).toBeLessThan(마감.getTime());
+  });
+
+  it('[NT-T45] 최후 알림은 마감 10분 전이다 — 더 당기면 「최후」가 아니다', () => {
+    expect(LAST_CALL_MINUTES).toBeGreaterThanOrEqual(5);
+    expect(LAST_CALL_MINUTES).toBeLessThanOrEqual(15);
   });
 });

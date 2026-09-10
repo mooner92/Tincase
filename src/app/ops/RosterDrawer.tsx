@@ -69,7 +69,12 @@ export function RosterDrawer({
         role="dialog"
         aria-modal="true"
         aria-label={`${divisionName} 인원 관리`}
-        className="absolute inset-y-0 right-0 flex h-full w-full max-w-4xl flex-col border-l border-hairline bg-canvas"
+        /*
+          OPS-40 — 열이 12개다. 4xl(896px)로는 어떤 화면에서도 모자라서 가로 스크롤이
+          기본 동작이 된다 — 운영 화면에서 매번 옆으로 밀어야 하는 건 일이다.
+          6xl로 넓히고, 그래도 모자라면 그때 스크롤한다.
+        */
+        className="absolute inset-y-0 right-0 flex h-full w-full max-w-6xl flex-col border-l border-hairline bg-canvas"
       >
         <div className="flex items-center justify-between border-b border-hairline px-5 py-3">
           <div>
@@ -89,19 +94,25 @@ export function RosterDrawer({
           </button>
         </div>
 
-        <div className="flex-1 overflow-y-auto">
-          <table className="w-full text-sm">
+        {/*
+          OPS-40 — 표가 **자기 폭을 갖고, 모자라면 가로로 스크롤한다.**
+          `w-full`이면 서랍 폭에 맞추려고 칸을 짜부라뜨리고, 그러면 「비활성화」가
+          한 글자씩 세로로 쪼개진다. 열이 12개라 어떤 폭에서도 언젠가 그렇게 된다 —
+          짜부라뜨리지 않는 것이 유일한 해법이다.
+        */}
+        <div className="flex-1 overflow-auto">
+          <table className="w-max min-w-full text-sm">
             <thead className="sticky top-0 bg-canvas shadow-[0_1px_0_0_var(--color-hairline)]">
               <tr className="text-left text-xs text-muted">
-                <th className="px-4 py-2 font-medium">이름</th>
-                <th className="px-4 py-2 font-medium">이메일</th>
-                <th className="px-4 py-2 font-medium">역할</th>
-                <th className="px-4 py-2 font-medium">제출 대상</th>
-                <th className="px-4 py-2 font-medium">사번</th>
-                <th className="px-4 py-2 font-medium">알림</th>
-                <th className="px-4 py-2 font-medium">정렬</th>
-                <th className="px-4 py-2 font-medium">비밀번호</th>
-                <th className="px-4 py-2 font-medium">계정</th>
+                <th className="px-4 py-2 font-medium whitespace-nowrap">이름</th>
+                <th className="px-4 py-2 font-medium whitespace-nowrap">이메일</th>
+                <th className="px-4 py-2 font-medium whitespace-nowrap">역할</th>
+                <th className="px-4 py-2 font-medium whitespace-nowrap">제출 대상</th>
+                <th className="px-4 py-2 font-medium whitespace-nowrap">사번</th>
+                <th className="px-4 py-2 font-medium whitespace-nowrap">알림</th>
+                <th className="px-4 py-2 font-medium whitespace-nowrap">정렬</th>
+                <th className="px-4 py-2 font-medium whitespace-nowrap">비밀번호</th>
+                <th className="px-4 py-2 font-medium whitespace-nowrap">계정</th>
               </tr>
             </thead>
             <tbody>
@@ -193,28 +204,28 @@ export function RosterDrawer({
                   <td className="whitespace-nowrap px-4 py-2">
                     <div className="flex items-center gap-1.5">
                       {!u.hasPassword ? (
-                        <span className="rounded bg-surface-card px-1.5 py-0.5 text-[11px] text-muted">미발급</span>
+                        <span className="rounded bg-surface-card px-1.5 py-0.5 text-[11px] whitespace-nowrap text-muted">미발급</span>
                       ) : u.locked ? (
-                        <span className="rounded bg-error/10 px-1.5 py-0.5 text-[11px] text-error">잠김</span>
+                        <span className="rounded bg-error/10 px-1.5 py-0.5 text-[11px] whitespace-nowrap text-error">잠김</span>
                       ) : u.mustChangePassword ? (
-                        <span className="rounded bg-warning-soft px-1.5 py-0.5 text-[11px] text-body-strong">변경 대기</span>
+                        <span className="rounded bg-warning-soft px-1.5 py-0.5 text-[11px] whitespace-nowrap text-body-strong">변경 대기</span>
                       ) : (
-                        <span className="rounded bg-brand-soft px-1.5 py-0.5 text-[11px] text-success">사용 중</span>
+                        <span className="rounded bg-brand-soft px-1.5 py-0.5 text-[11px] whitespace-nowrap text-success">사용 중</span>
                       )}
                       <button
                         disabled={busy}
                         onClick={() => onResetPassword(u)}
-                        className="rounded border border-hairline bg-surface-card px-2 py-0.5 text-xs font-medium text-ink hover:bg-surface-strong disabled:opacity-50"
+                        className="rounded border border-hairline bg-surface-card px-2 py-0.5 text-xs font-medium whitespace-nowrap text-ink hover:bg-surface-strong disabled:opacity-50"
                       >
                         {u.hasPassword ? '초기화' : '발급'}
                       </button>
                     </div>
                   </td>
-                  <td className="px-4 py-2">
+                  <td className="px-4 py-2 whitespace-nowrap">
                     <button
                       disabled={busy}
                       onClick={() => onPatch(u.id, { isActive: !u.isActive })}
-                      className="rounded border border-hairline px-2 py-0.5 text-xs text-body hover:bg-surface-soft"
+                      className="rounded border border-hairline px-2 py-0.5 text-xs whitespace-nowrap text-body hover:bg-surface-soft"
                     >
                       {u.isActive ? '비활성화' : '활성화'}
                     </button>

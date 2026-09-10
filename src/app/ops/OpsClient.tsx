@@ -255,17 +255,18 @@ export function OpsClient() {
       </div>
 
       <section className="overflow-x-auto card">
-        <table className="w-full text-sm">
+        {/* OPS-40 — 칸을 짜부라뜨리지 않는다. `w-full`만 두면 「비활성」이 세로로 쪼개진다 */}
+        <table className="w-max min-w-full text-sm">
           <thead>
             <tr className="border-b border-hairline text-left text-xs text-muted">
-              <th className="px-4 py-2 font-medium">부서</th>
-              <th className="px-4 py-2 font-medium">별칭</th>
-              <th className="px-4 py-2 font-medium">인원</th>
-              <th className="px-4 py-2 font-medium">양식</th>
-              <th className="px-4 py-2 font-medium">마감</th>
-              <th className="px-4 py-2 font-medium">업무일지</th>
-              <th className="px-4 py-2 font-medium">활성</th>
-              <th className="px-4 py-2 font-medium">인원 관리</th>
+              <th className="px-4 py-2 font-medium whitespace-nowrap">부서</th>
+              <th className="px-4 py-2 font-medium whitespace-nowrap">별칭</th>
+              <th className="px-4 py-2 font-medium whitespace-nowrap">인원</th>
+              <th className="px-4 py-2 font-medium whitespace-nowrap">양식</th>
+              <th className="px-4 py-2 font-medium whitespace-nowrap">마감</th>
+              <th className="px-4 py-2 font-medium whitespace-nowrap">업무일지</th>
+              <th className="px-4 py-2 font-medium whitespace-nowrap">활성</th>
+              <th className="px-4 py-2 font-medium whitespace-nowrap">인원 관리</th>
             </tr>
           </thead>
           <tbody>
@@ -325,7 +326,7 @@ export function OpsClient() {
                   <button
                     disabled={busy}
                     onClick={() => patchDivision(d.id, { isActive: !d.isActive })}
-                    className={`rounded px-2 py-0.5 text-xs font-medium ${
+                    className={`rounded px-2 py-0.5 text-xs font-medium whitespace-nowrap ${
                       d.isActive ? 'bg-green-100 text-ink' : 'bg-surface-card text-muted hover:bg-surface-strong'
                     }`}
                   >
@@ -335,7 +336,7 @@ export function OpsClient() {
                 <td className="px-4 py-2">
                   <button
                     onClick={() => openRoster(d.id)}
-                    className="rounded border border-hairline px-2 py-0.5 text-xs text-body hover:bg-surface-soft"
+                    className="rounded border border-hairline px-2 py-0.5 text-xs whitespace-nowrap text-body hover:bg-surface-soft"
                   >
                     열기
                   </button>

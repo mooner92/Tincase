@@ -1,7 +1,8 @@
 // NT-10~14 · NT-41 — 마감 전 미제출자 알림. **두 번 나가고, 두 번 다 이유가 다르다.**
 //
-//   마감 전날 11:45  «내일이 마감이에요»   — 준비할 시간을 준다   (NT-41)
-//   마감 1시간 전    «아직 안 냈어요»      — 마지막으로 손쓸 시점 (NT-10)
+//   마감 전날 11:45  «내일이 마감이에요»   — 준비할 시간을 준다     (NT-41)
+//   마감 1시간 전    «아직 안 냈어요»      — 마지막으로 손쓸 시점   (NT-10)
+//   마감 10분 전     «10분 뒤 마감입니다»  — 최후. 지금 아니면 못 낸다 (NT-42)
 //
 // **왜 1시간 전인가.** 그때가 아직 손쓸 수 있는 마지막 시점이다. 마감 후 독촉은 늦었다는
 // 통보일 뿐이다. AI홍보전략실 기준 목 14:00 마감이니 **목 13:00**에 나간다.
@@ -23,20 +24,40 @@ import { dayBeforeAt, formatDeadlineKo, slotKind } from '@/lib/week';
 
 /** 마감 몇 분 전에 보낼 것인가 */
 const LEAD_MINUTES = 60;
+/** NT-42 — 최후 알림. 「지금 아니면 못 낸다」를 알리는 마지막 순간 */
+export const LAST_CALL_MINUTES = 10;
+/**
+ * NT-42 — 최후 알림의 창 폭(분). **마감을 넘지 않아야 한다** — 넘으면
+ * 「10분 남았습니다」가 마감 뒤에 나가고, 그건 거짓말이자 이미 못 내게 된 사람에 대한 재촉이다.
+ * 스케줄러가 1분 주기라 3분이면 반드시 한 번 걸린다.
+ */
+export const LAST_CALL_WINDOW = 3;
 /** NT-41 — 마감 전날 이 시각(KST)에. 점심으로 자리를 뜨기 직전이라 아무것도 끊지 않는다 */
 const DAY_BEFORE_TIME = '11:45';
-/** 스케줄러가 5분마다 도니 창을 그보다 넓게 잡는다 — 반드시 한 번은 이 창을 지난다 */
+/** 창을 스케줄러 주기보다 넓게 잡는다 — 반드시 한 번은 이 창을 지난다 */
 const WINDOW_MINUTES = 12;
 
-export type ReminderKind = 'deadline_1d' | 'deadline_1h';
+export type ReminderKind = 'deadline_1d' | 'deadline_1h' | 'deadline_10m';
 
 /**
  * 단계 표. **시각 계산을 한곳에 모은다** — 예전에는 «1시간 전»이 조건문 안에 숫자로
  * 흩어져 있었고, 그래서 두 번째 단계를 붙이려면 그 조건문을 헤집어야 했다.
+ *
+ * `window`는 **그 시각부터 몇 분 안에** 보낼 것인가다. 넓게 잡는 이유는 컨테이너가
+ * 마침 그 순간 재시작 중이어도 다음 tick이 창 안에 들어오게 하기 위함이다.
+ *
+ * **최후 알림만 창이 좁다 (NT-42).** 창이 마감을 넘으면 「10분 남았습니다」가 마감 뒤에
+ * 나간다 — 거짓말이고, 이미 못 내게 된 사람에게 재촉하는 꼴이다. 스케줄러가 1분 주기라
+ * 3분이면 반드시 걸린다.
  */
-const STAGES: { kind: ReminderKind; at: (deadline: Date) => Date }[] = [
+const STAGES: { kind: ReminderKind; at: (deadline: Date) => Date; window?: number }[] = [
   { kind: 'deadline_1d', at: (d) => dayBeforeAt(d, DAY_BEFORE_TIME) },
   { kind: 'deadline_1h', at: (d) => new Date(d.getTime() - LEAD_MINUTES * 60_000) },
+  {
+    kind: 'deadline_10m',
+    at: (d) => new Date(d.getTime() - LAST_CALL_MINUTES * 60_000),
+    window: LAST_CALL_WINDOW,
+  },
 ];
 
 export interface ReminderOutcome {
@@ -95,6 +116,28 @@ function buildMessage(
     };
   }
 
+  /*
+   * NT-42 — **최후 알림.** 같은 사람에게 가는 세 번째다(전날 11:45 · 1시간 전 · 지금).
+   * 같은 말을 세 번 하면 세 번째는 안 읽힌다. 그래서 이것만 다르게 만든다:
+   *
+   *   제일 짧다        — 읽는 데 1초를 넘기면 지금은 이미 늦다
+   *   남은 분을 적는다 — 「마감 전」이 아니라 「10분」. 숫자가 사람을 움직인다
+   *   놓쳤을 때를 적는다 — 마감 뒤에는 담당자만 열 수 있다(TACP-18). 그걸 모르면
+   *                       마감 후에 혼자 붙들고 있다가 못 낸다
+   */
+  if (kind === 'deadline_10m') {
+    return {
+      subject: `[Tincase] ${slotLabel} 업무일지 마감 ${LAST_CALL_MINUTES}분 전입니다`,
+      contents: [
+        `[${user.employeeNo}]${user.name}님 ${LAST_CALL_MINUTES}분 뒤 마감입니다.`,
+        '',
+        '아직 제출되지 않았어요. 지금 Tincase에서 제출해주세요.',
+        '',
+        '마감 뒤에는 부서 담당자에게 말씀하셔야 낼 수 있습니다.',
+      ].join('\n'),
+    };
+  }
+
   return {
     subject: `[Tincase] ${slotLabel} ${종류} 업무일지 마감 1시간 전이에요`,
     contents: [
@@ -144,7 +187,7 @@ export async function runDueReminders(now = new Date()): Promise<ReminderOutcome
        * 14:30에 «내일이 마감이에요»가 오는 것보다 안 오는 편이 낫다.
        */
       const passed = (now.getTime() - stage.at(deadline).getTime()) / 60_000;
-      if (passed < 0 || passed > WINDOW_MINUTES) continue;
+      if (passed < 0 || passed > (stage.window ?? WINDOW_MINUTES)) continue;
 
       // NT-12 — 같은 (부서, 주차, 종류)로는 한 번만. 유니크 제약이 중복 발송을 구조적으로 막는다
       const already = await prisma.notifyLog.findFirst({

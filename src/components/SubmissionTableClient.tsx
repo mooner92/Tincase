@@ -79,12 +79,12 @@ export function SubmissionTableClient({
                 key={m.user.id}
                 className={`border-b border-hairline-soft last:border-0 ${m.status === 'missing' ? 'bg-surface-soft/60' : ''}`}
               >
-                <td className="px-5 py-3 font-medium text-ink">{m.user.name}</td>
+                <td className="px-5 py-3 font-medium whitespace-nowrap text-ink">{m.user.name}</td>
                 <td className="px-5 py-3">
                   {m.status === 'submitted' ? (
-                    <span className="font-medium text-success">● 제출</span>
+                    <span className="font-medium whitespace-nowrap text-success">● 제출</span>
                   ) : (
-                    <span className="text-muted-soft">
+                    <span className="whitespace-nowrap text-muted-soft">
                       ○ 미제출
                       {m.notifiedAtKst && (
                         <span
