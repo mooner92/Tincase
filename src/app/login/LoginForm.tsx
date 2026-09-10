@@ -76,9 +76,17 @@ export function LoginForm() {
       >
         {busy ? '로그인 중…' : '로그인'}
       </button>
-      <p className="text-center text-xs text-muted-soft">
-        비밀번호를 모르거나 잊으셨다면 AI홍보전략실 운영자에게 재발급을 요청하세요.
-      </p>
+      {/*
+        AU-32 — 예전에는 「운영자에게 요청하세요」였다. 그러면 운영자가 매번 불려 다니고,
+        급할 때 자리에 없으면 그날은 못 들어온다. 본인이 바로 받게 한다.
+      */}
+      {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- 인증 밖 페이지 */}
+      <a
+        href="/forgot"
+        className="block text-center text-xs text-muted underline underline-offset-2 hover:text-ink"
+      >
+        비밀번호를 잊으셨나요? 메신저로 재설정 링크 받기
+      </a>
     </form>
   );
 }

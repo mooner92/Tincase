@@ -1,6 +1,7 @@
 // GET /api/ops/divisions · PUT — 테넌시 관리 (operator 전용, API-32/33)
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
+import { templateProblem, templateState, templateStates } from '@/server/template-state';
 import { HttpError, notFound, requireOperator } from '@/server/authz';
 import { handler, json } from '@/server/http';
 import { audit } from '@/server/audit';
@@ -22,12 +23,8 @@ export const GET = handler(async (req: NextRequest) => {
       Number(b.isActive) - Number(a.isActive) ||
       a.nameKo.localeCompare(b.nameKo, 'ko'),
   );
-  const activeTemplates = await prisma.template.groupBy({
-    by: ['divisionId'],
-    where: { isActive: true },
-    _count: { _all: true },
-  });
-  const hasTemplate = new Set(activeTemplates.map((t) => t.divisionId));
+  // OPS-41 — **행이 아니라 파일까지** 본다. 행만 보면 「✓」가 거짓이 된다
+  const tplState = await templateStates(divisions.map((d) => d.id));
   return json({
     divisions: divisions.map((d) => ({
       id: d.id,
@@ -38,7 +35,9 @@ export const GET = handler(async (req: NextRequest) => {
       deadlineDow: d.deadlineDow,
       deadlineTime: d.deadlineTime,
       memberCount: d._count.users,
-      hasTemplate: hasTemplate.has(d.id),
+      hasTemplate: tplState.get(d.id) === 'ok',
+      /** OPS-41 — 「없음」과 「파일이 사라짐」은 해야 할 일이 다르다 */
+      templateState: tplState.get(d.id) ?? 'none',
       boardStatus: d.boardStatus, // 취합게시판 제출 이력 (DM-15)
       boardNote: d.boardNote,
     })),
@@ -64,10 +63,9 @@ export const PUT = handler(async (req: NextRequest) => {
   if (typeof body.isActive === 'boolean') {
     // 온보딩 활성화는 양식이 있어야 의미가 있다 — 없으면 부서원 업로드가 막힌 채 열림
     if (body.isActive) {
-      const tpl = await prisma.template.findFirst({ where: { divisionId: div.id, isActive: true } });
-      if (!tpl) {
-        throw new HttpError(409, 'no_template', `${div.nameKo}에 등록된 양식이 없습니다. 양식 등록 후 활성화하세요.`);
-      }
+      // OPS-41 — 목록과 **같은 판정**을 쓴다. 여기만 DB를 보면 「✓인데 못 켠다」가 된다
+      const problem = templateProblem(await templateState(div.id), div.nameKo);
+      if (problem) throw new HttpError(409, 'no_template', problem);
     }
     data.isActive = body.isActive;
   }

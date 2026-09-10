@@ -226,3 +226,54 @@ describe('AU-31 퇴사 처리', () => {
     expect(두번째.sessions).toBe(0);
   });
 });
+
+/**
+ * AU-32 — **비밀번호를 잊었을 때 본인이 요청한다.**
+ *
+ * 여기서 지키는 것은 「링크가 간다」가 아니라 **「명단이 새지 않는다」**이다.
+ * 없는 메일이라고 알려 주면 그것만으로 «누가 이 시스템을 쓰는가»를 캐낼 수 있다.
+ * 사내망이라도 명단은 명단이다.
+ */
+describe('AU-32 비밀번호 재설정 요청', () => {
+  const post = async (email: string) => {
+    const { POST } = await import('@/app/api/forgot/route');
+    const r = new Request('http://test.local/api/forgot', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-forwarded-for': `10.0.0.${Math.floor(Math.random() * 250)}` },
+      body: JSON.stringify({ email }),
+    }) as Request & { nextUrl: URL };
+    r.nextUrl = new URL('http://test.local/api/forgot');
+    return POST(r as never);
+  };
+
+  it('[AU-T80] 있는 메일과 없는 메일의 응답이 **완전히 같다**', async () => {
+    const 있음 = await post('inuse@test.kei.re.kr');
+    const 없음 = await post(`nobody-${Math.random().toString(36).slice(2)}@test.kei.re.kr`);
+    expect(있음.status).toBe(없음.status);
+    expect(await 있음.json()).toEqual(await 없음.json());
+  });
+
+  it('[AU-T81] 사번이 없어 못 보내는 경우도 같은 응답 — 화면이 그 사실을 알려선 안 된다', async () => {
+    const div = await db.division.findFirstOrThrow({ where: { slug: 'S_Div' } });
+    const 사번없음 = await db.user.create({
+      data: { email: 'noemp@test.kei.re.kr', name: '사번없음', divisionId: div.id },
+    });
+    const r = await post('noemp@test.kei.re.kr');
+    expect(await r.json()).toEqual({ ok: true });
+    // 링크도 만들지 않는다 — 보낼 길이 없는데 토큰만 쌓이면 안 된다
+    expect(await db.setupToken.count({ where: { userId: 사번없음.id } })).toBe(0);
+  });
+
+  it('[AU-T82] 퇴사자에게는 아무것도 가지 않는다', async () => {
+    const div = await db.division.findFirstOrThrow({ where: { slug: 'S_Div' } });
+    const 퇴사 = await db.user.create({
+      data: { email: 'gone@test.kei.re.kr', name: '나간사람', divisionId: div.id, employeeNo: '77777', isActive: false },
+    });
+    expect(await (await post('gone@test.kei.re.kr')).json()).toEqual({ ok: true });
+    expect(await db.setupToken.count({ where: { userId: 퇴사.id } })).toBe(0);
+  });
+
+  it('[AU-T83] 메일 주소가 비면 거절한다 — 빈 요청까지 조용히 받아 줄 이유는 없다', async () => {
+    expect((await post('')).status).toBe(422);
+  });
+});

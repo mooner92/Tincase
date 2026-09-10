@@ -16,6 +16,8 @@ interface DivisionRow {
   deadlineTime: string;
   memberCount: number;
   hasTemplate: boolean;
+  /** OPS-41 — `missing`은 「등록 기록만 있고 파일이 없다」 — 「없음」과 할 일이 다르다 */
+  templateState?: 'ok' | 'missing' | 'none';
   boardStatus: 'confirmed' | 'none';
   boardNote: string;
 }
@@ -312,7 +314,22 @@ export function OpsClient() {
                 <td className="whitespace-nowrap px-4 py-2 font-mono text-xs">/{d.shortSlug ?? '—'}</td>
                 <td className="px-4 py-2 tabular-nums">{d.memberCount}</td>
                 <td className="px-4 py-2">
-                  {d.hasTemplate ? <span className="text-success">✓</span> : <span className="text-error">없음</span>}
+                  {/*
+                    OPS-41 — 세 상태를 구분한다. 예전에는 등록 기록만 보고 「✓」를 찍어서,
+                    파일이 없는 부서도 켤 수 있어 보였다 — 켠 뒤에야 알게 된다.
+                  */}
+                  {d.templateState === 'missing' ? (
+                    <span
+                      title="등록 기록은 있는데 파일이 저장소에 없습니다 — 부서 설정에서 다시 올려주세요"
+                      className="whitespace-nowrap rounded bg-warning-soft px-1.5 py-0.5 text-[11px] font-medium text-body-strong"
+                    >
+                      파일 없음
+                    </span>
+                  ) : d.hasTemplate ? (
+                    <span className="text-success">✓</span>
+                  ) : (
+                    <span className="text-error">없음</span>
+                  )}
                 </td>
                 <td className="whitespace-nowrap px-4 py-2">
                   <select
