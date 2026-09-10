@@ -29,6 +29,7 @@ export function RosterDrawer({
   onClose,
   onPatch,
   onResetPassword,
+  onSendSetupLink,
 }: {
   divisionName: string | null;
   users: UserRow[];
@@ -36,6 +37,8 @@ export function RosterDrawer({
   onClose: () => void;
   onPatch: (userId: string, patch: Record<string, unknown>) => void;
   onResetPassword: (u: UserRow) => void;
+  /** AU-30 — 설정 링크 보내기. 보내도 그 사람 비밀번호는 바뀌지 않는다 */
+  onSendSetupLink: (userIds: string[]) => void;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -85,6 +88,25 @@ export function RosterDrawer({
               전체 {users.length}명 · 제출 대상 {roster}명 · 비밀번호 발급 {issued}/{users.length}
             </p>
           </div>
+          <div className="flex items-center gap-2">
+            {/*
+              AU-30 — **한 번에 보내기.** 부서 하나에 10명이면 열 번 누르게 두면 안 된다.
+              사번 없는 사람은 애초에 못 받으므로 목록에서 뺀다 — 「보냈는데 안 왔다」가
+              제일 나쁜 결과다.
+            */}
+            {(() => {
+              const 대상 = users.filter((u) => u.isActive && !u.hasPassword && u.employeeNo);
+              if (대상.length === 0) return null;
+              return (
+                <button
+                  disabled={busy}
+                  onClick={() => onSendSetupLink(대상.map((u) => u.id))}
+                  className="btn-secondary btn-sm whitespace-nowrap"
+                >
+                  미발급 {대상.length}명에게 링크 보내기
+                </button>
+              );
+            })()}
           <button
             onClick={onClose}
             className="rounded px-2 py-1 text-lg leading-none text-muted-soft hover:text-body"
@@ -92,6 +114,7 @@ export function RosterDrawer({
           >
             ×
           </button>
+          </div>
         </div>
 
         {/*
@@ -214,10 +237,24 @@ export function RosterDrawer({
                       )}
                       <button
                         disabled={busy}
-                        onClick={() => onResetPassword(u)}
+                        onClick={() => onSendSetupLink([u.id])}
+                        title="이 사람 메신저로 설정 링크를 보냅니다 — 기존 비밀번호는 바뀌지 않습니다"
                         className="rounded border border-hairline bg-surface-card px-2 py-0.5 text-xs font-medium whitespace-nowrap text-ink hover:bg-surface-strong disabled:opacity-50"
                       >
-                        {u.hasPassword ? '초기화' : '발급'}
+                        링크 보내기
+                      </button>
+                      {/*
+                        AU-30 — 옛 방식(임시 비밀번호를 화면에 띄우기)은 남겨 둔다.
+                        사번이 없어 메신저를 못 받는 사람은 이 길밖에 없다.
+                        기본이 아니라 **예외**이므로 눈에 덜 띄게 둔다.
+                      */}
+                      <button
+                        disabled={busy}
+                        onClick={() => onResetPassword(u)}
+                        title="임시 비밀번호를 화면에 한 번 띄웁니다 (메신저를 못 받는 경우에만)"
+                        className="rounded px-1.5 py-0.5 text-xs whitespace-nowrap text-muted-soft hover:text-ink disabled:opacity-50"
+                      >
+                        직접
                       </button>
                     </div>
                   </td>

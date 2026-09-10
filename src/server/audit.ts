@@ -19,7 +19,11 @@ export type AuditAction =
   | 'roster_sync'
   /** DM-20 — 담당자가 마감을 잠시 열었다·닫았다. **예외에는 언제나 이름이 붙는다** */
   | 'deadline_open'
-  | 'deadline_close';
+  | 'deadline_close'
+  /** AU-30 — 비밀번호 설정 링크를 보냈다. **비밀번호는 바뀌지 않는다** (쓸 때 바뀐다) */
+  | 'setup_link'
+  /** AU-30 — 본인이 링크로 비밀번호를 설정했다 */
+  | 'setup_done';
 
 export async function audit(
   actor: string,

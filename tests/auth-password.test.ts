@@ -326,6 +326,10 @@ describe('[AU-T39] 보호 페이지는 전부 비밀번호 강제 변경을 거�
       'src/app/layout.tsx': '루트 레이아웃 — 신원을 보지 않는다 (로그인 화면도 감싼다)',
       'src/app/login/page.tsx': '로그인 자체',
       'src/app/password/page.tsx': '**여기가 목적지다.** 가드를 걸면 무한 리다이렉트',
+      'src/app/setup/[token]/page.tsx':
+        'AU-30 — 링크로 **처음** 비밀번호를 정하는 자리다. 로그인해야 열 수 있으면 ' +
+        '비밀번호가 없는 사람은 영영 못 들어온다. 대신 토큰이 신원을 대신하고, ' +
+        '그 토큰은 1회용·3일 만료다',
     };
 
     const offenders: string[] = [];

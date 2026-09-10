@@ -109,6 +109,37 @@ export function OpsClient() {
       .finally(() => setBusy(false));
   };
 
+  /**
+   * AU-30 — 설정 링크 보내기.
+   *
+   * 확인 문구에 **「바뀌지 않습니다」를 먼저** 쓴다. 운영자가 제일 무서워하는 건
+   * 「이미 쓰고 있는 사람 비밀번호를 날리는 것」이고, 그 걱정이 남아 있으면
+   * 한 명씩 골라 보내게 된다 — 그러면 이 기능을 만든 뜻이 없다.
+   */
+  const sendSetupLink = (userIds: string[]) => {
+    const n = userIds.length;
+    if (!confirm(`${n}명에게 비밀번호 설정 링크를 메신저로 보냅니다.\n\n· 지금 쓰고 있는 비밀번호는 바뀌지 않습니다\n· 본인이 링크를 눌러 새로 정할 때만 바뀝니다\n· 링크는 1회용이고 3일 뒤 사라집니다`))
+      return;
+    setBusy(true);
+    fetch('/api/ops/setup-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userIds }),
+    })
+      .then(async (r) => {
+        const b = await r.json();
+        if (!r.ok) return flash(b.message ?? '보내지 못했습니다.');
+        const 실패 = (b.failed as { name: string; reason: string }[]) ?? [];
+        flash(
+          `링크 ${b.sent.length}명 발송` +
+            (실패.length ? ` · 실패 ${실패.length}명 (${실패.map((f) => `${f.name}:${f.reason}`).join(', ')})` : ''),
+        );
+        if (selected) loadUsers(selected);
+      })
+      .catch(() => flash('네트워크 오류로 보내지 못했습니다.'))
+      .finally(() => setBusy(false));
+  };
+
   const resetPassword = (u: UserRow) => {
     if (!confirm(`${u.name} 님의 비밀번호를 초기화합니다.\n기존 로그인은 모두 해제되고, 새 임시 비밀번호를 전달해야 합니다.`))
       return;
@@ -362,6 +393,7 @@ export function OpsClient() {
         onClose={() => setSelected(null)}
         onPatch={patchUser}
         onResetPassword={resetPassword}
+        onSendSetupLink={sendSetupLink}
       />
     </div>
   );
