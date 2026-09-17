@@ -32,6 +32,7 @@ export async function register() {
   }
 
   const { runDueMerges } = await import('./server/merge/run');
+  const { mergePauseState } = await import('./server/merge/pause');
   const { runDueReminders } = await import('./server/notify/deadline-reminder');
   const { runDueMergeNotices } = await import('./server/notify/merge-notices');
 
@@ -55,8 +56,20 @@ export async function register() {
     console.error('[알림] 설정 확인 실패', e);
   }
 
+  /*
+   * HM-44 — 기한부 일시정지 상태를 **기동할 때 한 번 보여 준다.**
+   * 「지금 무엇이 꺼져 있나」는 로그를 뒤지지 않고도 보여야 한다 (NT-32와 같은 이유).
+   */
+  {
+    const st = mergePauseState(new Date());
+    if (st.paused && st.until) console.log(`[merge] 자동 병합 일시정지 — ${st.until.toISOString()}까지 (그 뒤 저절로 재개)`);
+    else if (st.paused) console.error(`[merge] ${st.reason} — 자동 병합을 멈춘 채로 둔다`);
+  }
+
   // 겹쳐 도는 걸 막는다. 한 번 실행이 5분을 넘길 수 있다 (부서 30개 × 모델 호출)
   let running = false;
+  // 멈춰 있는 동안 1분마다 같은 줄을 찍지 않는다 — 한 시간에 한 번이면 «살아서 멈춰 있다»가 보인다
+  let pauseLoggedAt = 0;
 
   const tick = async () => {
     if (running) return;
@@ -71,6 +84,22 @@ export async function register() {
         }
       } catch (e) {
         console.error('[알림] 마감 전 알림 오류', e);
+      }
+
+      /*
+       * HM-44 — 멈춰 있으면 **여기서 끝난다.** 마감 전 알림은 바로 위에서 이미 돌았다 —
+       * 그게 「병합 일시정지」와 「스케줄러 정지」의 차이다. 제출은 계속 받고 재촉도 하되,
+       * 병합본을 새로 만들지도 「검토해 주세요」를 보내지도 않는다.
+       */
+      const pause = mergePauseState(new Date());
+      if (pause.paused) {
+        const now = Date.now();
+        if (now - pauseLoggedAt > 60 * 60_000) {
+          pauseLoggedAt = now;
+          if (pause.until) console.log(`[merge] 일시정지 중 — ${pause.until.toISOString()}까지`);
+          else console.error(`[merge] ${pause.reason} — 멈춘 채로 둔다`);
+        }
+        return; // finally에서 running이 풀린다
       }
 
       const { ran } = await runDueMerges();

@@ -152,6 +152,30 @@ function buildMessage(
 }
 
 /**
+ * NT-43 — **지금 어느 단계가 창 안에 있나.** 순수 계산이라 DB도 메신저도 타지 않는다.
+ *
+ * 떼어낸 이유: 이 산술은 **틀려도 조용하다.** 창이 좁아 스케줄러 주기와 어긋나면 알림이
+ * 영영 안 나가고, 넓어 마감을 넘으면 「10분 남았습니다」가 마감 뒤에 나간다. 둘 다
+ * 그 주에 늦게 낸 사람이 있어야만 드러나고, 아무도 신고하지 않는다.
+ *
+ * 실제로 최후 알림(deadline_10m)은 2026-09-10 21:08에 배포된 뒤 **한 번도 발송된 적이
+ * 없다** — 9/10은 배포가 마감 뒤였고, 9/17은 마감 6분 전에 스케줄러를 껐다. 처음 도는
+ * 코드를 목요일 오후에 처음 확인할 수는 없으므로, 여기서 분 단위로 확인한다.
+ *
+ * 창은 `[발송시각, 발송시각+창폭]`이다(양끝 포함). 1분 주기 스케줄러가 반드시 한 번은
+ * 지난다. **지나가 버린 창은 보내지 않는다** — 컨테이너가 그때 꺼져 있었다면 14:30에
+ * 「내일이 마감이에요」가 오는 것보다 안 오는 편이 낫다.
+ */
+export function dueStages(now: Date, deadline: Date): ReminderKind[] {
+  const out: ReminderKind[] = [];
+  for (const stage of STAGES) {
+    const passed = (now.getTime() - stage.at(deadline).getTime()) / 60_000;
+    if (passed >= 0 && passed <= (stage.window ?? WINDOW_MINUTES)) out.push(stage.kind);
+  }
+  return out;
+}
+
+/**
  * NT-10 · NT-41 — 발송 창에 든 부서에 대해 **미제출자에게만** 보낸다.
  *
  * 조용히 건너뛰는 경우: 창 밖 · 이미 보냄 · 미제출자 없음 · 사번 없는 사람.
@@ -180,14 +204,10 @@ export async function runDueReminders(now = new Date()): Promise<ReminderOutcome
   for (const division of divisions) {
     const deadline = effectiveDeadline(slot, division);
 
+    const due = new Set(dueStages(now, deadline));
+
     for (const stage of STAGES) {
-      /*
-       * 창은 `[발송시각, 발송시각+12분]`이다. 5분 주기 스케줄러가 이 창을 반드시 한 번은
-       * 지난다. **창이 지나가 버린 경우 보내지 않는다** — 컨테이너가 그 시간에 꺼져 있었다면
-       * 14:30에 «내일이 마감이에요»가 오는 것보다 안 오는 편이 낫다.
-       */
-      const passed = (now.getTime() - stage.at(deadline).getTime()) / 60_000;
-      if (passed < 0 || passed > (stage.window ?? WINDOW_MINUTES)) continue;
+      if (!due.has(stage.kind)) continue;
 
       // NT-12 — 같은 (부서, 주차, 종류)로는 한 번만. 유니크 제약이 중복 발송을 구조적으로 막는다
       const already = await prisma.notifyLog.findFirst({

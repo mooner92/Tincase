@@ -16,6 +16,7 @@
 import { prisma } from '../db';
 import { runMerge, MergeUnavailable, MergeFailed, type MergeOutcome } from './index';
 import { mergeGateOf } from '../deadline';
+import { ensureCurrentSlot } from '../worklog';
 
 /** HM-35 — 마감 후 이만큼 지나서 시작한다. 마감 정각에 들어온 제출이 커밋될 시간 */
 export const MERGE_DELAY_MINUTES = 1;
@@ -135,11 +136,19 @@ export async function hasFinalMerge(
  *   → 빈 병합본이나 무의미한 실패 기록을 남기지 않는다.
  */
 export async function runDueMerges(now = new Date()): Promise<{ ran: number; skipped: number }> {
-  const slot = await prisma.weekSlot.findFirst({
-    where: { opensAt: { lte: now } },
-    orderBy: { opensAt: 'desc' },
-  });
-  if (!slot) return { ran: 0, skipped: 0 };
+  /*
+   * HM-45 — **이번 주 슬롯을 보장한다.** 예전에는 «가장 최근 슬롯»을 그냥 집어 왔다.
+   *
+   * 슬롯은 누가 화면을 열 때 만들어지므로(WS-11 지연 생성), 새 주가 시작된 직후 아무도
+   * 접속하지 않았으면 **지난 주 슬롯**이 잡힌다. 그 슬롯의 마감은 이미 지났으니
+   * «마감했는데 최종 병합이 없네» 판정이 서서 **지난 주 문서를 다시 만든다** —
+   * 실장이 고쳐서 내보낸 그 문서를.
+   *
+   * 지금까지 안 터진 것은 알림 경로가 매 분 슬롯을 만들어 줬기 때문이다(NT-13).
+   * 그런데 그 경로는 메신저가 꺼져 있으면 **슬롯을 만들기 전에 빠져나간다.**
+   * 병합이 남의 기능의 부작용에 기대고 있는 셈이라 여기서 직접 보장한다.
+   */
+  const slot = await ensureCurrentSlot(now);
 
   const divisions = await prisma.division.findMany({ where: { isActive: true } });
   let ran = 0;

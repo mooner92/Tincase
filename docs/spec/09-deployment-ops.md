@@ -248,6 +248,22 @@ curl -fsS http://127.0.0.1:11111/api/health | jq .
 
 권장: **화요일 14:00 이후 ~ 일요일**.
 
+### OPS-16a — 자동 병합을 잠시 멈춰야 할 때
+
+`MERGE_SCHEDULER=off`(영구 정지)가 아니라 **기한부**로 멈춘다 — 되살리는 일이 사람
+기억에 남지 않게. 규칙과 이유는 [HM-44](08-hwp-merge-engine.md#hm-44--자동-병합-기한부-일시정지-).
+
+```yaml
+MERGE_PAUSE_UNTIL: "2026-09-21T09:00:00+09:00"   # 반드시 새 주차가 열린 뒤로
+```
+
+```bash
+sudo docker compose up -d        # 재빌드 불필요 — 환경변수만 바뀐다
+sudo docker compose logs app | grep '일시정지'
+```
+
+지나고 나면 그 줄은 아무것도 하지 않는다. 다음 정리 때 지운다.
+
 ### OPS-17 — 롤백
 
 ```bash

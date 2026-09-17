@@ -9,7 +9,7 @@ import { TZDate } from '@date-fns/tz';
 import { dayBeforeAt, deadlineFor, KST } from '@/lib/week';
 import { MERGE_DELAY_MINUTES } from '@/server/merge/run';
 import { REVIEW_MINUTES, SUBMIT_MINUTES } from '@/server/notify/merge-notices';
-import { LAST_CALL_MINUTES, LAST_CALL_WINDOW } from '@/server/notify/deadline-reminder';
+import { LAST_CALL_MINUTES, LAST_CALL_WINDOW, dueStages } from '@/server/notify/deadline-reminder';
 
 /** KST 벽시계로 읽어 "8/26(수) 11:45" 꼴로 — 실패 메시지가 UTC면 사람이 못 읽는다 */
 function kst(d: Date): string {
@@ -133,5 +133,75 @@ describe('NT-42 최후 알림 창', () => {
   it('[NT-T45] 최후 알림은 마감 10분 전이다 — 더 당기면 「최후」가 아니다', () => {
     expect(LAST_CALL_MINUTES).toBeGreaterThanOrEqual(5);
     expect(LAST_CALL_MINUTES).toBeLessThanOrEqual(15);
+  });
+});
+
+
+/**
+ * NT-43 — **분 단위로 훑는다.** 상수가 맞는 것과 알림이 나가는 것은 다른 얘기다.
+ *
+ * 최후 알림은 2026-09-10 21:08에 배포됐는데 **아직 한 번도 안 나갔다**:
+ * 9/10은 배포가 마감(14:00) 뒤였고, 9/17은 마감 6분 전(13:44)에 스케줄러를 껐다.
+ * 그래서 2026-09-24가 첫 실전이다. 처음 도는 코드를 목요일 오후에 처음 보지 않으려고
+ * 수요일 00:00부터 목요일 15:00까지 1분씩 밀어 보며 **실제로 몇 시 몇 분에 나가는지** 센다.
+ */
+describe('NT-43 실제 발송 분 — 목 14:00 마감 주간', () => {
+  // 2026-09-21(월) 개시 → 마감 2026-09-24(목) 14:00
+  const 마감 = deadlineFor(
+    { opensAt: new TZDate(2026, 8, 21, 0, 0, 0, 0, KST) },
+    { deadlineDow: 4, deadlineTime: '14:00' },
+  );
+
+  /** 수 00:00 ~ 목 15:00을 1분씩 — 각 종류가 켜지는 분을 모은다 */
+  const 발동: Record<string, string[]> = { deadline_1d: [], deadline_1h: [], deadline_10m: [] };
+  const 시작 = new TZDate(2026, 8, 23, 0, 0, 0, 0, KST).getTime();
+  for (let m = 0; m <= 39 * 60; m++) {
+    const now = new Date(시작 + m * 60_000);
+    for (const k of dueStages(now, 마감)) 발동[k].push(kst(now));
+  }
+
+  it('[NT-T50] 마감이 목 14:00로 잡힌다 — 이 주차 계산이 틀리면 나머지가 다 틀린다', () => {
+    expect(kst(마감)).toBe('9/24(목) 14:00');
+  });
+
+  it('[NT-T51] **최후 알림은 13:50~13:53에만 켜진다** — 마감을 넘지 않는다', () => {
+    expect(발동.deadline_10m).toEqual([
+      '9/24(목) 13:50',
+      '9/24(목) 13:51',
+      '9/24(목) 13:52',
+      '9/24(목) 13:53',
+    ]);
+    // 마지막 발동이 마감보다 앞이다 — 「10분 남았습니다」가 마감 뒤에 가면 거짓말이다
+    expect(발동.deadline_10m.at(-1)! < '9/24(목) 14:00').toBe(true);
+  });
+
+  it('[NT-T52] 1시간 전 알림은 13:00에 켜진다', () => {
+    expect(발동.deadline_1h[0]).toBe('9/24(목) 13:00');
+    expect(발동.deadline_1h.at(-1)).toBe('9/24(목) 13:12');
+  });
+
+  it('[NT-T53] 하루 전 알림은 수 11:45에 켜진다 — 점심시간 직전', () => {
+    expect(발동.deadline_1d[0]).toBe('9/23(수) 11:45');
+    expect(발동.deadline_1d.at(-1)).toBe('9/23(수) 11:57');
+  });
+
+  it('[NT-T54] 세 창이 겹치지 않는다 — 같은 분에 두 통이 가지 않는다', () => {
+    const 전부 = [...발동.deadline_1d, ...발동.deadline_1h, ...발동.deadline_10m];
+    expect(new Set(전부).size).toBe(전부.length);
+  });
+
+  it('[NT-T55] 창 **밖에서는 아무것도 안 켜진다** — 39시간 중 29분만 켜져 있다', () => {
+    const 켜진분 = 발동.deadline_1d.length + 발동.deadline_1h.length + 발동.deadline_10m.length;
+    expect(켜진분).toBe(13 + 13 + 4);
+    // 마감 뒤에는 어떤 단계도 켜지지 않는다
+    for (let m = 0; m <= 60; m++) {
+      const 마감후 = new Date(마감.getTime() + m * 60_000 + 1);
+      expect(dueStages(마감후, 마감), kst(마감후)).toEqual([]);
+    }
+  });
+
+  it('[NT-T56] 1분 주기가 창을 건너뛰지 않는다 — 가장 좁은 창도 2분 이상이다', () => {
+    // 스케줄러가 한 주기를 늦게 돌아도(실행이 1분을 넘으면 생긴다) 여전히 창에 든다
+    expect(발동.deadline_10m.length).toBeGreaterThanOrEqual(2);
   });
 });
