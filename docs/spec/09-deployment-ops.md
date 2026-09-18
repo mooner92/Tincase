@@ -264,6 +264,70 @@ sudo docker compose logs app | grep '일시정지'
 
 지나고 나면 그 줄은 아무것도 하지 않는다. 다음 정리 때 지운다.
 
+### OPS-42 — 빌드가 디스크를 먹는다 ★
+
+2026-09-18에 루트 볼륨이 **95%(23G 남음)** 까지 찼다. 원인을 따라가니 도커였다.
+
+```
+/var/lib/docker       1.3G     ← Docker Root Dir. 여기만 보면 멀쩡하다
+/var/lib/containerd    54G     ← 실제 데이터는 여기 있다
+```
+
+**이 서버의 도커는 이미지를 `/var/lib/docker`에 두지 않는다.** Docker 29는 containerd
+이미지 스토어를 쓴다(`driver-type: io.containerd.snapshotter.v1`). 그래서 디스크를 볼 때
+`Docker Root Dir`만 확인하면 **문제를 못 본다.** `du -sh /var/lib/containerd`를 봐야 한다.
+
+**왜 쌓였나 — buildx가 없다.**
+
+```
+$ ls /usr/libexec/docker/cli-plugins/
+docker-trust  docker-compose          ← docker-buildx 없음
+
+$ sudo docker compose up -d --build
+warning: Docker Compose requires buildx plugin to be installed   ← classic builder로 떨어진다
+```
+
+우분투 `docker.io` 패키지로 설치돼 있어 buildx가 안 들어온다. classic builder는 빌드 캐시를
+**중간 이미지**로 들고 있어서, 다음 빌드 때 그게 통째로 태그 없는(dangling) 이미지가 된다.
+관리되는 캐시가 아니므로 buildkit의 GC 정책이 적용되지 않는다 — `docker system df`가
+`Build Cache 0B`라고 하는 것은 캐시가 없어서가 아니라 **캐시를 캐시로 세지 않기 때문**이다.
+
+repman은 3단계 빌드라 **한 번 빌드할 때마다 약 1.2GB가 버려진다.** 17번 다시 빌드한
+결과 dangling 이미지가 51개(회수 52G) 쌓였다.
+
+**왜 buildx를 깔지 않았나.** Docker 공식 apt 저장소를 추가해야 하는데, 이 서버는 사용자
+6명과 GPU 컨테이너가 도는 공용 장비다. `docker.io` 패키지와 섞다가 도커가 흔들리면
+남의 작업까지 멈춘다. 얻는 것(자동 GC)에 비해 위험이 크다.
+
+**대신 청소를 자동으로 만들었다.** 빌드를 누가 어떻게 하든 잡히도록 시스템 타이머로 둔다 —
+배포 스크립트에 넣으면 스크립트를 안 쓴 빌드는 그대로 쌓이고, 문서에 적으면 사람이 기억해야 한다.
+
+```
+/etc/systemd/system/docker-image-prune.{service,timer}   일요일 04:00 · docker image prune -f
+```
+
+`image prune`만 쓴다. **`system prune`은 쓰지 않는다** — 멈춘 컨테이너·네트워크·볼륨까지
+지워서 공용 서버에서는 남의 작업을 없앤다. dangling 이미지는 태그가 없어 이름으로 참조할
+수 없으므로 지워도 아무것도 깨지지 않는다.
+
+```bash
+systemctl list-timers docker-image-prune.timer    # 다음 실행 확인
+sudo journalctl -u docker-image-prune.service     # 회수량 기록
+sudo systemctl disable --now docker-image-prune.timer   # 되돌리기
+```
+
+**디스크가 찼을 때 볼 순서:**
+
+```bash
+df -h /
+sudo du -sh /var/lib/containerd          # ← /var/lib/docker 아니다
+sudo docker image prune -f
+sudo sh -c 'du -sh /var/lib/containerd/*/ | sort -rh'
+```
+
+마지막 줄에 `sudo sh -c`를 쓰는 이유: 글로브는 sudo **밖**에서 펼쳐져서, 읽을 권한이 없으면
+조용히 빈 결과가 나온다. 「아무것도 없다」와 「못 봤다」가 똑같이 보인다.
+
 ### OPS-17 — 롤백
 
 ```bash
