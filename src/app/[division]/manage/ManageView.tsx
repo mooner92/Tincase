@@ -149,9 +149,19 @@ export async function ManageView({
             </p>
           </div>
           <div className="flex flex-col items-end gap-2.5">
+            {/*
+              WS-14 — 예외 주차면 이 배지가 붉어진다. 부서원 화면과 같은 규칙이다 —
+              새 요소를 더하지 않고 **이미 보는 것의 색을 바꾼다.**
+              다만 여기는 짙은 초록 띠 위다. 반투명 빨강을 깔면 초록과 섞여 **탁한 갈색**이
+              되어 경고로 안 읽힌다. 불투명 빨강에 흰 글자라야 색이 색으로 남는다.
+            */}
             <span
               className={`inline-flex items-center rounded-full px-3 py-1 text-[13px] font-medium ${
-                locked ? 'bg-white/10 text-white/70' : 'bg-white/15 text-brand-tint'
+                slot.deadlineNote && !locked && !opened
+                  ? 'bg-error font-semibold text-white'
+                  : locked
+                    ? 'bg-white/10 text-white/70'
+                    : 'bg-white/15 text-brand-tint'
               }`}
             >
               {/* 열려 있을 땐 원래 마감 날짜가 아니라 **언제까지인지**가 알아야 할 것이다 */}
@@ -159,12 +169,8 @@ export async function ManageView({
                 ? `열어 둠 · ${openUntilKo}까지`
                 : `${locked ? '마감됨' : '진행 중'} · ${formatDeadlineKo(deadline)}`}
             </span>
-            {/* WS-14 — 담당자에게는 「왜 수요일인가」보다 「이번 주는 수요일이다」가 먼저다.
-                병합도 알림도 전부 이 마감을 따라 하루 당겨진다 */}
             {slot.deadlineNote && (
-              <span className="badge-pill border-warning/50 bg-warning-soft text-ink" title={slot.deadlineNote}>
-                이번 주만 마감 다름
-              </span>
+              <p className="text-right text-[12px] leading-4 text-white/60">{slot.deadlineNote}</p>
             )}
             <CopyMissingButton names={missing} />
             {/*

@@ -77,43 +77,49 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
           </p>
           <h1 className="display mt-1 flex flex-wrap items-center gap-2.5 text-[40px] leading-[1.1]">
             {slot.label}
-            {/*
-        * WS-14 — **이번 주만 마감이 다르다.** 사람들은 「목요일 14시」를 몸으로 기억하고
-        * 있어서, 배지 숫자만 바뀌면 안 읽는다. 배지 옆이 아니라 본문 맨 위에 이유까지
-        * 적어 둔다 — 「왜」가 없으면 오타로 의심하고 담당자에게 되묻는다.
-        */}
-      {slot.deadlineNote && (
-        <section className="mt-6 flex gap-3 rounded-[14px] border border-warning/50 bg-warning-soft px-5 py-4">
-          <span aria-hidden className="mt-0.5 font-bold text-warning">!</span>
-          <div>
-            <p className="font-semibold text-ink">
-              이번 주는 마감이 <strong className="font-semibold">{formatDeadlineKo(deadline)}</strong>입니다
-            </p>
-            <p className="mt-1 text-[15px] text-body">{slot.deadlineNote}</p>
-          </div>
-        </section>
-      )}
-
-      {monthly && (
+            {monthly && (
               <span className="rounded-full bg-brand px-3 py-1 text-[15px] font-semibold text-white">
                 월간
               </span>
             )}
           </h1>
         </div>
-        <div className="flex items-center gap-2 pb-1.5">
-          {locked ? (
-            <span className="badge-pill bg-surface-strong">마감됨 · {formatDeadlineKo(deadline)}</span>
-          ) : opened ? (
-            /* 마감은 지났지만 담당자가 열어 두었다 — 언제까지인지가 제일 중요하다 */
-            <span className="badge-pill border-warning/50 bg-warning-soft text-ink">
-              마감 후 열림 · {opening ? toKstIso(opening.openUntil).slice(11, 16) : ''}까지
-            </span>
-          ) : (
-            <>
-              <span className="badge-pill">마감 {formatDeadlineKo(deadline)}</span>
-              <DeadlineCountdown deadlineAtMs={deadline.getTime()} serverNowMs={now.getTime()} />
-            </>
+        {/*
+          * WS-14 — **이번 주만 마감이 다를 때.** 사람들은 「목요일 14시」를 몸으로 기억하고
+          * 있어서 요일이 바뀐 것을 안 읽는다. 그렇다고 큰 안내 상자를 얹으면 제목 옆이
+          * 시끄러워지고, 매주 보는 화면에서 시끄러운 것은 곧 무시된다.
+          *
+          * 그래서 **새 요소를 더하지 않고 이미 보는 것의 색을 바꾼다** — 마감 배지가
+          * 빨간 볼드가 되고, 그 밑에 이유가 한 줄 붙는다. 시선이 어차피 가는 자리다.
+          */}
+        <div className="flex flex-col items-start gap-1.5 pb-1.5 sm:items-end">
+          <div className="flex items-center gap-2">
+            {locked ? (
+              <span className="badge-pill bg-surface-strong">마감됨 · {formatDeadlineKo(deadline)}</span>
+            ) : opened ? (
+              /* 마감은 지났지만 담당자가 열어 두었다 — 언제까지인지가 제일 중요하다 */
+              <span className="badge-pill border-warning/50 bg-warning-soft text-ink">
+                마감 후 열림 · {opening ? toKstIso(opening.openUntil).slice(11, 16) : ''}까지
+              </span>
+            ) : (
+              <>
+                <span
+                  className={
+                    slot.deadlineNote
+                      ? 'badge-pill border-error/60 bg-error-soft font-semibold text-error'
+                      : 'badge-pill'
+                  }
+                >
+                  마감 {formatDeadlineKo(deadline)}
+                </span>
+                <DeadlineCountdown deadlineAtMs={deadline.getTime()} serverNowMs={now.getTime()} />
+              </>
+            )}
+          </div>
+          {slot.deadlineNote && (
+            <p className="text-[13px] leading-5 text-muted sm:text-right">
+              <strong className="font-semibold text-error">이번 주만 변경</strong> · {slot.deadlineNote}
+            </p>
           )}
         </div>
       </section>
