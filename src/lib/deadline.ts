@@ -10,7 +10,7 @@
 // 열어 두고 잊는 것이 이 기능의 유일한 위험이다 — 그러면 마감이 사실상 없어진다.
 // 그래서 여는 것이 아니라 **「언제까지」를 정하는 것**으로 만들었다. 시각이 지나면
 // 아무도 손대지 않아도 닫힌다. 사람이 기억해야 지켜지는 규칙은 언젠가 안 지켜진다.
-import { isLocked, type DeadlinePolicy } from './week';
+import { isLocked, type DeadlinePolicy, type SlotDeadline } from './week';
 
 /** 한 번 열 때 주는 시간. 대외 마감(15:00)까지 손쓸 수 있는 만큼 */
 export const OPEN_MINUTES = 30;
@@ -34,7 +34,7 @@ export function isOpenNow(open: SlotOpen | null | undefined, now: Date = new Dat
  * 둘 다 조용한 실패라 이 함수 하나만 부르게 한다.
  */
 export function isSubmissionLocked(
-  slot: { opensAt: Date },
+  slot: SlotDeadline,
   division: DeadlinePolicy,
   open: SlotOpen | null | undefined,
   now: Date = new Date(),

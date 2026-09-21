@@ -17,7 +17,9 @@ model Division {
   shortSlug String? @unique // "aiprd" — 정식 슬러그로 redirect (Q-18)
   nameKo    String  @unique
   nameEn    String
-  /** 소속 본부 (조직도 3단계: 연구원 → 본부 → 실). 본부 직속이면 "한국환경연구원" */
+  /**
+   * 소속 본부 (조직도 3단계: 연구원 → 본부 → 실). 본부 직속이면 "한국환경연구원"
+   */
   parentKo  String  @default("한국환경연구원")
   isActive  Boolean @default(false) // 온보딩된 부서만 true
 
@@ -29,9 +31,11 @@ model Division {
   mergeDedupe     Boolean @default(true) // 중복 묶기
   mergeDropNotes  Boolean @default(true) // 특이사항이 비면 3번 표 삭제
   mergeRuleText   String  @default("") // 담당자가 쓰는 자연어 지침 — 모델에 그대로 전달
-  /** HM-33 — 「내용이 없다」는 뜻으로 보이는 낱말. 쉼표 구분. **비면 검사하지 않는다.**
-      기본이 꺼짐인 이유: 이건 한 부서에서 실제로 겪은 일이라 전사 규칙이 아니다.
-      찾기만 하고 **지우지 않는다** — 담당자 알림과 화면에 「확인해 주세요」로만 뜬다 */
+  /**
+   * HM-33 — 「내용이 없다」는 뜻으로 보이는 낱말. 쉼표 구분. **비면 검사하지 않는다.**
+   * 기본이 꺼짐인 이유: 이건 한 부서에서 실제로 겪은 일이라 전사 규칙이 아니다.
+   * 찾기만 하고 **지우지 않는다** — 담당자 알림과 화면에 「확인해 주세요」로만 뜬다
+   */
   emptyWords      String  @default("")
   /// HM-38 — 괄호로 감싸 적은 강조 표시. 병합이 떼어내고 「공유」로 바꾼다
   emphasisWords   String  @default("하이라이트")
@@ -41,14 +45,16 @@ model Division {
   boardStatus String @default("none") // "confirmed" | "unclear" | "none"
   boardNote   String @default("") // 관찰 근거 (제출일·특이사항)
 
-  /** NT-30 — 이 부서에 알림을 보낼 것인가. **기본값 false** —
-      새 부서가 온보딩되자마자 모르는 사람에게 알림이 가면 안 된다.
-      우리 부서에서 충분히 써 본 뒤 부서별로 하나씩 켠다 */
+  /**
+   * NT-30 — 이 부서에 알림을 보낼 것인가. **기본값 false** —
+   * 새 부서가 온보딩되자마자 모르는 사람에게 알림이 가면 안 된다.
+   * 우리 부서에서 충분히 써 본 뒤 부서별로 하나씩 켠다
+   */
   notifyEnabled Boolean @default(false)
 
-  createdAt   DateTime     @default(now())
-  users       User[]
-  templates   Template[]
+  createdAt    DateTime      @default(now())
+  users        User[]
+  templates    Template[]
   submissions  Submission[]
   mergeRuns    MergeRun[]
   notifyLogs   NotifyLog[]
@@ -65,18 +71,26 @@ model User {
   isCoordinator Boolean  @default(false) // 전사 총괄 (AU-16)
   isActive      Boolean  @default(true) // 삭제 금지, 비활성화만 (DM-03)
   onRoster      Boolean  @default(true) // **집계 대상**. 제출 권한이 아니다 (DM-04, DM-16)
-  /** DM-16 — 집계에서 뺀 이유. "휴직" · "부서장" 등. onRoster=false일 때만 뜻이 있다.
-      빼는 것과 그 이유를 같이 적어두지 않으면, 몇 주 뒤에 왜 뺐는지 아무도 모른다 */
+  /**
+   * DM-16 — 집계에서 뺀 이유. "휴직" · "부서장" 등. onRoster=false일 때만 뜻이 있다.
+   * 빼는 것과 그 이유를 같이 적어두지 않으면, 몇 주 뒤에 왜 뺐는지 아무도 모른다
+   */
   rosterNote    String?
-  /** NT-01 — 사내 메신저 사번(RecvId). 없으면 알림을 보내지 않는다.
-      이메일과 별개다 — 메신저는 사번으로만 사람을 찾는다 */
+  /**
+   * NT-01 — 사내 메신저 사번(RecvId). 없으면 알림을 보내지 않는다.
+   * 이메일과 별개다 — 메신저는 사번으로만 사람을 찾는다
+   */
   employeeNo    String?
-  /** RS-02 — ERP 인원 현황의 `직책` ("담당"·"실장"·"본부장"·"원장"…).
-      역할(head)과 집계 제외를 여기서 **유도**한다. 값을 저장해 두는 이유는
-      다음 동기화 때 «바뀌었는가»를 알기 위해서다 — 안 바뀌었으면 사람이 정한 값을 지킨다 */
+  /**
+   * RS-02 — ERP 인원 현황의 `직책` ("담당"·"실장"·"본부장"·"원장"…).
+   * 역할(head)과 집계 제외를 여기서 **유도**한다. 값을 저장해 두는 이유는
+   * 다음 동기화 때 «바뀌었는가»를 알기 위해서다 — 안 바뀌었으면 사람이 정한 값을 지킨다
+   */
   jobTitle      String?
-  /** NT-20 — 알림 받기. 본인이 끌 수 있고 운영자도 바꿀 수 있다.
-      끄면 마감 전 알림이 가지 않는다 — 제출 의무는 그대로다 */
+  /**
+   * NT-20 — 알림 받기. 본인이 끌 수 있고 운영자도 바꿀 수 있다.
+   * 끄면 마감 전 알림이 가지 않는다 — 제출 의무는 그대로다
+   */
   notifyEnabled Boolean  @default(true)
   sortOrder     Int      @default(100)
   createdAt     DateTime @default(now())
@@ -124,6 +138,17 @@ model WeekSlot {
   opensAt     DateTime // 월 00:00 KST (UTC 저장)
   createdAt   DateTime @default(now())
 
+  // WS-14 — **이 주차만의 마감 예외.** 연휴로 전사 일정이 당겨질 때 쓴다.
+  // 부서가 아니라 **주차**에 붙는 이유가 둘이다:
+  //   1. 다음 주로 샐 수 없다. 부서 설정을 고쳤다 되돌리는 방식은 되돌리는 일이
+  //      사람 기억에 남고, 잊으면 그 다음 주 마감이 통째로 틀린다 (HM-44와 같은 이유).
+  //   2. 지난 주차가 안 흔들린다. 부서 설정은 과거 주차의 마감 표시까지 소급해 바꾼다.
+  // 연휴 공지는 전사 대상이라 부서별이 아니라 주차별인 것이 뜻에도 맞는다.
+  deadlineDowOverride  Int? //    1=월 … 7=일. null이면 부서 기본값
+  deadlineTimeOverride String? // "HH:mm" KST. null이면 부서 기본값
+  /// 왜 당겼나 — 화면에 그대로 보인다. 이유 없는 예외는 두지 않는다
+  deadlineNote         String?
+
   submissions  Submission[]
   mergeRuns    MergeRun[]
   notifyLogs   NotifyLog[]
@@ -147,8 +172,10 @@ model Submission {
 
   uploadedAt   DateTime @default(now())
   uploadedFrom String?
-  /** WA-04 — 사람이 만든 hwp인지 시스템이 만든 것인지 (통계·디버깅용).
-      결과물 자체는 구별되지 않아야 하므로 처리 경로는 완전히 동일하다 */
+  /**
+   * WA-04 — 사람이 만든 hwp인지 시스템이 만든 것인지 (통계·디버깅용).
+   * 결과물 자체는 구별되지 않아야 하므로 처리 경로는 완전히 동일하다
+   */
   origin       String   @default("upload") // "upload" | "web"
 
   division Division @relation(fields: [divisionId], references: [id])
@@ -221,14 +248,14 @@ model SetupToken {
 }
 
 model SlotOpening {
-  id          String   @id @default(cuid())
-  divisionId  String
-  weekSlotId  String
+  id         String   @id @default(cuid())
+  divisionId String
+  weekSlotId String
   /// 이 시각까지 열려 있다. 「지금 닫기」는 이 값을 현재로 당긴다
-  openUntil   DateTime
+  openUntil  DateTime
   /// 누가 열었나 — 예외에는 언제나 이름이 붙는다
-  openedBy    String
-  openedAt    DateTime @default(now())
+  openedBy   String
+  openedAt   DateTime @default(now())
 
   division Division @relation(fields: [divisionId], references: [id])
   weekSlot WeekSlot @relation(fields: [weekSlotId], references: [id])
@@ -246,7 +273,9 @@ model MergeRun {
   ruleSnapshot String // 실행 시점 규칙 원문 (DM-13)
   rowCounts    String?
   warnings     String? // JSON: string[]
-  /** HM-26 — 검토 화면이 쓰는 정보 (합쳐진 행·모델 사용 여부·분류·미제출자). JSON */
+  /**
+   * HM-26 — 검토 화면이 쓰는 정보 (합쳐진 행·모델 사용 여부·분류·미제출자). JSON
+   */
   reviewJson   String?
   errorText    String?
   startedAt    DateTime  @default(now())
@@ -271,17 +300,25 @@ model AuditLog {
   @@index([divisionId, at])
 }
 
-/** NT-12 — 보낸 알림의 기록. 같은 (부서, 주차, 종류)로 두 번 보내지 않기 위한 자물쇠이자
-    "왜 안 왔지"를 나중에 풀기 위한 근거다 */
+/**
+ * NT-12 — 보낸 알림의 기록. 같은 (부서, 주차, 종류)로 두 번 보내지 않기 위한 자물쇠이자
+ * "왜 안 왔지"를 나중에 풀기 위한 근거다
+ */
 model NotifyLog {
   id         String   @id @default(cuid())
   divisionId String
   weekSlotId String
-  /** "deadline_1h" 등 */
+  /**
+   * "deadline_1h" 등
+   */
   kind       String
-  /** JSON: 실제로 보낸 사번 목록 */
+  /**
+   * JSON: 실제로 보낸 사번 목록
+   */
   recipients String
-  /** JSON: 걸러진 대상·오류 등 */
+  /**
+   * JSON: 걸러진 대상·오류 등
+   */
   detail     String?
   sentAt     DateTime @default(now())
 

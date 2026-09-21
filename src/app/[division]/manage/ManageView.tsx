@@ -78,7 +78,7 @@ export async function ManageView({
   };
 
   const deadline = effectiveDeadline(slot, division);
-  const closed = isLocked({ opensAt: slot.opensAt }, division, now);
+  const closed = isLocked(slot, division, now);
   // DM-20 — 담당자가 잠시 열어 두었는가
   const opening = await openingOf(division.id, slot.id);
   const opened = isOpenNow(opening, now);
@@ -159,6 +159,13 @@ export async function ManageView({
                 ? `열어 둠 · ${openUntilKo}까지`
                 : `${locked ? '마감됨' : '진행 중'} · ${formatDeadlineKo(deadline)}`}
             </span>
+            {/* WS-14 — 담당자에게는 「왜 수요일인가」보다 「이번 주는 수요일이다」가 먼저다.
+                병합도 알림도 전부 이 마감을 따라 하루 당겨진다 */}
+            {slot.deadlineNote && (
+              <span className="badge-pill border-warning/50 bg-warning-soft text-ink" title={slot.deadlineNote}>
+                이번 주만 마감 다름
+              </span>
+            )}
             <CopyMissingButton names={missing} />
             {/*
               DM-20 — 마감이 지난 뒤에만 보인다. 마감 전에는 누구나 낼 수 있으므로

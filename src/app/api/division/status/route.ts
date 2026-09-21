@@ -20,7 +20,7 @@ export const GET = handler(async (req: NextRequest) => {
 
   const { members, offRoster, summary } = await divisionStatus(scope.division.id, slot.id);
   const deadline = effectiveDeadline(slot, scope.division);
-  const locked = isLocked({ opensAt: slot.opensAt }, scope.division);
+  const locked = isLocked(slot, scope.division);
 
   const full = scope.isManager || scope.readAll; // TACP-16 — 부서장도 부서 담당자와 같이 본다
 

@@ -111,18 +111,40 @@ export function currentWeek(now: Date = new Date()): WeekDescriptor {
   return describeWeek(mondayOf(now));
 }
 
-/** WS-13 — 슬롯(월요일)과 부서 정책으로 이번 주 유효 마감을 계산 */
-export function deadlineFor(slot: { opensAt: Date }, div: DeadlinePolicy): Date {
-  const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(div.deadlineTime);
-  if (!m) throw new Error(`invalid deadlineTime: ${div.deadlineTime}`);
-  if (!Number.isInteger(div.deadlineDow) || div.deadlineDow < 1 || div.deadlineDow > 7) {
-    throw new Error(`invalid deadlineDow: ${div.deadlineDow}`);
+/**
+ * WS-14 — 슬롯이 들고 다니는 **이 주차만의 마감 예외.**
+ *
+ * `deadlineFor`가 이미 슬롯을 받으므로 예외를 슬롯에 실으면 **호출부를 하나도 고치지
+ * 않아도** 전부 따라온다. 마감을 세는 곳이 12군데인데, 그중 한 곳만 예외를 모르면
+ * 「화면은 수요일 마감인데 서버는 목요일에 잠그는」 상태가 된다 (TACP-12).
+ */
+export interface SlotDeadline {
+  opensAt: Date;
+  /** 물음표가 **없는** 이유: `{ opensAt: slot.opensAt }`로 깎아 넘기면 예외가 조용히
+   *  사라진다. 선택 필드로 두면 그 코드가 그대로 컴파일된다 — 실제로 이 저장소에
+   *  그런 자리가 일곱 군데 있었고, 화면은 수요일 마감이라 쓰면서 잠금은 목요일로
+   *  판정할 뻔했다. 필수로 두면 **타입이 그 실수를 잡는다.** */
+  deadlineDowOverride: number | null;
+  deadlineTimeOverride: string | null;
+}
+
+/**
+ * WS-13 — 슬롯(월요일)과 부서 정책으로 이번 주 유효 마감을 계산.
+ * WS-14 — 슬롯에 예외가 실려 있으면 **그것이 이긴다.**
+ */
+export function deadlineFor(slot: SlotDeadline, div: DeadlinePolicy): Date {
+  const dow = slot.deadlineDowOverride ?? div.deadlineDow;
+  const time = slot.deadlineTimeOverride ?? div.deadlineTime;
+  const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(time);
+  if (!m) throw new Error(`invalid deadlineTime: ${time}`);
+  if (!Number.isInteger(dow) || dow < 1 || dow > 7) {
+    throw new Error(`invalid deadlineDow: ${dow}`);
   }
   const k = new TZDate(slot.opensAt.getTime(), KST); // 월 00:00 KST 벽시계
   const d = new TZDate(
     k.getFullYear(),
     k.getMonth(),
-    k.getDate() + (div.deadlineDow - 1),
+    k.getDate() + (dow - 1),
     Number(m[1]),
     Number(m[2]),
     0,
@@ -177,7 +199,7 @@ export function validateDeadlinePolicy(div: DeadlinePolicy): string | null {
 }
 
 /** WS-06 — 잠금 판정. 정각까지는 허용 (`>` 비교, WS-T14) */
-export function isLocked(slot: { opensAt: Date }, div: DeadlinePolicy, now: Date = new Date()): boolean {
+export function isLocked(slot: SlotDeadline, div: DeadlinePolicy, now: Date = new Date()): boolean {
   return now.getTime() > deadlineFor(slot, div).getTime();
 }
 

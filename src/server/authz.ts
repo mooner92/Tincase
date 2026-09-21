@@ -194,7 +194,7 @@ export async function requireDeletableSubmission(scope: Scope, submissionId: str
 
   const open = await openingOf(sub.division.id, sub.weekSlot.id);
   // DM-20 — 열려 있으면 지우기도 열린다. 「제출할 수 있는데 못 지우는」 상태는 설명이 안 된다
-  if (isSubmissionLocked({ opensAt: sub.weekSlot.opensAt }, sub.division, open)) {
+  if (isSubmissionLocked(sub.weekSlot, sub.division, open)) {
     throw new HttpError(
       409,
       'slot_locked',

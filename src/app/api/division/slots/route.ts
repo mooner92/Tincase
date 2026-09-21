@@ -19,7 +19,7 @@ export const GET = handler(async (req: NextRequest) => {
       label: s.label,
       year: s.year,
       deadlineAt: toKstIso(effectiveDeadline(s, scope.division)),
-      locked: isLocked({ opensAt: s.opensAt }, scope.division),
+      locked: isLocked(s, scope.division),
       submitted: submittedOf(s.id),
     })),
   });

@@ -35,7 +35,7 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
    */
   const opening = await openingOf(division.id, slot.id);
   const opened = isOpenNow(opening, now);
-  const locked = isLocked({ opensAt: slot.opensAt }, division, now) && !opened;
+  const locked = isLocked(slot, division, now) && !opened;
   const nextOpens = new Date(slot.opensAt.getTime() + 7 * 86400_000);
 
   const [mySubmission, template, { members, extras }] = await Promise.all([
@@ -77,7 +77,24 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
           </p>
           <h1 className="display mt-1 flex flex-wrap items-center gap-2.5 text-[40px] leading-[1.1]">
             {slot.label}
-            {monthly && (
+            {/*
+        * WS-14 — **이번 주만 마감이 다르다.** 사람들은 「목요일 14시」를 몸으로 기억하고
+        * 있어서, 배지 숫자만 바뀌면 안 읽는다. 배지 옆이 아니라 본문 맨 위에 이유까지
+        * 적어 둔다 — 「왜」가 없으면 오타로 의심하고 담당자에게 되묻는다.
+        */}
+      {slot.deadlineNote && (
+        <section className="mt-6 flex gap-3 rounded-[14px] border border-warning/50 bg-warning-soft px-5 py-4">
+          <span aria-hidden className="mt-0.5 font-bold text-warning">!</span>
+          <div>
+            <p className="font-semibold text-ink">
+              이번 주는 마감이 <strong className="font-semibold">{formatDeadlineKo(deadline)}</strong>입니다
+            </p>
+            <p className="mt-1 text-[15px] text-body">{slot.deadlineNote}</p>
+          </div>
+        </section>
+      )}
+
+      {monthly && (
               <span className="rounded-full bg-brand px-3 py-1 text-[15px] font-semibold text-white">
                 월간
               </span>

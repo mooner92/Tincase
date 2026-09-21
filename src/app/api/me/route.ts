@@ -40,7 +40,7 @@ export const GET = handler(async (req: NextRequest) => {
       year: slot.year,
       opensAt: toKstIso(slot.opensAt),
       deadlineAt: toKstIso(deadline),
-      locked: isLocked({ opensAt: slot.opensAt }, scope.division, now),
+      locked: isLocked(slot, scope.division, now),
       msUntilDeadline: msUntilDeadline(deadline, now),
       nextOpensAt: toKstIso(nextOpens),
     },

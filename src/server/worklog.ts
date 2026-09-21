@@ -63,7 +63,7 @@ export async function uploadSubmission(input: UploadInput, now = new Date()): Pr
    * 「담당자가 이름을 걸고 연 30분」으로 바뀐 것이지 사라진 게 아니다.
    */
   const open = await openingOf(division.id, slot.id);
-  if (isSubmissionLocked({ opensAt: slot.opensAt }, division, open, now)) {
+  if (isSubmissionLocked(slot, division, open, now)) {
     await audit(user.email, 'reject', division.id, `slot:${slot.isoKey}`, { reason: 'slot_locked' });
     throw new HttpError(409, 'slot_locked', '마감되어 제출되지 않았습니다. 다음 주차에 제출해 주세요.');
   }
@@ -243,7 +243,8 @@ export async function divisionSlots(divisionId: string, limit = 26) {
 }
 
 export function effectiveDeadline(slot: WeekSlot, division: Division): Date {
-  return deadlineFor({ opensAt: slot.opensAt }, division);
+  // WS-14 — 슬롯을 **통째로** 넘긴다. `{ opensAt }`으로 깎으면 그 주차의 마감 예외가 사라진다
+  return deadlineFor(slot, division);
 }
 
 // ── 제출 취소 (ST-30~33 · TACP-14 · ADR-0007) ────────────────

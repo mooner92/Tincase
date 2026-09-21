@@ -68,7 +68,9 @@ describe('월 경계 (WS-04)', () => {
 });
 
 describe('마감 판정 (WS-06/13)', () => {
-  const slot = { opensAt: mondayOf(kst(2026, 8, 12)) }; // 8/10(월) 주
+  // WS-14 — 예외 필드가 필수라 명시한다. 선택 필드였다면 여기서 빠뜨려도 통과하고,
+  // 그게 바로 운영 코드 일곱 군데에서 났던 실수다
+  const slot = { opensAt: mondayOf(kst(2026, 8, 12)), deadlineDowOverride: null, deadlineTimeOverride: null };
 
   it('[WS-T12] 월 00:00:00 → 열림', () => {
     expect(isLocked(slot, DEFAULT, kst(2026, 8, 10, 0, 0, 0))).toBe(false);
@@ -118,7 +120,7 @@ describe('시간대 견고성 (WS-07/T19)', () => {
     const t = new Date('2026-08-09T15:00:00.000Z');
     const w = currentWeek(t);
     expect(w.label).toBe('8월 2주차');
-    expect(isLocked({ opensAt: w.opensAt }, DEFAULT, t)).toBe(false);
+    expect(isLocked({ opensAt: w.opensAt, deadlineDowOverride: null, deadlineTimeOverride: null }, DEFAULT, t)).toBe(false);
   });
   it('opensAt은 KST 자정 정각 인스턴트다', () => {
     const w = currentWeek(kst(2026, 8, 13, 12));
@@ -168,7 +170,7 @@ describe('isoKey 경계 (WS-09)', () => {
 
 describe('표시 유틸', () => {
   it('formatDeadlineKo — "8월 11일(화) 14:00"', () => {
-    const dl = deadlineFor({ opensAt: mondayOf(kst(2026, 8, 12)) }, DEFAULT);
+    const dl = deadlineFor({ opensAt: mondayOf(kst(2026, 8, 12)), deadlineDowOverride: null, deadlineTimeOverride: null }, DEFAULT);
     expect(formatDeadlineKo(dl)).toBe('8월 11일(화) 14:00');
   });
   it('toKstIso — +09:00 오프셋 (API-04)', () => {

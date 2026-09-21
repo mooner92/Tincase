@@ -35,13 +35,13 @@ export async function submissionLocked(
   now = new Date(),
 ): Promise<boolean> {
   const open = await openingOf(division.id, slot.id);
-  return isSubmissionLocked({ opensAt: slot.opensAt }, division, open, now);
+  return isSubmissionLocked(slot, division, open, now);
 }
 
 /** HM-34 — 자동 병합이 기준으로 삼는 시각 (열었다 닫으면 그때가 새 마감이다) */
 export async function mergeGateOf(division: Division, slot: WeekSlot): Promise<Date> {
   const open = await openingOf(division.id, slot.id);
-  return mergeGate(deadlineFor({ opensAt: slot.opensAt }, division), open);
+  return mergeGate(deadlineFor(slot, division), open);
 }
 
 /**
