@@ -11,7 +11,8 @@
 //
 // 프로토콜은 레거시 폼 전송이다: `application/x-www-form-urlencoded`,
 // 텍스트 필드마다 `*_Encode=UTF-8`을 **쌍으로** 보내야 한글이 안 깨진다.
-// 응답은 JSON이 아니라 HTML이므로 성공 판정은 HTTP 200으로 한다.
+// 응답은 JSON이 아니라 **짧은 평문**이다 — 성공이면 `send ok\n` (2026-09-23 실측).
+// 「HTML이라 본문으로 판정할 수 없다」고 적혀 있었는데 사실이 아니었다.
 import { env } from './env';
 import { logger } from './logger';
 
@@ -123,8 +124,21 @@ export async function sendAlert(input: AlertInput): Promise<SendResult> {
         body: buildForm(chunk, input).toString(),
         signal: AbortSignal.timeout(10_000),
       });
-      // 응답은 HTML이라 본문으로 성공을 판정할 수 없다 (문서 06 §2)
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      /*
+       * 지금은 HTTP 200만 보고 성공으로 친다. **그건 「접수됨」이지 「전달됨」이 아니다.**
+       * 실제 응답 본문은 `send ok`라 판정에 쓸 수 있지만(위 실측), 실패했을 때 무엇을
+       * 돌려주는지는 아직 한 번도 못 봤다. 성공 문자열 하나만 알고 «그 외는 실패»로
+       * 좁히면, 정상 응답의 변종에도 「실패」를 찍어 멀쩡한 알림을 실패로 기록한다.
+       *
+       * 그래서 지금은 **본문을 남기기만 한다.** 실패 사례가 한 번이라도 잡히면 그때
+       * 판정에 넣는다 — 추측으로 좁히지 않는다.
+       */
+      const body = (await res.text()).trim().slice(0, 200);
+      if (!res.ok) throw new Error(`HTTP ${res.status} — ${body}`);
+      if (body !== 'send ok') {
+        // 조용히 넘어가면 «보냈다는데 안 왔다»를 영영 못 푼다
+        logger.warn({ chunk, body, subject: input.subject }, '[알림] 처음 보는 응답');
+      }
       result.sent.push(...chunk);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
