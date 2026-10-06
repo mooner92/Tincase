@@ -25,6 +25,7 @@ export default async function OpsPage() {
         userName={ps.scope.user.name}
         isLead={ps.scope.isManager || ps.scope.readAll}
         isOperator
+        readAll
         viaCloudflare={ps.scope.source === 'cloudflare'}
         notifyEnabled={ps.scope.user.notifyEnabled}
       />

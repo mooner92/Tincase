@@ -87,6 +87,7 @@ export default async function MonitorPage() {
         userName={scope.user.name}
         isLead={scope.isManager || scope.readAll}
         isOperator={scope.user.isOperator}
+        readAll={scope.readAll}
         viaCloudflare={scope.source === 'cloudflare'}
         notifyEnabled={ps.scope.user.notifyEnabled}
       />
@@ -94,9 +95,12 @@ export default async function MonitorPage() {
         <div className="mb-4 flex items-center justify-between">
           <h1 className="sr-only">전사 제출 현황</h1>
           <div className="flex gap-2 text-sm">
-            <Link href="/ops" className="tab-pill">
-              ← 운영
-            </Link>
+            {/* PG-49c — 총괄에게 `/ops`는 404다. 누르면 404가 나는 링크는 그리지 않는다 (TACP-9) */}
+            {scope.user.isOperator && (
+              <Link href="/ops" className="tab-pill">
+                ← 운영
+              </Link>
+            )}
             <Link href="/ops/audit" className="tab-pill">
               감사 로그
             </Link>
@@ -115,6 +119,53 @@ export default async function MonitorPage() {
           deadlineText={formatDeadlineKo(effectiveDeadline(slot, divisions[0]))}
           excludedNote={excludedNote}
         />
+
+        {/*
+          PG-49b — **부서별 바로가기.** 조직도는 「누가 냈나」를 보여 주지만 「무엇을 냈나」로 가는
+          길이 없었다. 총괄은 전 부서를 읽을 수 있는데(TACP §3.3) 주소를 직접 쳐야 했다.
+          타 부서 화면은 읽기 전용이고, 들어가는 순간 감사 로그에 남는다(TACP-10).
+        */}
+        <section className="card mt-6 px-6 py-5">
+          <h2 className="text-sm font-semibold text-ink">
+            부서별 · {slot.label}
+            <span className="ml-2 text-xs font-normal text-muted">
+              수합 관리에서 제출물을 열어 보고, 보관함에서 병합본을 받습니다
+            </span>
+          </h2>
+          <ul className="mt-3 divide-y divide-hairline-soft text-sm">
+            {counted
+              .slice()
+              // Tincase를 쓰는 부서가 위 — 열어 볼 수 있는 곳이 먼저 보여야 한다
+              .sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.name.localeCompare(b.name, 'ko'))
+              .map((d) => {
+                const roster = d.people.filter((p) => p.onRoster);
+                const done = roster.filter((p) => p.submitted).length;
+                return (
+                  <li key={d.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2">
+                    <span className="min-w-40 font-medium text-ink">{d.name}</span>
+                    {d.isActive ? (
+                      <>
+                        <span className="w-16 text-right tabular-nums text-body">
+                          {done}
+                          <span className="text-muted"> / {roster.length}</span>
+                        </span>
+                        <span className="flex gap-2">
+                          <Link href={`/${d.slug}/manage`} className="tab-pill">
+                            수합 관리
+                          </Link>
+                          <Link href={`/${d.slug}/archive`} className="tab-pill">
+                            보관함
+                          </Link>
+                        </span>
+                      </>
+                    ) : (
+                      <span className="text-xs text-muted-soft">Tincase 미사용 — 취합게시판으로 제출</span>
+                    )}
+                  </li>
+                );
+              })}
+          </ul>
+        </section>
 
         {streaks.length > 0 && (
           <section className="card mt-6 px-6 py-5">

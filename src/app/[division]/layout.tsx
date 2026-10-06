@@ -41,6 +41,7 @@ export default async function DivisionLayout({
         userName={view.scope.user.name}
         isLead={view.canManage}
         isOperator={view.scope.user.isOperator}
+        readAll={view.scope.readAll}
         viaCloudflare={view.scope.source === 'cloudflare'}
         notifyEnabled={view.scope.user.notifyEnabled}
         foreign={!view.isOwn}

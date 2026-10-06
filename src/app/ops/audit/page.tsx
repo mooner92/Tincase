@@ -92,6 +92,7 @@ export default async function AuditPage({
         userName={scope.user.name}
         isLead={scope.isManager || scope.readAll}
         isOperator={scope.user.isOperator}
+        readAll={scope.readAll}
         viaCloudflare={scope.source === 'cloudflare'}
         notifyEnabled={ps.scope.user.notifyEnabled}
       />

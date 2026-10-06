@@ -5,13 +5,9 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { NotifyToggle } from './NotifyToggle';
 import { useEffect, useRef, useState } from 'react';
+import { buildNav, isNavActive } from '@/lib/nav';
+export type { NavItem } from '@/lib/nav';
 
-export interface NavItem {
-  href: string;
-  label: string;
-  /** 업무 메뉴가 아니라 도움말 — 시각적으로 구분한다 */
-  hint?: boolean;
-}
 
 export function AppHeader({
   slug,
@@ -19,6 +15,7 @@ export function AppHeader({
   userName,
   isLead,
   isOperator,
+  readAll = false,
   viaCloudflare,
   notifyEnabled,
   foreign = false,
@@ -28,6 +25,8 @@ export function AppHeader({
   userName: string;
   isLead: boolean;
   isOperator: boolean;
+  /** PG-49 — 전 부서 읽기 (총괄·운영자). 켜지면 `전사 현황` 메뉴가 생긴다 */
+  readAll?: boolean;
   viaCloudflare: boolean;
   /** NT-21 — 본인 알림 받기 상태. 드롭다운에서 바로 끌 수 있다 */
   notifyEnabled?: boolean;
@@ -53,32 +52,9 @@ export function AppHeader({
     };
   }, [open]);
 
-  const items: NavItem[] = [
-    ...(slug
-      ? [
-          { href: `/${slug}`, label: foreign ? '개요' : '제출' },
-          // TACP-15 — 병합본은 부서원 모두가 본다. 타 부서 열람 중에도 그 부서 보관함을 본다
-          { href: `/${slug}/archive`, label: '보관함' },
-          ...(foreign ? [] : [{ href: `/${slug}/history`, label: '내 이력' }]),
-          ...(isLead
-            ? [
-                { href: `/${slug}/manage`, label: '수합 관리' },
-                { href: `/${slug}/manage/settings`, label: '부서 설정' },
-              ]
-            : []),
-        ]
-      : []),
-    ...(isOperator ? [{ href: '/ops', label: '운영' }] : []),
-    // 안내는 **처음 쓰는 사람**이 찾는 것이다. 드롭다운 안은 이미 아는 사람만 여는 자리라
-    // 정작 필요한 사람에게 안 보인다. 맨 끝에 두되 물음표를 붙여 업무 메뉴와 구분한다
-    { href: '/guide', label: '사용 안내', hint: true },
-  ];
-
-  const isActive = (href: string) => {
-    if (href === `/${slug}`) return pathname === href;
-    if (href.endsWith('/manage')) return pathname === href || /\/manage\/\d{4}-W\d{2}$/.test(pathname);
-    return pathname === href || pathname.startsWith(href + '/');
-  };
+  // PG-49d — 역할별 메뉴는 buildNav 하나가 정한다
+  const items = buildNav({ slug, foreign, isLead, isOperator, readAll });
+  const isActive = (href: string) => isNavActive(href, pathname, items, slug);
 
   const logout = () => {
     if (viaCloudflare) {
