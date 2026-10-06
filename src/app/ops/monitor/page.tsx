@@ -6,6 +6,8 @@ import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
 import { OrgMonitor } from '@/components/OrgMonitor';
+import { DeadlineScheduler } from '@/components/DeadlineScheduler';
+import { canScheduleDeadlines } from '@/server/authz';
 import { layoutOrg, type DivisionNode } from '@/lib/orgtree';
 import { ensureCurrentSlot, effectiveDeadline } from '@/server/worklog';
 import { toKstIso, formatDeadlineKo } from '@/lib/week';
@@ -112,6 +114,8 @@ export default async function MonitorPage() {
             </a>
           </div>
         </div>
+        {/* WS-19 · TACP-20 — 주차 마감은 총괄이 정한다. 바꿀 수 있는 사람에게만 그린다 (TACP-9) */}
+        {canScheduleDeadlines(scope.user) && <DeadlineScheduler />}
         <OrgMonitor
           layout={layout}
           weekLabel={slot.label}

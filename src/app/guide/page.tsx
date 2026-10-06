@@ -7,6 +7,7 @@
 // (scripts/seed-demo.ts). 실제 화면을 찍어 두면 저장소가 public이라 개인정보가 남는다.
 import { redirect } from 'next/navigation';
 import { requirePageScope } from '@/server/page-scope';
+import { canScheduleDeadlines } from '@/server/authz';
 import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
@@ -220,11 +221,68 @@ export default async function GuidePage() {
           ))}
         </div>
 
+        {/*
+          WS-19 · TACP-20 — 총괄담당 매뉴얼. 이 일을 할 수 있는 사람에게만 보인다 (TACP-9).
+          글로 적는다 — 이 절은 쓰는 사람이 한두 명이고, 연휴에만 꺼내 보는 절차라
+          「무엇을 붙여넣고 무엇을 확인하나」가 정확히 적혀 있는 편이 낫다.
+        */}
+        {canScheduleDeadlines(scope.user) && (
+          <>
+            <h2 className="display mt-14 mb-1 text-[22px]">총괄담당</h2>
+            <p className="mb-5 text-sm text-muted">
+              전 부서의 업무일지를 보고, 연휴로 바뀐 마감을 전 부서에 한꺼번에 적용합니다.
+            </p>
+            <div className="space-y-6">
+              <section className="card px-7 py-6">
+                <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">05</p>
+                <h3 className="display mt-1 text-lg">전 부서가 무엇을 냈는지 보기</h3>
+                <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
+                  <li>상단 메뉴 <strong className="text-ink">[전사 현황]</strong> — 이번 주 누가 냈는지 조직도로 보입니다</li>
+                  <li>아래 <strong className="text-ink">「부서별」</strong>에서 부서를 골라 [수합 관리] — 제출물을 열어 보고, 지난 주차도 고를 수 있습니다</li>
+                  <li>[보관함] — 그 부서의 병합본(hwp)을 받습니다</li>
+                  <li>다른 부서 화면은 <strong className="text-ink">보기만</strong> 됩니다. 들어간 기록은 남습니다</li>
+                </ol>
+              </section>
+
+              <section className="card px-7 py-6">
+                <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">06</p>
+                <h3 className="display mt-1 text-lg">연휴로 마감이 바뀌었을 때</h3>
+                <p className="mt-2 text-[15px] text-body">
+                  취합게시판(NAMS)에 올린 작성 요청 본문을 <strong className="text-ink">그대로 붙여넣으면</strong>{' '}
+                  날짜·시각·이유를 읽어 그 주 전 부서의 마감을 바꿉니다.
+                </p>
+                <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
+                  <li>[전사 현황] 맨 위 <strong className="text-ink">「주차 마감」</strong> → [마감 바꾸기]</li>
+                  <li>
+                    [공지 붙여넣기]에 요청 본문을 통째로 붙여넣습니다. 이런 문장을 읽습니다 —{' '}
+                    <span className="text-muted">「제출 기한은 10월 07(수) 오후 3시입니다」</span>
+                  </li>
+                  <li>
+                    [미리보기] — 어느 주차의 마감이 언제로 바뀌는지, 알림·병합이 몇 시에 나가는지 확인합니다.{' '}
+                    <strong className="text-ink">이 단계에서는 아직 아무것도 바뀌지 않습니다</strong>
+                  </li>
+                  <li>[이대로 적용] — 부서원 화면의 마감이 빨갛게 바뀌고 이유가 한 줄 붙습니다</li>
+                </ol>
+                <ul className="mt-4 space-y-1 text-sm text-muted">
+                  <li>· 공지의 시각은 <strong className="text-body">대외 마감</strong>입니다. 부서 마감은 자동으로 <strong className="text-body">한 시간 앞</strong>으로 잡힙니다 (대외 15:00 → 부서 14:00)</li>
+                  <li>· 요일이 날짜와 맞지 않으면 적용하지 않습니다 — 공지를 먼저 확인해 주세요</li>
+                  <li>· 그 주에만 걸립니다. <strong className="text-body">다음 주는 손대지 않아도 평소대로</strong> 돌아갑니다</li>
+                  <li>· 이미 지난 알림은 다시 나가지 않습니다. 대신 마감 당일 09:00 알림이 나갑니다</li>
+                  <li>· 이미 지난 마감은 옮길 수 없습니다. 잘못 넣었으면 마감 전에 [평소대로 되돌리기]</li>
+                  <li>· 붙여넣기가 안 되면 [직접 입력]에서 대외 마감 날짜·시각을 고르면 됩니다</li>
+                </ul>
+              </section>
+            </div>
+          </>
+        )}
+
         <h2 className="display mt-14 mb-4 text-[22px]">자주 묻는 것</h2>
         <div className="card divide-y divide-hairline-soft">
           {[
             ['주간과 월간은 어떻게 구분되나요?', `그 달의 마지막 날이 들어 있는 주가 마지막 주이고, 그 주에는 월간 업무일지를 냅니다. ${examples.map((e) => `${e.month}은 ${e.range} — ${e.note}`).join('. ')}. 월간 주에는 제출 화면 위쪽에 초록색 [월간] 표시가 뜹니다.`],
             ['월간에는 뭘 더 써야 하나요?', '한 주가 아니라 한 달치를 정리합니다. 양식과 마감(목요일 14:00)은 주간과 같고, 분량이 늘어납니다. 병합본 파일 이름도 "월간업무"로 나옵니다.'],
+            ['알림은 언제 오나요?', '아직 내지 않은 분에게만 갑니다 — 마감 전날 11:45, 마감 당일 09:00, 마감 1시간 전, 마감 10분 전. 이미 냈으면 오지 않습니다. 사내 메신저 알림함으로 옵니다.'],
+            ['연휴 때 마감이 바뀌면요?', '그 주만 마감이 당겨지고, 제출 화면의 마감 표시가 빨갛게 바뀌며 이유가 함께 나옵니다. 알림도 바뀐 마감에 맞춰 나갑니다. 다음 주에는 평소대로 돌아갑니다.'],
             ['마감을 놓치면 어떻게 되나요?', '마감 후에는 제출도 취소도 되지 않습니다. 담당자에게 말씀해 주세요 — 예외는 시스템이 아니라 사람이 판단할 일입니다.'],
             ['같은 주에 두 번 내도 되나요?', '됩니다. 다시 올리면 새 버전으로 저장되고 마지막 것이 병합에 들어갑니다. 이전 버전도 남아 있어 필요하면 다시 받을 수 있습니다.'],
             ['다른 사람이 낸 내용을 볼 수 있나요?', '부서원끼리는 누가 언제 냈는지만 봅니다. 파일 내용은 부서담당자부터 볼 수 있습니다.'],

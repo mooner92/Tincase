@@ -112,7 +112,7 @@ export function currentWeek(now: Date = new Date()): WeekDescriptor {
 }
 
 /**
- * WS-14 — 슬롯이 들고 다니는 **이 주차만의 마감 예외.**
+ * WS-18 — 슬롯이 들고 다니는 **이 주차만의 마감 예외.**
  *
  * `deadlineFor`가 이미 슬롯을 받으므로 예외를 슬롯에 실으면 **호출부를 하나도 고치지
  * 않아도** 전부 따라온다. 마감을 세는 곳이 12군데인데, 그중 한 곳만 예외를 모르면
@@ -130,7 +130,7 @@ export interface SlotDeadline {
 
 /**
  * WS-13 — 슬롯(월요일)과 부서 정책으로 이번 주 유효 마감을 계산.
- * WS-14 — 슬롯에 예외가 실려 있으면 **그것이 이긴다.**
+ * WS-18 — 슬롯에 예외가 실려 있으면 **그것이 이긴다.**
  */
 export function deadlineFor(slot: SlotDeadline, div: DeadlinePolicy): Date {
   const dow = slot.deadlineDowOverride ?? div.deadlineDow;

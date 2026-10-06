@@ -852,3 +852,95 @@ describe('HM-43 실패 재시도 간격', () => {
     expect(RETRY_BACKOFF_MINUTES.length).toBeGreaterThan(0);
   });
 });
+
+/**
+ * WS-19 · TACP-20 — 주차 마감 예외는 **총괄·운영자가** 정한다.
+ *
+ * 이 예외는 한 부서가 아니라 그 주 전 부서의 마감을 움직인다. 그래서 지키는 것은 셋이다:
+ * 정할 수 있는 사람만 정한다 · 부서 쪽은 존재조차 모른다(404) · 지난 마감은 옮기지 않는다.
+ */
+d('WS-19 주차 마감 예외 — 총괄이 정한다', () => {
+  const route = () => import('@/app/api/schedule/deadline/route');
+  /** 지금부터 h시간 뒤의 대외 마감을 `YYYY-MM-DDTHH:mm`(KST)로 */
+  const externalIn = async (hours: number) => {
+    const { TZDate } = await import('@date-fns/tz');
+    const k = new TZDate(Date.now() + hours * 3600_000, 'Asia/Seoul');
+    const z = (n: number) => String(n).padStart(2, '0');
+    return `${k.getFullYear()}-${z(k.getMonth() + 1)}-${z(k.getDate())}T${z(k.getHours())}:00`;
+  };
+  const post = async (identity: string, body: unknown) => {
+    const { POST } = await route();
+    return POST(
+      nx('/api/schedule/deadline', identity, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      }),
+    );
+  };
+
+  afterAll(async () => {
+    const { prisma } = await import('@/server/db');
+    await prisma.weekSlot.updateMany({
+      data: { deadlineDowOverride: null, deadlineTimeOverride: null, deadlineNote: null },
+    });
+  });
+
+  it('[WS-T70] ★ 총괄이 미리보고 적용한다 — 저장되고 감사 기록에 전·후가 남는다', async () => {
+    const external = await externalIn(50);
+    const pre = await post(ID.coord, { mode: 'preview', external });
+    expect(pre.status).toBe(200);
+    const { plan } = await pre.json();
+    expect(plan.blocked).toBeNull();
+
+    // 미리보기는 쓰지 않는다
+    const { prisma } = await import('@/server/db');
+    expect((await prisma.weekSlot.findUniqueOrThrow({ where: { isoKey: plan.isoKey } })).deadlineDowOverride).toBeNull();
+
+    const res = await post(ID.coord, { mode: 'apply', external });
+    expect(res.status).toBe(200);
+    const slot = await prisma.weekSlot.findUniqueOrThrow({ where: { isoKey: plan.isoKey } });
+    expect(slot.deadlineDowOverride).not.toBeNull();
+    expect(slot.deadlineNote).toContain('마감입니다');
+
+    const log = await prisma.auditLog.findFirst({
+      where: { action: 'deadline_override', actor: ID.coord },
+      orderBy: { at: 'desc' },
+    });
+    expect(log?.target).toBe(`slot:${plan.isoKey}`);
+    expect(JSON.parse(log!.detail!).after).toBe(plan.department);
+
+    // 해제하면 평소대로 — 이것도 기록된다
+    const { DELETE } = await route();
+    const del = await DELETE(nx(`/api/schedule/deadline?isoKey=${plan.isoKey}`, ID.coord, { method: 'DELETE' }));
+    expect(del.status).toBe(200);
+    expect((await prisma.weekSlot.findUniqueOrThrow({ where: { isoKey: plan.isoKey } })).deadlineDowOverride).toBeNull();
+  });
+
+  it('[WS-T70b] 운영자도 정할 수 있다', async () => {
+    const { GET } = await route();
+    expect((await GET(nx('/api/schedule/deadline', ID.op))).status).toBe(200);
+  });
+
+  it('[WS-T71] ★ 부서 쪽(담당자·부서원)은 404 — 한 부서가 전 부서의 마감을 움직이지 못한다', async () => {
+    const external = await externalIn(50);
+    for (const who of [ID.aLead, ID.bLead, ID.aMember]) {
+      expect((await post(who, { mode: 'apply', external })).status, who).toBe(404);
+      const { GET } = await route();
+      expect((await GET(nx('/api/schedule/deadline', who))).status, who).toBe(404);
+    }
+  });
+
+  it('[WS-T72] 이미 지난 마감으로는 옮기지 않는다 — 미리보기는 막힌 이유를 말하고, 적용은 409', async () => {
+    const past = await externalIn(-2);
+    const pre = await post(ID.coord, { mode: 'preview', external: past });
+    expect(pre.status).toBe(200);
+    expect((await pre.json()).plan.blocked).toMatch(/지났습니다/);
+    expect((await post(ID.coord, { mode: 'apply', external: past })).status).toBe(409);
+  });
+
+  it('[WS-T72b] 공지를 못 읽으면 422 — 추측으로 마감을 만들지 않는다', async () => {
+    const res = await post(ID.coord, { mode: 'preview', noticeText: '주간업무 작성 요청드립니다.' });
+    expect(res.status).toBe(422);
+  });
+});

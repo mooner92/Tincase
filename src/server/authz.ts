@@ -140,6 +140,24 @@ export async function requireOperator(headers: Headers): Promise<Scope> {
 }
 
 /**
+ * TACP-20 — 주차 마감 일정을 바꿀 수 있는가 (총괄·운영자).
+ *
+ * 지금은 readAll과 같은 사람들이지만 **쓰기 판정으로 따로 둔다.** readAll은 「읽기」라는
+ * 뜻이고(TACP-8), 거기에 쓰기를 얹으면 그 뜻이 흐려진다 — 나중에 readAll에 누가 더해지면
+ * 그 사람이 전 부서의 마감까지 움직이게 된다.
+ */
+export function canScheduleDeadlines(user: Pick<User, 'isOperator' | 'isCoordinator'>): boolean {
+  return user.isOperator || user.isCoordinator;
+}
+
+/** TACP-20 — 주차 마감 예외 쓰기 진입점. 그 외에는 404 (TACP-5) */
+export async function requireScheduler(headers: Headers): Promise<Scope> {
+  const scope = await requireScope(headers);
+  if (!canScheduleDeadlines(scope.user)) throw notFound();
+  return scope;
+}
+
+/**
  * AU-13 — 제출물 접근 판정. 항상 이 함수로만 Submission을 얻는다.
  * 반환되면 접근 허용이 이미 판정된 것. 아니면 404 (구별 불가).
  */

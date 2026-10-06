@@ -37,7 +37,7 @@ export const LAST_CALL_WINDOW = 3;
 const DAY_BEFORE_TIME = '11:45';
 /**
  * NT-45 — 마감 당일 이 시각(KST). 출근 직후라 번쩍여도 하던 일을 끊지 않는다.
- * 전날 알림을 놓친 주(연휴로 마감이 전날 오후에 당겨진 주 — WS-14)의 안전망이기도 하다
+ * 전날 알림을 놓친 주(연휴로 마감이 전날 오후에 당겨진 주 — WS-18)의 안전망이기도 하다
  */
 const MORNING_TIME = '09:00';
 /** 창을 스케줄러 주기보다 넓게 잡는다 — 반드시 한 번은 이 창을 지난다 */
@@ -78,6 +78,21 @@ const STAGES: {
     window: LAST_CALL_WINDOW,
   },
 ];
+
+/**
+ * WS-19g — 이 마감에 **실제로 나갈** 알림 단계와 시각. 미리보기가 쓴다.
+ * 단계 표(STAGES)를 그대로 읽으므로, 미리보기와 실제 발송이 갈라질 수 없다.
+ */
+export function reminderTimes(deadline: Date): { kind: ReminderKind; at: Date }[] {
+  return STAGES.filter((s) => !s.applies || s.applies(deadline)).map((s) => ({ kind: s.kind, at: s.at(deadline) }));
+}
+
+export const REMINDER_LABEL: Record<ReminderKind, string> = {
+  deadline_1d: '하루 전 알림',
+  deadline_day: '당일 아침 알림',
+  deadline_1h: '1시간 전 알림',
+  deadline_10m: '최후 알림 (10분 전)',
+};
 
 export interface ReminderOutcome {
   division: string;

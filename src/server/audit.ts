@@ -23,7 +23,9 @@ export type AuditAction =
   /** AU-30 — 비밀번호 설정 링크를 보냈다. **비밀번호는 바뀌지 않는다** (쓸 때 바뀐다) */
   | 'setup_link'
   /** AU-30 — 본인이 링크로 비밀번호를 설정했다 */
-  | 'setup_done';
+  | 'setup_done'
+  /** TACP-20 · WS-19 — 총괄·운영자가 주차 마감 예외를 설정·해제했다. 전·후와 이유가 남는다 */
+  | 'deadline_override';
 
 export async function audit(
   actor: string,

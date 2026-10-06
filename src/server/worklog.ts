@@ -243,7 +243,7 @@ export async function divisionSlots(divisionId: string, limit = 26) {
 }
 
 export function effectiveDeadline(slot: WeekSlot, division: Division): Date {
-  // WS-14 — 슬롯을 **통째로** 넘긴다. `{ opensAt }`으로 깎으면 그 주차의 마감 예외가 사라진다
+  // WS-18 — 슬롯을 **통째로** 넘긴다. `{ opensAt }`으로 깎으면 그 주차의 마감 예외가 사라진다
   return deadlineFor(slot, division);
 }
 

@@ -68,7 +68,7 @@ describe('월 경계 (WS-04)', () => {
 });
 
 describe('마감 판정 (WS-06/13)', () => {
-  // WS-14 — 예외 필드가 필수라 명시한다. 선택 필드였다면 여기서 빠뜨려도 통과하고,
+  // WS-18 — 예외 필드가 필수라 명시한다. 선택 필드였다면 여기서 빠뜨려도 통과하고,
   // 그게 바로 운영 코드 일곱 군데에서 났던 실수다
   const slot = { opensAt: mondayOf(kst(2026, 8, 12)), deadlineDowOverride: null, deadlineTimeOverride: null };
 
