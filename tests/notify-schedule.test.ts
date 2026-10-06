@@ -153,7 +153,7 @@ describe('NT-43 실제 발송 분 — 목 14:00 마감 주간', () => {
   );
 
   /** 수 00:00 ~ 목 15:00을 1분씩 — 각 종류가 켜지는 분을 모은다 */
-  const 발동: Record<string, string[]> = { deadline_1d: [], deadline_1h: [], deadline_10m: [] };
+  const 발동: Record<string, string[]> = { deadline_1d: [], deadline_day: [], deadline_1h: [], deadline_10m: [] };
   const 시작 = new TZDate(2026, 8, 23, 0, 0, 0, 0, KST).getTime();
   for (let m = 0; m <= 39 * 60; m++) {
     const now = new Date(시작 + m * 60_000);
@@ -185,14 +185,20 @@ describe('NT-43 실제 발송 분 — 목 14:00 마감 주간', () => {
     expect(발동.deadline_1d.at(-1)).toBe('9/23(수) 11:57');
   });
 
-  it('[NT-T54] 세 창이 겹치지 않는다 — 같은 분에 두 통이 가지 않는다', () => {
-    const 전부 = [...발동.deadline_1d, ...발동.deadline_1h, ...발동.deadline_10m];
+  it('[NT-T57] 당일 아침 알림은 목 09:00에 켜진다 — 출근 직후 (NT-45)', () => {
+    expect(발동.deadline_day[0]).toBe('9/24(목) 09:00');
+    expect(발동.deadline_day.at(-1)).toBe('9/24(목) 09:12');
+  });
+
+  it('[NT-T54] 네 창이 겹치지 않는다 — 같은 분에 두 통이 가지 않는다', () => {
+    const 전부 = [...발동.deadline_1d, ...발동.deadline_day, ...발동.deadline_1h, ...발동.deadline_10m];
     expect(new Set(전부).size).toBe(전부.length);
   });
 
-  it('[NT-T55] 창 **밖에서는 아무것도 안 켜진다** — 39시간 중 29분만 켜져 있다', () => {
-    const 켜진분 = 발동.deadline_1d.length + 발동.deadline_1h.length + 발동.deadline_10m.length;
-    expect(켜진분).toBe(13 + 13 + 4);
+  it('[NT-T55] 창 **밖에서는 아무것도 안 켜진다** — 39시간 중 43분만 켜져 있다', () => {
+    const 켜진분 =
+      발동.deadline_1d.length + 발동.deadline_day.length + 발동.deadline_1h.length + 발동.deadline_10m.length;
+    expect(켜진분).toBe(13 + 13 + 13 + 4);
     // 마감 뒤에는 어떤 단계도 켜지지 않는다
     for (let m = 0; m <= 60; m++) {
       const 마감후 = new Date(마감.getTime() + m * 60_000 + 1);
@@ -203,5 +209,59 @@ describe('NT-43 실제 발송 분 — 목 14:00 마감 주간', () => {
   it('[NT-T56] 1분 주기가 창을 건너뛰지 않는다 — 가장 좁은 창도 2분 이상이다', () => {
     // 스케줄러가 한 주기를 늦게 돌아도(실행이 1분을 넘으면 생긴다) 여전히 창에 든다
     expect(발동.deadline_10m.length).toBeGreaterThanOrEqual(2);
+  });
+});
+
+/**
+ * NT-45 — 당일 09:00 아침 알림.
+ *
+ * 2026-10-06(화) 17:36, 기획조정실이 이번 주 대외 마감을 수 15:00으로 당겼다(연휴).
+ * 부서 마감은 수 14:00이 됐는데 그 「하루 전」은 이미 지난 화 11:45였다. 알림은 창 안에서만
+ * 나가고 소급하지 않아서, 그 주 첫 알림이 **마감 한 시간 전**이 될 뻔했다.
+ */
+describe('NT-45 당일 아침 알림', () => {
+  const 주 = (d: number) => ({ opensAt: new TZDate(2026, 9, d, 0, 0, 0, 0, KST) as unknown as Date });
+
+  it('[NT-T60] 순서 — 전날 11:45 → 당일 09:00 → 1시간 전 → 10분 전 → 마감', () => {
+    const 마감 = deadlineFor(주(5), { deadlineDow: 4, deadlineTime: '14:00' });
+    const 켜짐 = new Map<string, number>();
+    for (let t = 마감.getTime() - 3 * 86400_000; t <= 마감.getTime(); t += 60_000) {
+      for (const k of dueStages(new Date(t), 마감)) if (!켜짐.has(k)) 켜짐.set(k, t);
+    }
+    expect([...켜짐.keys()]).toEqual(['deadline_1d', 'deadline_day', 'deadline_1h', 'deadline_10m']);
+    expect(kst(new Date(켜짐.get('deadline_day')!))).toBe('10/8(목) 09:00');
+  });
+
+  it('[NT-T61] 마감이 10:00 이전이면 아침 알림은 없다 — 09:00과 1시간 전이 겹치거나 뒤집힌다', () => {
+    const 켜지나 = (hhmm: string) => {
+      const 마감 = deadlineFor(주(5), { deadlineDow: 4, deadlineTime: hhmm });
+      for (let t = 마감.getTime() - 86400_000; t <= 마감.getTime(); t += 60_000) {
+        if (dueStages(new Date(t), 마감).includes('deadline_day')) return true;
+      }
+      return false;
+    };
+    expect(켜지나('09:30'), '09:30 마감 — 09:00은 이미 1시간 전보다 늦다').toBe(false);
+    expect(켜지나('10:00'), '10:00 마감 — 09:00이 곧 1시간 전이다').toBe(false);
+    expect(켜지나('10:01'), '10:01 마감 — 09:00이 1시간 전보다 1분 앞선다').toBe(true);
+    expect(켜지나('14:00')).toBe(true);
+  });
+
+  it('[NT-T62] ★ 2026-10-06 사례 — 화 17:36에 마감을 수 14:00으로 당기면, 그 뒤 실제로 나가는 것', () => {
+    const 마감 = deadlineFor(
+      { ...주(5), deadlineDowOverride: 3, deadlineTimeOverride: '14:00' },
+      { deadlineDow: 4, deadlineTime: '14:00' },
+    );
+    expect(kst(마감)).toBe('10/7(수) 14:00');
+    const 당긴시각 = new TZDate(2026, 9, 6, 17, 36, 0, 0, KST).getTime();
+    const 켜짐 = new Map<string, string>();
+    for (let t = 당긴시각; t <= 마감.getTime(); t += 60_000) {
+      for (const k of dueStages(new Date(t), 마감)) if (!켜짐.has(k)) 켜짐.set(k, kst(new Date(t)));
+    }
+    // 하루 전(화 11:45)은 이미 지났다 — 아침 알림이 그 공백을 메운다
+    expect(Object.fromEntries(켜짐)).toEqual({
+      deadline_day: '10/7(수) 09:00',
+      deadline_1h: '10/7(수) 13:00',
+      deadline_10m: '10/7(수) 13:50',
+    });
   });
 });

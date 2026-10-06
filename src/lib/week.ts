@@ -165,13 +165,23 @@ export function deadlineFor(slot: SlotDeadline, div: DeadlinePolicy): Date {
  * 「그 부서 마감의 전날 11:45」가 부서 수와 무관하게 맞는 유일한 표현이다.
  */
 export function dayBeforeAt(deadline: Date, hhmm: string): Date {
+  return dayOffsetAt(deadline, -1, hhmm);
+}
+
+/** NT-45 — 마감 **당일**의 어느 시각(KST). 「당일 아침 알림」이 나갈 순간을 구한다 */
+export function sameDayAt(deadline: Date, hhmm: string): Date {
+  return dayOffsetAt(deadline, 0, hhmm);
+}
+
+/** 마감 날짜에서 달력으로 `days`일 떨어진 날의 hh:mm (KST) — 뺄셈이 아니라 날짜로 센다 */
+function dayOffsetAt(deadline: Date, days: number, hhmm: string): Date {
   const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(hhmm);
   if (!m) throw new Error(`invalid time: ${hhmm}`);
   const k = new TZDate(deadline.getTime(), KST);
   const d = new TZDate(
     k.getFullYear(),
     k.getMonth(),
-    k.getDate() - 1, // TZDate가 월·연 경계를 알아서 넘긴다 (3월 1일 → 2월 28/29일)
+    k.getDate() + days, // TZDate가 월·연 경계를 알아서 넘긴다 (3월 1일 → 2월 28/29일)
     Number(m[1]),
     Number(m[2]),
     0,
