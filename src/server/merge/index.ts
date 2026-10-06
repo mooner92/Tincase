@@ -9,7 +9,7 @@ import { readStoredFile, writeFileAtomic, sanitizeSegment } from '../storage';
 import { readWorklog } from '@/lib/hwp/reader';
 import { openHwp } from '@/lib/hwp/ole';
 import { parseRecords, serializeRecords } from '@/lib/hwp/record';
-import { fillTable, packHwp, plainShapeIdOf } from '@/lib/hwp/writer';
+import { fillTable, packHwp, plainShapeIdOf, prependTitleParagraph } from '@/lib/hwp/writer';
 import { BLUE, ensureColorShape } from '@/lib/hwp/charshape';
 import { toPlan, orderPeople } from './rules';
 import { groupDuplicates, MergeRow, GroupingResult } from './model';
@@ -90,6 +90,8 @@ export function composeMergedHwp(
   tableRows: Record<Bucket, string[][]>,
   /** HM-37 — 표별 행 강조 여부. 안 주면 전부 보통 */
   emphasis?: Partial<Record<Bucket, boolean[]>>,
+  /** HM-46 — 맨 위에 둘 부서명. 안 주면 양식 그대로 */
+  title?: string,
 ): {
   bytes: Buffer;
   tableCount: number;
@@ -143,6 +145,15 @@ export function composeMergedHwp(
       emphasisShapeId: blueShapeId,
     });
   });
+
+  /*
+   * HM-46 — 맨 위에 부서명. **표를 다 채운 뒤에** 넣는다 — 표 편집은 표 순번으로 자리를
+   * 찾으니 상관없지만, 문단을 먼저 늘려 두면 다른 편집이 기대는 위치가 하나 더 생긴다.
+   * 못 넣어도 병합은 계속한다 — 부서명 때문에 그 주 병합이 멈추면 안 된다 (HM-21).
+   */
+  if (title && prependTitleParagraph(recs, title) === 'unsupported') {
+    warnings.push('양식 첫 부분의 구조가 달라 병합본 맨 위에 부서명을 넣지 못했습니다.');
+  }
 
   return {
     bytes: packHwp(templateBytes, [serializeRecords(recs)], docInfoOut),
@@ -343,7 +354,7 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
     rowEmphasis.notes = [];
   }
 
-  const composed = composeMergedHwp(src, tableRows, rowEmphasis);
+  const composed = composeMergedHwp(src, tableRows, rowEmphasis, division.nameKo);
   warnings.push(...composed.warnings);
   const out = composed.bytes;
   const tableCount = composed.tableCount;

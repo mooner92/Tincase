@@ -709,3 +709,135 @@ describe('HM-38 괄호로 적은 공유 표시', () => {
     expect(parseEmphasisWords('가, 가, 나')).toEqual(['가', '나']);
   });
 });
+
+// ── HM-46 — 병합본 맨 위에 부서명 ─────────────────────────────
+//
+// 2026-10-06 기획조정실(최종 취합)의 요청: 게시판에 올라오는 부서 병합본 머리에 부서명이
+// 없어서 직접 채워 넣고 있었다. 양식이 「1. 주요 업무실적」으로 바로 시작하기 때문이다.
+//
+// 첫 문단에는 구역 정의 컨트롤이 붙어 있어 그 앞에 끼울 수 없다. 그래서 첫 문단의 글자만
+// 부서명으로 바꾸고, 원래 제목은 제목 문단을 복제해 바로 아래에 다시 놓는다.
+describe('HM-46 병합본 맨 위의 부서명', () => {
+  const load = () => readFileSync('fixtures/master-template.hwp');
+  const hasFix = (() => {
+    try {
+      load();
+      return true;
+    } catch {
+      return false;
+    }
+  })();
+  const t = hasFix ? it : it.skip;
+  const rows = {
+    achievements: [['1-1', '공공데이터 평가 자료 작성', '', '', '']],
+    plans: [['2-1', '알림 시스템 개발', '10/1', '', '']],
+    notes: [],
+  };
+
+  /** 본문 문단을 위에서부터: 보이는 글자와 붙은 컨트롤 */
+  async function topParas(bytes: Buffer) {
+    const { openHwp } = await import('@/lib/hwp/ole');
+    const { parseRecords, paraText, TAG } = await import('@/lib/hwp/record');
+    const recs = parseRecords(openHwp(bytes).sections[0]);
+    const out: { text: string; ctrls: string[] }[] = [];
+    for (let i = 0; i < recs.length; i++) {
+      if (recs[i].tag !== TAG.PARA_HEADER || recs[i].level !== 0) continue;
+      let text = '';
+      const ctrls: string[] = [];
+      for (let k = i + 1; k < recs.length && recs[k].level > 0; k++) {
+        if (recs[k].level !== 1) continue;
+        if (recs[k].tag === TAG.PARA_TEXT) text = paraText(recs[k].data);
+        if (recs[k].tag === TAG.CTRL_HEADER) {
+          const d = recs[k].data;
+          ctrls.push(Buffer.from([d[3], d[2], d[1], d[0]]).toString('latin1'));
+        }
+      }
+      out.push({ text, ctrls });
+    }
+    return out;
+  }
+
+  /**
+   * 한글이 「손상」으로 보는 지점 — 문단 머리가 밝힌 수와 뒤따르는 레코드가 어긋난 문단 수.
+   * 글자 수 = PARA_TEXT 길이(없으면 1), 서식 구간 수, 줄 수.
+   */
+  async function headerMismatches(bytes: Buffer) {
+    const { openHwp } = await import('@/lib/hwp/ole');
+    const { parseRecords, TAG } = await import('@/lib/hwp/record');
+    const recs = parseRecords(openHwp(bytes).sections[0]);
+    const bad: string[] = [];
+    for (let i = 0; i < recs.length; i++) {
+      if (recs[i].tag !== TAG.PARA_HEADER) continue;
+      const lv = recs[i].level;
+      let text = -1;
+      let runs = 0;
+      let segs = 0;
+      for (let k = i + 1; k < recs.length && recs[k].level > lv; k++) {
+        if (recs[k].level !== lv + 1) continue;
+        if (recs[k].tag === TAG.PARA_TEXT) text = recs[k].data.length / 2;
+        if (recs[k].tag === TAG.PARA_CHAR_SHAPE) runs = recs[k].data.length / 8;
+        if (recs[k].tag === TAG.PARA_LINE_SEG) segs = recs[k].data.length / 36;
+      }
+      const d = recs[i].data;
+      const nChars = d.readUInt32LE(0) & 0x7fffffff;
+      if (nChars !== (text < 0 ? 1 : text)) bad.push(`#${i} 글자 ${nChars}≠${text}`);
+      if (d.readUInt16LE(12) !== runs) bad.push(`#${i} 서식 ${d.readUInt16LE(12)}≠${runs}`);
+      if (d.readUInt16LE(16) !== segs) bad.push(`#${i} 줄 ${d.readUInt16LE(16)}≠${segs}`);
+    }
+    return bad;
+  }
+
+  t('[HM-T100] 맨 위가 부서명, 바로 아래가 「1. 주요 업무실적」, 그 다음이 표', async () => {
+    const { composeMergedHwp } = await import('@/server/merge');
+    const out = composeMergedHwp(load(), rows, undefined, 'AI홍보전략실');
+    const p = await topParas(out.bytes);
+    expect(p[0].text).toBe('AI홍보전략실');
+    expect(p[1].text).toBe('1. 주요 업무실적');
+    expect(p[2].ctrls).toContain('tbl ');
+    expect(out.warnings).toEqual([]);
+  });
+
+  t('[HM-T101] 첫 문단의 구역·단 정의 컨트롤은 그대로 남는다 — 지우면 문서 구조가 무너진다', async () => {
+    const { composeMergedHwp } = await import('@/server/merge');
+    const p = await topParas(composeMergedHwp(load(), rows, undefined, 'AI홍보전략실').bytes);
+    expect(p[0].ctrls).toEqual(['secd', 'cold']);
+    expect(p[1].ctrls, '복제한 제목 문단에 컨트롤이 딸려 오면 구역이 두 번 정의된다').toEqual([]);
+  });
+
+  t('[HM-T102] ★ 모든 문단의 자기 기술(글자·서식 구간·줄 수)이 맞는다', async () => {
+    const { composeMergedHwp } = await import('@/server/merge');
+    // 전제: 원본 양식은 이미 맞는다 — 맞지 않던 것을 우리 탓으로 돌리지 않기 위해
+    expect(await headerMismatches(load())).toEqual([]);
+    expect(await headerMismatches(composeMergedHwp(load(), rows, undefined, 'AI홍보전략실').bytes)).toEqual([]);
+    // 원래 제목보다 긴 부서명 — 서식 구간·글자 수 경계가 바뀌는 쪽
+    const long = '국가기후위기적응센터 기후위기대응연구본부';
+    expect(await headerMismatches(composeMergedHwp(load(), rows, undefined, long).bytes)).toEqual([]);
+  });
+
+  t('[HM-T103] 표 내용은 부서명이 없을 때와 똑같이 읽힌다', async () => {
+    const { composeMergedHwp } = await import('@/server/merge');
+    const { readWorklog } = await import('@/lib/hwp/reader');
+    const plain = readWorklog(composeMergedHwp(load(), rows).bytes).worklog;
+    const titled = readWorklog(composeMergedHwp(load(), rows, undefined, 'AI홍보전략실').bytes).worklog;
+    expect(titled).toEqual(plain);
+  });
+
+  t('[HM-T104] 이미 부서명이 있으면 다시 넣지 않는다 — 두 번 찍히는 것은 없는 것보다 나쁘다', async () => {
+    const { composeMergedHwp } = await import('@/server/merge');
+    const once = composeMergedHwp(load(), rows, undefined, 'AI홍보전략실').bytes;
+    // 부서명이 들어간 문서를 다시 양식으로 쓰는 경우 (양식에 부서명을 적어 둔 부서와 같다)
+    const twice = composeMergedHwp(once, rows, undefined, 'AI홍보전략실');
+    const p = await topParas(twice.bytes);
+    expect(p.filter((x) => x.text === 'AI홍보전략실')).toHaveLength(1);
+    expect(p.filter((x) => x.text === '1. 주요 업무실적')).toHaveLength(1);
+    expect(twice.warnings).toEqual([]);
+  });
+
+  t('[HM-T105] 부서명을 주지 않으면 지금까지와 바이트 단위로 같다', async () => {
+    const { composeMergedHwp } = await import('@/server/merge');
+    const a = composeMergedHwp(load(), rows).bytes;
+    const b = composeMergedHwp(load(), rows, undefined, undefined).bytes;
+    expect(Buffer.compare(a, b)).toBe(0);
+    expect((await topParas(a))[0].text).toBe('1. 주요 업무실적');
+  });
+});

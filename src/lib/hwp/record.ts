@@ -87,6 +87,18 @@ const WIDE_CTRL = new Set([1, 2, 3, 4, 5, 6, 7, 8, 9, 11, 12, 14, 15, 16, 17, 18
  */
 const LINE_BREAK = 10;
 
+/**
+ * HM-46 — 문단 글자 **맨 앞에 붙은 8칸 컨트롤들**이 차지하는 유닛 수.
+ *
+ * 문서 첫 문단에는 구역·단 정의(`secd`·`cold`)가 글자 앞에 붙어 있다. 그 컨트롤을
+ * 보존한 채 보이는 글자만 바꾸려면 어디까지가 컨트롤인지 알아야 한다.
+ */
+export function leadingControlUnits(data: Buffer): number {
+  let i = 0;
+  while (i + 16 <= data.length && WIDE_CTRL.has(data.readUInt16LE(i))) i += 16;
+  return i / 2;
+}
+
 /** 문단 텍스트 추출 — 제어 문자 제거. 문단 끝 CR(13)도 제거된다. 줄바꿈(10)은 `\n`으로 */
 export function paraText(data: Buffer): string {
   let out = '';

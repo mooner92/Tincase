@@ -20,7 +20,7 @@
 
 import * as CFB from 'cfb';
 import { deflateRawSync } from 'node:zlib';
-import { HwpRecord, TAG, parseRecords, serializeRecords } from './record';
+import { HwpRecord, TAG, leadingControlUnits, paraText, parseRecords, serializeRecords } from './record';
 
 const TBL_ROWS = 4;
 const TBL_COLS = 6;
@@ -539,4 +539,136 @@ export function appendBodyParagraph(recs: HwpRecord[], text: string): void {
 
   // 글자 교체는 셀과 규칙이 같다 (빈 글자면 PARA_TEXT를 두지 않는다 — HM-11a)
   setCellText(recs, { row: -1, col: -1, start: base, end: recs.length }, text);
+}
+
+// ── HM-46 — 맨 위 제목 한 줄 (부서명) ──────────────────────────
+
+interface Block {
+  start: number;
+  end: number;
+}
+
+/** 최상위(본문) 문단들의 레코드 범위 */
+function topParagraphs(recs: readonly HwpRecord[]): Block[] {
+  const out: Block[] = [];
+  for (let i = 0; i < recs.length; i++) {
+    if (recs[i].tag !== TAG.PARA_HEADER || recs[i].level !== 0) continue;
+    let end = i + 1;
+    while (end < recs.length && recs[end].level > 0) end++;
+    out.push({ start: i, end });
+  }
+  return out;
+}
+
+/** 문단 **자신의** 레코드 중 tag인 첫 것. 컨트롤 안쪽(더 깊은 레벨)은 남의 것이다 */
+function ownRecord(recs: readonly HwpRecord[], b: Block, tag: number): number {
+  const lv = recs[b.start].level + 1;
+  for (let k = b.start + 1; k < b.end; k++) if (recs[k].tag === tag && recs[k].level === lv) return k;
+  return -1;
+}
+
+function ownControls(recs: readonly HwpRecord[], b: Block): string[] {
+  const lv = recs[b.start].level + 1;
+  const out: string[] = [];
+  for (let k = b.start + 1; k < b.end; k++) {
+    if (recs[k].tag === TAG.CTRL_HEADER && recs[k].level === lv) out.push(ctrlId(recs[k].data));
+  }
+  return out;
+}
+
+function ownText(recs: readonly HwpRecord[], b: Block): string {
+  const k = ownRecord(recs, b, TAG.PARA_TEXT);
+  return k < 0 ? '' : paraText(recs[k].data);
+}
+
+function writeHeaderU16(recs: HwpRecord[], headerIdx: number, offset: number, value: number): void {
+  const d = Buffer.from(recs[headerIdx].data);
+  if (d.length < offset + 2) return;
+  d.writeUInt16LE(value, offset);
+  recs[headerIdx] = { ...recs[headerIdx], data: d };
+}
+
+export type TitleResult = 'inserted' | 'present' | 'unsupported';
+
+/**
+ * HM-46 — 문서 **맨 위에 제목 한 줄**(부서명)을 둔다.
+ *
+ * 첫 문단 앞에는 끼워 넣을 수 없다 — 구역·단 정의 컨트롤(`secd`·`cold`)이 첫 문단에
+ * 붙어 있어서 그 앞에 문단을 두면 구조가 어긋난다. 그래서 자리를 바꾼다:
+ *
+ *   전   [secd][cold]「1. 주요 업무실적」   ← 첫 문단
+ *   후   [secd][cold]「AI홍보전략실」       ← 첫 문단, 컨트롤 그대로·글자만 교체
+ *                    「1. 주요 업무실적」   ← 컨트롤 없는 제목 문단을 복제해 다시 놓음
+ *
+ * 복제할 문단은 **첫 문단과 문단모양이 같은 것**을 먼저 고른다 — 원래 제목과 같은 모양으로
+ * 다시 서게 하려는 것이다 (전 부서 양식에서 세 제목 문단은 모양이 같다, 2026-10-06 실측).
+ *
+ * 한글은 문단 머리가 밝힌 수(글자·서식 구간·줄)와 뒤따르는 레코드가 맞는지 본다 (HM-28).
+ * 그래서 글자를 바꾼 문단은 셋을 모두 다시 맞춘다.
+ */
+export function prependTitleParagraph(recs: HwpRecord[], title: string): TitleResult {
+  const clean = sanitizeCellText(title).replace(/\n/g, ' ').trim();
+  if (!clean) return 'unsupported';
+
+  const blocks = topParagraphs(recs);
+  if (blocks.length === 0) return 'unsupported';
+  const first = blocks[0];
+
+  // 첫 표 앞 문단에 이미 있으면 그만 — 양식에 부서명을 적어 둔 부서가 있을 수 있다
+  for (const b of blocks) {
+    if (ownControls(recs, b).includes('tbl ')) break;
+    if (ownText(recs, b).includes(clean)) return 'present';
+  }
+  // 첫 문단에 표가 붙은 양식은 다루지 않는다 — 글자를 바꾸면 표 옆에 글자가 생긴다
+  if (ownControls(recs, first).includes('tbl ')) return 'unsupported';
+
+  const textIdx = ownRecord(recs, first, TAG.PARA_TEXT);
+  if (textIdx < 0) return 'unsupported';
+  const old = recs[textIdx].data.toString('ucs2');
+  const prefix = leadingControlUnits(recs[textIdx].data);
+  let bodyEnd = old.length;
+  while (bodyEnd > prefix && old.charCodeAt(bodyEnd - 1) < 32) bodyEnd--;
+  const heading = old.slice(prefix, bodyEnd);
+  const tail = old.slice(bodyEnd);
+
+  // 1) 원래 제목을 바로 아래에 다시 놓는다 (첫 문단이 비어 있었으면 옮길 것이 없다)
+  if (heading.trim()) {
+    const shape = recs[first.start].data.readUInt16LE(8);
+    const plain = blocks
+      .slice(1)
+      .filter((b) => ownControls(recs, b).length === 0 && ownText(recs, b).trim() !== '');
+    const proto = plain.find((b) => recs[b.start].data.readUInt16LE(8) === shape) ?? plain[0];
+    if (!proto) return 'unsupported';
+    const copy = recs.slice(proto.start, proto.end).map((r) => ({ ...r, data: Buffer.from(r.data) }));
+    recs.splice(first.end, 0, ...copy);
+    setCellText(recs, { row: -1, col: -1, start: first.end, end: first.end + copy.length }, heading);
+  }
+
+  // 2) 첫 문단 — 컨트롤은 두고 보이는 글자만 부서명으로
+  const next = Buffer.from(old.slice(0, prefix) + clean + tail, 'ucs2');
+  const nChars = next.length / 2;
+  recs[textIdx] = { ...recs[textIdx], data: next };
+  setNChars(recs, first.start, nChars);
+
+  // 서식 구간이 새 글자 길이를 넘으면 덜어낸다 (첫 구간은 남긴다). 구간 수도 맞춘다
+  const csIdx = ownRecord(recs, first, TAG.PARA_CHAR_SHAPE);
+  if (csIdx >= 0) {
+    const d = recs[csIdx].data;
+    const keep: Buffer[] = [];
+    for (let k = 0; k + 8 <= d.length; k += 8) {
+      if (k === 0 || d.readUInt32LE(k) < nChars) keep.push(d.subarray(k, k + 8));
+    }
+    if (keep.length * 8 !== d.length) {
+      recs[csIdx] = { ...recs[csIdx], data: Buffer.concat(keep) };
+      writeHeaderU16(recs, first.start, 12, keep.length);
+    }
+  }
+
+  // 3) 줄 배치 캐시는 버리고 줄 수를 0으로 (HM-28) — 첫 문단 자신의 것만
+  const segIdx = ownRecord(recs, first, TAG.PARA_LINE_SEG);
+  if (segIdx >= 0) {
+    recs.splice(segIdx, 1);
+    writeHeaderU16(recs, first.start, 16, 0);
+  }
+  return 'inserted';
 }

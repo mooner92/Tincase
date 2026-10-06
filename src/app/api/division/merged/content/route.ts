@@ -182,7 +182,13 @@ export const PUT = handler(async (req: NextRequest) => {
     rowEmphasis[key] = kept.map((r) => r.emphasis);
   }
 
-  const composed = composeMergedHwp(await readStoredFile(template.filePath), tableRows, rowEmphasis);
+  // HM-46 — 고쳐 저장한 병합본에도 부서명이 맨 위에 있어야 한다 (자동 병합과 같은 경로)
+  const composed = composeMergedHwp(
+    await readStoredFile(template.filePath),
+    tableRows,
+    rowEmphasis,
+    division.nameKo,
+  );
   await writeFileAtomic(run.outputPath!, composed.bytes);
 
   const rowCounts = {
