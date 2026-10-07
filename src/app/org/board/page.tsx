@@ -5,7 +5,7 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { requirePageScope } from '@/server/page-scope';
-import { canRunOrgRollup } from '@/server/authz';
+import { canOpenOrgDesk } from '@/server/authz';
 import { noticeFor } from '@/components/Notice';
 import { AutoRefresh } from '@/components/AutoRefresh';
 import { orgBoard } from '@/server/rollup/run';
@@ -35,7 +35,7 @@ function Stage({ tone, title, sub }: { tone: Tone; title: string; sub?: string |
 export default async function OrgBoardPage({ searchParams }: { searchParams: Promise<{ isoKey?: string }> }) {
   const ps = await requirePageScope();
   if (!ps.ok) return noticeFor(ps.code, ps.message);
-  if (!canRunOrgRollup(ps.scope.user)) notFound();
+  if (!(await canOpenOrgDesk(ps.scope))) notFound(); // TACP-5 · RU-52 — /org와 같은 게이트
   const sp = await searchParams;
   const slot = await rollupSlot(sp.isoKey ?? null);
   const board = await orgBoard(slot);

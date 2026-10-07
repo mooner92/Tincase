@@ -338,23 +338,39 @@ async function rollupOn(): Promise<boolean> {
   return (await loadOrgSetting()).enabled;
 }
 
-/** TACP-21 — 내 부서 결과를 위로 [제출]·취소. **내 부서의 lead·head만** — readAll도 대신 내지 않는다 */
-export async function requireReportSender(headers: Headers): Promise<Scope> {
-  const scope = await requireScope(headers);
-  if (!scope.isManager || !(await rollupOn())) throw notFound();
+/**
+ * TACP-21 — 내 부서 결과를 위로 [제출]·취소할 수 있는가. **내 부서의 lead·head만** — readAll도 대신 내지 않는다.
+ * 화면([제출] 카드)과 API(`requireReportSender`)가 이 하나를 본다 — 둘이 갈라지면 누르면 404인 버튼이 생긴다 (TACP-9)
+ */
+export function canSendReport(scope: Pick<Scope, 'isManager'>): boolean {
+  return scope.isManager;
+}
+
+/** TACP-21 — [제출]·취소 판정 (이미 인증한 scope). 3단계가 꺼져 있으면 문이 없다 (RU-52) */
+export async function assertReportSender(scope: Scope): Promise<Scope> {
+  if (!canSendReport(scope) || !(await rollupOn())) throw notFound();
   return scope;
 }
 
+export async function requireReportSender(headers: Headers): Promise<Scope> {
+  return assertReportSender(await requireScope(headers));
+}
+
 /**
- * TACP-21 — 본부 단계 **쓰기** 진입점. 내 부서가 본부 단계가 있는 본부(RU-07)이고 내가 lead·head일 때만.
+ * TACP-21 — 본부 단계 **쓰기** 판정 (이미 인증한 scope). 내 부서가 본부 단계가 있는 본부(RU-07)이고 내가 lead·head일 때만.
  * 「어느 본부인가」는 신원의 부서가 정한다 — 요청 값이 정하지 않는다 (TACP-6).
  */
-export async function requireHqManager(headers: Headers): Promise<{ scope: Scope; node: RollupNode }> {
-  const scope = await requireScope(headers);
+export async function hqNodeOfManager(scope: Scope): Promise<RollupNode> {
   if (!scope.isManager || !(await rollupOn())) throw notFound();
   const node = hqNodeOf(await loadTree(), scope.division.id);
   if (!node) throw notFound();
-  return { scope, node };
+  return node;
+}
+
+/** TACP-21 — 본부 단계 **쓰기** 진입점 */
+export async function requireHqManager(headers: Headers): Promise<{ scope: Scope; node: RollupNode }> {
+  const scope = await requireScope(headers);
+  return { scope, node: await hqNodeOfManager(scope) };
 }
 
 /**
@@ -386,11 +402,19 @@ export function canRunOrgRollup(user: Pick<User, 'isOperator' | 'isCoordinator'>
   return user.isOperator || user.isCoordinator;
 }
 
+/**
+ * TACP-21 · RU-52 — 전사 취합 **화면·API의 문**. `/org`·`/org/board`·`/api/rollup/org/*`·메뉴가 이 하나를 본다.
+ * 페이지가 `canRunOrgRollup`만 보고 스위치를 빠뜨리면, 꺼 둔 3단계가 총괄에게 그대로 열린다 — 판정을 복사하지 않는다 (TACP-12).
+ */
+export async function canOpenOrgDesk(scope: Scope): Promise<boolean> {
+  if (!canRunOrgRollup(scope.user)) return false;
+  // RU-52 — 꺼져 있을 때는 운영자만 (켜는 사람). 총괄에게는 켠 뒤에 열린다
+  return scope.user.isOperator || (await rollupOn());
+}
+
 export async function requireOrgRollup(headers: Headers): Promise<Scope> {
   const scope = await requireScope(headers);
-  if (!canRunOrgRollup(scope.user)) throw notFound();
-  // RU-52 — 꺼져 있을 때는 운영자만 (켜는 사람). 총괄에게는 켠 뒤에 열린다
-  if (!scope.user.isOperator && !(await rollupOn())) throw notFound();
+  if (!(await canOpenOrgDesk(scope))) throw notFound();
   return scope;
 }
 
@@ -402,7 +426,8 @@ export async function hasHqDesk(scope: Scope): Promise<boolean> {
 /**
  * TACP-21 — **보낸 사본** 읽기 판정. 반환되면 허용된 것이다.
  *
- *   보낸 부서            부서원 모두 (TACP-15와 같은 넓이 — 위로 보낸 내 부서 문서다)
+ *   보낸 부서 (`unit`)   부서원 모두 (TACP-15와 같은 넓이 — 위로 보낸 내 부서 문서다)
+ *   보낸 본부 (`hq`)     그 본부의 lead·head만 — 본부본은 「본부: write와 같음」(§TACP-21 표). 본부원(member)은 404
  *   받는 본부            그 본부의 lead·head — 산하 단위가 보낸 `unit` 사본만 + 감사
  *   readAll             전부 + 감사 (타 부서일 때)
  *   그 외               404
@@ -413,7 +438,8 @@ export async function findReadableReport(scope: Scope, reportId: string) {
     include: { division: true, weekSlot: true },
   });
   if (!r) throw notFound();
-  if (r.divisionId === scope.division.id) return r;
+  // 내 부서가 보낸 것 — 실·팀 사본은 부서원 모두, 본부본은 본부의 lead·head만
+  if (r.divisionId === scope.division.id && (r.level === 'unit' || scope.isManager)) return r;
   if (r.level === 'unit' && scope.isManager) {
     const node = hqNodeOf(await loadTree(), scope.division.id);
     if (node?.contributors.some((c) => c.id === r.divisionId)) {
@@ -444,6 +470,5 @@ export async function findReadableRollup(scope: Scope, runId: string) {
 
 /** 메뉴에 그릴 취합 화면 — 헤더를 그리는 서버 쪽에서 한 번에 (TACP-9) */
 export async function rollupNav(scope: Scope): Promise<{ hqDesk: boolean; orgDesk: boolean }> {
-  const on = await rollupOn();
-  return { hqDesk: await hasHqDesk(scope), orgDesk: canRunOrgRollup(scope.user) && (on || scope.user.isOperator) };
+  return { hqDesk: await hasHqDesk(scope), orgDesk: await canOpenOrgDesk(scope) };
 }

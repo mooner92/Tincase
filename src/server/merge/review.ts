@@ -15,6 +15,13 @@ import { BUCKETS, type BucketKey } from '@/lib/merge-rows';
 import { describeChange, summarizeChanges, type DiffRow, type RowChange } from '@/lib/merge-diff';
 import { slotKind, toKstIso } from '@/lib/week';
 
+/**
+ * HM-47 — **부서 병합본** 승인만 고르는 조건. MergeReview 표에는 본부장의 본부본 승인(`hq_approve`, RU-55)도
+ * 같은 부서 id(본부)로 산다. 이 조건 없이 고르면 본부장이 본부본을 승인한 것이 그 본부 **자체 병합본**의
+ * 승인으로 보이고, 같은 판 중복 판정이 엉뚱한 행과 비교된다. 부서 병합본 쪽 질의는 전부 이것을 쓴다.
+ */
+export const UNIT_REVIEW = { kind: { not: 'hq_approve' } } as const;
+
 /** 병합본 hwp → 표별 행 (비교용) */
 export function worklogRows(buf: Buffer): Record<BucketKey, DiffRow[]> {
   const w = readWorklog(buf).worklog;
@@ -132,7 +139,7 @@ export interface ReviewView {
 
 /** 지금 병합본에 대한 가장 최근 승인. 병합본이 없거나 승인 전이면 null */
 export async function latestReview(divisionId: string, weekSlotId: string): Promise<ReviewView | null> {
-  const review = await prisma.mergeReview.findFirst({ where: { divisionId, weekSlotId }, orderBy: { createdAt: 'desc' } });
+  const review = await prisma.mergeReview.findFirst({ where: { divisionId, weekSlotId, ...UNIT_REVIEW }, orderBy: { createdAt: 'desc' } });
   if (!review) return null;
   const run = await prisma.mergeRun.findFirst({
     where: { divisionId, weekSlotId, status: 'succeeded', outputPath: { not: null } },
@@ -166,7 +173,7 @@ export async function latestReview(divisionId: string, weekSlotId: string): Prom
 /** NT-47 — 이 실행(최종본)에 대한 승인이 있나. 마감 뒤 알림이 문구를 고르는 데 쓴다 */
 export async function approvalOf(run: Pick<MergeRun, 'id' | 'divisionId' | 'weekSlotId'>) {
   const review = await prisma.mergeReview.findFirst({
-    where: { divisionId: run.divisionId, weekSlotId: run.weekSlotId, mergeRunId: run.id },
+    where: { divisionId: run.divisionId, weekSlotId: run.weekSlotId, mergeRunId: run.id, ...UNIT_REVIEW },
     orderBy: { createdAt: 'desc' },
   });
   if (!review) return null;

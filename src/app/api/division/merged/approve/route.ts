@@ -5,7 +5,7 @@ import { prisma } from '@/server/db';
 import { requireReviewer, HttpError } from '@/server/authz';
 import { handler, json, rateLimit } from '@/server/http';
 import { readStoredFile, sha256 } from '@/server/storage';
-import { latestReview, recordReview } from '@/server/merge/review';
+import { latestReview, recordReview, UNIT_REVIEW } from '@/server/merge/review';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,9 +25,10 @@ export const POST = handler(async (req: NextRequest) => {
   if (!run?.outputPath) throw new HttpError(409, 'no_merge', '아직 병합본이 없습니다.');
 
   const bytes = await readStoredFile(run.outputPath);
-  // 같은 판을 두 번 승인하지 않는다 — 두 번 누르면 담당자에게 알림이 두 번 간다
+  // 같은 판을 두 번 승인하지 않는다 — 두 번 누르면 담당자에게 알림이 두 번 간다.
+  // 본부장의 본부본 승인(hq_approve)은 다른 문서의 승인이라 비교 대상이 아니다
   const last = await prisma.mergeReview.findFirst({
-    where: { divisionId: division.id, weekSlotId: slot.id },
+    where: { divisionId: division.id, weekSlotId: slot.id, ...UNIT_REVIEW },
     orderBy: { createdAt: 'desc' },
   });
   if (last && last.mergeRunId === run.id && last.sha256 === sha256(bytes)) {

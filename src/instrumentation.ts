@@ -88,7 +88,18 @@ export async function register() {
       }
 
       /*
-       * HM-44 — 멈춰 있으면 **여기서 끝난다.** 마감 전 알림은 바로 위에서 이미 돌았다 —
+       * RU-54~57 — 3단계 알림. 꺼져 있으면(RU-52) 아무것도 하지 않는다.
+       * 병합 일시정지(HM-44) **앞에서** 돈다 — 실·팀 [제출]·본부 이어 붙이기·총괄 도착은 사람이 하는 일이라
+       * 자동 병합이 멈춰 있어도 계속된다. 뒤에 두면 멈춘 주에는 본부·총괄 기한 알림이 하나도 안 나간다.
+       */
+      try {
+        for (const r of await runDueRollupNotices()) console.log(`[알림] ${r.kind}: ${r.sent}/${r.targets}명`);
+      } catch (e) {
+        console.error('[알림] 3단계 알림 오류', e);
+      }
+
+      /*
+       * HM-44 — 멈춰 있으면 **여기서 끝난다.** 마감 전 알림·3단계 알림은 위에서 이미 돌았다 —
        * 그게 「병합 일시정지」와 「스케줄러 정지」의 차이다. 제출은 계속 받고 재촉도 하되,
        * 병합본을 새로 만들지도 「검토해 주세요」를 보내지도 않는다.
        */
@@ -117,12 +128,6 @@ export async function register() {
         }
       } catch (e) {
         console.error('[알림] 병합 안내 오류', e);
-      }
-      // RU-54~57 — 3단계 알림. 꺼져 있으면(RU-52) 아무것도 하지 않는다
-      try {
-        for (const r of await runDueRollupNotices()) console.log(`[알림] ${r.kind}: ${r.sent}/${r.targets}명`);
-      } catch (e) {
-        console.error('[알림] 3단계 알림 오류', e);
       }
     } catch (e) {
       // 스케줄러는 절대 죽지 않는다 — 다음 주기에 다시 시도한다

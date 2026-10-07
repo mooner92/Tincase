@@ -102,6 +102,18 @@ export function orgArrivalMessage(p: { name: string; employeeNo: string }, slot:
   };
 }
 
+/** RU-57 — 총괄 도착 알림의 NotifyLog 종류. 총괄 한 사람에 하나 (같은 부서에 총괄이 여럿일 수 있다) */
+export const orgArrivalKind = (userId: string) => `ru_org_arrival:${userId}`;
+
+/**
+ * RU-57 — 도착 알림에 적는 이름. 본부 단계가 있으면 본부가 낸다. 없으면 그 하나뿐인 단위가 바로 내므로(RU-07)
+ * **낸 단위**의 이름이다 — Tincase를 쓰지 않는(꺼진) 본부 아래 한 실만 쓰는 경우 본부 이름을 적으면,
+ * 낸 적 없는 곳이 「도착」으로 적히고 정작 낸 실의 이름은 알림 어디에도 없다.
+ */
+export function arrivalName(n: Pick<RollupNode, 'node' | 'contributors' | 'hasHqStep'>): string {
+  return n.hasHqStep ? n.node.nameKo : n.contributors[0].nameKo;
+}
+
 function inWindow(now: Date, at: Date) {
   const passed = (now.getTime() - at.getTime()) / 60_000;
   return passed >= 0 && passed <= WINDOW_MINUTES;
@@ -144,12 +156,13 @@ export async function runDueRollupNotices(now = new Date()) {
       const missing: string[] = [];
       for (const n of tree.nodes) {
         const ok = n.hasHqStep ? await currentReport(n.node.id, slot.id, 'hq') : await currentReport(n.contributors[0].id, slot.id, 'unit');
-        (ok ? arrived : missing).push(n.node.nameKo);
+        (ok ? arrived : missing).push(arrivalName(n));
       }
       const coords = await people({ isCoordinator: true });
       for (const c of coords) {
-        // 총괄이 여럿이면 각자 — NotifyLog는 그 총괄의 부서에 남긴다
-        const r = await deliver('ru_org_arrival', c.divisionId, slot, [c], (p) => orgArrivalMessage(p, slot, arrived, missing), link('/org'));
+        // 총괄이 여럿이면 각자 — NotifyLog는 그 총괄의 부서에 남기고, 종류에 **사람**을 붙인다.
+        // (부서·주차·종류)가 유일하므로 종류가 같으면 같은 부서의 둘째 총괄은 「이미 보냄」으로 건너뛰어진다
+        const r = await deliver(orgArrivalKind(c.id), c.divisionId, slot, [c], (p) => orgArrivalMessage(p, slot, arrived, missing), link('/org'));
         if (r) out.push(r);
       }
     } catch (e) {

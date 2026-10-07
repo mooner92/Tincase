@@ -88,3 +88,16 @@ describe('HM-44 배포 파일의 값', () => {
     expect(compose).not.toMatch(/^\s*MERGE_SCHEDULER:\s*"?off/m);
   });
 });
+
+describe('HM-44 멈춰도 도는 것', () => {
+  it('[RU-T48] 3단계 알림(RU-54~57)은 병합 일시정지 **앞에서** 돈다 — 사람이 하는 단계의 기한은 멈추지 않는다', () => {
+    const src = readFileSync('src/instrumentation.ts', 'utf-8');
+    const call = src.indexOf('await runDueRollupNotices(');
+    const pause = src.indexOf('if (pause.paused)');
+    expect(call, 'runDueRollupNotices 호출이 없다').toBeGreaterThan(0);
+    expect(pause, '일시정지 분기가 없다').toBeGreaterThan(0);
+    // 뒤에 있으면 멈춘 주에는 본부·총괄 기한 알림이 하나도 안 나간다
+    expect(call).toBeLessThan(pause);
+    expect(src.indexOf('await runDueRollupNotices(', call + 1), '두 번 부르면 같은 주기에 두 번 돈다').toBe(-1);
+  });
+});

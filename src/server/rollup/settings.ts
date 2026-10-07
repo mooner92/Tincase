@@ -26,12 +26,22 @@ function checkSubset(order: string[], allowed: Set<string>) {
 }
 
 /**
- * 본부 순서 — **내 본부**만 (TACP-6: 쓰기 대상은 신원의 부서). `self`를 끄면 기여 단위가 바뀌므로
- * 본부 단계가 사라질 수도 있다(기여 단위가 하나 남으면 RU-07) — 화면이 그 결과를 다시 그린다.
+ * 본부 순서 — **내 본부**만 (TACP-6: 쓰기 대상은 신원의 부서).
+ *
+ * RU-08 — `self`를 끄면 기여 단위가 바뀐다. 산하 단위가 하나만 남으면 본부 단계가 사라지는데(RU-07),
+ * 그러면 본부 화면·API(`requireHqManager`)가 404가 되어 **같은 화면에서 다시 켤 수 없다** — 되돌릴 길이
+ * 운영자의 DB 손질뿐인 스위치가 된다. 그래서 그렇게 될 끄기는 받지 않는다 (422).
  */
 export async function setHqOrder(scope: Scope, node: RollupNode, input: OrderInput) {
   // 지금 순서 목록에 없는 본부 자신도 고를 수 있다 — `self`를 다시 켜는 경우
   checkSubset(input.order, new Set([node.node.id, ...node.contributors.map((c) => c.id)]));
+  if (input.self === false && node.contributors.filter((c) => c.id !== node.node.id).length < 2) {
+    throw new HttpError(
+      422,
+      'hq_step_would_vanish',
+      '본부 문서를 빼면 이어 붙일 실·팀이 하나만 남아 본부 취합 단계가 없어집니다. 산하 실·팀이 둘 이상일 때만 뺄 수 있습니다.',
+    );
+  }
   const before = await prisma.division.findUniqueOrThrow({
     where: { id: node.node.id },
     select: { rollupOrder: true, rollupNote: true, rollupPageBreak: true, rollupSelf: true },

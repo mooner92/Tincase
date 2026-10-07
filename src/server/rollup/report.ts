@@ -44,6 +44,22 @@ async function latestOutput(level: ReportLevel, divisionId: string, weekSlotId: 
   return run?.outputPath ? { runId: run.id, outputPath: run.outputPath, at: run.finishedAt ?? run.startedAt } : null;
 }
 
+/**
+ * RU-02 — 보낸 사본과 지금 결과가 **내용으로** 다른가. 실행 id로 보지 않는다.
+ *
+ * 다시 병합(이어 붙이기)해도 같은 파일이 나오면 [제출]은 새 행을 만들지 않는다(같은 판 — `submitReport`).
+ * 그런데 「바뀜」을 실행 id로 정하면 그 경우 영영 풀리지 않는다 — 다시 내도 「바뀜」이 남는다.
+ * 반대로 같은 실행이라도 담당자가 고치면(API-50) 파일이 바뀐다. 그래서 둘 다 내용(sha256) 하나로 본다.
+ * 파일을 못 읽으면 「바뀜」 쪽으로 — 보낸 것이 지금 것이라고 말할 근거가 없다.
+ */
+export async function outputDiffers(outputPath: string, sentSha256: string): Promise<boolean> {
+  try {
+    return sha256(await readStoredFile(outputPath)) !== sentSha256;
+  } catch {
+    return true;
+  }
+}
+
 export interface ReportState {
   level: ReportLevel;
   /** 보낼 곳 — 「기획경영본부」 또는 「총괄」 (RU-07) */
@@ -68,12 +84,7 @@ export async function reportState(
     if (target.kind === 'hq') targetLabel = target.node.node.nameKo;
   }
   const [current, out] = await Promise.all([currentReport(divisionId, slot.id, level), latestOutput(level, divisionId, slot.id)]);
-  let changed = false;
-  if (current && out && out.runId !== current.sourceRunId) changed = true;
-  else if (current && out) {
-    // 같은 실행이라도 담당자가 고치면(API-50) 파일이 바뀐다 — 내용으로 본다
-    changed = sha256(await readStoredFile(out.outputPath)) !== current.sha256;
-  }
+  const changed = current && out ? await outputDiffers(out.outputPath, current.sha256) : false;
   const who = current ? await prisma.user.findUnique({ where: { id: current.submittedBy }, select: { name: true } }) : null;
   return {
     level,

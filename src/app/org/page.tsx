@@ -5,7 +5,7 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { requirePageScope } from '@/server/page-scope';
-import { canRunOrgRollup, rollupNav } from '@/server/authz';
+import { canOpenOrgDesk, rollupNav } from '@/server/authz';
 import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
@@ -23,7 +23,7 @@ export default async function OrgPage({ searchParams }: { searchParams: Promise<
   const ps = await requirePageScope();
   if (!ps.ok) return noticeFor(ps.code, ps.message);
   const scope = ps.scope;
-  if (!canRunOrgRollup(scope.user)) notFound(); // TACP-5 — 존재 은닉
+  if (!(await canOpenOrgDesk(scope))) notFound(); // TACP-5 — 존재 은닉 · RU-52 스위치도 같은 게이트가 본다
   const sp = await searchParams;
   const slot = await rollupSlot(sp.isoKey ?? null);
   const [board, weeks, nav, stages] = await Promise.all([orgBoard(slot), weekOptions(slot), rollupNav(scope), stageLabels(slot)]);

@@ -10,7 +10,7 @@ import { HttpError, type Scope } from '../authz';
 import { readStoredFile, sanitizeSegment, writeFileAtomic } from '../storage';
 import { logger } from '../logger';
 import { composeRollupHwp, readUnits, BUCKETS, type UnitBlock } from '@/lib/hwp/rollup';
-import { currentReport } from './report';
+import { currentReport, outputDiffers } from './report';
 import { loadOrgSetting, loadTree, type RollupNode, type TreeDivision } from './tree';
 
 /** 결과 화면이 쓰는 단위별 요약 (RollupRun.unitsJson) */
@@ -289,7 +289,8 @@ export async function hqBoard(node: RollupNode, slot: WeekSlot): Promise<HqBoard
     units,
     lastRun: runCell(lastRun, current),
     hqReport: cell(hq, names),
-    hqReportOutdated: !!hq && !!lastOk && hq.sourceRunId !== lastOk.id,
+    // RU-02 — 실행 id가 아니라 내용으로. 다시 이어 붙여 같은 파일이 나오면 「바뀜」이 아니다 (outputDiffers)
+    hqReportOutdated: !!hq && !!lastOk?.outputPath && (await outputDiffers(lastOk.outputPath, hq.sha256)),
   };
 }
 

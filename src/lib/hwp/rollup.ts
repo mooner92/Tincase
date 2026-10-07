@@ -264,6 +264,7 @@ export function composeRollupHwp(
     out.push(...h, ...clone(body));
   }
   recs = out;
+  markLastParagraph(recs);
   renumberTableInstances(recs, tablesPerUnit);
 
   // ── 강조 서식 — 필요할 때만 DocInfo를 건드린다 (HM-37) ──
@@ -301,6 +302,35 @@ export function composeRollupHwp(
   const problem = verifyRollup(bytes, units, tablesPerUnit);
   if (problem) throw new HwpWriteError(`이어 붙인 결과 검증 실패 — ${problem}`);
   return { bytes, warnings };
+}
+
+/** PARA_HEADER 글자 수의 최상위 비트 — 「문단 목록의 마지막 문단」 표시 */
+const LAST_IN_LIST = 0x80000000;
+
+/**
+ * 본문 문단 중 **마지막 하나에만** 「목록의 끝」 표시를 둔다.
+ *
+ * 양식의 마지막 문단(3번 표 뒤)은 이 비트를 들고 있다 — 전 부서 양식·실제 취합본 모두 본문 문단 중
+ * 마지막 하나에만 켜져 있다(2026-10-07 실측, 운영 양식 31개). 양식 몸통을 단위 수만큼 복제하면 그 문단이
+ * 따라 복제되어 **문서 한가운데**에 「여기서 끝」이 생긴다. 한글이 그 뒤를 어떻게 읽을지 우리가 모른다 —
+ * 그래서 조립이 끝난 뒤 모두 끄고 마지막 것만 켠다. 표 안(더 깊은 레벨)의 문단은 셀마다 목록이 따로라 건드리지 않는다.
+ */
+function markLastParagraph(recs: HwpRecord[]): void {
+  let last = -1;
+  for (let i = 0; i < recs.length; i++) {
+    if (recs[i].tag !== TAG.PARA_HEADER || recs[i].level !== 0) continue;
+    last = i;
+    const v = recs[i].data.readUInt32LE(0);
+    if (v & LAST_IN_LIST) {
+      const d = Buffer.from(recs[i].data);
+      d.writeUInt32LE((v & ~LAST_IN_LIST) >>> 0, 0);
+      recs[i] = { ...recs[i], data: d };
+    }
+  }
+  if (last < 0) return;
+  const d = Buffer.from(recs[last].data);
+  d.writeUInt32LE((d.readUInt32LE(0) | LAST_IN_LIST) >>> 0, 0);
+  recs[last] = { ...recs[last], data: d };
 }
 
 function locateTableCount(recs: readonly HwpRecord[]): number {

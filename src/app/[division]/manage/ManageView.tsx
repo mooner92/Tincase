@@ -34,6 +34,7 @@ export async function ManageView({
   canDeleteAny,
   canEditMerged,
   canApprove = false,
+  canSendReport = false,
 }: {
   division: Division; // ★ 해석된 부서. scope.division을 쓰면 타 부서 열람 시 어긋난다
   isoKey?: string;
@@ -47,6 +48,8 @@ export async function ManageView({
   canEditMerged: boolean;
   /** HM-47 — 승인 버튼. 내 부서의 head에게만 (TACP-16) */
   canApprove?: boolean;
+  /** RU-30 — 위로 [제출] 카드. 내 부서의 lead·head에게만 (TACP-21 `canSendReport`). 총괄·운영자도 대신 내지 않는다 */
+  canSendReport?: boolean;
 }) {
   const now = new Date();
   await ensureCurrentSlot(now);
@@ -62,8 +65,9 @@ export async function ManageView({
     divisionSlots(division.id),
   ]);
 
-  // RU-30 — 위로 [제출]. 내 부서 담당자에게만 그린다 (TACP-21·TACP-9). 꺼진 부서면 보낼 곳이 없어 null
-  const report = canMerge && (await rollupEnabled()) ? await reportState(division.id, slot, 'unit') : null;
+  // RU-30 — 위로 [제출]. 내 부서 lead·head에게만 그린다 (TACP-21·TACP-9). `canMerge`가 아니다 — 거기엔 readAll이
+  // 섞여 있어 총괄에게 누르면 404인 버튼이 보였다. 꺼진 부서면 보낼 곳이 없어 null
+  const report = canSendReport && (await rollupEnabled()) ? await reportState(division.id, slot, 'unit') : null;
 
   // HM-26 — 최신 실행 하나만 본다. 재실행하면 새 기록이 쌓이고 최신이 유효하다
   const lastRun = await prisma.mergeRun.findFirst({

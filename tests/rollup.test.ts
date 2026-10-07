@@ -243,4 +243,34 @@ describe('RU-10 이어 붙이기', () => {
     const out = composeRollupHwp(await namedTemplate('기획경영본부'), [...a, empty]);
     expect(readUnits(out.bytes, 'x').units.map((u) => u.name)).toEqual(['AI홍보전략실', '인사관리실']);
   });
+
+  t('[RU-T19] ★ 「목록의 끝」 표시는 본문 마지막 문단 하나에만 — 몸통을 복제해도 한가운데 생기지 않는다', async () => {
+    const { openHwp } = await import('@/lib/hwp/ole');
+    const { parseRecords, TAG } = await import('@/lib/hwp/record');
+    /** 본문(레벨 0) 문단마다 최상위 비트가 켜졌나 */
+    const flags = (bytes: Buffer) =>
+      parseRecords(openHwp(bytes).sections[0])
+        .filter((r) => r.tag === TAG.PARA_HEADER && r.level === 0)
+        .map((r) => (r.data.readUInt32LE(0) & 0x80000000) !== 0);
+    const lastOnly = (f: boolean[]) => f.length > 0 && f.filter(Boolean).length === 1 && f[f.length - 1];
+
+    // 전제 — 양식 자체가 그렇게 생겼다 (운영 양식 전부 같다, 2026-10-07 실측)
+    const tpl = await namedTemplate('기획경영본부');
+    expect(lastOnly(flags(tpl))).toBe(true);
+    expect(lastOnly(flags(load('master-template.hwp')))).toBe(true);
+
+    const u = readUnits(await teamDoc('AI홍보전략실', A), 'x').units[0];
+    const three = [u, { ...u, name: '기획조정실' }, { ...u, name: '연구관리실' }];
+    for (const [template, opts] of [
+      [tpl, { pageBreak: true }],
+      [tpl, { pageBreak: false }],
+      [load('master-template.hwp'), { pageBreak: true }], // 옛 양식 — HM-46이 문단을 하나 더 만든다
+    ] as const) {
+      const f = flags(composeRollupHwp(template, three, opts).bytes);
+      expect(f.filter(Boolean), '켜진 문단 수').toHaveLength(1);
+      expect(f[f.length - 1], '마지막 문단').toBe(true);
+    }
+    // 단위 하나면 양식과 같다
+    expect(lastOnly(flags(composeRollupHwp(tpl, [u]).bytes))).toBe(true);
+  });
 });
