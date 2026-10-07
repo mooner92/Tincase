@@ -526,8 +526,13 @@ d('RU-02 · RU-08 · HM-47 · RU-57 — 바뀜 판정 · 본부 스위치 · 승
     await merged('hq', '본부 자체 문서');
     expect(await latestReview(divId.hq, slot.id)).toBeNull(); // 본부본 승인이 병합본 승인으로 보이지 않는다
 
-    const unitApprove = () =>
-      import('@/app/api/division/merged/approve/route').then(({ POST }) => POST(nx('/api/division/merged/approve', ID.hqHead, jsonInit('POST', { isoKey }))));
+    // #2 — 승인은 **본 판**에만. 화면처럼 먼저 열어 판(runId·sha256)을 받고 그것을 보낸다
+    const unitApprove = async () => {
+      const { GET } = await import('@/app/api/division/merged/content/route');
+      const view = await (await GET(nx(`/api/division/merged/content?isoKey=${isoKey}`, ID.hqHead))).json();
+      const { POST } = await import('@/app/api/division/merged/approve/route');
+      return POST(nx('/api/division/merged/approve', ID.hqHead, jsonInit('POST', { isoKey, runId: view.runId, sha256: view.sha256 })));
+    };
     expect((await (await unitApprove()).json()).unchanged).toBe(false);
     // 그 사이 본부본을 승인해도(가장 최근 행이 hq_approve가 되어도) 같은 병합본을 두 번 승인하지 않는다
     const hqApprove = await import('@/app/api/rollup/hq/approve/route');

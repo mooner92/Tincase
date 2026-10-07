@@ -1,7 +1,7 @@
 // PG-50 — 전사 현황 본판: 본부 → 팀 묶음
 import { describe, expect, it } from 'vitest';
 import { groupByHq, OUTSIDE } from '@/lib/org-groups';
-import type { DivisionNode } from '@/lib/orgtree';
+import { layoutOrg, type DivisionNode } from '@/lib/orgtree';
 
 const p = (name: string, submitted: boolean, onRoster = true) => ({ id: name, name, submitted, isLead: false, onRoster, submittedAtKst: null });
 const d = (name: string, parent: string, extra: Partial<DivisionNode> = {}): DivisionNode => ({
@@ -37,6 +37,35 @@ describe('PG-50 본부별 팀 묶음', () => {
       ['국토환경연구본부', ['국토환경연구본부']],
       [OUTSIDE, ['임원실']],
     ]);
+  });
+
+  it('[PG-T72] 상위 본부에 부서 행이 없어도 그 본부 이름 아래로 묶는다 — 「본부 밖」으로 떨어지지 않는다', () => {
+    const g = groupByHq([
+      d('임원실', ROOT, { people: [p('가', true)] }),
+      // 「물환경연구본부」는 Division 행이 없다 — ERP 상위부서 이름만 안다
+      d('물정책연구실', '물환경연구본부', { people: [p('나', false)] }),
+      d('물순환연구실', '물환경연구본부', { people: [p('다', true)] }),
+    ]);
+    expect(g.map((x) => [x.name, x.teams.map((t) => t.name)])).toEqual([
+      ['물환경연구본부', ['물정책연구실', '물순환연구실']],
+      [OUTSIDE, ['임원실']],
+    ]);
+    expect([g[0].submitted, g[0].roster]).toEqual([1, 2]);
+  });
+
+  it('[PG-T73] 조직도 그래프의 합계는 본판과 같다 — Tincase 미사용 부서·명단 밖 제출은 세지 않는다', () => {
+    const counted = [
+      ...all.filter((x) => x.counted),
+      // 미사용 부서 — 그래프에는 그리지만(회색) 분모에 넣지 않는다
+      d('홍보실', ROOT, { isActive: false, people: [p('사', false), p('아', false)] }),
+    ];
+    const g = groupByHq(counted);
+    const teams = g.flatMap((x) => x.teams).filter((t) => t.isActive);
+    const board = { submitted: teams.reduce((n, t) => n + t.submitted, 0), roster: teams.reduce((n, t) => n + t.roster, 0) };
+    const graph = layoutOrg(counted).totals;
+    expect([graph.submitted, graph.roster]).toEqual([board.submitted, board.roster]);
+    // 기획조정실의 「라」는 명단 밖인데 냈다 — 「낸 사람」 수에 들어가면 분자가 분모를 넘을 수 있다
+    expect(graph).toMatchObject({ submitted: 3, roster: 5 });
   });
 
   it('[PG-T71] 팀 숫자는 명단(onRoster) 기준 「7/8」 · 미제출 이름 · Tincase 미사용 팀은 본부 합계에 넣지 않는다', () => {

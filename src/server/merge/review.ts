@@ -9,7 +9,7 @@ import { logger } from '../logger';
 import { env } from '../env';
 import { messengerStatus, sendAlert } from '../messenger';
 import { readStoredFile, sha256 } from '../storage';
-import type { Scope } from '../authz';
+import { HttpError, type Scope } from '../authz';
 import { readWorklog } from '@/lib/hwp/reader';
 import { BUCKETS, type BucketKey } from '@/lib/merge-rows';
 import { describeChange, summarizeChanges, type DiffRow, type RowChange } from '@/lib/merge-diff';
@@ -59,11 +59,23 @@ export function approvalMessage(lead: { name: string; employeeNo: string }, revi
   };
 }
 
-/** NT-46 — 승인하는 순간 담당자에게. 부서 알림(NT-30)·본인 설정(NT-20)·사번(NT-01)을 그대로 따른다 */
-async function notifyLeads(review: MergeReview, reviewer: string, slot: WeekSlot, changes: RowChange[]) {
-  if (!messengerStatus().enabled) return;
+/** 승인 알림을 몇 명에게 보냈나 — 화면이 「알렸습니다」를 사실대로 말하게 한다 */
+export interface NotifyResult {
+  /** 실제로 나간 사람 수 */
+  sent: number;
+  /** 보낼 대상(알림을 켠 담당자) 수 */
+  targets: number;
+}
+
+/**
+ * NT-46 — 승인하는 순간 담당자에게. 부서 알림(NT-30)·본인 설정(NT-20)·사번(NT-01)을 그대로 따른다.
+ * **몇 명에게 나갔는지 돌려준다** — 알림이 꺼진 부서에서도 화면이 「담당자에게 알렸습니다」라고
+ * 말하던 결함이 있었다(2026-10-07 리뷰). 보내지 않았으면 0이다.
+ */
+async function notifyLeads(review: MergeReview, reviewer: string, slot: WeekSlot, changes: RowChange[]): Promise<NotifyResult> {
+  if (!messengerStatus().enabled) return { sent: 0, targets: 0 };
   const division = await prisma.division.findUnique({ where: { id: review.divisionId } });
-  if (!division?.notifyEnabled) return;
+  if (!division?.notifyEnabled) return { sent: 0, targets: 0 };
   const leads = await prisma.user.findMany({
     where: { divisionId: division.id, isActive: true, divisionRole: 'lead', notifyEnabled: true, employeeNo: { not: null } },
     select: { name: true, employeeNo: true },
@@ -88,6 +100,36 @@ async function notifyLeads(review: MergeReview, reviewer: string, slot: WeekSlot
       },
     });
   }
+  return { sent: sent.length, targets: leads.length };
+}
+
+/**
+ * HM-47 — 승인·저장은 **화면에서 본 판**에 대해서만 한다. 연 뒤에 다시 병합했거나 누가 고쳐 저장했으면 409.
+ *
+ * 판은 (실행 id, 파일 sha256)로 짚는다. 실행 id만 보면 담당자가 같은 실행의 파일을 고친 것(API-50)을
+ * 못 잡고, sha만 보면 다시 병합해 우연히 같은 파일이 된 경우를 구별하지 못한다.
+ * 부서장이 보지 않은 판에 「승인」이 붙거나, 옛 화면이 방금 저장된 것을 덮어쓰는 일을 막는다.
+ */
+export function requireViewedVersion(
+  run: Pick<MergeRun, 'id'>,
+  currentSha: string,
+  viewed: { runId?: unknown; sha256?: unknown } | null | undefined,
+): void {
+  if (!viewed || viewed.runId !== run.id || viewed.sha256 !== currentSha) {
+    throw new HttpError(409, 'merged_changed', '병합본이 바뀌었어요 — 다시 열어 확인해 주세요');
+  }
+}
+
+/**
+ * HM-47 — 이 실행의 **이 판**을 이미 승인했나. 같은 판을 두 번 승인하면 담당자에게 알림이 두 번 간다 —
+ * [승인]을 두 번 누른 것도, 부서장이 아무것도 안 바꾸고 [수정 저장]을 한 번 더 누른 것도 같은 일이다.
+ */
+export async function alreadyApproved(run: Pick<MergeRun, 'id' | 'divisionId' | 'weekSlotId'>, sha: string): Promise<boolean> {
+  const last = await prisma.mergeReview.findFirst({
+    where: { divisionId: run.divisionId, weekSlotId: run.weekSlotId, mergeRunId: run.id, ...UNIT_REVIEW },
+    orderBy: { createdAt: 'desc' },
+  });
+  return !!last && last.sha256 === sha;
 }
 
 /**
@@ -101,7 +143,7 @@ export async function recordReview(opts: {
   kind: 'edit' | 'approve';
   changes: RowChange[];
   bytes: Buffer;
-}): Promise<MergeReview> {
+}): Promise<{ review: MergeReview; notified: NotifyResult }> {
   const { scope, run, slot, kind, changes, bytes } = opts;
   const review = await prisma.mergeReview.create({
     data: {
@@ -119,12 +161,13 @@ export async function recordReview(opts: {
     kind,
     summary: summarizeChanges(changes),
   });
+  let notified: NotifyResult = { sent: 0, targets: 0 };
   try {
-    await notifyLeads(review, titled(scope.user), slot, changes);
+    notified = await notifyLeads(review, titled(scope.user), slot, changes);
   } catch (e) {
     logger.error({ err: (e as Error).message, review: review.id }, '[알림] 승인 알림 실패');
   }
-  return review;
+  return { review, notified };
 }
 
 export interface ReviewView {
@@ -171,12 +214,24 @@ export async function latestReview(divisionId: string, weekSlotId: string): Prom
 }
 
 /** NT-47 — 이 실행(최종본)에 대한 승인이 있나. 마감 뒤 알림이 문구를 고르는 데 쓴다 */
-export async function approvalOf(run: Pick<MergeRun, 'id' | 'divisionId' | 'weekSlotId'>) {
+export async function approvalOf(run: Pick<MergeRun, 'id' | 'divisionId' | 'weekSlotId' | 'outputPath'>) {
   const review = await prisma.mergeReview.findFirst({
     where: { divisionId: run.divisionId, weekSlotId: run.weekSlotId, mergeRunId: run.id, ...UNIT_REVIEW },
     orderBy: { createdAt: 'desc' },
   });
   if (!review) return null;
+  /*
+   * 승인한 **판**인가 — 담당자가 같은 실행의 파일을 고치면(API-50) 실행 id는 그대로다.
+   * 화면(`latestReview`)은 sha로 「승인 뒤 바뀜」을 보이는데 알림만 「승인 완료」라고 하면 둘이 갈라진다.
+   */
+  let changedAfter = false;
+  if (run.outputPath) {
+    try {
+      changedAfter = sha256(await readStoredFile(run.outputPath)) !== review.sha256;
+    } catch {
+      changedAfter = true;
+    }
+  }
   const who = await prisma.user.findUnique({ where: { id: review.reviewerId }, select: { name: true, jobTitle: true } });
   let changes: RowChange[] = [];
   try {
@@ -184,5 +239,5 @@ export async function approvalOf(run: Pick<MergeRun, 'id' | 'divisionId' | 'week
   } catch {
     changes = [];
   }
-  return { by: who ? titled(who) : '부서장', at: review.createdAt, summary: summarizeChanges(changes) };
+  return { by: who ? titled(who) : '부서장', at: review.createdAt, summary: summarizeChanges(changes), changedAfter };
 }

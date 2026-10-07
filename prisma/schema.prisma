@@ -202,6 +202,12 @@ model Submission {
    * 「누구 것인가」와 「누가 손댔나」를 둘 다 적어, 기록이 갈리지 않게 한다 (ADR-0013)
    */
   editedById   String?
+  /**
+   * TACP-22 — 담당자가 **고친 시각**. 고친 판의 `uploadedAt`은 부서원이 원래 낸 시각을 그대로 잇는다 —
+   * 현황·감사 문서가 「제출 시각」으로 읽는 값이 담당자의 손질 시각으로 바뀌면, 마감 뒤에 고친 것이
+   * 그 사람이 늦게 낸 것으로 보인다. 고친 일은 이 칸이 따로 말한다 (2026-10-07 리뷰)
+   */
+  editedAt     DateTime?
 
   division Division @relation(fields: [divisionId], references: [id])
   user     User     @relation(fields: [userId], references: [id])

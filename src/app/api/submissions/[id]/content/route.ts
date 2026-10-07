@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic';
 export const PUT = handler(async (req: NextRequest, ctx: { params: Promise<{ id: string }> }) => {
   const scope = await requireScope(req.headers);
   const { id } = await ctx.params;
-  const target = await requireRevisableSubmission(scope, id); // 내 부서 lead·head, 최신 판만 — 그 외 404/409
+  const target = await requireRevisableSubmission(scope, id); // 내 부서 lead·head, 남의 것·최신 판만 — 그 외 404/409
   rateLimit(`revise:${scope.user.email}`, 30, 60_000);
 
   const body = (await req.json().catch(() => null)) as DocInput | null;

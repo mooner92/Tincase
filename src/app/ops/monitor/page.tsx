@@ -1,7 +1,7 @@
 // `/ops/monitor` — 전사 제출 현황. 운영자·총괄 전용 (TACP §3.2 readAll).
 //
 // PG-50 (2026-10-07) — 본판은 **본부별 팀 막대**다. 원형 조직도는 예쁘지만 「어느 팀이 몇 명 남았나」가
-// 안 읽혔다. 원형은 구석의 [조직도 그래프 ↗]로 새 탭에서 연다. 연속 미제출은 접어 둔다 — 매일 볼 것이 아니다.
+// 안 읽혔다. 원형은 구석의 [조직도 그래프 ↗]로 새 탭에서 연다. 연속 미제출은 뺐다(2026-10-07 — 쓸 일이 없다).
 import { redirect, notFound } from 'next/navigation';
 import { getPageScope } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
@@ -29,7 +29,7 @@ export default async function MonitorPage() {
 
   const data = await monitorData();
   const groups = groupByHq(data.nodes);
-  const { slot, streaks } = data;
+  const { slot } = data;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -81,38 +81,6 @@ export default async function MonitorPage() {
           excludedNote={data.excludedNote}
         />
 
-        {/* 연속 미제출 — 매주 볼 것은 아니어서 접어 둔다. 필요할 때 펼친다 */}
-        {streaks.length > 0 && (
-          <details className="card mt-6 px-6 py-4">
-            <summary className="cursor-pointer text-sm font-semibold text-ink">
-              연속 미제출 {streaks.length}명
-              <span className="ml-2 text-xs font-normal text-muted">
-                마감이 지난 최근 {streaks[0].weeks}주차 기준 · 펼쳐서 보기
-              </span>
-            </summary>
-            <ul className="mt-3 space-y-1.5 text-sm">
-              {streaks.slice(0, 30).map((r) => (
-                <li key={r.userId} className="flex flex-wrap items-baseline gap-x-3">
-                  <span
-                    className={`inline-block w-14 shrink-0 text-right font-semibold tabular-nums ${
-                      r.streak >= 4 ? 'text-error' : 'text-warning'
-                    }`}
-                  >
-                    {r.streak}주 연속
-                  </span>
-                  <span className="min-w-36 text-muted">{r.divisionName}</span>
-                  <span className="font-medium text-ink">{r.name}</span>
-                  <span className="text-xs text-muted-soft">
-                    {r.lastSubmittedLabel ? `마지막 제출 ${r.lastSubmittedLabel}` : `${r.weeks}주 동안 제출 없음`}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            {streaks.length > 30 && (
-              <p className="mt-2 text-xs text-muted-soft">… 외 {streaks.length - 30}명. 전체는 CSV로 받으세요.</p>
-            )}
-          </details>
-        )}
       </div>
       <AppFooter />
     </div>

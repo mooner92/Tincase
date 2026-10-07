@@ -43,6 +43,8 @@ export default async function HistoryPage() {
             uploadedAtKst: sub ? toKstIso(sub.uploadedAt).slice(0, 16).replace('T', ' ') : null,
             monthly: slotKind(s) === 'monthly',
             editedBy: sub?.editedById ? (editors.get(sub.editedById) ?? '담당자') : null,
+            // TACP-22 — 제출시각은 내가 낸 시각 그대로, 고친 시각은 따로
+            editedAtKst: sub?.editedAt ? toKstIso(sub.editedAt).slice(11, 16) : null,
           };
         })}
       />

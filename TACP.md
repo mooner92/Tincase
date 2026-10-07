@@ -18,6 +18,9 @@
   (본부 담당자·본부장, 총괄)이 읽는다. 받는 쪽이 하위 부서의 다른 것(제출물·병합본 원본)을 읽게 되는
   것이 아니다 — 새로 열리는 것은 「보낸 사본」 하나다 (ADR-0012)
 - v1.5.2 — **TACP-22 신설: 담당자는 부서원 제출물을 새 판으로 고친다.** 덮어쓰지 않고, 누가 고쳤는지 남긴다 (ADR-0013)
+- v1.5.3 — TACP-22 보정 (2026-10-07 리뷰): **자기 제출물은 첨삭하지 않는다**(마감을 우회하는 길이 된다) ·
+  §3.1 operator 첨삭 칸 정정 — 자기 부서의 lead·head 역할이 있을 때만이다(코드와 같게) ·
+  head의 「남의 제출물 내용」 read를 읽기 게이트가 지키게 함(§9)
 - v1.3 — **`head`(부서장) Principal 신설** (TACP-16). 부서 문서 권한은 lead와 동일,
   다른 것은 권한이 아니라 **알림 시점**이다. 병합본 **작성자 열람**을 명문화 (TACP-17)
 
@@ -141,7 +144,7 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
 | **내 제출물 삭제** | delete(마감 전) | delete(마감 전) | delete(마감 전) | delete(마감 전) | delete |
 | **남의 제출물 내용** | — | read | read | read | read |
 | **남의 제출물 삭제** | — | — | — | — | delete |
-| **남의 제출물 첨삭** (새 판으로) | — | **write** | **write** | — | write(자기 부서) |
+| **남의 제출물 첨삭** (새 판으로) | — | **write** | **write** | — | write(자기 부서의 lead·head일 때만) |
 | 부서 양식 내려받기 | read | read | read | read | read |
 | 부서 양식 등록·교체 | — | write | write | write | write |
 | 작성 안내 · 병합 규칙 | read | write | write | write | write |
@@ -209,7 +212,10 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
   TACP-18이 걱정한 「기록이 갈리는」 문제를 피한다
 - **가장 최근 판만** 고친다. 옛 판을 고치면 지금 판을 무르는 것과 같다
 - **마감과 상관없다** — 마감 뒤에 맞추는 것이 이 권한의 목적이다. 병합본에는 [다시 병합]으로 들어간다
-- **내 부서만** (TACP-6). coordinator는 readAll이지만 고치지 못한다(TACP-8). operator는 자기 부서에서만
+- **내 부서만** (TACP-6). coordinator는 readAll이지만 고치지 못한다(TACP-8). operator는 **자기 부서의 lead·head
+  역할이 있을 때만** 고친다 — operator라는 것만으로는 열리지 않는다(실제 운영자는 자기 부서의 lead다)
+- **남의 것만** 고친다. 자기 제출물은 404다 — 첨삭은 마감을 보지 않으므로, 열어 두면 담당자만 마감 뒤에
+  자기 것을 고치는 길이 된다. 본인은 다른 부서원과 똑같이 마감 전에 다시 낸다(또는 마감 열기 TACP-18)
 - 대신 내주는 것(안 낸 사람의 제출을 만드는 것)은 여전히 없다 (TACP-18) — 고치는 것은 **낸 것**이다
 - 게이트: `requireRevisableSubmission(scope, id)` · 감사 `submission_revise` · 결정 [ADR-0013](docs/adr/0013-lead-revises-submission.md)
 
@@ -470,7 +476,7 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | `requireOrgRollup(headers)` | coordinator·operator — **전사 이어 붙이기 쓰기** (TACP-21) | **404** |
 | `findReadableReport(scope, id)` | 보낸 사본 **읽기** 판정 — 보낸 부서·받는 본부·readAll (TACP-21) | **404** |
 | `requireReviewer(headers)` | head(이면서 lead가 아님) — **병합본 승인 전용** (TACP-16, HM-47) | **404** |
-| `requireRevisableSubmission(scope, id)` | 제출물 **첨삭** 판정 — 내 부서 lead·head, 최신 판만 (TACP-22) | **404** / 409 |
+| `requireRevisableSubmission(scope, id)` | 제출물 **첨삭** 판정 — 내 부서 lead·head, **남의 것**·최신 판만 (TACP-22). 화면의 [고치기]는 같은 식 `canReviseSubmission` | **404** / 409 |
 | `resolveTargetDivision(scope, slug?)` | 대상 부서 해석 (TACP-7) | **404** |
 | `findAccessibleSubmission(scope, id)` | 제출물 **읽기** 판정 | **404** |
 | `requireDeletableSubmission(scope, id)` | 제출물 **삭제** 판정 (TACP-14) | **404** / 409 |
@@ -541,6 +547,8 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | **HM-T111** | **[승인] — head만.** lead·member·타 부서 head → 404 |
 | **WA-T40** | **lead·head가 부서원 제출물을 고친다 → 새 판(v+1), 원래 판 보존, 고친 사람 기록** (새로 허용된 것) |
 | **WA-T41** | **member·coordinator·타 부서 lead의 첨삭 → 404** · 옛 판 첨삭 → 409 (그대로 금지인 것) |
+| **WA-T43** | **lead·head가 자기 제출물을 첨삭 → 404** (새로 금지된 것 — 마감 우회) · 열람 화면 [고치기]도 없다 |
+| **WA-T44** | **head가 부서원 제출물을 연다 → 200** (§3.1 「남의 제출물 내용」 head=read — 게이트가 lead만 보던 것을 바로잡음) |
 
 새 Resource를 추가하면 **그 Resource의 격리 테스트를 같은 커밋에 넣는다.**
 
@@ -568,6 +576,7 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | 2026-08-14 | 레이아웃만 URL을 해석하고 페이지는 `scope.division` 사용 → 헤더/본문 부서 불일치 | TACP-7 | `resolveTargetDivision` 단일 출처 도입 (v1.3.1) |
 | 2026-08-14 | operator 판정이 **4개 라우트에 각각 복사**되어 있었음 (`ops/divisions`·`ops/roster`·`ops/password-reset`·`template/standard`). 손으로 3개를 찾고, 네 번째는 TACP-12 테스트가 찾아냈다 | TACP-12 | `requireOperator` 게이트로 통합 + 재발 방지 테스트 (v1.3.2) |
 | 2026-08-26 | 병합본 **수정** 판정이 라우트 안에 `if (!scope.isLead)`로 적혀 있었다 (`merged/content`·`merge` 2곳). §3.2에서 두 칸(수정·실행)의 coordinator 권한이 다른데 코드는 같은 식을 복사해 써서, 병합 **실행**이 문서보다 좁게(coordinator 불가) 동작했다 | TACP-12 | `requireOwnManager`(수정) / `requireManager`(실행) 두 게이트로 분리 (v1.23.0) |
+| 2026-10-07 | 제출물 **읽기** 게이트(`findAccessibleSubmission`)가 `scope.isLead`로 적혀 있었다. §3.1은 head도 read인데, 부서장은 [고치기]는 받고(첨삭 게이트는 `isManager`) 정작 열면 404였다 | TACP-16 | `isManager`로 통일 + WA-T44 |
 
 ---
 

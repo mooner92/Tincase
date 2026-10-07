@@ -8,20 +8,21 @@ import { prisma } from '@/server/db';
 import { requireScope, requireOwnManager, resolveTargetDivision, requireMergedAccess, isReviewer, HttpError } from '@/server/authz';
 import { handler, json, rateLimit } from '@/server/http';
 import { audit } from '@/server/audit';
-import { readStoredFile, writeFileAtomic } from '@/server/storage';
+import { readStoredFile, sha256, writeFileAtomic } from '@/server/storage';
 import { readWorklog, TABLE_TITLES, TABLE_COLUMNS } from '@/lib/hwp/reader';
 import { tableGrid, columnWidths } from '@/lib/hwp/model';
 import { composeMergedHwp } from '@/server/merge';
 import { boardTitle } from '@/lib/docname';
 import { slotKind, toKstIso } from '@/lib/week';
-import { latestReview, recordReview, worklogRows } from '@/server/merge/review';
+import { alreadyApproved, latestReview, recordReview, requireViewedVersion, worklogRows } from '@/server/merge/review';
+import { cleanCell } from '@/server/worklog-doc';
 import { diffWorklog } from '@/lib/merge-diff';
 
 export const dynamic = 'force-dynamic';
 
 import { BUCKETS, rowNo } from '@/lib/merge-rows';
-const MAX_CELL = 500;
 const MAX_ROWS = 200;
+const TABLE_NAME: Record<string, string> = { achievements: '실적', plans: '계획', notes: '특이사항' };
 
 async function locate(req: NextRequest, slugParam: string | null, isoKey: string | null) {
   const scope = await requireScope(req.headers);
@@ -95,10 +96,14 @@ export const GET = handler(async (req: NextRequest) => {
    */
   const canSeeAuthors = (division.id === scope.division.id && scope.isManager) || scope.readAll;
 
-  const parsed = readWorklog(await readStoredFile(run.outputPath!));
+  const bytes = await readStoredFile(run.outputPath!);
+  const parsed = readWorklog(bytes);
   await audit(scope.user.email, 'preview', division.id, `merged:${slot.isoKey}`);
 
   return json({
+    // HM-47 — 지금 보는 **판**. 저장·승인할 때 그대로 돌려보낸다 — 그 사이 바뀌었으면 409 (requireViewedVersion)
+    runId: run.id,
+    sha256: sha256(bytes),
     // HM-47 — 승인 상태와 [승인] 버튼. 버튼은 이 부서의 head에게만 (TACP-16)
     review: await latestReview(division.id, slot.id),
     canApprove: division.id === scope.division.id && isReviewer(scope),
@@ -145,7 +150,13 @@ export const GET = handler(async (req: NextRequest) => {
 /** API-50 — 담당자가 고친 내용으로 병합본을 **다시 쓴다**. 원본 제출물은 건드리지 않는다 */
 export const PUT = handler(async (req: NextRequest) => {
   const body = (await req.json().catch(() => null)) as
-    | { isoKey?: string; tables?: { key: string; rows: string[][]; emphasis?: boolean[] }[] }
+    | {
+        isoKey?: string;
+        /** HM-47 — 화면에서 본 판 (GET이 준 그대로) */
+        runId?: string;
+        sha256?: string;
+        tables?: { key: string; rows: string[][]; emphasis?: boolean[] }[];
+      }
     | null;
   if (!body?.tables) throw new HttpError(422, 'invalid_request', '표 내용이 없습니다.');
 
@@ -154,16 +165,16 @@ export const PUT = handler(async (req: NextRequest) => {
   rateLimit(`merged-edit:${scope.user.email}`, 20, 60_000);
   const { division, slot, run } = await locate(req, null, body.isoKey ?? null);
 
+  // HM-47 — 연 뒤에 다시 병합했거나 누가 저장했으면 덮어쓰지 않는다. 부서장의 저장은 승인이라 더더욱
+  const current = await readStoredFile(run.outputPath!);
+  const currentSha = sha256(current);
+  requireViewedVersion(run, currentSha, body);
+
   const template = await prisma.template.findFirst({ where: { divisionId: division.id, isActive: true } });
   if (!template) throw new HttpError(422, 'no_template', '부서 양식이 없어 다시 쓸 수 없습니다.');
 
-  const clean = (v: unknown) =>
-    String(v ?? '')
-      .split('')
-      .filter((ch) => ch.charCodeAt(0) >= 32 || ch === '\t')
-      .join('')
-      .trim()
-      .slice(0, MAX_CELL);
+  // 줄바꿈은 남기고, 길면 자르지 않고 422 — 웹 작성·첨삭과 같은 규칙이다 (worklog-doc `cleanCell`)
+  const clean = (v: unknown, key: string, i: number) => cleanCell(v, `${TABLE_NAME[key] ?? ''} ${i + 1}번째 줄`);
 
   const tableRows = { achievements: [] as string[][], plans: [] as string[][], notes: [] as string[][] };
   const rowEmphasis = { achievements: [] as boolean[], plans: [] as boolean[], notes: [] as boolean[] };
@@ -179,7 +190,7 @@ export const PUT = handler(async (req: NextRequest) => {
     const kept = (t.rows ?? [])
       .slice(0, MAX_ROWS)
       .map((r, i) => ({
-        cells: [clean(r[1]), clean(r[2]), clean(r[3]), clean(r[4])],
+        cells: [clean(r[1], key, i), clean(r[2], key, i), clean(r[3], key, i), clean(r[4], key, i)],
         emphasis: t.emphasis?.[i] === true,
       }))
       .filter((r) => r.cells.some(Boolean));
@@ -188,7 +199,7 @@ export const PUT = handler(async (req: NextRequest) => {
   }
 
   // HM-47 — 무엇이 바뀌었나는 **덮어쓰기 전에** 읽어 둔다
-  const beforeRows = isReviewer(scope) ? worklogRows(await readStoredFile(run.outputPath!)) : null;
+  const beforeRows = isReviewer(scope) ? worklogRows(current) : null;
 
   // HM-46 — 고쳐 저장한 병합본에도 부서명이 맨 위에 있어야 한다 (자동 병합과 같은 경로)
   const composed = composeMergedHwp(
@@ -214,12 +225,20 @@ export const PUT = handler(async (req: NextRequest) => {
    * HM-47 — **부서장의 저장은 곧 승인이다.** 계정의 역할로 판정한다 — 담당자의 저장은 승인이 아니다.
    * 바뀐 곳은 저장한 파일을 다시 읽어 계산한다 — 화면이 보낸 것이 아니라 문서에 실제로 들어간 것.
    */
-  let approved: { summary: string } | null = null;
+  const savedSha = sha256(composed.bytes);
+  /** `notified` — 담당자 몇 명에게 알림이 나갔나 (0이면 화면이 「알렸습니다」라고 하지 않는다) */
+  let approved: { summary: string; notified: number; unchanged?: boolean } | null = null;
   if (beforeRows) {
-    const changes = diffWorklog(beforeRows, worklogRows(composed.bytes));
-    await recordReview({ scope, run, slot, kind: 'edit', changes, bytes: composed.bytes });
-    approved = { summary: (await latestReview(division.id, slot.id))?.summary ?? '' };
+    if (savedSha === currentSha && (await alreadyApproved(run, savedSha))) {
+      // 바뀐 것 없이 다시 저장했고 이 판은 이미 승인했다 — 승인·알림을 또 만들지 않는다
+      approved = { summary: (await latestReview(division.id, slot.id))?.summary ?? '', notified: 0, unchanged: true };
+    } else {
+      const changes = diffWorklog(beforeRows, worklogRows(composed.bytes));
+      const { notified } = await recordReview({ scope, run, slot, kind: 'edit', changes, bytes: composed.bytes });
+      approved = { summary: (await latestReview(division.id, slot.id))?.summary ?? '', notified: notified.sent };
+    }
   }
 
-  return json({ ok: true, rowCounts, warnings: composed.warnings, approved });
+  // 저장한 판 — 화면이 이어서 고치거나 승인할 때 이것을 보낸다
+  return json({ ok: true, rowCounts, warnings: composed.warnings, approved, runId: run.id, sha256: savedSha });
 });

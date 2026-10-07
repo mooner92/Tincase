@@ -41,12 +41,20 @@ function nx(url: string, identity?: string, init?: RequestInit) {
   (r as unknown as { nextUrl: URL }).nextUrl = new URL(`http://test.local${url}`);
   return r as never;
 }
-const put = (identity: string, isoKey: string, ach: string[], plans: string[]) =>
+/** HM-47 — 화면이 GET으로 받은 **판** (runId + sha256). 저장·승인 때 그대로 돌려보낸다 */
+type Viewed = { runId?: string; sha256?: string };
+async function view(identity: string, iso: string): Promise<Viewed> {
+  const { GET } = await import('@/app/api/division/merged/content/route');
+  const j = await (await GET(nx(`/api/division/merged/content?isoKey=${iso}`, identity))).json();
+  return { runId: j.runId, sha256: j.sha256 };
+}
+const putReq = (identity: string, isoKey: string, ach: string[], plans: string[], v: Viewed) =>
   nx('/api/division/merged/content', identity, {
     method: 'PUT',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
       isoKey,
+      ...v,
       tables: [
         { key: 'achievements', rows: ach.map((c) => ['', c, '', '', '']) },
         { key: 'plans', rows: plans.map((c) => ['', c, '', '', '']) },
@@ -54,12 +62,16 @@ const put = (identity: string, isoKey: string, ach: string[], plans: string[]) =
       ],
     }),
   });
-const approve = (identity: string, isoKey: string) =>
+/** 지금 판을 열어 본 뒤 저장한다 — 화면의 실제 동선 */
+const put = async (identity: string, isoKey: string, ach: string[], plans: string[]) =>
+  putReq(identity, isoKey, ach, plans, await view(identity, isoKey));
+const approveReq = (identity: string, isoKey: string, v: Viewed) =>
   nx('/api/division/merged/approve', identity, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ isoKey }),
+    body: JSON.stringify({ isoKey, ...v }),
   });
+const approve = async (identity: string, isoKey: string) => approveReq(identity, isoKey, await view(identity, isoKey));
 
 let isoKey = '';
 let divId = '';
@@ -108,9 +120,12 @@ afterAll(() => {
 d('HM-47 부서장 승인', () => {
   it('[HM-T110] ★ head가 고쳐 저장하면 승인으로 기록된다 — 무엇을 바꿨는지와 함께', async () => {
     const { PUT } = await import('@/app/api/division/merged/content/route');
-    const res = await PUT(put(ID.head, isoKey, ['보도자료 배포(2건)', '웹진 발송'], ['포럼 참석']));
+    const res = await PUT(await put(ID.head, isoKey, ['보도자료 배포(2건)', '웹진 발송'], ['포럼 참석']));
     expect(res.status).toBe(200);
-    expect((await res.json()).approved.summary).toBe('실적 1줄 고침');
+    const body = await res.json();
+    expect(body.approved.summary).toBe('실적 1줄 고침');
+    // 알림이 꺼진 환경(메신저 미설정) — 「알렸습니다」라고 말할 근거가 없다
+    expect(body.approved.notified).toBe(0);
 
     const { prisma } = await import('@/server/db');
     const reviews = await prisma.mergeReview.findMany({ where: { divisionId: divId } });
@@ -123,7 +138,7 @@ d('HM-47 부서장 승인', () => {
 
   it('[HM-T110b] lead의 저장은 승인이 **아니다** — 그리고 승인한 판이 바뀌었다고 보인다', async () => {
     const { PUT, GET } = await import('@/app/api/division/merged/content/route');
-    const res = await PUT(put(ID.lead, isoKey, ['보도자료 배포(2건)', '웹진 발송', '홈페이지 점검'], ['포럼 참석']));
+    const res = await PUT(await put(ID.lead, isoKey, ['보도자료 배포(2건)', '웹진 발송', '홈페이지 점검'], ['포럼 참석']));
     expect(res.status).toBe(200);
     expect((await res.json()).approved).toBeNull();
     const { prisma } = await import('@/server/db');
@@ -136,18 +151,21 @@ d('HM-47 부서장 승인', () => {
 
   it('[HM-T111] ★ [고칠 것 없음 · 승인]은 head만 — lead·member 404, 다른 부서 head는 자기 부서만', async () => {
     const { POST } = await import('@/app/api/division/merged/approve/route');
-    expect((await POST(approve(ID.lead, isoKey))).status).toBe(404);
-    expect((await POST(approve(ID.member, isoKey))).status).toBe(404);
+    const v = await view(ID.head, isoKey);
+    expect((await POST(approveReq(ID.lead, isoKey, v))).status).toBe(404);
+    expect((await POST(approveReq(ID.member, isoKey, v))).status).toBe(404);
     // 다른 부서의 head — 대상은 신원의 부서다(TACP-6). 그 부서엔 병합본이 없어 409, 검토실엔 아무 일도 없다
-    expect((await POST(approve(ID.otherHead, isoKey))).status).toBe(409);
+    expect((await POST(approveReq(ID.otherHead, isoKey, v))).status).toBe(409);
     const { prisma } = await import('@/server/db');
     expect(await prisma.mergeReview.count({ where: { divisionId: divId } })).toBe(1);
 
-    const ok = await POST(approve(ID.head, isoKey));
+    const ok = await POST(await approve(ID.head, isoKey));
     expect(ok.status).toBe(200);
-    expect((await ok.json()).review).toMatchObject({ kind: 'approve', changedAfter: false });
+    const okBody = await ok.json();
+    expect(okBody.review).toMatchObject({ kind: 'approve', changedAfter: false });
+    expect(okBody.notified).toBe(0); // 메신저 미설정 — 보낸 사람이 없다
     // 같은 판을 또 누르면 새 기록·새 알림을 만들지 않는다
-    expect((await (await POST(approve(ID.head, isoKey))).json()).unchanged).toBe(true);
+    expect((await (await POST(await approve(ID.head, isoKey))).json()).unchanged).toBe(true);
     expect(await prisma.mergeReview.count({ where: { divisionId: divId } })).toBe(2);
   });
 
@@ -165,5 +183,84 @@ d('HM-47 부서장 승인', () => {
     expect(m.contents).toContain('· 실적 「보도자료 배포(1건)」 → 「보도자료 배포(2건)」');
     const none = approvalMessage({ name: '담당', employeeNo: '1234' }, '홍길동 실장', slot, at, []);
     expect(none.contents).toContain('고친 곳 없이 승인했어요');
+  });
+});
+
+describe('NT-40·47 마감 뒤 알림 고르기 — 회귀', () => {
+  it('[HM-T113] ★ 성공 + 이미 승인이면 아무것도 안 보낸다 — 담당자에게 「병합본이 없어요」가 가면 안 된다', async () => {
+    const { pickJobs } = await import('@/server/notify/merge-notices');
+    const approved = { by: '실장', at: new Date(), summary: '', changedAfter: false };
+    expect(pickJobs(true, false, { ok: true, approval: approved })).toEqual([]);
+    expect(pickJobs(true, false, { ok: true, approval: null })).toEqual([{ kind: 'merge_review', role: 'head' }]);
+    // 승인 뒤 바뀌었으면 다시 검토를 부탁한다
+    expect(pickJobs(true, false, { ok: true, approval: { ...approved, changedAfter: true } })).toEqual([{ kind: 'merge_review', role: 'head' }]);
+    expect(pickJobs(true, false, { ok: false, approval: null })).toEqual([{ kind: 'merge_missing', role: 'lead' }]);
+    expect(pickJobs(false, true, { ok: true, approval: approved })).toEqual([{ kind: 'merge_done', role: 'lead' }]);
+  });
+
+  it('[HM-T114] 승인 뒤 담당자가 같은 실행의 파일을 고치면 알림도 「승인 뒤 바뀜」으로 본다', async () => {
+    const { prisma } = await import('@/server/db');
+    const { approvalOf } = await import('@/server/merge/review');
+    const run = await prisma.mergeRun.findFirstOrThrow({ where: { divisionId: divId } });
+    // HM-T111 끝에서 head가 지금 판을 승인했다 → 바뀌지 않음
+    expect((await approvalOf(run))?.changedAfter).toBe(false);
+    const { PUT } = await import('@/app/api/division/merged/content/route');
+    await PUT(await put(ID.lead, isoKey, ['담당자가 또 고침'], ['포럼 참석']));
+    expect((await approvalOf(run))?.changedAfter).toBe(true);
+  });
+});
+
+d('HM-47 승인은 **본 판**에만 — 회귀 (2026-10-07 리뷰)', () => {
+  it('[HM-T116] ★ 연 뒤에 담당자가 고쳤으면 부서장의 [승인]·[수정 저장]은 409 — 보지 않은 판에 승인이 붙지 않는다', async () => {
+    const { prisma } = await import('@/server/db');
+    const { PUT } = await import('@/app/api/division/merged/content/route');
+    const { POST } = await import('@/app/api/division/merged/approve/route');
+    const seen = await view(ID.head, isoKey); // 부서장이 화면을 열었다
+    expect(seen.runId).toBeTruthy();
+    expect(seen.sha256).toMatch(/^[0-9a-f]{64}$/);
+    // 그 사이 담당자가 고쳐 저장했다
+    expect((await PUT(await put(ID.lead, isoKey, ['담당자가 몰래 고침'], ['포럼 참석']))).status).toBe(200);
+    const before = await prisma.mergeReview.count({ where: { divisionId: divId } });
+
+    const stale = await POST(approveReq(ID.head, isoKey, seen));
+    expect(stale.status).toBe(409);
+    expect((await stale.json()).message).toBe('병합본이 바뀌었어요 — 다시 열어 확인해 주세요');
+    expect((await PUT(putReq(ID.head, isoKey, ['부서장 옛 화면'], ['포럼 참석'], seen))).status).toBe(409);
+    // 판을 안 보내는 옛 화면도 같다 — 무엇을 봤는지 모르면 승인하지 않는다
+    expect((await POST(approveReq(ID.head, isoKey, {}))).status).toBe(409);
+    expect(await prisma.mergeReview.count({ where: { divisionId: divId } })).toBe(before);
+
+    // 다시 열면 된다
+    expect((await POST(await approve(ID.head, isoKey))).status).toBe(200);
+    expect(await prisma.mergeReview.count({ where: { divisionId: divId } })).toBe(before + 1);
+  });
+
+  it('[HM-T117] 부서장이 아무것도 안 바꾸고 다시 저장하면 승인·알림을 또 만들지 않는다', async () => {
+    const { prisma } = await import('@/server/db');
+    const { PUT } = await import('@/app/api/division/merged/content/route');
+    const rows: [string[], string[]] = [['부서장이 다듬음'], ['포럼 참석']];
+    const first = await (await PUT(await put(ID.head, isoKey, ...rows))).json();
+    expect(first.approved.unchanged).toBeUndefined();
+    const count = await prisma.mergeReview.count({ where: { divisionId: divId } });
+
+    const again = await PUT(await put(ID.head, isoKey, ...rows));
+    expect(again.status).toBe(200);
+    expect((await again.json()).approved).toMatchObject({ unchanged: true, notified: 0 });
+    expect(await prisma.mergeReview.count({ where: { divisionId: divId } })).toBe(count);
+  });
+
+  it('[HM-T118] ★ 한 칸의 줄바꿈은 저장해도 남는다 · 너무 긴 칸은 자르지 않고 422', async () => {
+    const { PUT, GET } = await import('@/app/api/division/merged/content/route');
+    const res = await PUT(await put(ID.lead, isoKey, ['첫 줄\n둘째 줄'], ['포럼 참석']));
+    expect(res.status).toBe(200);
+    const after = await (await GET(nx(`/api/division/merged/content?isoKey=${isoKey}`, ID.lead))).json();
+    expect(after.tables[0].rows[1][1]).toBe('첫 줄\n둘째 줄');
+
+    const long = await PUT(await put(ID.lead, isoKey, ['가'.repeat(501)], ['포럼 참석']));
+    expect(long.status).toBe(422);
+    expect((await long.json()).message).toContain('501자');
+    // 거절했으니 문서는 그대로다
+    const still = await (await GET(nx(`/api/division/merged/content?isoKey=${isoKey}`, ID.lead))).json();
+    expect(still.tables[0].rows[1][1]).toBe('첫 줄\n둘째 줄');
   });
 });

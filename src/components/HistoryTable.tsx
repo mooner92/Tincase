@@ -15,6 +15,8 @@ export interface HistoryRow {
   monthly?: boolean;
   /** TACP-22 — 담당자가 고친 판이면 고친 사람. 내 글이 바뀐 것을 본인이 안다 */
   editedBy?: string | null;
+  /** TACP-22 — 고친 시각 (KST "HH:MM"). 제출시각(`uploadedAtKst`)은 내가 낸 시각 그대로다 */
+  editedAtKst?: string | null;
 }
 
 export function HistoryTable({
@@ -78,7 +80,11 @@ export function HistoryTable({
                       {r.uploadedAtKst}
                       {r.version ? ` · v${r.version}` : ''}
                     </span>
-                    {r.editedBy && <span className="ml-1.5 text-warning">· {r.editedBy} 고침</span>}
+                    {r.editedBy && (
+                      <span className="ml-1.5 text-warning">
+                        · {r.editedBy} 고침{r.editedAtKst ? ` · ${r.editedAtKst}` : ''}
+                      </span>
+                    )}
                   </>
                 ) : (
                   <span className="text-muted-soft">미제출</span>
@@ -124,7 +130,11 @@ export function HistoryTable({
                 </td>
                 <td className="px-4 py-2.5 tabular-nums text-body">
                   {r.version ? `v${r.version}` : '—'}
-                  {r.editedBy && <span className="ml-1.5 text-xs text-warning">{r.editedBy} 고침</span>}
+                  {r.editedBy && (
+                    <span className="ml-1.5 text-xs text-warning">
+                      {r.editedBy} 고침{r.editedAtKst ? ` · ${r.editedAtKst}` : ''}
+                    </span>
+                  )}
                 </td>
                 <td className="px-4 py-2.5 tabular-nums text-body">{r.uploadedAtKst ?? '—'}</td>
                 <td className="px-4 py-2.5 text-right">{actions(r)}</td>

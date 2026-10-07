@@ -35,10 +35,11 @@ export function OrgMonitor({
 
   const pct = layout.totals.roster > 0 ? Math.round((layout.totals.submitted / layout.totals.roster) * 100) : 0;
 
+  // 본판(OrgProgress)과 같은 사람들 — Tincase 미사용 부서는 취합게시판으로 내므로 「미제출」이 아니다
   const missingByDivision = useMemo(
     () =>
       layout.divisions
-        .filter((d) => d.counted && d.roster > d.submitted)
+        .filter((d) => d.counted && d.isActive && d.roster > d.submitted)
         .map((d) => ({ name: d.name, missing: d.laidOut.filter((p) => p.onRoster && !p.submitted).map((p) => p.name) })),
     [layout.divisions],
   );
@@ -137,7 +138,7 @@ export function OrgMonitor({
             {/* 실 → 사람. 제출한 사람만 초록으로 흐른다 */}
             {layout.divisions.map((d) =>
               d.laidOut.map((p) => {
-                const dim = focus && !isRelated(focus, d);
+                const dim = (focus && !isRelated(focus, d)) || !d.isActive;
                 if (p.submitted) {
                   return (
                     <path
@@ -189,10 +190,10 @@ export function OrgMonitor({
               </g>
             ))}
 
-            {/* 실 — 완료율만큼 채워진 고리 */}
+            {/* 실 — 완료율만큼 채워진 고리. Tincase 미사용 부서는 회색으로만 그린다(세지 않는다) */}
             {layout.divisions.map((d) => {
-              const done = d.roster > 0 && d.submitted === d.roster;
-              const dim = focus && focus.kind === 'division' && focus.d.id !== d.id;
+              const done = d.isActive && d.roster > 0 && d.submitted === d.roster;
+              const dim = (focus && focus.kind === 'division' && focus.d.id !== d.id) || !d.isActive;
               return (
                 <g
                   key={d.id}
@@ -204,7 +205,7 @@ export function OrgMonitor({
                     cx={d.x}
                     cy={d.y}
                     r={done ? 7 : 6}
-                    fill={done ? '#8fd3a3' : d.submitted > 0 ? '#f0c24d' : '#ffffff'}
+                    fill={!d.isActive ? '#9ca3af' : done ? '#8fd3a3' : d.submitted > 0 ? '#f0c24d' : '#ffffff'}
                     fillOpacity={dim ? 0.25 : 1}
                     stroke={done ? '#8fd3a3' : 'none'}
                     strokeOpacity={0.35}
@@ -230,7 +231,7 @@ export function OrgMonitor({
             {/* 사람 */}
             {layout.people.map((p) => {
               const d = layout.divisions.find((x) => x.laidOut.includes(p))!;
-              const dim = focus && !isRelated(focus, d);
+              const dim = (focus && !isRelated(focus, d)) || !d.isActive;
               return (
                 <circle
                   key={p.id}
@@ -247,7 +248,13 @@ export function OrgMonitor({
                 >
                   <title>
                     {`${d.name} · ${p.name}${p.isLead ? ' (담당자)' : ''}\n${
-                      p.submitted ? `제출 ${p.submittedAtKst}` : p.onRoster ? '미제출' : '제출 대상 아님'
+                      !d.isActive
+                        ? 'Tincase 미사용 · 취합게시판으로 제출'
+                        : p.submitted
+                          ? `제출 ${p.submittedAtKst}`
+                          : p.onRoster
+                            ? '미제출'
+                            : '제출 대상 아님'
                     }`}
                   </title>
                 </circle>
@@ -268,7 +275,9 @@ export function OrgMonitor({
             </div>
             <span className="font-medium text-white">
               {focus?.kind === 'division'
-                ? `${focus.d.name} — ${focus.d.submitted}/${focus.d.roster}`
+                ? focus.d.isActive
+                  ? `${focus.d.name} — ${focus.d.submitted}/${focus.d.roster}`
+                  : `${focus.d.name} — Tincase 미사용`
                 : focus?.kind === 'person'
                   ? `${focus.d.name} · ${focus.p.name} — ${focus.p.submitted ? focus.p.submittedAtKst : '미제출'}`
                   : '점 위에 올리면 상세가 보입니다'}

@@ -16,7 +16,7 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
   const versions = await prisma.submission.findMany({
     where: { userId: sub.userId, weekSlotId: sub.weekSlotId },
     orderBy: { version: 'desc' },
-    select: { id: true, version: true, isLatest: true, uploadedAt: true, byteSize: true, editedById: true },
+    select: { id: true, version: true, isLatest: true, uploadedAt: true, byteSize: true, editedById: true, editedAt: true },
   });
   // TACP-22 — 담당자가 고친 판에는 고친 사람 이름을 붙인다
   const editorIds = [...new Set(versions.map((v) => v.editedById).filter((x): x is string => !!x))];
@@ -25,10 +25,12 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
   );
 
   return json({
-    versions: versions.map(({ editedById, ...v }) => ({
+    versions: versions.map(({ editedById, editedAt, ...v }) => ({
       ...v,
       uploadedAt: toKstIso(v.uploadedAt),
       editedBy: editedById ? (editors.get(editedById) ?? '담당자') : null,
+      // TACP-22 — 고친 시각은 따로. `uploadedAt`은 부서원이 낸 시각이다
+      editedAt: editedAt ? toKstIso(editedAt) : null,
     })),
   });
 });

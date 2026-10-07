@@ -15,6 +15,7 @@ import { ReportSubmitCard } from '@/components/ReportSubmitCard';
 import { reportState } from '@/server/rollup/report';
 import { rollupEnabled } from '@/server/rollup/schedule';
 import { latestReview } from '@/server/merge/review';
+import { readStoredFile, sha256 } from '@/server/storage';
 import { notFound } from 'next/navigation';
 
 interface ReviewPayload {
@@ -75,7 +76,18 @@ export async function ManageView({
     orderBy: { startedAt: 'desc' },
   });
   const review = lastRun?.reviewJson ? (JSON.parse(lastRun.reviewJson) as ReviewPayload) : null;
+  // HM-47 — 이 화면이 보여 주는 **판**. [승인]이 이 판에만 붙도록 그대로 돌려보낸다
+  let mergedSha: string | null = null;
+  if (lastRun?.status === 'succeeded' && lastRun.outputPath) {
+    try {
+      mergedSha = sha256(await readStoredFile(lastRun.outputPath));
+    } catch {
+      mergedSha = null; // 파일이 없으면 승인도 못 한다 — 서버가 409로 답한다
+    }
+  }
   const mergeState: MergeStateView = {
+    runId: lastRun?.status === 'succeeded' ? lastRun.id : null,
+    sha256: mergedSha,
     status: (lastRun?.status as MergeStateView['status']) ?? 'none',
     finishedAtKst: lastRun?.finishedAt ? toKstIso(lastRun.finishedAt).slice(5, 16).replace('T', ' ') : null,
     trigger: lastRun ? ((JSON.parse(lastRun.ruleSnapshot) as { trigger?: 'auto' | 'manual' }).trigger ?? null) : null,

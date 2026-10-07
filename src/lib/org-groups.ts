@@ -60,8 +60,14 @@ export function groupByHq(all: readonly DivisionNode[]): HqGroup[] {
   for (const d of all) {
     if (!d.counted) continue;
     const top = topOf(d);
+    /*
+     * 사슬이 연구원(ORG_ROOT)에 닿기 전에 끊겼다 — 상위 단위(본부)에 Division 행이 없는 경우다.
+     * 그 팀은 「본부 밖」이 아니라 **그 상위 이름** 아래에 있다 (ERP 상위부서는 알고 있다).
+     * 예전에는 자기 자신이 최상위로 잡혀 「본부 밖」으로 떨어졌다 (2026-10-07 리뷰)
+     */
+    const orphan = top.parent !== ORG_ROOT && !byName.has(top.parent);
     // 산하가 없는 최상위 단위는 본부가 아니다 — 「본부 밖」 한 묶음으로
-    const key = top.id === d.id && !hasChildren.has(d.name) ? OUTSIDE : top.name;
+    const key = orphan ? top.parent : top.id === d.id && !hasChildren.has(d.name) ? OUTSIDE : top.name;
     const g = groups.get(key) ?? { name: key, teams: [], roster: 0, submitted: 0 };
     const t = teamOf(d);
     g.teams.push(t);

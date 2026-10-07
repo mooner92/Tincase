@@ -51,6 +51,9 @@ interface Content {
   review?: { by: string; atKst: string; kind: 'edit' | 'approve'; summary: string; lines: string[]; changedAfter: boolean } | null;
   /** HM-47 — 이 사람이 승인할 수 있나 (이 부서의 head) */
   canApprove?: boolean;
+  /** HM-47 — 지금 보는 판. 저장·승인 때 그대로 돌려보낸다 — 그 사이 바뀌었으면 서버가 409 */
+  runId?: string;
+  sha256?: string;
 }
 
 /** 헤더 행을 뺀 본문만. 서버가 준 격자는 첫 줄이 열 이름이다 */
@@ -250,40 +253,65 @@ export function MergedDrawer({
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         isoKey,
+        runId: data.runId,
+        sha256: data.sha256,
         tables: data.tables.map((t) => ({ key: t.key, rows: bodyRows(t), emphasis: t.emphasis ?? [] })),
       }),
     });
     if (!res.ok) {
+      // 409 merged_changed — 연 뒤에 다시 병합했거나 누가 고쳤다. 고친 내용은 화면에 남겨 둔다(옮겨 적을 수 있게)
       setErr((await res.json().catch(() => ({}))).message ?? '저장하지 못했습니다.');
       setBusy(false);
       return;
     }
-    const saved = (await res.json().catch(() => ({}))) as { approved?: { summary: string } | null };
+    const saved = (await res.json().catch(() => ({}))) as {
+      approved?: { summary: string; notified: number; unchanged?: boolean } | null;
+      runId?: string;
+      sha256?: string;
+    };
+    // 방금 저장한 판이 이제 「본 판」이다 — 아래 재조회가 실패해도 이어서 고치거나 승인할 수 있게
+    setData((d) => (d ? { ...d, runId: saved.runId ?? d.runId, sha256: saved.sha256 ?? d.sha256 } : d));
     setDirty(false);
     setBusy(false);
-    // HM-47 — 부서장의 저장은 곧 승인이다. 무엇이 일어났는지 그 자리에서 말한다
-    flash(saved.approved ? '저장 · 승인 완료 — 담당자에게 알렸습니다' : '저장');
+    // HM-47 — 부서장의 저장은 곧 승인이다. 무엇이 일어났는지 그 자리에서, **사실대로** 말한다
+    flash(
+      !saved.approved
+        ? '저장'
+        : saved.approved.unchanged
+          ? '저장 — 이미 승인한 판입니다'
+          : saved.approved.notified > 0
+            ? '저장 · 승인 완료 — 담당자에게 알렸습니다'
+            : '저장 · 승인 기록됨 — 알림은 보내지 않았어요',
+    );
     router.refresh();
     // 채번이 다시 매겨지므로 서버가 쓴 결과를 다시 읽는다
     const fresh = await fetch(`/api/division/merged/content?division=${divisionSlug}&isoKey=${isoKey}`);
     if (fresh.ok) setData(await fresh.json());
   };
 
-  // HM-47 — 고칠 것 없이 승인
+  // HM-47 — 고칠 것 없이 승인. **지금 보는 판**에만 붙는다
   const approve = async () => {
+    if (!data) return;
     setBusy(true);
     setErr(null);
     const res = await fetch('/api/division/merged/approve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isoKey }),
+      body: JSON.stringify({ isoKey, runId: data.runId, sha256: data.sha256 }),
     });
     setBusy(false);
     if (!res.ok) {
       setErr((await res.json().catch(() => ({}))).message ?? '승인하지 못했습니다.');
       return;
     }
-    flash('승인 완료 — 담당자에게 알렸습니다');
+    const r = (await res.json().catch(() => ({}))) as { notified?: number; unchanged?: boolean };
+    flash(
+      r.unchanged
+        ? '이미 승인한 판입니다'
+        : (r.notified ?? 0) > 0
+          ? '승인 완료 — 담당자에게 알렸습니다'
+          : '승인 기록됨 — 알림은 보내지 않았어요',
+    );
     router.refresh();
     const fresh = await fetch(`/api/division/merged/content?division=${divisionSlug}&isoKey=${isoKey}`);
     if (fresh.ok) setData(await fresh.json());
