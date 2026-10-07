@@ -36,6 +36,19 @@ export interface MergeStateView {
   missing: string[];
   /** HM-33 — 확인이 필요한 행 (「없음」 등). 지우지 않고 보여준다 */
   flagged: { no: string; who: string; content: string; bucket: string }[];
+  /** HM-47 — 부서장 승인. 없으면 아직 승인 전 */
+  review: ReviewStateView | null;
+  /** 부서장 계정이 있는 부서인가 — 없으면 「승인 전」을 띄우지 않는다 */
+  hasHead: boolean;
+}
+
+export interface ReviewStateView {
+  by: string;
+  atKst: string;
+  kind: 'edit' | 'approve';
+  summary: string;
+  lines: string[];
+  changedAfter: boolean;
 }
 
 export function MergePanel({
@@ -45,6 +58,7 @@ export function MergePanel({
   canRun,
   canDownload,
   canEditMerged,
+  canApprove = false,
   submitted,
 }: {
   state: MergeStateView;
@@ -54,6 +68,8 @@ export function MergePanel({
   canDownload: boolean;
   /** 병합본 수정 — 담당자 + 내 부서 (TACP-15). «병합 실행»과 다른 판정이다 */
   canEditMerged: boolean;
+  /** HM-47 — [고칠 것 없음 · 승인]. 이 부서의 head에게만 (TACP-16) */
+  canApprove?: boolean;
   submitted: number;
 }) {
   const [busy, setBusy] = useState(false);
@@ -61,6 +77,23 @@ export function MergePanel({
   const [openGroups, setOpenGroups] = useState(false);
   const [openContent, setOpenContent] = useState(false);
   const router = useRouter();
+
+  const [openReview, setOpenReview] = useState(false);
+  const approve = () => {
+    setBusy(true);
+    setErr(null);
+    fetch('/api/division/merged/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isoKey }),
+    })
+      .then(async (r) => {
+        if (!r.ok) setErr(((await r.json()) as { message?: string }).message ?? '승인하지 못했습니다.');
+        else router.refresh();
+      })
+      .catch(() => setErr('네트워크 오류로 승인하지 못했습니다.'))
+      .finally(() => setBusy(false));
+  };
 
   const run = () => {
     setBusy(true);
@@ -133,6 +166,52 @@ export function MergePanel({
           )}
         </div>
       </div>
+
+      {/* HM-47 — 부서장 승인. 담당자가 「언제·무엇을」 고쳤는지 여기서 본다 */}
+      {done && (state.review || state.hasHead) && (
+        <div className="mt-4 rounded-xl bg-surface-card/80 px-4 py-3 text-sm">
+          {state.review ? (
+            <>
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className={state.review.changedAfter ? 'font-semibold text-warning' : 'font-semibold text-success'}>
+                  {state.review.changedAfter ? '승인 뒤 바뀜' : '✓ 승인 완료'}
+                </span>
+                <span className="text-ink">{state.review.by}</span>
+                <span className="text-muted">
+                  {state.review.atKst} · {state.review.kind === 'approve' ? '고친 곳 없이 승인' : state.review.summary}
+                </span>
+                {state.review.lines.length > 0 && (
+                  <button onClick={() => setOpenReview((v) => !v)} className="text-xs text-muted underline">
+                    {openReview ? '접기' : '바뀐 곳 보기'}
+                  </button>
+                )}
+              </div>
+              {state.review.changedAfter && (
+                <p className="mt-1 text-xs text-muted">
+                  승인한 뒤 병합본이 다시 만들어졌거나 고쳐졌습니다 — 지금 판은 승인한 판과 다릅니다.
+                </p>
+              )}
+              {openReview && (
+                <ul className="mt-2 space-y-0.5 text-[13px] text-body">
+                  {state.review.lines.map((l, i) => (
+                    <li key={i}>· {l}</li>
+                  ))}
+                </ul>
+              )}
+            </>
+          ) : (
+            <span className="text-muted">부서장 승인 전 — 부서장이 병합본을 고쳐 저장하거나 [승인]을 누르면 담당자에게 알림이 갑니다</span>
+          )}
+          {canApprove && (!state.review || state.review.changedAfter) && (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <button onClick={approve} disabled={busy} className="btn-primary btn-sm">
+                고칠 것 없음 · 승인
+              </button>
+              <span className="text-xs text-muted">고칠 곳이 있으면 [내용 보기]에서 고쳐 저장하세요 — 저장이 곧 승인입니다</span>
+            </div>
+          )}
+        </div>
+      )}
 
       {err && <p className="mt-3 text-sm text-error">{err}</p>}
 

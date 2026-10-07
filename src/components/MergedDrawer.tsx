@@ -47,6 +47,10 @@ interface Content {
   tables: TableView[];
   /** 서버가 작성자를 보냈는가 (TACP-17) */
   canSeeAuthors?: boolean;
+  /** HM-47 — 가장 최근 부서장 승인 */
+  review?: { by: string; atKst: string; kind: 'edit' | 'approve'; summary: string; lines: string[]; changedAfter: boolean } | null;
+  /** HM-47 — 이 사람이 승인할 수 있나 (이 부서의 head) */
+  canApprove?: boolean;
 }
 
 /** 헤더 행을 뺀 본문만. 서버가 준 격자는 첫 줄이 열 이름이다 */
@@ -254,11 +258,33 @@ export function MergedDrawer({
       setBusy(false);
       return;
     }
+    const saved = (await res.json().catch(() => ({}))) as { approved?: { summary: string } | null };
     setDirty(false);
     setBusy(false);
-    flash('저장');
+    // HM-47 — 부서장의 저장은 곧 승인이다. 무엇이 일어났는지 그 자리에서 말한다
+    flash(saved.approved ? '저장 · 승인 완료 — 담당자에게 알렸습니다' : '저장');
     router.refresh();
     // 채번이 다시 매겨지므로 서버가 쓴 결과를 다시 읽는다
+    const fresh = await fetch(`/api/division/merged/content?division=${divisionSlug}&isoKey=${isoKey}`);
+    if (fresh.ok) setData(await fresh.json());
+  };
+
+  // HM-47 — 고칠 것 없이 승인
+  const approve = async () => {
+    setBusy(true);
+    setErr(null);
+    const res = await fetch('/api/division/merged/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isoKey }),
+    });
+    setBusy(false);
+    if (!res.ok) {
+      setErr((await res.json().catch(() => ({}))).message ?? '승인하지 못했습니다.');
+      return;
+    }
+    flash('승인 완료 — 담당자에게 알렸습니다');
+    router.refresh();
     const fresh = await fetch(`/api/division/merged/content?division=${divisionSlug}&isoKey=${isoKey}`);
     if (fresh.ok) setData(await fresh.json());
   };
@@ -337,7 +363,9 @@ export function MergedDrawer({
             </button>
           )}
           <span className="ml-auto text-sm">
-            {copied && <span className="font-medium text-success">{copied} 복사됨</span>}
+            {copied && (
+              <span className="font-medium text-success">{copied === '제목' ? '제목 복사됨' : copied}</span>
+            )}
             {dirty && !copied && <span className="text-warning">저장하지 않은 수정</span>}
           </span>
           {canEdit && (
@@ -346,6 +374,30 @@ export function MergedDrawer({
             </button>
           )}
         </div>
+
+        {/* HM-47 — 승인 상태. 부서장에게는 [고칠 것 없음 · 승인] — 고쳐 저장하면 그 저장이 승인이다 */}
+        {data && (data.review || data.canApprove) && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline-soft bg-surface-soft px-6 py-2.5 text-sm">
+            {data.review ? (
+              <>
+                <span className={data.review.changedAfter ? 'font-semibold text-warning' : 'font-semibold text-success'}>
+                  {data.review.changedAfter ? '승인 뒤 바뀜' : '✓ 승인 완료'}
+                </span>
+                <span className="text-ink">{data.review.by}</span>
+                <span className="text-muted">
+                  {data.review.atKst} · {data.review.kind === 'approve' ? '고친 곳 없이 승인' : data.review.summary}
+                </span>
+              </>
+            ) : (
+              <span className="text-muted">아직 승인 전 — 고쳐서 [수정 저장]하면 그 저장이 승인이 되고, 담당자에게 알림이 갑니다</span>
+            )}
+            {data.canApprove && (!data.review || data.review.changedAfter) && (
+              <button onClick={approve} disabled={busy || dirty} className="btn-secondary btn-sm ml-auto">
+                고칠 것 없음 · 승인
+              </button>
+            )}
+          </div>
+        )}
 
         <div ref={bodyRef} className="flex-1 overflow-y-auto px-6 py-5">
           {err && <p className="card border-error/40 bg-error-soft px-4 py-3 text-sm text-error">{err}</p>}

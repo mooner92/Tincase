@@ -5,7 +5,7 @@
 // 화면에서 보고 고칠 수 있으면 한글을 열 일이 없다.
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
-import { requireScope, requireOwnManager, resolveTargetDivision, requireMergedAccess, HttpError } from '@/server/authz';
+import { requireScope, requireOwnManager, resolveTargetDivision, requireMergedAccess, isReviewer, HttpError } from '@/server/authz';
 import { handler, json, rateLimit } from '@/server/http';
 import { audit } from '@/server/audit';
 import { readStoredFile, writeFileAtomic } from '@/server/storage';
@@ -14,6 +14,8 @@ import { tableGrid, columnWidths } from '@/lib/hwp/model';
 import { composeMergedHwp } from '@/server/merge';
 import { boardTitle } from '@/lib/docname';
 import { slotKind, toKstIso } from '@/lib/week';
+import { latestReview, recordReview, worklogRows } from '@/server/merge/review';
+import { diffWorklog } from '@/lib/merge-diff';
 
 export const dynamic = 'force-dynamic';
 
@@ -97,6 +99,9 @@ export const GET = handler(async (req: NextRequest) => {
   await audit(scope.user.email, 'preview', division.id, `merged:${slot.isoKey}`);
 
   return json({
+    // HM-47 — 승인 상태와 [승인] 버튼. 버튼은 이 부서의 head에게만 (TACP-16)
+    review: await latestReview(division.id, slot.id),
+    canApprove: division.id === scope.division.id && isReviewer(scope),
     title: boardTitle(slot.month, slot.label, division.nameKo, slotKind(slot)),
     slot: { isoKey: slot.isoKey, label: slot.label, year: slot.year, kind: slotKind(slot) },
     editedAt: toKstIso(run.finishedAt ?? run.startedAt),
@@ -182,6 +187,9 @@ export const PUT = handler(async (req: NextRequest) => {
     rowEmphasis[key] = kept.map((r) => r.emphasis);
   }
 
+  // HM-47 — 무엇이 바뀌었나는 **덮어쓰기 전에** 읽어 둔다
+  const beforeRows = isReviewer(scope) ? worklogRows(await readStoredFile(run.outputPath!)) : null;
+
   // HM-46 — 고쳐 저장한 병합본에도 부서명이 맨 위에 있어야 한다 (자동 병합과 같은 경로)
   const composed = composeMergedHwp(
     await readStoredFile(template.filePath),
@@ -202,5 +210,16 @@ export const PUT = handler(async (req: NextRequest) => {
   });
   await audit(scope.user.email, 'merge', division.id, `merged:${slot.isoKey}`, { action: 'edit', rowCounts });
 
-  return json({ ok: true, rowCounts, warnings: composed.warnings });
+  /*
+   * HM-47 — **부서장의 저장은 곧 승인이다.** 계정의 역할로 판정한다 — 담당자의 저장은 승인이 아니다.
+   * 바뀐 곳은 저장한 파일을 다시 읽어 계산한다 — 화면이 보낸 것이 아니라 문서에 실제로 들어간 것.
+   */
+  let approved: { summary: string } | null = null;
+  if (beforeRows) {
+    const changes = diffWorklog(beforeRows, worklogRows(composed.bytes));
+    await recordReview({ scope, run, slot, kind: 'edit', changes, bytes: composed.bytes });
+    approved = { summary: (await latestReview(division.id, slot.id))?.summary ?? '' };
+  }
+
+  return json({ ok: true, rowCounts, warnings: composed.warnings, approved });
 });

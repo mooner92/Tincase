@@ -109,6 +109,21 @@ export async function requireOwnManager(headers: Headers): Promise<Scope> {
   return scope;
 }
 
+/**
+ * TACP-16 · HM-47 — **병합본 승인 진입점.** head(실장·팀장·본부장…)만, 그것도 **자기 부서**만.
+ * lead는 자기가 만든 문서를 승인하지 않는다 — 「검토했다」는 기록은 검토할 사람만 남긴다.
+ * 대상 부서는 신원의 부서다 (TACP-6). 한 사람이 lead이면서 head일 수는 없다(역할 하나).
+ */
+export function isReviewer(scope: Pick<Scope, 'isHead'>): boolean {
+  return scope.isHead;
+}
+
+export async function requireReviewer(headers: Headers): Promise<Scope> {
+  const scope = await requireScope(headers);
+  if (!isReviewer(scope)) throw notFound();
+  return scope;
+}
+
 /** @deprecated TACP-16 — `requireManager`를 쓸 것. 이름이 head를 빠뜨린다 */
 export const requireLead = requireManager;
 

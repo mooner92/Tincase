@@ -1,5 +1,6 @@
 // `/{slug}/manage/{isoKey}` — 과거 주차 (PG-24)
 import { notFound, redirect } from 'next/navigation';
+import { isReviewer } from '@/server/authz';
 import { getPageScope, getDivisionView } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { ManageView } from '../ManageView';
@@ -24,5 +25,6 @@ export default async function ManageWeekPage({ params }: { params: Promise<{ div
       canDownloadMerged={view.canManage}
       canDeleteAny={view.canDeleteAny}
       canEditMerged={view.canEditMerged}
+      canApprove={view.isOwn && isReviewer(view.scope)}
     />;
 }

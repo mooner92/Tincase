@@ -111,8 +111,9 @@ export async function planDeadline(
     ...reminderTimes(department).map((r) => ({ label: REMINDER_LABEL[r.kind], at: r.at })),
     { label: '부서 마감', at: department },
     { label: '자동 병합', at: new Date(department.getTime() + MERGE_DELAY_MINUTES * 60_000) },
-    { label: '부서장 검토 요청', at: new Date(department.getTime() + REVIEW_MINUTES * 60_000) },
-    { label: '담당자 제출 요청', at: new Date(department.getTime() + SUBMIT_MINUTES * 60_000) },
+    // NT-47 — 이미 승인했으면 검토 요청은 안 나가고, 제출 요청에는 승인 상태가 한 줄 붙는다
+    { label: '부서장 검토 요청 (승인 전일 때만)', at: new Date(department.getTime() + REVIEW_MINUTES * 60_000) },
+    { label: '담당자 제출 요청 (승인 상태 포함)', at: new Date(department.getTime() + SUBMIT_MINUTES * 60_000) },
     { label: '대외 마감', at: external },
   ]
     .sort((a, b) => a.at.getTime() - b.at.getTime())

@@ -249,6 +249,10 @@ export function DeadlineScheduler() {
                 </tbody>
               </table>
 
+              <p className="mt-2 text-xs text-muted">
+                부서장 승인 알림은 시각이 아니라 <strong className="text-body">승인하는 순간</strong> 담당자에게 갑니다 — 마감을 옮겨도 따로 할 일이 없습니다.
+              </p>
+
               {plan.warnings.map((w) => (
                 <p key={w} className="mt-2 rounded-lg bg-warning-soft px-3 py-1.5 text-xs text-ink">
                   {w}

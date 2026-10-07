@@ -98,6 +98,11 @@ isManager = divisionRole === 'lead' || 'head'    // 부서 문서를 다루는 �
 실패를 head에게 보내지 않는 것은 **고칠 수 없는 사람에게 가는 실패 통지는 소음**이기 때문이다.
 소음이 쌓이면 정작 중요한 알림도 안 읽힌다.
 
+**하나 다른 것 — 승인(검토 완료)은 head의 행동이다 (v1.5.1, HM-47).** head가 병합본을 고쳐 저장하면
+그것이 승인으로 기록되고 담당자에게 알림이 간다. 고칠 것이 없으면 [고칠 것 없음 · 승인]을 누른다 —
+이 버튼은 **head에게만** 있다(게이트 `requireReviewer`). lead는 자기가 만든 문서를 승인하지 않는다.
+권한의 크기가 아니라 **책임의 기록**이다 — 「검토했다」는 말을 검토할 사람만 남길 수 있게 한다.
+
 `head`도 lead와 똑같이 **사람은 못 바꾸고**(TACP-3), **남의 제출물은 못 지우고**(TACP-14),
 **타 부서는 404다**(TACP-4·5). head는 자기 부서의 장이지 전사 역할이 아니다.
 
@@ -445,6 +450,7 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | `requireHqManager(headers)` | 내 부서가 **본부 단계가 있는 본부**이고 lead·head (TACP-21) | **404** |
 | `requireOrgRollup(headers)` | coordinator·operator — **전사 이어 붙이기 쓰기** (TACP-21) | **404** |
 | `findReadableReport(scope, id)` | 보낸 사본 **읽기** 판정 — 보낸 부서·받는 본부·readAll (TACP-21) | **404** |
+| `requireReviewer(headers)` | head(이면서 lead가 아님) — **병합본 승인 전용** (TACP-16, HM-47) | **404** |
 | `resolveTargetDivision(scope, slug?)` | 대상 부서 해석 (TACP-7) | **404** |
 | `findAccessibleSubmission(scope, id)` | 제출물 **읽기** 판정 | **404** |
 | `requireDeletableSubmission(scope, id)` | 제출물 **삭제** 판정 (TACP-14) | **404** / 409 |
@@ -511,6 +517,8 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | **RU-T32** | **산하가 아닌 단위의 사본 → 404** — 다른 본부의 실 |
 | **RU-T33** | **member는 [제출]·본부 이어 붙이기 404** · **coordinator가 남의 실·팀을 [제출]하면 404** |
 | **RU-T34** | **coordinator가 전사 이어 붙이기 → 허용**, lead·head는 404 |
+| **HM-T110** | **head가 고쳐 저장 → 승인 기록 + 담당자 알림** · lead의 저장은 승인이 아니다 |
+| **HM-T111** | **[승인] — head만.** lead·member·타 부서 head → 404 |
 
 새 Resource를 추가하면 **그 Resource의 격리 테스트를 같은 커밋에 넣는다.**
 
