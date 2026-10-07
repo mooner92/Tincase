@@ -34,6 +34,8 @@ model Division {
   deadlineDow   Int     @default(4)      // 마감 요일 1=월 … 7=일 (기본 목 — DM-10)
   deadlineTime  String  @default("14:00")// "HH:mm" KST
   mergeRuleText String  @default("")     // 부서 병합 규칙 (S-08 §6)
+  mergeSort     String  @default("input")// "input" 제출자 순 | "date" 일자 오름차순 (HM-48)
+  mergeUndated  String  @default("last") // 날짜 없는 줄의 자리 "last" | "first" (HM-48, date일 때만)
   guideText     String  @default("")     // 업로드 화면 작성 안내 (줄 단위, CP-21)
 
   createdAt     DateTime @default(now())
@@ -251,6 +253,9 @@ type MemberStatus = { user: User; latest: Submission | null; versionCount: numbe
 
 `MergeRun.ruleSnapshot`에 실행 시점 규칙 원문을 저장한다. "그때 왜 이 순서로 나왔지"를
 재현 가능하게 — 규칙은 계속 편집되므로 참조가 아니라 복사여야 한다.
+
+담기는 것: `trigger` · `categories` · `dedupe` · `dropNotes` · `guidance` · `sort` · `undated` (HM-48).
+**순서를 바꾸는 설정은 빠짐없이 들어가야 한다** — 하나라도 빠지면 「왜 이 순서」의 답이 스냅샷에 없다.
 
 ### DM-14 — 부서 양식 불변식
 
