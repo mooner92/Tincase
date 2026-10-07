@@ -24,8 +24,8 @@ const dot: Record<Tone, string> = {
 
 function Stage({ tone, title, sub }: { tone: Tone; title: string; sub?: string | null }) {
   return (
-    <div className={`flex min-h-[5.5rem] flex-col justify-center rounded-2xl px-5 py-3 ${dot[tone]}`}>
-      <span className="text-[1.35rem] font-bold leading-tight">{title}</span>
+    <div className={`flex min-h-[4.25rem] flex-col justify-center rounded-2xl px-4 py-2 ${dot[tone]}`}>
+      <span className="text-[1.25rem] font-bold leading-tight">{title}</span>
       {sub && <span className="mt-0.5 text-sm font-medium opacity-80">{sub}</span>}
     </div>
   );
@@ -55,7 +55,7 @@ export default async function OrgBoardPage({ searchParams }: { searchParams: Pro
   const final = board.lastRun?.status === 'succeeded' ? board.lastRun : null;
 
   return (
-    <main className="min-h-screen bg-brand px-10 py-8 text-white">
+    <main className="min-h-screen bg-brand px-10 py-6 text-white">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <p className="text-lg font-medium text-brand-tint">Tincase · 전사 주간업무 취합</p>
@@ -74,14 +74,14 @@ export default async function OrgBoardPage({ searchParams }: { searchParams: Pro
       </header>
 
       {/* 한 줄 요약 — 회의실 뒷줄에서도 읽히는 숫자 넷 */}
-      <section className="mt-8 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <section className="mt-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
         {[
           { k: '개인 제출', v: `${sumSent}/${sumRoster}`, s: '명' },
           { k: '실·팀 제출', v: `${unitsSent}/${allUnits.length}`, s: '곳' },
           { k: '총괄 도착', v: `${arrived}/${board.nodes.length}`, s: '곳' },
           { k: '전사본', v: final ? '준비됨' : '대기', s: final ? kst(final.finishedAt) ?? '' : '' },
         ].map((m) => (
-          <div key={m.k} className="rounded-2xl bg-white/[0.07] px-6 py-5">
+          <div key={m.k} className="rounded-2xl bg-white/[0.07] px-6 py-4">
             <p className="text-base text-white/70">{m.k}</p>
             <p className="mt-1 text-4xl font-bold tabular-nums">
               {m.v}
@@ -91,8 +91,8 @@ export default async function OrgBoardPage({ searchParams }: { searchParams: Pro
         ))}
       </section>
 
-      <section className="mt-8 space-y-3">
-        <div className="grid grid-cols-[14rem_1fr_13rem] gap-4 px-2 text-sm font-medium uppercase tracking-wide text-white/50">
+      <section className="mt-6 space-y-2">
+        <div className="grid grid-cols-[17rem_1fr_13rem] gap-4 px-2 text-sm font-medium uppercase tracking-wide text-white/50">
           <span>본부</span>
           <span>실·팀</span>
           <span>총괄</span>
@@ -101,8 +101,8 @@ export default async function OrgBoardPage({ searchParams }: { searchParams: Pro
           const sentUnits = n.units.filter((u) => u.report).length;
           const nodeTone: Tone = n.ready ? 'done' : sentUnits > 0 || n.units.some((u) => u.merged) ? 'doing' : 'idle';
           return (
-            <div key={n.node.id} className="grid grid-cols-[14rem_1fr_13rem] items-stretch gap-4 rounded-3xl bg-white/[0.04] p-3">
-              <div className="flex items-center px-3 text-2xl font-bold leading-snug">{n.node.nameKo}</div>
+            <div key={n.node.id} className="grid grid-cols-[17rem_1fr_13rem] items-stretch gap-4 rounded-3xl bg-white/[0.04] p-2">
+              <div className="flex items-center px-3 text-[1.6rem] font-bold leading-snug break-keep">{n.node.nameKo}</div>
               <div className="flex flex-wrap items-stretch gap-3">
                 {n.units.map((u) => {
                   const p = people.get(u.division.id);
@@ -130,7 +130,7 @@ export default async function OrgBoardPage({ searchParams }: { searchParams: Pro
       </section>
 
       {board.offline.length > 0 && (
-        <p className="mt-8 text-lg text-white/60">Tincase 밖(취합게시판): {board.offline.map((d) => d.nameKo).join(' · ')}</p>
+        <p className="mt-5 text-lg text-white/60">Tincase 밖(취합게시판): {board.offline.map((d) => d.nameKo).join(' · ')}</p>
       )}
     </main>
   );
