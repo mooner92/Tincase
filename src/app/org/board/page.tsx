@@ -1,36 +1,35 @@
-// `/org/board` — 큰 화면 (RU-33 · TACP-21). 운영회의 화면에 띄워 둔다.
+// `/org/board` — 큰 화면 (RU-33·65 · TACP-21). 운영회의 화면에 띄워 둔다.
 //
-// 멀리서 읽혀야 한다: 글자는 크게, 낱말은 적게, 색은 셋(도착·진행·대기)뿐.
-// 한 줄 = 한 본부(또는 본부 밖 단위). 왼쪽에서 오른쪽으로 실·팀 → 본부 → 전사가 흐른다.
+// 한 칸 = 최종본의 한 섹션(13개, 최종본 순서). 멀리서 읽혀야 한다: 글자는 크게, 낱말은 적게, 색은 셋.
+// 파랑 = 총괄에 도착(Tincase 제출·올린 파일) · 주황 = 진행 중(사람들이 내는 중·본부 취합 중) · 회색 = 대기.
+// 바탕은 밝게 — 브랜드색으로 꽉 채우면 상태 색이 묻힌다 (2026-10-07 피드백).
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { requirePageScope } from '@/server/page-scope';
 import { canOpenOrgDesk } from '@/server/authz';
 import { noticeFor } from '@/components/Notice';
 import { AutoRefresh } from '@/components/AutoRefresh';
-import { orgBoard } from '@/server/rollup/run';
 import { rollupSlot } from '@/server/rollup/slot';
 import { divisionStatus } from '@/server/worklog';
 import { kst } from '@/server/rollup/view';
+import { loadTree } from '@/server/rollup/tree';
+import { resolveSections } from '@/server/rollup/sections';
+import { lastOrgRun } from '@/server/rollup/orgrun';
+import { latestReview } from '@/server/merge/review';
 
 export const dynamic = 'force-dynamic';
 
 type Tone = 'done' | 'doing' | 'idle';
-// 밝은 바탕에 상태 색 셋만. 바탕을 브랜드색으로 꽉 채우면 상태 색이 묻힌다 (2026-10-07 피드백)
 const tile: Record<Tone, string> = {
-  done: 'border-[#9db8f5] bg-[#e9f0ff] text-[#1e3a8a]',
-  doing: 'border-[#efc98a] bg-[#fff4e0] text-[#7a4a00]',
-  idle: 'border-hairline-soft bg-surface-strong text-muted',
+  done: 'border-[#9db8f5] bg-[#e9f0ff]',
+  doing: 'border-[#efc98a] bg-[#fff4e0]',
+  idle: 'border-hairline-soft bg-white',
 };
-
-function Stage({ tone, title, sub }: { tone: Tone; title: string; sub?: string | null }) {
-  return (
-    <div className={`flex min-h-[4.25rem] flex-col justify-center rounded-2xl border px-4 py-2 ${tile[tone]}`}>
-      <span className="text-[1.25rem] font-bold leading-tight">{title}</span>
-      {sub && <span className="mt-0.5 text-sm font-medium opacity-80">{sub}</span>}
-    </div>
-  );
-}
+const pill: Record<Tone, string> = {
+  done: 'bg-[#1e3a8a] text-white',
+  doing: 'bg-[#b26a00] text-white',
+  idle: 'bg-surface-strong text-muted',
+};
 
 export default async function OrgBoardPage({ searchParams }: { searchParams: Promise<{ isoKey?: string }> }) {
   const ps = await requirePageScope();
@@ -38,22 +37,46 @@ export default async function OrgBoardPage({ searchParams }: { searchParams: Pro
   if (!(await canOpenOrgDesk(ps.scope))) notFound(); // TACP-5 · RU-52 — /org와 같은 게이트
   const sp = await searchParams;
   const slot = await rollupSlot(sp.isoKey ?? null);
-  const board = await orgBoard(slot);
+  const tree = await loadTree();
+  const sources = await resolveSections(slot, tree);
+  const run = await lastOrgRun(slot, sources);
 
-  // 사람 단위 진행 — 실·팀마다 몇 명 중 몇 명이 냈나
-  const people = new Map<string, { roster: number; submitted: number }>();
-  for (const n of board.nodes) {
-    for (const u of n.units) {
-      const s = await divisionStatus(u.division.id, slot.id);
-      people.set(u.division.id, { roster: s.summary.roster, submitted: Math.min(s.summary.submitted, s.summary.roster) });
+  // 섹션마다: 그 섹션을 쓰는 Tincase 부서(본부 섹션이면 실제로 쓰는 실)의 사람 진행·승인
+  const rows: { id: string; title: string; tone: Tone; status: string; sub: string }[] = [];
+  let roster = 0;
+  let sent = 0;
+  for (const s of sources) {
+    const node = s.section.divisionId
+      ? tree.nodes.find((n) => n.node.id === s.section.divisionId || n.contributors.some((c) => c.id === s.section.divisionId))
+      : undefined;
+    const writer = node
+      ? (node.contributors.find((c) => c.id === s.section.divisionId) ?? (node.contributors.length === 1 ? node.contributors[0] : undefined))
+      : undefined;
+    let people: { roster: number; submitted: number } | null = null;
+    let approved = false;
+    if (writer) {
+      const st = await divisionStatus(writer.id, slot.id);
+      people = { roster: st.summary.roster, submitted: Math.min(st.summary.submitted, st.summary.roster) };
+      roster += people.roster;
+      sent += people.submitted;
+      const rv = await latestReview(writer.id, slot.id);
+      approved = !!rv && !rv.changedAfter;
     }
+    const arrived = s.kind === 'tincase' || s.kind === 'upload';
+    const tone: Tone = arrived ? 'done' : s.kind === 'waiting_hq' || (people && people.submitted > 0) ? 'doing' : 'idle';
+    const status = arrived ? '도착' : s.kind === 'waiting_hq' ? '본부 취합 중' : people && people.submitted > 0 ? '작성 중' : '대기';
+    const sub = [
+      s.kind === 'upload' ? '게시판 파일' : s.kind === 'tincase' ? 'Tincase' : node ? null : 'Tincase 밖',
+      people ? `${people.submitted}/${people.roster}명` : null,
+      approved ? '부서장 승인' : null,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    rows.push({ id: s.section.id, title: s.section.title, tone, status, sub });
   }
-  const allUnits = board.nodes.flatMap((n) => n.units);
-  const sumRoster = [...people.values()].reduce((a, p) => a + p.roster, 0);
-  const sumSent = [...people.values()].reduce((a, p) => a + p.submitted, 0);
-  const unitsSent = allUnits.filter((u) => u.report).length;
-  const arrived = board.nodes.filter((n) => n.ready).length;
-  const final = board.lastRun?.status === 'succeeded' ? board.lastRun : null;
+  const arrivedCount = sources.filter((s) => s.kind === 'tincase' || s.kind === 'upload').length;
+  const final = run?.status === 'succeeded' ? run : null;
+  const half = Math.ceil(rows.length / 2);
 
   return (
     <main className="min-h-screen bg-surface-soft px-10 py-6 text-ink">
@@ -74,13 +97,16 @@ export default async function OrgBoardPage({ searchParams }: { searchParams: Pro
         </div>
       </header>
 
-      {/* 한 줄 요약 — 회의실 뒷줄에서도 읽히는 숫자 넷 */}
-      <section className="mt-5 grid grid-cols-2 gap-4 lg:grid-cols-4">
+      <section className="mt-5 grid grid-cols-3 gap-4">
         {[
-          { k: '개인 제출', v: `${sumSent}/${sumRoster}`, s: '명', hi: false },
-          { k: '실·팀 제출', v: `${unitsSent}/${allUnits.length}`, s: '곳', hi: false },
-          { k: '총괄 도착', v: `${arrived}/${board.nodes.length}`, s: '곳', hi: false },
-          { k: '전사본', v: final ? '준비됨' : '대기', s: final ? kst(final.finishedAt) ?? '' : '', hi: !!final },
+          { k: '개인 제출 (Tincase)', v: `${sent}/${roster}`, s: '명', hi: false },
+          { k: '섹션 도착', v: `${arrivedCount}/${sources.length}`, s: '곳', hi: false },
+          {
+            k: '전사 취합본',
+            v: final ? (final.stale ? '다시 만들기' : '준비됨') : '대기',
+            s: final ? (kst(final.finishedAt) ?? '') : '',
+            hi: !!final && !final.stale,
+          },
         ].map((m) => (
           <div key={m.k} className={`rounded-2xl border bg-white px-6 py-4 ${m.hi ? 'border-[#9db8f5] ring-2 ring-[#e9f0ff]' : 'border-hairline-soft'}`}>
             <p className="text-base text-muted">{m.k}</p>
@@ -92,52 +118,39 @@ export default async function OrgBoardPage({ searchParams }: { searchParams: Pro
         ))}
       </section>
 
-      <section className="mt-6 space-y-2">
-        <div className="grid grid-cols-[17rem_1fr_13rem] gap-4 px-2 text-sm font-medium tracking-wide text-muted">
-          <span>본부</span>
-          <span className="flex flex-wrap items-center gap-x-4">
-            실·팀
-            <span className="flex items-center gap-1.5"><i className="inline-block h-2.5 w-2.5 rounded-full bg-[#5b82e0]" />제출·도착</span>
-            <span className="flex items-center gap-1.5"><i className="inline-block h-2.5 w-2.5 rounded-full bg-[#e3a640]" />진행 중</span>
-            <span className="flex items-center gap-1.5"><i className="inline-block h-2.5 w-2.5 rounded-full bg-[#c8c8c8]" />대기</span>
-          </span>
-          <span>총괄</span>
-        </div>
-        {board.nodes.map((n) => {
-          const sentUnits = n.units.filter((u) => u.report).length;
-          const nodeTone: Tone = n.ready ? 'done' : sentUnits > 0 || n.units.some((u) => u.merged) ? 'doing' : 'idle';
-          return (
-            <div key={n.node.id} className="grid grid-cols-[17rem_1fr_13rem] items-stretch gap-4 rounded-3xl border border-hairline-soft bg-white p-2">
-              <div className="flex items-center px-3 text-[1.6rem] font-bold leading-snug break-keep">{n.node.nameKo}</div>
-              <div className="flex flex-wrap items-stretch gap-3">
-                {n.units.map((u) => {
-                  const p = people.get(u.division.id);
-                  const tone: Tone = u.report ? 'done' : u.merged || (p && p.submitted > 0) ? 'doing' : 'idle';
-                  const label = u.report ? `제출 ${kst(u.report.submittedAt)?.slice(6)}` : u.merged ? '병합됨' : p ? `${p.submitted}/${p.roster}명` : '';
-                  return <Stage key={u.division.id} tone={tone} title={u.division.nameKo} sub={label} />;
-                })}
-              </div>
-              <Stage
-                tone={nodeTone}
-                title={n.ready ? '도착' : n.hasHqStep ? '본부 취합 중' : '대기'}
-                sub={
-                  n.hasHqStep
-                    ? n.hqReport
-                      ? `본부 제출 ${kst(n.hqReport.submittedAt)?.slice(6)}`
-                      : `실·팀 ${sentUnits}/${n.units.length}`
-                    : n.units[0]?.report
-                      ? '바로 제출'
-                      : null
-                }
-              />
-            </div>
-          );
-        })}
-      </section>
+      <div className="mt-4 flex items-center gap-5 px-1 text-sm text-muted">
+        <span className="flex items-center gap-1.5">
+          <i className="inline-block h-2.5 w-2.5 rounded-full bg-[#1e3a8a]" />
+          도착
+        </span>
+        <span className="flex items-center gap-1.5">
+          <i className="inline-block h-2.5 w-2.5 rounded-full bg-[#b26a00]" />
+          진행 중
+        </span>
+        <span className="flex items-center gap-1.5">
+          <i className="inline-block h-2.5 w-2.5 rounded-full bg-[#c8c8c8]" />
+          대기
+        </span>
+        <span className="ml-auto">위에서 아래로 최종본 순서</span>
+      </div>
 
-      {board.offline.length > 0 && (
-        <p className="mt-5 text-lg text-muted">Tincase 밖(취합게시판): {board.offline.map((d) => d.nameKo).join(' · ')}</p>
-      )}
+      {/* 13섹션 — 두 단, 왼쪽 단 위에서 아래로 이어 오른쪽 단 */}
+      <section className="mt-2 grid grid-cols-2 gap-x-4">
+        {[rows.slice(0, half), rows.slice(half)].map((col, c) => (
+          <div key={c} className="space-y-2">
+            {col.map((r, i) => (
+              <div key={r.id} className={`flex items-center gap-4 rounded-2xl border px-5 py-2.5 ${tile[r.tone]}`}>
+                <span className="w-7 text-right text-xl font-semibold tabular-nums text-muted">{c * half + i + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[1.45rem] font-bold leading-tight">{r.title}</p>
+                  {r.sub && <p className="mt-0.5 truncate text-base text-muted">{r.sub}</p>}
+                </div>
+                <span className={`shrink-0 rounded-full px-4 py-1.5 text-lg font-semibold ${pill[r.tone]}`}>{r.status}</span>
+              </div>
+            ))}
+          </div>
+        ))}
+      </section>
     </main>
   );
 }
