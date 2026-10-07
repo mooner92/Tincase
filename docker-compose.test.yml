@@ -1,0 +1,41 @@
+# RU-40~43 — **테스트 서버 (11112).** 운영(docker-compose.yml)과 완전히 분리한다.
+#
+#   sudo docker compose -f docker-compose.test.yml -p repman-test up -d --build
+#
+# 분리하는 것 — 컨테이너·이미지 태그·DB·저장소·세션 쿠키 이름.
+# 끄는 것     — 메신저(실제 사람에게 알림이 가면 안 된다)·자동 병합 스케줄러·Cloudflare.
+# .env.production을 읽지 않는다 — 거기 든 메신저 설정이 딸려 오면 테스트에서 실제 알림이 나간다.
+services:
+  app-test:
+    build: .
+    image: repman:test
+    container_name: repman-test
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:11112:3000"
+    environment:
+      NODE_ENV: production
+      TZ: Asia/Seoul
+      TINCASE_ENV: test                       # RU-43 — 화면 맨 위 「테스트 서버」 띠
+      DATABASE_URL: file:/data/db/worklog.db
+      STORAGE_ROOT: /data
+      CF_ACCESS_TEAM: test-none               # 필수값이라 채우지만 쓰지 않는다 (사내 비밀번호 로그인만)
+      SESSION_COOKIE_NAME: repman_test_session  # RU-42 — 운영 로그인과 섞이지 않게
+      MESSENGER_URL: ""                       # RU-41 — 알림 끔
+      MESSENGER_ALLOWLIST: ""
+      MERGE_SCHEDULER: "off"                  # RU-41 — 병합은 버튼으로만
+      MERGE_MODEL: hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M
+      MERGE_MODEL_URL: http://host.docker.internal:11437
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /data/worklog-test:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }

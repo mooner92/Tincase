@@ -2,7 +2,12 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { prisma } from './db';
 
-export const SESSION_COOKIE = 'repman_session';
+/*
+ * RU-42 — 쿠키 이름은 환경으로 바꿀 수 있다. **같은 서버의 다른 포트는 쿠키를 공유한다**
+ * (쿠키는 호스트만 보고 포트를 보지 않는다). 테스트 서버(11112)가 같은 이름을 쓰면
+ * 거기 로그인하는 순간 운영(11111)의 로그인이 덮여 풀린다. 운영은 기본값 그대로다.
+ */
+export const SESSION_COOKIE = process.env.SESSION_COOKIE_NAME || 'repman_session';
 /** 재로그인 피로도를 줄이기 위한 넉넉한 유효기간 (사용자 결정: 약 한 달) */
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
 /** 마지막 사용 후 이 시간이 지나면 만료 연장 (슬라이딩) */

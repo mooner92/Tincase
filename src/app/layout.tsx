@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import localFont from 'next/font/local';
 import './globals.css';
+import { EnvBanner } from '@/components/EnvBanner';
 
 /**
  * 페이퍼로지 — 한글·영문 모두 이 글꼴로 간다.
@@ -37,7 +38,10 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ko" className={paperlogy.variable}>
-      <body className="min-h-screen">{children}</body>
+      <body className="min-h-screen">
+        <EnvBanner />
+        {children}
+      </body>
     </html>
   );
 }
