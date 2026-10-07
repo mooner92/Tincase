@@ -22,6 +22,7 @@ import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
 import { slotKind } from '@/lib/week';
 import { describeFlagged, type FlaggedRow } from '@/lib/empty-content';
 import { approvalOf } from '../merge/review';
+import { loadOrgSetting, loadTree, submitTarget } from '../rollup/tree';
 import { toKstIso } from '@/lib/week';
 
 /** 스케줄러가 5분 주기이므로 창은 그보다 넉넉해야 반드시 한 번 걸린다 */
@@ -68,6 +69,8 @@ interface MergeFacts {
    */
   approval: { by: string; at: Date; summary: string } | null;
   hasHead: boolean;
+  /** RU-53 — 3단계를 쓰면 보낼 곳(「기획경영본부」·「총괄(기획조정실)」). 안 쓰면 null — 게시판 문구 그대로 */
+  submitTo?: string | null;
 }
 
 /** NT-47 — 승인 한 줄 */
@@ -176,8 +179,9 @@ function compose(kind: NoticeKind, who: Person, slotLabel: string, monthly: bool
       ...staleBlock(f.stale, 'Tincase 수합 관리에서 [다시 병합]을 눌러주세요.'),
       ...flagBlock(f.flagged),
       '',
-      'Tincase에서 hwp로 받아 취합게시판에 올리고',
-      '웹디스크에 업로드해주세요.',
+      ...(f.submitTo
+        ? [`Tincase 수합 관리에서 [${f.submitTo}에 제출]을 눌러주세요.`]
+        : ['Tincase에서 hwp로 받아 취합게시판에 올리고', '웹디스크에 업로드해주세요.']),
     ]
       .filter((l, i, a) => !(l === '' && a[i - 1] === ''))
       .join('\n'),
@@ -259,6 +263,8 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
   const monthly = slotKind(slot) === 'monthly';
   const out: NoticeOutcome[] = [];
   const divisions = await prisma.division.findMany({ where: { isActive: true, notifyEnabled: true } });
+  // RU-53 — 3단계를 쓰면 마지막 알림의 할 일이 「게시판」이 아니라 「Tincase에서 제출」이다
+  const tree = (await loadOrgSetting()).enabled ? await loadTree() : null;
 
   for (const division of divisions) {
     try {
@@ -329,6 +335,10 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
         flagged,
         stale,
         approval: run ? await approvalOf(run) : null,
+        submitTo: (() => {
+          const t = tree ? submitTarget(tree, division.id) : null;
+          return t ? (t.kind === 'hq' ? t.node.node.nameKo : '총괄(기획조정실)') : null;
+        })(),
         hasHead: (await prisma.user.count({ where: { divisionId: division.id, isActive: true, divisionRole: 'head' } })) > 0,
         ok: !!run,
         sources: used.size,

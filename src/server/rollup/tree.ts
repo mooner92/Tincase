@@ -111,6 +111,9 @@ export async function loadOrgSetting() {
       order: '[]',
       note: '',
       pageBreak: true,
+      enabled: false,
+      unitDueMinutes: 60,
+      hqDueMinutes: 120,
       updatedBy: null,
       updatedAt: new Date(0),
     }

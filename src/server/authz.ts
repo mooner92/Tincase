@@ -6,7 +6,7 @@ import { prisma } from './db';
 import { audit } from './audit';
 import { openingOf } from './deadline';
 import { isSubmissionLocked } from '@/lib/deadline';
-import { hqNodeOf, loadTree, type RollupNode } from './rollup/tree';
+import { hqNodeOf, loadOrgSetting, loadTree, type RollupNode } from './rollup/tree';
 
 export class HttpError extends Error {
   constructor(
@@ -333,10 +333,15 @@ export async function requireMergedAccess(
 
 // ── TACP-21 — 위로 올린 제출 (본부·전사 취합) ─────────────────────────────
 
+/** RU-52 — 3단계 취합을 쓰는가. 꺼져 있으면 3단계의 문은 운영자의 설정 화면 하나뿐이다 */
+async function rollupOn(): Promise<boolean> {
+  return (await loadOrgSetting()).enabled;
+}
+
 /** TACP-21 — 내 부서 결과를 위로 [제출]·취소. **내 부서의 lead·head만** — readAll도 대신 내지 않는다 */
 export async function requireReportSender(headers: Headers): Promise<Scope> {
   const scope = await requireScope(headers);
-  if (!scope.isManager) throw notFound();
+  if (!scope.isManager || !(await rollupOn())) throw notFound();
   return scope;
 }
 
@@ -346,7 +351,7 @@ export async function requireReportSender(headers: Headers): Promise<Scope> {
  */
 export async function requireHqManager(headers: Headers): Promise<{ scope: Scope; node: RollupNode }> {
   const scope = await requireScope(headers);
-  if (!scope.isManager) throw notFound();
+  if (!scope.isManager || !(await rollupOn())) throw notFound();
   const node = hqNodeOf(await loadTree(), scope.division.id);
   if (!node) throw notFound();
   return { scope, node };
@@ -360,6 +365,7 @@ export async function resolveHqView(
   scope: Scope,
   slug?: string | null,
 ): Promise<{ node: RollupNode; canWrite: boolean }> {
+  if (!(await rollupOn()) && !scope.user.isOperator) throw notFound(); // RU-52
   const tree = await loadTree();
   const own = scope.isManager ? hqNodeOf(tree, scope.division.id) : null;
   if (own && (!slug || slug === own.node.slug)) return { node: own, canWrite: true };
@@ -383,12 +389,14 @@ export function canRunOrgRollup(user: Pick<User, 'isOperator' | 'isCoordinator'>
 export async function requireOrgRollup(headers: Headers): Promise<Scope> {
   const scope = await requireScope(headers);
   if (!canRunOrgRollup(scope.user)) throw notFound();
+  // RU-52 — 꺼져 있을 때는 운영자만 (켜는 사람). 총괄에게는 켠 뒤에 열린다
+  if (!scope.user.isOperator && !(await rollupOn())) throw notFound();
   return scope;
 }
 
 /** 메뉴용 — 이 사람에게 본부 취합 화면이 있는가 (TACP-9: 할 수 없는 곳으로 가는 길은 그리지 않는다) */
 export async function hasHqDesk(scope: Scope): Promise<boolean> {
-  return scope.isManager && hqNodeOf(await loadTree(), scope.division.id) !== null;
+  return scope.isManager && (await rollupOn()) && hqNodeOf(await loadTree(), scope.division.id) !== null;
 }
 
 /**
@@ -436,5 +444,6 @@ export async function findReadableRollup(scope: Scope, runId: string) {
 
 /** 메뉴에 그릴 취합 화면 — 헤더를 그리는 서버 쪽에서 한 번에 (TACP-9) */
 export async function rollupNav(scope: Scope): Promise<{ hqDesk: boolean; orgDesk: boolean }> {
-  return { hqDesk: await hasHqDesk(scope), orgDesk: canRunOrgRollup(scope.user) };
+  const on = await rollupOn();
+  return { hqDesk: await hasHqDesk(scope), orgDesk: canRunOrgRollup(scope.user) && (on || scope.user.isOperator) };
 }

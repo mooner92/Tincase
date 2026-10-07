@@ -425,6 +425,12 @@ model OrgRollupSetting {
   order     String   @default("[]")
   note      String   @default("")
   pageBreak Boolean  @default(true)
+  /// RU-52 — 3단계 취합을 쓰는가. 꺼져 있으면 [제출] 카드·본부/전사 메뉴·단계 알림이 하나도 안 나타난다
+  enabled        Boolean @default(false)
+  /// RU-51 — 실·팀 → 위로 제출 기한 = 그 주 부서 마감 + 이 분 (기본 60 = 지금의 대외 마감)
+  unitDueMinutes Int     @default(60)
+  /// RU-51 — 본부 → 총괄 제출 기한 = 그 주 부서 마감 + 이 분 (기본 120)
+  hqDueMinutes   Int     @default(120)
   updatedBy String?
   updatedAt DateTime @updatedAt
 }

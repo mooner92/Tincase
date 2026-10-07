@@ -13,6 +13,7 @@ import { SubmissionTableClient, type MemberRow } from '@/components/SubmissionTa
 import { MergePanel, type MergeStateView } from '@/components/MergePanel';
 import { ReportSubmitCard } from '@/components/ReportSubmitCard';
 import { reportState } from '@/server/rollup/report';
+import { rollupEnabled } from '@/server/rollup/schedule';
 import { latestReview } from '@/server/merge/review';
 import { notFound } from 'next/navigation';
 
@@ -62,7 +63,7 @@ export async function ManageView({
   ]);
 
   // RU-30 — 위로 [제출]. 내 부서 담당자에게만 그린다 (TACP-21·TACP-9). 꺼진 부서면 보낼 곳이 없어 null
-  const report = canMerge ? await reportState(division.id, slot, 'unit') : null;
+  const report = canMerge && (await rollupEnabled()) ? await reportState(division.id, slot, 'unit') : null;
 
   // HM-26 — 최신 실행 하나만 본다. 재실행하면 새 기록이 쌓이고 최신이 유효하다
   const lastRun = await prisma.mergeRun.findFirst({

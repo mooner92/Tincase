@@ -14,6 +14,8 @@ import { WeekPicker } from '@/components/WeekPicker';
 import { orgBoard } from '@/server/rollup/run';
 import { rollupSlot } from '@/server/rollup/slot';
 import { chipOf, kst, runView, weekOptions } from '@/server/rollup/view';
+import { stageLabels } from '@/server/rollup/notices';
+import { OrgSchedulePanel } from '@/components/OrgSchedulePanel';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +26,7 @@ export default async function OrgPage({ searchParams }: { searchParams: Promise<
   if (!canRunOrgRollup(scope.user)) notFound(); // TACP-5 — 존재 은닉
   const sp = await searchParams;
   const slot = await rollupSlot(sp.isoKey ?? null);
-  const [board, weeks, nav] = await Promise.all([orgBoard(slot), weekOptions(slot), rollupNav(scope)]);
+  const [board, weeks, nav, stages] = await Promise.all([orgBoard(slot), weekOptions(slot), rollupNav(scope), stageLabels(slot)]);
 
   const rows: DeskRow[] = board.nodes.map((n) => {
     if (!n.hasHqStep) {
@@ -75,6 +77,7 @@ export default async function OrgPage({ searchParams }: { searchParams: Promise<
             <p className="text-sm text-muted">전사 취합</p>
             <h1 className="display text-2xl">{slot.label} 주간업무</h1>
             <p className="mt-1 text-sm text-body">
+              본부 제출 기한 <strong className="text-ink">{stages.hqDueKo}</strong> ·{' '}
               {board.nodes.length}곳 중 <strong className="text-ink">{ready}곳 도착</strong>
               {board.offline.length > 0 && <span className="text-muted"> · Tincase 밖 {board.offline.length}곳</span>}
             </p>
@@ -88,6 +91,7 @@ export default async function OrgPage({ searchParams }: { searchParams: Promise<
         </div>
 
         <div className="mt-6 space-y-6">
+          <OrgSchedulePanel {...stages} weekLabel={slot.label} />
           <OrderList
             key={rows.map((r) => r.id).join()}
             rows={rows}

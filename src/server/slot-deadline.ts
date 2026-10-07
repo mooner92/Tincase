@@ -61,8 +61,31 @@ function earliest(slot: Pick<WeekSlot, 'opensAt' | 'deadlineDowOverride' | 'dead
   return ps.map((p) => deadlineFor(slot, p)).reduce((a, b) => (a < b ? a : b));
 }
 
+/**
+ * RU-50 — 그 주의 **기준 시각**: 켜진 부서들의 부서 마감 중 가장 이른 것(WS-18 예외 반영).
+ * 3단계 기한·알림이 전부 여기서 계산되므로, 총괄이 마감을 옮기면 한꺼번에 따라 움직인다.
+ */
+export async function weekAnchor(slot: Pick<WeekSlot, 'opensAt' | 'deadlineDowOverride' | 'deadlineTimeOverride'>): Promise<Date> {
+  return earliest(slot, await policies());
+}
+
 const hhmm = (d: Date) => toKstIso(d).slice(11, 16);
 const ko = (d: Date) => formatDeadlineKo(d);
+
+/** RU-58 — 미리보기에 넣을 3단계 기한·알림. 3단계를 안 쓰면 빈 목록 */
+async function rollupRows(department: Date): Promise<{ label: string; at: Date }[]> {
+  const { loadOrgSetting } = await import('./rollup/tree');
+  const { stagesFrom } = await import('./rollup/schedule');
+  const { HQ_DUE_SOON_MINUTES } = await import('./rollup/notices');
+  const s = await loadOrgSetting();
+  if (!s.enabled) return [];
+  const t = stagesFrom(department, s);
+  return [
+    { label: '실·팀 → 위로 제출 기한 · 본부 담당자 알림', at: t.unitDue },
+    { label: '본부 → 총괄 제출 15분 전 알림', at: new Date(t.hqDue.getTime() - HQ_DUE_SOON_MINUTES * 60_000) },
+    { label: '본부 → 총괄 제출 기한 · 총괄 도착 알림', at: t.hqDue },
+  ];
+}
 
 /** 대외 마감(직접 입력) `YYYY-MM-DDTHH:mm` (KST) → Date */
 export function parseExternalInput(v: string): Date | null {
@@ -115,6 +138,8 @@ export async function planDeadline(
     { label: '부서장 검토 요청 (승인 전일 때만)', at: new Date(department.getTime() + REVIEW_MINUTES * 60_000) },
     { label: '담당자 제출 요청 (승인 상태 포함)', at: new Date(department.getTime() + SUBMIT_MINUTES * 60_000) },
     { label: '대외 마감', at: external },
+    // RU-58 — 3단계를 쓰면 본부·총괄 기한도 같은 기준에서 따라 움직인다
+    ...(await rollupRows(department)),
   ]
     .sort((a, b) => a.at.getTime() - b.at.getTime())
     .map((r) => ({ label: r.label, at: toKstIso(r.at), atKo: ko(r.at), passed: r.at.getTime() <= now.getTime() }));

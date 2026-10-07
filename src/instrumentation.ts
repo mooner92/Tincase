@@ -35,6 +35,7 @@ export async function register() {
   const { mergePauseState } = await import('./server/merge/pause');
   const { runDueReminders } = await import('./server/notify/deadline-reminder');
   const { runDueMergeNotices } = await import('./server/notify/merge-notices');
+  const { runDueRollupNotices } = await import('./server/rollup/notices');
 
   /*
    * NT-32 — 기동할 때마다 **알림이 켜진 부서를 로그에 찍는다.**
@@ -116,6 +117,12 @@ export async function register() {
         }
       } catch (e) {
         console.error('[알림] 병합 안내 오류', e);
+      }
+      // RU-54~57 — 3단계 알림. 꺼져 있으면(RU-52) 아무것도 하지 않는다
+      try {
+        for (const r of await runDueRollupNotices()) console.log(`[알림] ${r.kind}: ${r.sent}/${r.targets}명`);
+      } catch (e) {
+        console.error('[알림] 3단계 알림 오류', e);
       }
     } catch (e) {
       // 스케줄러는 절대 죽지 않는다 — 다음 주기에 다시 시도한다

@@ -126,6 +126,8 @@ beforeAll(async () => {
   await mk(ID.hq2Lead, 'hq2', { divisionRole: 'lead' });
   await mk(ID.soloLead, 'solo', { divisionRole: 'lead' });
   await mk(ID.coord, 'solo', { isCoordinator: true });
+  // RU-52 — 3단계를 켠 상태에서 시험한다 (꺼졌을 때는 RU-T40이 따로 본다)
+  await prisma.orgRollupSetting.create({ data: { id: 'org', enabled: true } });
 }, 60_000);
 
 afterAll(() => {
@@ -327,5 +329,80 @@ d('TACP-21 위로 올린 제출', () => {
     const b = await (await hq.GET(nx(`/api/rollup/hq?isoKey=${isoKey}`, ID.hqLead))).json();
     expect(b.board.lastRun.stale).toBe(true);
     expect(b.board.units.find((u: { division: { nameKo: string } }) => u.division.nameKo === '실둘').report).toBeNull();
+  });
+});
+
+d('RU-50~58 단계 일정 · 스위치 · 본부장 승인', () => {
+  it('[RU-T40] ★ 3단계가 꺼져 있으면 [제출]·본부·전사 문이 닫힌다 — 운영자의 설정 화면만 열린다', async () => {
+    const { prisma } = await import('@/server/db');
+    await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { enabled: false } });
+    try {
+      expect((await submitUnit(ID.u1Lead)).status).toBe(404);
+      const hq = await import('@/app/api/rollup/hq/route');
+      expect((await hq.GET(nx(`/api/rollup/hq?isoKey=${isoKey}`, ID.hqLead))).status).toBe(404);
+      const org = await import('@/app/api/rollup/org/route');
+      expect((await org.GET(nx(`/api/rollup/org?isoKey=${isoKey}`, ID.coord))).status).toBe(404);
+      const { rollupNav } = await import('@/server/authz');
+      const { requireScope } = await import('@/server/authz');
+      const lead = await requireScope(new Headers({ 'x-test-identity': ID.hqLead }));
+      expect(await rollupNav(lead)).toEqual({ hqDesk: false, orgDesk: false });
+    } finally {
+      await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { enabled: true } });
+    }
+  });
+
+  it('[RU-T41] 단계 시각은 기준 시각에서 — 기준이 하루 당겨지면 기한도 하루 당겨진다 (WS-19와 함께)', async () => {
+    const { stagesFrom } = await import('@/server/rollup/schedule');
+    const normal = new Date('2026-10-08T05:00:00Z'); // 목 14:00 KST
+    const holiday = new Date('2026-10-07T05:00:00Z'); // 수 14:00 KST
+    const a = stagesFrom(normal, { unitDueMinutes: 60, hqDueMinutes: 120 });
+    const b = stagesFrom(holiday, { unitDueMinutes: 60, hqDueMinutes: 120 });
+    expect(a.hqDue.getTime() - b.hqDue.getTime()).toBe(24 * 3600_000);
+    expect(b.unitDue.toISOString()).toBe('2026-10-07T06:00:00.000Z'); // 수 15:00
+    expect(b.hqDue.toISOString()).toBe('2026-10-07T07:00:00.000Z'); // 수 16:00
+  });
+
+  it('[RU-T42] 단계 시각 설정 — 총괄 허용, 본부가 실·팀보다 이르면 422, 담당자 404', async () => {
+    const { PUT } = await import('@/app/api/rollup/org/settings/route');
+    const put = (who: string, body: unknown) =>
+      PUT(nx('/api/rollup/org/settings', who, { method: 'PUT', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }));
+    expect((await put(ID.coord, { unitDueMinutes: 60, hqDueMinutes: 180 })).status).toBe(200);
+    expect((await put(ID.coord, { unitDueMinutes: 120, hqDueMinutes: 60 })).status).toBe(422);
+    expect((await put(ID.hqLead, { hqDueMinutes: 240 })).status).toBe(404);
+    const { prisma } = await import('@/server/db');
+    expect((await prisma.orgRollupSetting.findUniqueOrThrow({ where: { id: 'org' } })).hqDueMinutes).toBe(180);
+  });
+
+  it('[RU-T43] ★ 본부장 승인 — head만, 같은 판은 한 번. 다시 이어 붙이면 「승인 뒤 바뀜」', async () => {
+    const { POST } = await import('@/app/api/rollup/hq/approve/route');
+    const approve = (who: string) => POST(nx('/api/rollup/hq/approve', who, jsonInit('POST', { isoKey })));
+    expect((await approve(ID.hqLead)).status).toBe(404); // 담당자는 자기가 만든 것을 승인하지 않는다
+    expect((await approve(ID.hqMember)).status).toBe(404);
+    const ok = await approve(ID.hqHead);
+    expect(ok.status).toBe(200);
+    expect((await ok.json()).unchanged).toBe(false);
+    expect((await (await approve(ID.hqHead)).json()).unchanged).toBe(true);
+
+    const { prisma } = await import('@/server/db');
+    const { hqApproval } = await import('@/server/rollup/notices');
+    const slot = await prisma.weekSlot.findUniqueOrThrow({ where: { isoKey } });
+    expect((await hqApproval(divId.hq, slot))?.changedAfter).toBe(false);
+    const hq = await import('@/app/api/rollup/hq/route');
+    await hq.POST(nx('/api/rollup/hq', ID.hqLead, jsonInit('POST', { isoKey })));
+    expect((await hqApproval(divId.hq, slot))?.changedAfter).toBe(true);
+  });
+
+  it('[RU-T44] 알림 문구 — 본부 담당자에게 제출·미제출, 총괄에게 도착·미도착, 할 일 한 줄', async () => {
+    const { hqCollectMessage, orgArrivalMessage, hqDueSoonMessage } = await import('@/server/rollup/notices');
+    const slot = { label: '10월 2주차', opensAt: new Date('2026-10-11T15:00:00Z'), year: 2026, month: 10, weekOfMonth: 2 } as never;
+    const p = { name: '담당', employeeNo: '1' };
+    const a = hqCollectMessage(p, slot, '기획경영본부', ['기획조정실', 'AI홍보전략실'], ['인사관리실']);
+    expect(a.subject).toContain('2/3곳 제출');
+    expect(a.contents).toContain('아직 1곳: 인사관리실');
+    expect(a.contents).toContain('본부장 검토');
+    const b = orgArrivalMessage(p, slot, ['기획경영본부'], ['환경평가본부', '임원실']);
+    expect(b.subject).toContain('1/3곳 도착');
+    expect(b.contents).toContain('아직 2곳: 환경평가본부·임원실');
+    expect(hqDueSoonMessage(p, slot, new Date('2026-10-15T07:00:00Z')).contents).toContain('16:00까지');
   });
 });

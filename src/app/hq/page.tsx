@@ -13,6 +13,9 @@ import { hqBoard } from '@/server/rollup/run';
 import { reportState } from '@/server/rollup/report';
 import { rollupSlot } from '@/server/rollup/slot';
 import { kst, runView, unitRow, weekOptions } from '@/server/rollup/view';
+import { hqApproval, stageLabels } from '@/server/rollup/notices';
+import { HqApprovalCard } from '@/components/HqApprovalCard';
+import { isReviewer } from '@/server/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +34,13 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
   }
   const { node, canWrite } = view;
   const slot = await rollupSlot(sp.isoKey ?? null);
-  const [board, weeks, nav] = await Promise.all([hqBoard(node, slot), weekOptions(slot), rollupNav(scope)]);
+  const [board, weeks, nav, stages, approval] = await Promise.all([
+    hqBoard(node, slot),
+    weekOptions(slot),
+    rollupNav(scope),
+    stageLabels(slot),
+    hqApproval(node.node.id, slot),
+  ]);
   const hqReport = canWrite ? await reportState(node.node.id, slot, 'hq') : null;
   const sent = board.units.filter((u) => u.report).length;
   const baseHref = canWrite ? '/hq' : `/hq?node=${encodeURIComponent(node.node.slug)}`;
@@ -57,6 +66,9 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
               {node.node.nameKo} <span className="text-muted">·</span> {slot.label}
             </h1>
             <p className="mt-1 text-sm text-body">
+              실·팀 제출 기한 {stages.unitDueKo} · 총괄 제출 기한 <strong className="text-ink">{stages.hqDueKo}</strong>
+            </p>
+            <p className="mt-0.5 text-sm text-body">
               산하 {board.units.length}개 단위 중 <strong className="text-ink">{sent}개 제출</strong>
               {!canWrite && <span className="ml-2 text-muted">— 읽기 전용 (총괄·운영자)</span>}
             </p>
@@ -91,6 +103,10 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
             title="아직 이어 붙이지 않았습니다"
             resultWord="본부본"
           />
+          {/* RU-55 — 본부장 승인. 버튼은 본부의 head에게만 (HM-47과 같은 규칙) */}
+          {board.lastRun?.status === 'succeeded' && (
+            <HqApprovalCard isoKey={slot.isoKey} approval={approval} canApprove={canWrite && isReviewer(scope)} />
+          )}
           {hqReport && (
             <ReportSubmitCard
               isoKey={slot.isoKey}

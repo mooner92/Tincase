@@ -74,3 +74,30 @@ export async function setOrgOrder(scope: Scope, input: OrderInput) {
     after: input,
   });
 }
+
+/** RU-51·52 — 3단계 사용 여부와 단계 간격. 간격은 그 주 부서 마감에서 센 분이다 */
+export const scheduleInput = z
+  .object({
+    enabled: z.boolean().optional(),
+    unitDueMinutes: z.number().int().min(0).max(48 * 60).optional(),
+    hqDueMinutes: z.number().int().min(0).max(72 * 60).optional(),
+  })
+  .strict();
+export type ScheduleInput = z.infer<typeof scheduleInput>;
+
+export async function setOrgSchedule(scope: Scope, input: ScheduleInput) {
+  const before = await loadOrgSetting();
+  const unit = input.unitDueMinutes ?? before.unitDueMinutes;
+  const hq = input.hqDueMinutes ?? before.hqDueMinutes;
+  // 본부가 실·팀보다 먼저 마감되면 본부는 이어 붙일 것이 없다
+  if (hq < unit) throw new HttpError(422, 'invalid_schedule', '본부 제출 기한은 실·팀 제출 기한보다 늦어야 합니다.');
+  await prisma.orgRollupSetting.upsert({
+    where: { id: 'org' },
+    create: { id: 'org', enabled: input.enabled ?? false, unitDueMinutes: unit, hqDueMinutes: hq, updatedBy: scope.user.id },
+    update: { ...(input.enabled !== undefined ? { enabled: input.enabled } : {}), unitDueMinutes: unit, hqDueMinutes: hq, updatedBy: scope.user.id },
+  });
+  await audit(scope.user.email, 'rollup_order', null, 'org:schedule', {
+    before: { enabled: before.enabled, unitDueMinutes: before.unitDueMinutes, hqDueMinutes: before.hqDueMinutes },
+    after: { enabled: input.enabled ?? before.enabled, unitDueMinutes: unit, hqDueMinutes: hq },
+  });
+}
