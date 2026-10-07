@@ -47,6 +47,28 @@ export async function loadSections(): Promise<OrgSection[]> {
   return prisma.orgSection.findMany({ orderBy: { sortOrder: 'asc' } });
 }
 
+/**
+ * RU-61 · RU-10 — 부서 → 섹션 제목. 본부 이어 붙이기도 전사와 **같은 제목**을 단다 — 본부장이 검토한 문서와
+ * 최종본의 섹션 제목이 갈라지지 않게(`기획경영본부(기획조정실)`). 섹션이 없는 부서는 부서 이름.
+ *
+ * loadSections와 달리 섹션 목록을 **만들지 않는다**: 본부의 [이어 붙이기]가 총괄의 섹션 설정을 건드리면 안 된다.
+ * 목록이 아직 비어 있으면 기본 13개를 이름으로 맞춰 본다 — 총괄이 처음 열 때 loadSections가 만들 제목과 같다.
+ * 같은 부서를 가리키는 섹션이 여럿이면 켜진 것 → 앞 순서.
+ */
+export async function sectionTitles(divisions: readonly { id: string; nameKo: string }[]): Promise<Map<string, string>> {
+  const rows = await prisma.orgSection.findMany({ orderBy: { sortOrder: 'asc' }, select: { divisionId: true, title: true, isActive: true } });
+  const byDivision = new Map<string, string>();
+  for (const s of [...rows.filter((r) => r.isActive), ...rows.filter((r) => !r.isActive)]) {
+    if (s.divisionId && !byDivision.has(s.divisionId)) byDivision.set(s.divisionId, s.title);
+  }
+  return new Map(
+    divisions.map((d) => [
+      d.id,
+      (rows.length ? byDivision.get(d.id) : DEFAULT_SECTIONS.find((s) => s.division === d.nameKo)?.title) ?? d.nameKo,
+    ]),
+  );
+}
+
 export type SectionSourceKind = 'tincase' | 'upload' | 'waiting_hq' | 'missing';
 
 export interface SectionSource {

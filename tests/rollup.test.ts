@@ -1,11 +1,20 @@
-// RU-10~15 — 본부·전사 이어 붙이기 엔진.
+// RU-10~18 — 본부 이어 붙이기. RU-12·16 — 단위로 읽기.
 //
-// 이 엔진의 약속은 하나다: **단위 안의 것은 하나도 바뀌지 않고, 순서만 바뀐다** (RU-11).
+// 본부 단계의 약속은 하나다: **단위 안의 것은 바뀌지 않고, 순서만 바뀐다** (RU-11) — 전사와 같은 정규화(RU-63)만 빼고.
 // 그래서 테스트도 거의 전부 「넣은 것 = 다시 읽은 것」의 꼴이다. 문서가 한글에서 열리는지는
 // 테스트로 볼 수 없으므로, 한글이 「손상」으로 판정하는 지점(문단 자기 기술 — HM-46)을 대신 본다.
+//
+// 2026-10-07 중복 제거 — 본부 단계가 실형 5열 표를 다시 그리던 composeRollupHwp를 빼고 전사와 같은 엔진
+// (orgdoc.ts composeOrgDocument, RU-62)을 쓴다. RU-T10~19는 그 엔진으로 옮겼다. ID는 요구가 같으면 그대로 두었다:
+//   T10 넣은 것 = 다시 읽은 것  → 이름은 섹션 제목, 빈 3번 표만 「특이사항 없음」(RU-63)
+//   T11 문단 자기 기술 · T12 구역 정의 하나 · T13 쪽 나누기 켬/끔 · T15 같은 입력 같은 파일
+//   T16 표 인스턴스 ID 겹치지 않음 · T17 부서명 줄 없는 옛 양식 · T19 「목록의 끝」 하나 → 같은 요구, 엔진만 바뀜
+//   T18 빈 단위도 자리를 지킨다 → 빈 표가 아니라 「특이사항 없음」이 든 섹션으로 (RU-63)
+//   T14 본부본 → 전사 펼치기 → **뺐다.** 전사는 본부본을 다시 읽지 않고 본부본에 든 실·팀 사본을 섹션으로 쓴다(sections.ts)
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
-import { composeRollupHwp, readUnits, titleBucket, type UnitBlock } from '@/lib/hwp/rollup';
+import { readUnits, titleBucket, type UnitBlock, type UnitRow } from '@/lib/hwp/rollup';
+import { composeOrgDocument } from '@/lib/hwp/orgdoc';
 
 const load = (f: string) => readFileSync(`fixtures/${f}`);
 const hasFix = (() => {
@@ -100,6 +109,19 @@ async function topParas(bytes: Buffer) {
   return out;
 }
 
+/** 본부 이어 붙이기와 같은 부름 — 사본 하나 = 섹션 하나 (server/rollup/run.ts runHqRollup) */
+const hq = (template: Buffer, sections: { title: string; source: Buffer }[], pageBreak = true) =>
+  composeOrgDocument(template, sections, { pageBreak });
+
+/** RU-63 — 비어 있던 3번 표는 「특이사항 없음」 한 줄이 된다 (실·팀이 적은 줄이 아니라 정규화가 넣은 줄) */
+const NOTES_NONE: UnitRow = { no: '3-1', content: '특이사항 없음', date: '', place: '', attendee: '', emphasis: false };
+
+/** 넣은 단위가 섹션으로 들어가면 이렇게 다시 읽혀야 한다 — 이름은 섹션 제목, 나머지는 그대로 */
+const asSection = (u: UnitBlock, title: string, hasNotesTable = true): UnitBlock => ({
+  name: title,
+  tables: { ...u.tables, notes: u.tables.notes.length || !hasNotesTable ? u.tables.notes : [NOTES_NONE] },
+});
+
 const plain = (units: UnitBlock[]) =>
   units.map((u) => ({
     name: u.name,
@@ -153,77 +175,81 @@ describe('RU-12 단위로 읽기', () => {
   });
 });
 
-describe('RU-10 이어 붙이기', () => {
-  t('[RU-T10] ★ 넣은 단위가 그대로 다시 읽힌다 — 이름·행·구분 번호·강조 (RU-11·14)', async () => {
-    const units = [
-      ...readUnits(await teamDoc('AI홍보전략실', A, { achievements: [false, true, false] }), 'x').units,
-      ...readUnits(await teamDoc('기획조정실', B, { notes: [true] }), 'x').units,
-      ...readUnits(load('sample-filled-w2.hwp'), '연구관리실').units,
-    ];
-    const out = composeRollupHwp(await namedTemplate('기획경영본부'), units, { pageBreak: true });
+describe('RU-10 본부 이어 붙이기 — 섹션 조립 엔진(RU-62)', () => {
+  t('[RU-T10] ★ 넣은 단위가 그대로 다시 읽힌다 — 행·구분 번호·강조, 이름은 섹션 제목 (RU-11·14)', async () => {
+    const a = await teamDoc('AI홍보전략실', A, { achievements: [false, true, false] });
+    const b = await teamDoc('기획조정실', B, { notes: [true] });
+    const w2 = load('sample-filled-w2.hwp'); // 사람이 3번 표를 지운 실제 제출본
+    const out = hq(await namedTemplate('기획경영본부'), [
+      { title: '기획경영본부(AI홍보전략실)', source: a },
+      { title: '기획경영본부(기획조정실)', source: b },
+      { title: '기획경영본부(연구관리실)', source: w2 },
+    ]);
     expect(out.warnings).toEqual([]);
+    expect(out.outcomes.map((o) => o.status)).toEqual(['copied', 'copied', 'copied']);
     const back = readUnits(out.bytes, 'x');
     expect(back.warnings).toEqual([]);
-    expect(plain(back.units)).toEqual(plain(units));
+    expect(plain(back.units)).toEqual(
+      plain([
+        asSection(readUnits(a, 'x').units[0], '기획경영본부(AI홍보전략실)'),
+        asSection(readUnits(b, 'x').units[0], '기획경영본부(기획조정실)'),
+        asSection(readUnits(w2, 'x').units[0], '기획경영본부(연구관리실)', false),
+      ]),
+    );
+    // 「공유」 행 수가 그대로 — 파란 서식은 원본 DocInfo에서 옮겨 온다(RU-62)
+    const shared = (u: UnitBlock) => u.tables.achievements.filter((r) => r.emphasis).length + u.tables.notes.filter((r) => r.emphasis).length;
+    expect(back.units.map(shared)).toEqual([1, 1, 0]);
   });
 
   t('[RU-T11] ★ 모든 문단의 자기 기술(글자·서식 구간·줄 수)이 맞는다 — 한글이 「손상」으로 보는 지점', async () => {
-    const units = [
-      ...readUnits(await teamDoc('AI홍보전략실', A, { achievements: [true, false, false] }), 'x').units,
-      ...readUnits(await teamDoc('국가기후위기적응센터 기후적응정책실', B), 'x').units,
+    const sections = [
+      { title: '기획경영본부(AI홍보전략실)', source: await teamDoc('AI홍보전략실', A, { achievements: [true, false, false] }) },
+      { title: '국가기후위기적응센터', source: await teamDoc('국가기후위기적응센터 기후적응정책실', B) },
     ];
     for (const tpl of [await namedTemplate('기획경영본부'), load('master-template.hwp')]) {
-      const out = composeRollupHwp(tpl, units, { pageBreak: true });
-      expect(await headerMismatches(out.bytes)).toEqual([]);
+      expect(await headerMismatches(hq(tpl, sections).bytes)).toEqual([]);
     }
   });
 
-  t('[RU-T12] 구역 정의는 첫 문단에만 — 단위 이름 줄에 컨트롤이 딸려 오지 않는다', async () => {
-    const units = readUnits(await teamDoc('AI홍보전략실', A), 'x').units;
-    const three = [units[0], { ...units[0], name: '기획조정실' }, { ...units[0], name: '연구관리실' }];
-    const p = await topParas(composeRollupHwp(await namedTemplate('기획경영본부'), three, { pageBreak: true }).bytes);
-    const heads = p.filter((x) => ['AI홍보전략실', '기획조정실', '연구관리실'].includes(x.text));
-    expect(heads.map((x) => x.text)).toEqual(['AI홍보전략실', '기획조정실', '연구관리실']);
+  t('[RU-T12] 구역 정의는 첫 문단에만 — 둘째 섹션부터의 제목 줄에 컨트롤이 딸려 오지 않는다', async () => {
+    const a = await teamDoc('AI홍보전략실', A);
+    const titles = ['기획경영본부(AI홍보전략실)', '기획경영본부(기획조정실)', '기획경영본부(연구관리실)'];
+    const p = await topParas(hq(await namedTemplate('기획경영본부'), titles.map((title) => ({ title, source: a }))).bytes);
+    const heads = p.filter((x) => titles.includes(x.text));
+    expect(heads.map((x) => x.text)).toEqual(titles);
     expect(heads[0].ctrls).toEqual(['secd', 'cold']);
     expect(heads[1].ctrls).toEqual([]);
     expect(heads[2].ctrls).toEqual([]);
     expect(p.filter((x) => x.ctrls.includes('secd'))).toHaveLength(1);
   });
 
-  t('[RU-T13] 쪽 나누기는 둘째 단위부터, 끄면 하나도 없다', async () => {
-    const u = readUnits(await teamDoc('AI홍보전략실', A), 'x').units[0];
-    const units = [u, { ...u, name: '기획조정실' }, { ...u, name: '연구관리실' }];
+  t('[RU-T13] 쪽 나누기는 둘째 섹션부터, 끄면(본부 설정 rollupPageBreak) 하나도 없다 (RU-18)', async () => {
+    const a = await teamDoc('AI홍보전략실', A);
+    const sections = ['AI홍보전략실', '기획조정실', '연구관리실'].map((title) => ({ title, source: a }));
     const tpl = await namedTemplate('기획경영본부');
-    const on = await topParas(composeRollupHwp(tpl, units, { pageBreak: true }).bytes);
+    const on = await topParas(hq(tpl, sections, true).bytes);
     expect(on.filter((x) => x.pageBreak).map((x) => x.text)).toEqual(['기획조정실', '연구관리실']);
-    const off = await topParas(composeRollupHwp(tpl, units, { pageBreak: false }).bytes);
+    const off = await topParas(hq(tpl, sections, false).bytes);
     expect(off.filter((x) => x.pageBreak)).toEqual([]);
+    // 기본값은 켬 — 전사 최종본은 옵션 없이 부른다(섹션마다 새 쪽, 분석 §3.1)
+    const dflt = await topParas(composeOrgDocument(tpl, sections).bytes);
+    expect(dflt.filter((x) => x.pageBreak).map((x) => x.text)).toEqual(['기획조정실', '연구관리실']);
   });
 
-  t('[RU-T14] 본부본을 다시 이어 붙이면 단위가 펼쳐진다 — 본부 → 전사', async () => {
-    const tpl = await namedTemplate('기획조정실');
-    const a = readUnits(await teamDoc('AI홍보전략실', A), 'x').units;
-    const b = readUnits(await teamDoc('기획조정실', B), 'x').units;
-    const hq = composeRollupHwp(tpl, [...a, ...b], { pageBreak: true }).bytes;
-    const solo = await teamDoc('글로벌대외협력단', B);
-    const org = composeRollupHwp(tpl, [...readUnits(hq, 'x').units, ...readUnits(solo, 'x').units], { pageBreak: true });
-    expect(readUnits(org.bytes, 'x').units.map((u) => u.name)).toEqual(['AI홍보전략실', '기획조정실', '글로벌대외협력단']);
-    expect(plain(readUnits(org.bytes, 'x').units)).toEqual(plain([...a, ...b, ...readUnits(solo, 'x').units]));
-  });
-
-  t('[RU-T15] 같은 입력이면 같은 파일 — 결과가 실행마다 달라지지 않는다', async () => {
-    const units = [...readUnits(await teamDoc('AI홍보전략실', A), 'x').units, ...readUnits(await teamDoc('기획조정실', B), 'x').units];
+  t('[RU-T15] 같은 입력이면 같은 파일 — RU-02 「바뀜」은 내용으로 판정하므로 결과가 실행마다 달라지면 안 된다', async () => {
+    const sections = [
+      { title: 'AI홍보전략실', source: await teamDoc('AI홍보전략실', A) },
+      { title: '기획조정실', source: await teamDoc('기획조정실', B) },
+    ];
     const tpl = await namedTemplate('기획경영본부');
-    const x = composeRollupHwp(tpl, units, { pageBreak: true }).bytes;
-    const y = composeRollupHwp(tpl, units, { pageBreak: true }).bytes;
-    expect(Buffer.compare(x, y)).toBe(0);
+    expect(Buffer.compare(hq(tpl, sections).bytes, hq(tpl, sections).bytes)).toBe(0);
   });
 
-  t('[RU-T16] 복제한 표는 저마다 다른 인스턴스 ID를 갖는다', async () => {
+  t('[RU-T16] 같은 양식에서 나온 표들도 저마다 다른 인스턴스 ID를 갖는다 (RU-17)', async () => {
     const { openHwp } = await import('@/lib/hwp/ole');
     const { parseRecords, TAG } = await import('@/lib/hwp/record');
-    const u = readUnits(await teamDoc('AI홍보전략실', A), 'x').units[0];
-    const out = composeRollupHwp(await namedTemplate('기획경영본부'), [u, { ...u, name: 'B' }, { ...u, name: 'C' }]);
+    const a = await teamDoc('AI홍보전략실', A);
+    const out = hq(await namedTemplate('기획경영본부'), ['A', 'B', 'C'].map((title) => ({ title, source: a })));
     const ids = parseRecords(openHwp(out.bytes).sections[0])
       .filter((r) => r.tag === TAG.CTRL_HEADER && r.data.toString('latin1', 0, 4) === ' lbt')
       .map((r) => r.data.readUInt32LE(36));
@@ -232,19 +258,29 @@ describe('RU-10 이어 붙이기', () => {
   });
 
   t('[RU-T17] 부서명 줄이 없는 옛 양식으로도 만든다 (첫 문단이 「1. 주요 업무실적」)', async () => {
-    const units = [...readUnits(await teamDoc('AI홍보전략실', A), 'x').units, ...readUnits(await teamDoc('기획조정실', B), 'x').units];
-    const out = composeRollupHwp(load('master-template.hwp'), units);
-    expect(plain(readUnits(out.bytes, 'x').units)).toEqual(plain(units));
+    const a = await teamDoc('AI홍보전략실', A);
+    const b = await teamDoc('기획조정실', B);
+    const out = hq(load('master-template.hwp'), [
+      { title: 'AI홍보전략실', source: a },
+      { title: '기획조정실', source: b },
+    ]);
+    expect(plain(readUnits(out.bytes, 'x').units)).toEqual(
+      plain([asSection(readUnits(a, 'x').units[0], 'AI홍보전략실'), asSection(readUnits(b, 'x').units[0], '기획조정실')]),
+    );
   });
 
-  t('[RU-T18] 행이 하나도 없는 단위도 자리를 지킨다 — 빈 표로 들어간다', async () => {
-    const empty: UnitBlock = { name: '인사관리실', tables: { achievements: [], plans: [], notes: [] } };
-    const a = readUnits(await teamDoc('AI홍보전략실', A), 'x').units;
-    const out = composeRollupHwp(await namedTemplate('기획경영본부'), [...a, empty]);
-    expect(readUnits(out.bytes, 'x').units.map((u) => u.name)).toEqual(['AI홍보전략실', '인사관리실']);
+  t('[RU-T18] 행이 하나도 없는 단위도 자리를 지킨다 — 제목과 표가 들어가고, 빈 3번 표는 「특이사항 없음」 (RU-63)', async () => {
+    const out = hq(await namedTemplate('기획경영본부'), [
+      { title: '기획경영본부(AI홍보전략실)', source: await teamDoc('AI홍보전략실', A) },
+      { title: '기획경영본부(인사관리실)', source: await teamDoc('인사관리실', { achievements: [], plans: [], notes: [] }) },
+    ]);
+    const back = readUnits(out.bytes, 'x').units;
+    expect(back.map((u) => u.name)).toEqual(['기획경영본부(AI홍보전략실)', '기획경영본부(인사관리실)']);
+    expect(plain([back[1]])).toEqual(plain([{ name: '기획경영본부(인사관리실)', tables: { achievements: [], plans: [], notes: [NOTES_NONE] } }]));
+    expect(out.outcomes[1].fixed).toContain('빈 3번 표에 「특이사항 없음」');
   });
 
-  t('[RU-T19] ★ 「목록의 끝」 표시는 본문 마지막 문단 하나에만 — 몸통을 복제해도 한가운데 생기지 않는다', async () => {
+  t('[RU-T19] ★ 「목록의 끝」 표시는 본문 마지막 문단 하나에만 — 섹션을 이어도 한가운데 생기지 않는다', async () => {
     const { openHwp } = await import('@/lib/hwp/ole');
     const { parseRecords, TAG } = await import('@/lib/hwp/record');
     /** 본문(레벨 0) 문단마다 최상위 비트가 켜졌나 */
@@ -254,23 +290,24 @@ describe('RU-10 이어 붙이기', () => {
         .map((r) => (r.data.readUInt32LE(0) & 0x80000000) !== 0);
     const lastOnly = (f: boolean[]) => f.length > 0 && f.filter(Boolean).length === 1 && f[f.length - 1];
 
-    // 전제 — 양식 자체가 그렇게 생겼다 (운영 양식 전부 같다, 2026-10-07 실측)
+    // 전제 — 양식도 원본도 그렇게 생겼다(운영 양식 전부 같다, 2026-10-07 실측). 원본마다 하나씩 들고 온다
     const tpl = await namedTemplate('기획경영본부');
+    const a = await teamDoc('AI홍보전략실', A);
     expect(lastOnly(flags(tpl))).toBe(true);
+    expect(lastOnly(flags(a))).toBe(true);
     expect(lastOnly(flags(load('master-template.hwp')))).toBe(true);
 
-    const u = readUnits(await teamDoc('AI홍보전략실', A), 'x').units[0];
-    const three = [u, { ...u, name: '기획조정실' }, { ...u, name: '연구관리실' }];
-    for (const [template, opts] of [
-      [tpl, { pageBreak: true }],
-      [tpl, { pageBreak: false }],
-      [load('master-template.hwp'), { pageBreak: true }], // 옛 양식 — HM-46이 문단을 하나 더 만든다
+    const three = ['AI홍보전략실', '기획조정실', '연구관리실'].map((title) => ({ title, source: a }));
+    for (const [template, pageBreak] of [
+      [tpl, true],
+      [tpl, false],
+      [load('master-template.hwp'), true], // 옛 양식 — 첫 문단이 「1. 주요 업무실적」
     ] as const) {
-      const f = flags(composeRollupHwp(template, three, opts).bytes);
+      const f = flags(hq(template, three, pageBreak).bytes);
       expect(f.filter(Boolean), '켜진 문단 수').toHaveLength(1);
       expect(f[f.length - 1], '마지막 문단').toBe(true);
     }
-    // 단위 하나면 양식과 같다
-    expect(lastOnly(flags(composeRollupHwp(tpl, [u]).bytes))).toBe(true);
+    // 섹션 하나여도 같다
+    expect(lastOnly(flags(hq(tpl, [three[0]]).bytes))).toBe(true);
   });
 });

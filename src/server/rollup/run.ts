@@ -1,7 +1,11 @@
-// RU-04·10·31·32 — 본부·전사 **이어 붙이기 실행**과 현황판.
+// RU-04·10·31 — 본부 **이어 붙이기 실행**과 본부 현황판. (전사 취합본은 orgrun.ts)
 //
 // 입력은 언제나 **보낸 사본**이다(ADR-0012). 하위의 병합본 원본을 직접 읽지 않는다 —
 // 그러면 아직 검토 중인 문서가 위로 새고, 하위가 다시 병합하는 순간 위의 결과가 몰래 바뀐다.
+//
+// 조립은 전사 취합과 **같은 엔진**(orgdoc.ts — RU-62)이다. 사본 하나가 섹션 하나가 되어 원래 꼴 그대로 들어간다.
+// 예전에는 본부 단계만 실형 5열 표로 다시 그렸다(composeRollupHwp) — 엔진이 둘이면 본부장이 검토한 꼴과
+// 최종본의 꼴이 갈라진다. 2026-10-07 중복 제거로 뺐다.
 import path from 'node:path';
 import type { ReportSubmission, RollupRun, WeekSlot } from '@prisma/client';
 import { prisma } from '../db';
@@ -9,12 +13,15 @@ import { audit } from '../audit';
 import { HttpError, type Scope } from '../authz';
 import { readStoredFile, sanitizeSegment, writeFileAtomic } from '../storage';
 import { logger } from '../logger';
-import { composeRollupHwp, readUnits, BUCKETS, type UnitBlock } from '@/lib/hwp/rollup';
+import { composeOrgDocument, type OrgSectionOutcome } from '@/lib/hwp/orgdoc';
+import { readUnits, BUCKETS } from '@/lib/hwp/rollup';
 import { currentReport, outputDiffers } from './report';
+import { sectionTitles } from './sections';
 import { type RollupNode, type TreeDivision } from './tree';
 
-/** 결과 화면이 쓰는 단위별 요약 (RollupRun.unitsJson) */
+/** 결과 화면이 쓰는 단위별 요약 (RollupRun.unitsJson) — 단위 하나 = 사본 하나 = 섹션 하나 */
 export interface RolledUnit {
+  /** 섹션 제목 — 전사와 같은 제목(RU-61), 섹션이 없는 부서는 부서 이름 */
   name: string;
   divisionId: string;
   submissionId: string;
@@ -23,21 +30,51 @@ export interface RolledUnit {
 }
 
 interface Input {
-  division: Pick<TreeDivision, 'id' | 'nameKo' | 'slug'>;
+  division: Pick<TreeDivision, 'id' | 'nameKo'>;
   report: ReportSubmission;
+  title: string;
+  bytes: Buffer;
 }
 
-function summarize(u: UnitBlock, input: Input): RolledUnit {
-  return {
-    name: u.name,
-    divisionId: input.division.id,
-    submissionId: input.report.id,
-    rows: { achievements: u.tables.achievements.length, plans: u.tables.plans.length, notes: u.tables.notes.length },
-    emphasis: BUCKETS.reduce((n, b) => n + u.tables[b].filter((r) => r.emphasis).length, 0),
-  };
+/**
+ * RU-19 — 화면용 행 수·「공유」 수. **보낸 사본**에서 센다(RU-16 단위로 읽기). 결과 문서에서 세지 않는 이유:
+ * RU-63 정규화가 빈 3번 표에 「특이사항 없음」을 넣는다 — 실·팀이 적은 줄이 아니다.
+ * 사본 하나에 단위가 여럿이면(지난 자료 적재본 등) 더한다.
+ * 읽기 경고(「표 밖의 글은 옮기지 않았습니다」)는 옮기지 않는다 — 이제 표 밖의 글도 원래 꼴 그대로 들어가서 사실이 아니다.
+ */
+function summarize(input: Input): RolledUnit {
+  const rows = { achievements: 0, plans: 0, notes: 0 };
+  let emphasis = 0;
+  try {
+    for (const u of readUnits(input.bytes, input.division.nameKo).units) {
+      for (const b of BUCKETS) {
+        rows[b] += u.tables[b].length;
+        emphasis += u.tables[b].filter((r) => r.emphasis).length;
+      }
+    }
+  } catch {
+    // 못 읽는 사본은 조립 결과(status 'failed')가 이미 경고로 말한다 — 여기서는 0으로 둔다
+  }
+  return { name: input.title, divisionId: input.division.id, submissionId: input.report.id, rows, emphasis };
 }
 
-/** 양식 — 본부 단계는 본부의 양식, 전사는 총괄 부서의 양식. 없으면 첫 단위의 것, 그다음 전사 표준 */
+/**
+ * RU-19 — 섹션 결과 → 「확인해 주세요」 줄들, 섹션 제목을 앞에 붙여서.
+ * 사본 맨 위의 부서명 줄을 뺀 것은 알리지 않는다 — 제목을 생성해 단 것이라(RU-61) 매번 뜨면 소음이다.
+ * 그 밖에 뺀 것(빨간 안내문, 지난 자료의 문서 제목 등)은 알린다 — 조용히 버리지 않는다(RU-16과 같은 원칙).
+ */
+function outcomeLines(o: OrgSectionOutcome, input: Input): string[] {
+  if (o.status === 'failed') return [`${o.title}: 옮기지 못했습니다 — ${o.error ?? '알 수 없는 오류'}`];
+  const ownTitle = new Set([input.division.nameKo, o.title].map((t) => `제목 「${t.slice(0, 30)}」`));
+  const dropped = o.dropped.filter((d) => !ownTitle.has(d));
+  return [
+    ...(o.fixed?.length ? [`${o.title}: 자동 수정 — ${o.fixed.join(' · ')}`] : []),
+    ...(o.warnings ?? []).map((w) => `${o.title}: ${w}`),
+    ...(dropped.length ? [`${o.title}: 뺀 것 — ${dropped.join(', ')}`] : []),
+  ];
+}
+
+/** 양식 — 본부의 양식. 없으면 기여 단위의 것, 그다음 전사 표준 */
 async function templateFor(ownerDivisionId: string | null, fallbackDivisionIds: string[]): Promise<Buffer> {
   for (const id of [ownerDivisionId, ...fallbackDivisionIds]) {
     if (!id) continue;
@@ -55,98 +92,74 @@ async function templateFor(ownerDivisionId: string | null, fallbackDivisionIds: 
   throw new HttpError(409, 'no_template', '이어 붙일 양식을 찾지 못했습니다. 부서 설정에서 양식을 등록하세요.');
 }
 
+const rollupRel = (dir: string[], slot: WeekSlot, runId: string) =>
+  path.join(...dir.map(sanitizeSegment), String(slot.year), `${sanitizeSegment(slot.label.replace(/ /g, '_'))}_${sanitizeSegment(runId)}.hwp`);
+
 /**
- * 공통 — 사본들을 순서대로 읽어 이어 붙이고 기록한다.
+ * RU-31 — 본부 이어 붙이기. 기여 단위 중 **제출한 것만**, 정한 순서대로 (RU-04·20).
  * 실패해도 RollupRun은 남는다(`failed` + 이유) — 「눌렀는데 아무 일도 없었다」가 없게.
+ * 사본 하나를 못 읽으면 그 섹션 자리에 실패를 적고 나머지는 만든다(HM-21 — 전사와 같다). 경고 맨 앞 줄이 그것을 말한다(RU-19).
  */
-async function execute(opts: {
-  scope: Scope;
-  level: 'hq' | 'org';
-  divisionId: string | null;
-  slot: WeekSlot;
-  inputs: Input[];
-  template: Buffer;
-  pageBreak: boolean;
-  outRel: (runId: string) => string;
-}): Promise<RollupRun> {
-  const { scope, level, divisionId, slot, inputs } = opts;
+export async function runHqRollup(scope: Scope, node: RollupNode, slot: WeekSlot): Promise<RollupRun> {
+  const submitted: { division: TreeDivision; report: ReportSubmission }[] = [];
+  for (const c of node.contributors) {
+    const report = await currentReport(c.id, slot.id, 'unit');
+    if (report) submitted.push({ division: c, report });
+  }
+  if (submitted.length === 0) throw new HttpError(409, 'nothing_submitted', '아직 제출한 실·팀이 없습니다.');
+  const template = await templateFor(node.node.id, node.contributors.map((c) => c.id));
+  const titles = await sectionTitles(submitted.map((s) => s.division));
+
   const run = await prisma.rollupRun.create({
     data: {
-      level,
-      divisionId,
+      level: 'hq',
+      divisionId: node.node.id,
       weekSlotId: slot.id,
       status: 'running',
-      inputIds: JSON.stringify(inputs.map((i) => i.report.id)),
+      inputIds: JSON.stringify(submitted.map((s) => s.report.id)),
       createdBy: scope.user.id,
     },
   });
   try {
-    const units: UnitBlock[] = [];
-    const summary: RolledUnit[] = [];
-    const warnings: string[] = [];
-    for (const input of inputs) {
-      const read = readUnits(await readStoredFile(input.report.filePath), input.division.nameKo);
-      warnings.push(...read.warnings);
-      // 실·팀 사본은 단위가 하나다 — 이름은 **부서 기록의 이름**을 쓴다. 지난 자료에는 옛 이름
-      // (「생물환경부」)이나 문서 제목이 맨 위에 있을 수 있다. 본부본은 문서 안의 단위 이름을 따른다
-      const blocks =
-        input.report.level === 'unit' && read.units.length === 1 ? [{ ...read.units[0], name: input.division.nameKo }] : read.units;
-      for (const u of blocks) {
-        units.push(u);
-        summary.push(summarize(u, input));
-      }
+    const inputs: Input[] = [];
+    for (const s of submitted) {
+      inputs.push({ ...s, title: titles.get(s.division.id) ?? s.division.nameKo, bytes: await readStoredFile(s.report.filePath) });
     }
-    const out = composeRollupHwp(opts.template, units, { pageBreak: opts.pageBreak });
-    warnings.push(...out.warnings);
-    const rel = opts.outRel(run.id);
+    // RU-10 — 사본 하나 = 섹션 하나. 원래 꼴 그대로(RU-62), 정규화(RU-63)도 전사와 같다 — 본부장이 본 것이 최종본에 들어간다
+    const out = composeOrgDocument(
+      template,
+      inputs.map((i) => ({ title: i.title, source: i.bytes })),
+      { pageBreak: node.node.rollupPageBreak },
+    );
+    // 못 옮긴 섹션을 맨 앞에 — 결과 카드는 「준비됨」이라도 이 줄을 먼저 읽어야 한다
+    const failedFirst = out.outcomes.map((o, k) => ({ o, k })).sort((a, b) => Number(b.o.status === 'failed') - Number(a.o.status === 'failed'));
+    const warnings = [...failedFirst.flatMap(({ o, k }) => outcomeLines(o, inputs[k])), ...out.warnings];
+    const rel = rollupRel(['divisions', node.node.slug, 'rollup'], slot, run.id);
     await writeFileAtomic(rel, out.bytes);
     const done = await prisma.rollupRun.update({
       where: { id: run.id },
       data: {
         status: 'succeeded',
         outputPath: rel,
-        unitsJson: JSON.stringify(summary),
+        unitsJson: JSON.stringify(inputs.map(summarize)),
         warnings: JSON.stringify(warnings),
         finishedAt: new Date(),
       },
     });
-    await audit(scope.user.email, 'rollup', divisionId, `rollup:${run.id}`, {
-      level,
+    await audit(scope.user.email, 'rollup', node.node.id, `rollup:${run.id}`, {
+      level: 'hq',
       isoKey: slot.isoKey,
       inputs: inputs.map((i) => ({ division: i.division.nameKo, report: i.report.id })),
     });
     return done;
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    logger.error({ err: message, runId: run.id, level }, '[취합] 이어 붙이기 실패');
+    logger.error({ err: message, runId: run.id, level: 'hq' }, '[취합] 이어 붙이기 실패');
     return prisma.rollupRun.update({
       where: { id: run.id },
       data: { status: 'failed', errorText: message, finishedAt: new Date() },
     });
   }
-}
-
-const rollupRel = (dir: string[], slot: WeekSlot, runId: string) =>
-  path.join(...dir.map(sanitizeSegment), String(slot.year), `${sanitizeSegment(slot.label.replace(/ /g, '_'))}_${sanitizeSegment(runId)}.hwp`);
-
-/** RU-31 — 본부 이어 붙이기. 기여 단위 중 **제출한 것만**, 정한 순서대로 (RU-04·20) */
-export async function runHqRollup(scope: Scope, node: RollupNode, slot: WeekSlot): Promise<RollupRun> {
-  const inputs: Input[] = [];
-  for (const c of node.contributors) {
-    const report = await currentReport(c.id, slot.id, 'unit');
-    if (report) inputs.push({ division: c, report });
-  }
-  if (inputs.length === 0) throw new HttpError(409, 'nothing_submitted', '아직 제출한 실·팀이 없습니다.');
-  return execute({
-    scope,
-    level: 'hq',
-    divisionId: node.node.id,
-    slot,
-    inputs,
-    template: await templateFor(node.node.id, node.contributors.map((c) => c.id)),
-    pageBreak: node.node.rollupPageBreak,
-    outRel: (id) => rollupRel(['divisions', node.node.slug, 'rollup'], slot, id),
-  });
 }
 
 // ── 현황판 ────────────────────────────────────────────────
