@@ -1,17 +1,17 @@
-// `/ops/monitor` — 전사 제출 현황 조직도. 운영자·총괄 전용 (TACP §3.2 readAll).
+// `/ops/monitor` — 전사 제출 현황. 운영자·총괄 전용 (TACP §3.2 readAll).
+//
+// PG-50 (2026-10-07) — 본판은 **본부별 팀 막대**다. 원형 조직도는 예쁘지만 「어느 팀이 몇 명 남았나」가
+// 안 읽혔다. 원형은 구석의 [조직도 그래프 ↗]로 새 탭에서 연다. 연속 미제출은 접어 둔다 — 매일 볼 것이 아니다.
 import { redirect, notFound } from 'next/navigation';
-import { prisma } from '@/server/db';
 import { getPageScope } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
-import { OrgMonitor } from '@/components/OrgMonitor';
+import { OrgProgress } from '@/components/OrgProgress';
 import { DeadlineScheduler } from '@/components/DeadlineScheduler';
 import { canScheduleDeadlines, rollupNav } from '@/server/authz';
-import { layoutOrg, type DivisionNode } from '@/lib/orgtree';
-import { ensureCurrentSlot, effectiveDeadline } from '@/server/worklog';
-import { toKstIso, formatDeadlineKo } from '@/lib/week';
-import { missingStreaks } from '@/server/streak';
+import { monitorData } from '@/server/monitor';
+import { groupByHq } from '@/lib/org-groups';
 import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
@@ -27,59 +27,9 @@ export default async function MonitorPage() {
   // 전 부서를 보는 화면이므로 readAll만 (총괄·운영자). 그 외에는 존재 은닉 (TACP-5)
   if (!scope.readAll) notFound();
 
-  const now = new Date();
-  const slot = await ensureCurrentSlot(now);
-
-  const divisions = await prisma.division.findMany({
-    orderBy: [{ parentKo: 'asc' }, { nameKo: 'asc' }],
-    include: {
-      users: {
-        where: { isActive: true },
-        orderBy: [{ divisionRole: 'desc' }, { sortOrder: 'asc' }, { name: 'asc' }],
-        select: { id: true, name: true, divisionRole: true, onRoster: true },
-      },
-    },
-  });
-  const subs = await prisma.submission.findMany({
-    where: { weekSlotId: slot.id, isLatest: true },
-    select: { userId: true, uploadedAt: true },
-  });
-  const byUser = new Map(subs.map((s) => [s.userId, s.uploadedAt]));
-
-  const nodes: DivisionNode[] = divisions.map((d) => ({
-    id: d.id,
-    name: d.nameKo,
-    slug: d.slug,
-    parent: d.parentKo,
-    isActive: d.isActive,
-    // R-002 실측 — 취합게시판 제출 이력이 있는 부서만 집계한다.
-    // 연구부서 17개(232명)는 애초에 주간 업무일지를 내지 않는다.
-    counted: d.boardStatus === 'confirmed',
-    people: d.users.map((u) => {
-      const at = byUser.get(u.id);
-      return {
-        id: u.id,
-        name: u.name,
-        submitted: !!at,
-        isLead: u.divisionRole === 'lead',
-        onRoster: u.onRoster,
-        submittedAtKst: at ? toKstIso(at).slice(5, 16).replace('T', ' ') : null,
-      };
-    }),
-  }));
-
-  // 트리에는 **실제로 업무일지를 내는 부서만** 그린다.
-  // 30개 전부 그리면 227명이 회색 점으로 원 둘레를 채워 정작 볼 것이 안 보인다.
-  // 제외된 부서는 숫자로만 알린다 (숨기는 게 아니라 그리지 않는 것).
-  const counted = nodes.filter((n) => n.counted);
-  const skipped = nodes.filter((n) => !n.counted);
-  const layout = layoutOrg(counted);
-  const excludedNote = {
-    divisions: skipped.length,
-    people: skipped.reduce((n, d) => n + d.people.filter((p) => p.onRoster).length, 0),
-  };
-  // 스냅샷이 못 보여주는 것 — "이번 주 안 냄"과 "3주 연속 안 냄"은 다른 얘기다
-  const streaks = await missingStreaks(now);
+  const data = await monitorData();
+  const groups = groupByHq(data.nodes);
+  const { slot, streaks } = data;
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -95,9 +45,9 @@ export default async function MonitorPage() {
         notifyEnabled={ps.scope.user.notifyEnabled}
       />
       <div className="mx-auto w-full max-w-[1120px] flex-1 px-5 pt-8 pb-8">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
           <h1 className="sr-only">전사 제출 현황</h1>
-          <div className="flex gap-2 text-sm">
+          <div className="flex flex-wrap gap-2 text-sm">
             {/* PG-49c — 총괄에게 `/ops`는 404다. 누르면 404가 나는 링크는 그리지 않는다 (TACP-9) */}
             {scope.user.isOperator && (
               <Link href="/ops" className="tab-pill">
@@ -114,72 +64,32 @@ export default async function MonitorPage() {
               CSV
             </a>
           </div>
+          {/* PG-50 — 원형 조직도는 구석에서 새 탭으로 */}
+          <a href="/ops/monitor/graph" target="_blank" rel="noopener" className="text-sm text-muted underline hover:text-ink">
+            조직도 그래프 ↗
+          </a>
         </div>
+
         {/* WS-19 · TACP-20 — 주차 마감은 총괄이 정한다. 바꿀 수 있는 사람에게만 그린다 (TACP-9) */}
         {canScheduleDeadlines(scope.user) && <DeadlineScheduler />}
-        <OrgMonitor
-          layout={layout}
+
+        <OrgProgress
+          groups={groups}
           weekLabel={slot.label}
-          capturedAtKst={toKstIso(now).slice(5, 16).replace('T', ' ') + ' 기준'}
-          deadlineText={formatDeadlineKo(effectiveDeadline(slot, divisions[0]))}
-          excludedNote={excludedNote}
+          deadlineText={data.deadlineText}
+          capturedAtKst={data.capturedAtKst}
+          excludedNote={data.excludedNote}
         />
 
-        {/*
-          PG-49b — **부서별 바로가기.** 조직도는 「누가 냈나」를 보여 주지만 「무엇을 냈나」로 가는
-          길이 없었다. 총괄은 전 부서를 읽을 수 있는데(TACP §3.3) 주소를 직접 쳐야 했다.
-          타 부서 화면은 읽기 전용이고, 들어가는 순간 감사 로그에 남는다(TACP-10).
-        */}
-        <section className="card mt-6 px-6 py-5">
-          <h2 className="text-sm font-semibold text-ink">
-            부서별 · {slot.label}
-            <span className="ml-2 text-xs font-normal text-muted">
-              수합 관리에서 제출물을 열어 보고, 보관함에서 병합본을 받습니다
-            </span>
-          </h2>
-          <ul className="mt-3 divide-y divide-hairline-soft text-sm">
-            {counted
-              .slice()
-              // Tincase를 쓰는 부서가 위 — 열어 볼 수 있는 곳이 먼저 보여야 한다
-              .sort((a, b) => Number(b.isActive) - Number(a.isActive) || a.name.localeCompare(b.name, 'ko'))
-              .map((d) => {
-                const roster = d.people.filter((p) => p.onRoster);
-                const done = roster.filter((p) => p.submitted).length;
-                return (
-                  <li key={d.id} className="flex flex-wrap items-center gap-x-4 gap-y-1 py-2">
-                    <span className="min-w-40 font-medium text-ink">{d.name}</span>
-                    {d.isActive ? (
-                      <>
-                        <span className="w-16 text-right tabular-nums text-body">
-                          {done}
-                          <span className="text-muted"> / {roster.length}</span>
-                        </span>
-                        <span className="flex gap-2">
-                          <Link href={`/${d.slug}/manage`} className="tab-pill">
-                            수합 관리
-                          </Link>
-                          <Link href={`/${d.slug}/archive`} className="tab-pill">
-                            보관함
-                          </Link>
-                        </span>
-                      </>
-                    ) : (
-                      <span className="text-xs text-muted-soft">Tincase 미사용 — 취합게시판으로 제출</span>
-                    )}
-                  </li>
-                );
-              })}
-          </ul>
-        </section>
-
+        {/* 연속 미제출 — 매주 볼 것은 아니어서 접어 둔다. 필요할 때 펼친다 */}
         {streaks.length > 0 && (
-          <section className="card mt-6 px-6 py-5">
-            <h2 className="text-sm font-semibold text-ink">
+          <details className="card mt-6 px-6 py-4">
+            <summary className="cursor-pointer text-sm font-semibold text-ink">
               연속 미제출 {streaks.length}명
               <span className="ml-2 text-xs font-normal text-muted">
-                마감이 지난 최근 {streaks[0].weeks}주차 기준 · 한 주 거른 것과 계속 안 내는 것은 다른 얘기입니다
+                마감이 지난 최근 {streaks[0].weeks}주차 기준 · 펼쳐서 보기
               </span>
-            </h2>
+            </summary>
             <ul className="mt-3 space-y-1.5 text-sm">
               {streaks.slice(0, 30).map((r) => (
                 <li key={r.userId} className="flex flex-wrap items-baseline gap-x-3">
@@ -201,7 +111,7 @@ export default async function MonitorPage() {
             {streaks.length > 30 && (
               <p className="mt-2 text-xs text-muted-soft">… 외 {streaks.length - 30}명. 전체는 CSV로 받으세요.</p>
             )}
-          </section>
+          </details>
         )}
       </div>
       <AppFooter />
