@@ -5,7 +5,6 @@
 //
 // 자료는 **데모 DB로 녹화한 것**이라 사람 이름·업무 내용이 전부 가공이다
 // (scripts/seed-demo.ts). 실제 화면을 찍어 두면 저장소가 public이라 개인정보가 남는다.
-import { redirect } from 'next/navigation';
 import { requirePageScope } from '@/server/page-scope';
 import { canScheduleDeadlines, rollupNav } from '@/server/authz';
 import { noticeFor } from '@/components/Notice';
@@ -311,7 +310,7 @@ export default async function GuidePage() {
                 <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">05</p>
                 <h3 className="display mt-1 text-lg">전 부서가 무엇을 냈는지 보기</h3>
                 <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
-                  <li>상단 메뉴 <strong className="text-ink">[전사 현황]</strong> — 이번 주 누가 냈는지 조직도로 보입니다</li>
+                  <li>상단 메뉴 <strong className="text-ink">[전사]</strong>의 <strong className="text-ink">[현황]</strong> 탭 — 이번 주 누가 냈는지 본부·팀별로 보입니다</li>
                   <li>아래 <strong className="text-ink">「부서별」</strong>에서 부서를 골라 [수합 관리] — 제출물을 열어 보고, 지난 주차도 고를 수 있습니다</li>
                   <li>[보관함] — 그 부서의 병합본(hwp)을 받습니다</li>
                   <li>다른 부서 화면은 <strong className="text-ink">보기만</strong> 됩니다. 들어간 기록은 남습니다</li>
@@ -326,7 +325,7 @@ export default async function GuidePage() {
                   날짜·시각·이유를 읽어 그 주 전 부서의 마감을 바꿉니다.
                 </p>
                 <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
-                  <li>[전사 현황] 맨 위 <strong className="text-ink">「주차 마감」</strong> → [마감 바꾸기]</li>
+                  <li>[전사] → [현황] 탭 맨 위 <strong className="text-ink">「주차 일정」</strong> → [마감 바꾸기]</li>
                   <li>
                     [공지 붙여넣기]에 요청 본문을 통째로 붙여넣습니다. 이런 문장을 읽습니다 —{' '}
                     <span className="text-muted">「제출 기한은 10월 07(수) 오후 3시입니다」</span>
@@ -344,6 +343,9 @@ export default async function GuidePage() {
                   <li>· 이미 지난 알림은 다시 나가지 않습니다. 대신 마감 당일 09:00 알림이 나갑니다</li>
                   <li>· 이미 지난 마감은 옮길 수 없습니다. 잘못 넣었으면 마감 전에 [평소대로 되돌리기]</li>
                   <li>· 붙여넣기가 안 되면 [직접 입력]에서 대외 마감 날짜·시각을 고르면 됩니다</li>
+                  {rnav.orgDesk && (
+                    <li>· 3단계 취합을 쓰면 실·팀·본부 제출 기한도 <strong className="text-body">같은 간격으로 따라 옮겨집니다</strong> — 「주차 일정」의 주차 줄에 바로 보입니다</li>
+                  )}
                 </ul>
               </section>
 
@@ -352,7 +354,7 @@ export default async function GuidePage() {
                   <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">08</p>
                   <h3 className="display mt-1 text-lg">전사 취합 — 한 번에 최종본 만들기</h3>
                   <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
-                    <li>상단 메뉴 <strong className="text-ink">[전사 취합]</strong> — 본부·부서마다 도착했는지, 본부 안에서는 실·팀이 어디까지 왔는지 보입니다</li>
+                    <li>상단 메뉴 <strong className="text-ink">[전사]</strong>의 <strong className="text-ink">[취합]</strong> 탭 — 본부·부서마다 도착했는지, 본부 안에서는 실·팀이 어디까지 왔는지 보입니다</li>
                     <li>본부 순서를 ▲▼로 정하고 [순서 저장] (한 번 정하면 매주 그대로)</li>
                     <li>[이어 붙이기] — 도착한 것만 순서대로 한 문서가 됩니다. [전사본 받기]로 받아 한글에서 다듬어 NAMS에 올립니다</li>
                     <li>늦게 도착한 곳이 있으면 [다시 이어 붙이기] — 「바뀜」 표시가 알려 줍니다</li>
@@ -360,6 +362,7 @@ export default async function GuidePage() {
                   <ul className="mt-4 space-y-1 text-sm text-muted">
                     <li>· 「Tincase 밖에서 내는 곳」은 아직 취합게시판으로 받는 부서입니다. 전사본에 직접 넣어 주세요</li>
                     <li>· 남의 부서를 대신 내지는 않습니다 — 안 온 곳은 「도착 전」으로 남습니다</li>
+                    <li>· 실·팀·본부 제출 기한은 [현황] 탭 「주차 일정」 카드의 <strong className="text-body">「3단계 취합」</strong>에서 「부서 마감 몇 시간 뒤」로 정합니다</li>
                   </ul>
                 </section>
               )}

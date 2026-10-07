@@ -1,22 +1,39 @@
 'use client';
-// WS-19 · TACP-20 — 주차 마감 예외를 **총괄이** 정한다 (전사 현황 위쪽).
+// WS-19l — 「주차 일정」 카드 하나 (「전사」 [현황] 탭 위쪽).
 //
-// 기획조정실 공지 본문을 그대로 붙여넣으면 날짜·시각·이유를 읽는다. 바로 바꾸지 않고
-// **먼저 보여 준다** — 어느 주차가 언제로 바뀌는지, 알림·병합이 언제 나가는지, 이미 지나서
-// 안 나가는 알림이 무엇인지. 전 부서의 마감이 한꺼번에 움직이는 일이라 한 번 더 보는 값이 크다.
+// 예전에는 카드가 둘이었다 — 전사 현황의 「주차 마감」(WS-19)과 전사 취합의 「단계 일정」(RU-51·52).
+// 둘 다 **그 주 부서 마감 하나**에서 출발하는데 화면이 갈라져 있어서, 총괄이 연휴 공지로 마감을 옮긴 뒤
+// 본부 기한이 따라왔는지 보려면 다른 화면에 가야 했고, 단계 일정 카드는 「바꾸려면 전사 현황으로」라는
+// 안내를 달고 있었다. 그래서 한 카드에 둔다: 주차마다 부서 마감 → 실·팀 기한 → 본부 기한이 한 줄에.
 //
+// 무엇을 그릴지는 서버가 정해 넘긴다(TACP-9·12):
+//   canSchedule  — 마감 바꾸기·되돌리기 (TACP-20 `canScheduleDeadlines`)
+//   rollup       — 3단계 스위치·단계 간격 (TACP-21 `canOpenOrgDesk`). null이면 그 부분을 그리지 않는다
+//
+// 마감 바꾸기: 기획조정실 공지 본문을 그대로 붙여넣으면 날짜·시각·이유를 읽는다. 바로 바꾸지 않고
+// **먼저 보여 준다** — 어느 주차가 언제로 바뀌는지, 알림·병합이 언제 나가는지, 이미 지나서 안 나가는
+// 알림이 무엇인지. 전 부서의 마감이 한꺼번에 움직이는 일이라 한 번 더 보는 값이 크다.
 // 확인 창(confirm)은 쓰지 않는다 — 미리보기 화면 자체가 확인 단계다.
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
-interface WeekRow {
+export interface WeekScheduleRow {
   isoKey: string;
   label: string;
   deadlineKo: string;
   overridden: boolean;
   note: string | null;
   passed: boolean;
+  /** RU-58 — 3단계를 쓸 때만. 부서 마감과 같은 날이면 시각만 */
+  stages: { unitDueKo: string; hqDueKo: string } | null;
 }
+
+export interface RollupScheduleSetting {
+  enabled: boolean;
+  unitDueMinutes: number;
+  hqDueMinutes: number;
+}
+
 interface Plan {
   isoKey: string;
   weekLabel: string;
@@ -33,9 +50,16 @@ interface Plan {
 const EXAMPLE = `★ 이번 주 주간업무 제출 기한은 10월 07(수) 오후 3시입니다. ★
 (연휴 일정으로 인한 마감 기한이니 양해 부탁드립니다.)`;
 
-export function DeadlineScheduler() {
+export function WeekSchedule({
+  weeks,
+  canSchedule,
+  rollup,
+}: {
+  weeks: WeekScheduleRow[];
+  canSchedule: boolean;
+  rollup: RollupScheduleSetting | null;
+}) {
   const router = useRouter();
-  const [weeks, setWeeks] = useState<WeekRow[] | null>(null);
   const [editing, setEditing] = useState(false);
   const [how, setHow] = useState<'paste' | 'manual'>('paste');
   const [notice, setNotice] = useState('');
@@ -45,15 +69,7 @@ export function DeadlineScheduler() {
   const [err, setErr] = useState<string | null>(null);
   const [done, setDone] = useState<string | null>(null);
   const [clearing, setClearing] = useState<string | null>(null);
-
-  const load = () =>
-    fetch('/api/schedule/deadline')
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
-      .then((b: { weeks: WeekRow[] }) => setWeeks(b.weeks))
-      .catch(() => setErr('마감 상태를 불러오지 못했습니다.'));
-  useEffect(() => {
-    load();
-  }, []);
+  const stagesOn = weeks.some((w) => w.stages);
 
   const post = async (mode: 'preview' | 'apply') => {
     setBusy(true);
@@ -78,8 +94,7 @@ export function DeadlineScheduler() {
         setPlan(null);
         setNotice('');
         setExternal('');
-        await load();
-        router.refresh();
+        router.refresh(); // 줄(부서 마감·단계 기한)은 서버가 다시 계산해 내려준다
       }
     } catch {
       setErr('네트워크 오류로 처리하지 못했습니다.');
@@ -98,7 +113,6 @@ export function DeadlineScheduler() {
       if (!r.ok) setErr(b.message ?? '되돌리지 못했습니다.');
       else {
         setDone(`${b.label} 마감을 평소대로(${b.normalKo}) 되돌렸습니다.`);
-        await load();
         router.refresh();
       }
     } catch {
@@ -110,29 +124,36 @@ export function DeadlineScheduler() {
   };
 
   return (
-    <section className="card mb-6 px-6 py-5">
+    <section id="schedule" className="card mb-6 scroll-mt-24 px-6 py-5">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-sm font-semibold text-ink">
-          주차 마감
+          주차 일정
           <span className="ml-2 text-xs font-normal text-muted">
-            연휴로 대외 마감이 바뀌면 여기서 바꿉니다 — 전 부서에 한꺼번에 적용됩니다
+            {canSchedule ? '연휴로 대외 마감이 바뀌면 여기서 바꿉니다 — ' : ''}
+            {stagesOn ? '전 부서 마감과 3단계 기한이 한꺼번에 따라갑니다' : '전 부서에 한꺼번에 적용됩니다'}
           </span>
         </h2>
-        {!editing && (
+        {canSchedule && !editing && (
           <button onClick={() => setEditing(true)} className="btn-secondary btn-sm">
             마감 바꾸기
           </button>
         )}
       </div>
 
-      {/* 이번 주 · 다음 주 */}
+      {/* 이번 주 · 다음 주 — 부서 마감 → (3단계) 실·팀 → 본부 */}
       <ul className="mt-3 space-y-1.5 text-sm">
-        {(weeks ?? []).map((w) => (
+        {weeks.map((w) => (
           <li key={w.isoKey} className="flex flex-wrap items-center gap-x-3 gap-y-1">
             <span className="w-24 text-muted">{w.label}</span>
             <span className={w.overridden ? 'font-semibold text-error' : 'text-ink'}>부서 마감 {w.deadlineKo}</span>
+            {w.stages && (
+              <span className="text-body">
+                <span className="text-muted">· 실·팀 제출</span> {w.stages.unitDueKo}{' '}
+                <span className="text-muted">· 본부 제출</span> {w.stages.hqDueKo}
+              </span>
+            )}
             {w.overridden && <span className="text-xs text-muted">· {w.note}</span>}
-            {w.overridden && !w.passed && clearing !== w.isoKey && (
+            {canSchedule && w.overridden && !w.passed && clearing !== w.isoKey && (
               <button onClick={() => setClearing(w.isoKey)} className="text-xs text-muted underline">
                 평소대로 되돌리기
               </button>
@@ -155,7 +176,7 @@ export function DeadlineScheduler() {
       {done && <p className="mt-3 rounded-lg bg-brand-soft px-3 py-2 text-sm text-ink">{done}</p>}
       {err && <p className="mt-3 rounded-lg bg-error-soft px-3 py-2 text-sm text-error">{err}</p>}
 
-      {editing && (
+      {canSchedule && editing && (
         <div className="mt-4 border-t border-hairline-soft pt-4">
           <div className="flex gap-2 text-sm">
             <button
@@ -269,6 +290,128 @@ export function DeadlineScheduler() {
           )}
         </div>
       )}
+
+      {rollup && <RollupStages {...rollup} />}
     </section>
+  );
+}
+
+// ── RU-51·52 — 3단계 스위치와 단계 간격 ─────────────────────────────────────
+// 시각은 「그 주 부서 마감 + 몇 분」으로 정한다 — 연휴로 부서 마감이 옮겨지면(위의 마감 바꾸기) 단계 기한도
+// 같은 간격으로 따라간다. 날짜를 직접 적지 않는 이유다. 계산된 시각은 위 주차 줄에 보인다.
+
+const OPTIONS = [30, 60, 90, 120, 180, 240, 1440];
+const offsetLabel = (m: number) =>
+  m === 1440 ? '다음 날 같은 시각' : m % 60 === 0 ? `${m / 60}시간 뒤` : `${Math.floor(m / 60) ? `${Math.floor(m / 60)}시간 ` : ''}${m % 60}분 뒤`;
+
+function RollupStages({ enabled, unitDueMinutes, hqDueMinutes }: RollupScheduleSetting) {
+  const router = useRouter();
+  const [unit, setUnit] = useState(unitDueMinutes);
+  const [hq, setHq] = useState(hqDueMinutes);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  /** 끄기는 한 번 더 묻는다 — 끄면 총괄에게서도 이 부분이 사라지고, 다시 켜는 것은 운영자만 한다 (RU-52) */
+  const [turningOff, setTurningOff] = useState(false);
+  const dirty = unit !== unitDueMinutes || hq !== hqDueMinutes;
+
+  const save = async (body: Record<string, unknown>) => {
+    setBusy(true);
+    setErr(null);
+    try {
+      const r = await fetch('/api/rollup/org/settings', {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const b = await r.json().catch(() => ({}));
+      if (!r.ok) setErr(b.message ?? '저장하지 못했습니다.');
+      else router.refresh(); // 주차 줄의 단계 기한·탭·메뉴가 같이 바뀐다
+    } catch {
+      setErr('네트워크 오류로 저장하지 못했습니다.');
+    } finally {
+      setBusy(false);
+      setTurningOff(false);
+    }
+  };
+  const opts = (cur: number) => [...new Set([...OPTIONS, cur])].sort((a, b) => a - b);
+
+  return (
+    <div className="mt-4 border-t border-hairline-soft pt-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold text-ink">
+          3단계 취합
+          <span className="ml-2 text-xs font-normal text-muted">실·팀 → 본부 → 총괄 제출 기한 · 부서 마감에서 셉니다</span>
+        </h3>
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={enabled}
+            disabled={busy || turningOff}
+            onChange={(e) => (e.target.checked ? save({ enabled: true }) : setTurningOff(true))}
+          />
+          <span className={enabled ? 'font-semibold text-success' : 'font-semibold text-warning'}>
+            {enabled ? '사용 중' : '꺼짐'}
+          </span>
+        </label>
+      </div>
+
+      {turningOff && (
+        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-warning-soft px-3 py-2 text-sm text-ink">
+          <span>끄면 실·팀의 [제출] 카드, 본부 취합·[취합] 탭, 단계 알림이 모두 사라집니다. 다시 켜는 것은 운영자만 할 수 있습니다.</span>
+          <button onClick={() => save({ enabled: false })} disabled={busy} className="btn-secondary btn-sm">
+            끄기
+          </button>
+          <button onClick={() => setTurningOff(false)} className="text-xs text-muted underline">
+            아니오
+          </button>
+        </div>
+      )}
+      {!enabled && (
+        <p className="mt-2 rounded-lg bg-warning-soft px-3 py-2 text-sm text-ink">
+          꺼져 있습니다 — 실·팀의 [제출] 카드, 본부 취합·[취합] 탭, 단계 알림이 아무에게도 보이지 않습니다. 켜는 순간 나타납니다.
+        </p>
+      )}
+
+      <div className="mt-3 space-y-2 text-sm">
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="w-36 text-muted">실·팀 → 위로 제출</span>
+          <select
+            value={unit}
+            onChange={(e) => setUnit(Number(e.target.value))}
+            className="rounded-lg border border-border-strong px-2 py-1 text-sm"
+            aria-label="실·팀 제출 기한"
+          >
+            {opts(unit).map((m) => (
+              <option key={m} value={m}>
+                부서 마감 {offsetLabel(m)}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs text-muted">본부 담당자에게 산하 제출 현황 알림</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <span className="w-36 text-muted">본부 → 총괄 제출</span>
+          <select
+            value={hq}
+            onChange={(e) => setHq(Number(e.target.value))}
+            className="rounded-lg border border-border-strong px-2 py-1 text-sm"
+            aria-label="본부 제출 기한"
+          >
+            {opts(hq).map((m) => (
+              <option key={m} value={m}>
+                부서 마감 {offsetLabel(m)}
+              </option>
+            ))}
+          </select>
+          <span className="text-xs text-muted">15분 전 본부 재촉 · 기한에 총괄 도착 알림</span>
+        </div>
+      </div>
+      {dirty && (
+        <button onClick={() => save({ unitDueMinutes: unit, hqDueMinutes: hq })} disabled={busy} className="btn-secondary btn-sm mt-3">
+          {busy ? '저장 중…' : '단계 시각 저장'}
+        </button>
+      )}
+      {err && <p className="mt-3 rounded-lg bg-error-soft px-3 py-2 text-sm text-error">{err}</p>}
+    </div>
   );
 }

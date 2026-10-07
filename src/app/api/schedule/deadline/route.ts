@@ -1,6 +1,6 @@
 // /api/schedule/deadline — 주차 마감 예외 (WS-19 · TACP-20). 총괄·운영자 전용.
 //
-//   GET                          이번 주·다음 주 마감 상태
+//   GET                          이번 주·다음 주 마감 상태 — 3단계를 쓰면 실·팀·본부 제출 기한도 (WS-19l · RU-58)
 //   POST {mode:'preview', …}     미리보기 — 쓰지 않는다
 //   POST {mode:'apply', …}       적용 — 서버가 다시 계산해서 쓴다
 //   DELETE ?isoKey=              해제 — 평소 마감으로

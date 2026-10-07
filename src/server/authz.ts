@@ -151,8 +151,16 @@ export async function requireSubmitter(headers: Headers): Promise<Scope> {
  */
 export async function requireOperator(headers: Headers): Promise<Scope> {
   const scope = await requireScope(headers);
-  if (!scope.user.isOperator) throw notFound();
+  if (!canOperate(scope.user)) throw notFound();
   return scope;
+}
+
+/**
+ * 운영(`/ops`)의 문 — 화면이 「← 운영」 같은 길을 그릴지도 이것으로 정한다 (TACP-9).
+ * 페이지가 `user.isOperator`를 직접 읽으면 문과 길이 따로 적힌다 (TACP-12).
+ */
+export function canOperate(user: Pick<User, 'isOperator'>): boolean {
+  return user.isOperator;
 }
 
 /**
@@ -434,6 +442,22 @@ export async function requireOrgRollup(headers: Headers): Promise<Scope> {
   const scope = await requireScope(headers);
   if (!(await canOpenOrgDesk(scope))) throw notFound();
   return scope;
+}
+
+/**
+ * PG-49 — 「전사」 [현황](`/ops/monitor`)의 문. 전 부서를 한 화면에 늘어놓으므로 readAll만 (TACP-5).
+ * 페이지와 탭 막대가 이 하나를 본다 — 탭은 있는데 누르면 404인 일이 없게 (TACP-9).
+ */
+export function canOpenMonitor(scope: Pick<Scope, 'readAll'>): boolean {
+  return scope.readAll;
+}
+
+/**
+ * PG-49e — 「전사」 탭 막대에 그릴 탭. **탭마다 그 화면의 문과 같은 판정**이다:
+ * [현황] = `canOpenMonitor`, [취합] = `canOpenOrgDesk`(3단계가 꺼져 있으면 총괄에게도 없다 — RU-52).
+ */
+export async function orgTabs(scope: Scope): Promise<{ monitor: boolean; org: boolean }> {
+  return { monitor: canOpenMonitor(scope), org: await canOpenOrgDesk(scope) };
 }
 
 /** 메뉴용 — 이 사람에게 본부 취합 화면이 있는가 (TACP-9: 할 수 없는 곳으로 가는 길은 그리지 않는다) */

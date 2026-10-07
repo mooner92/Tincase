@@ -74,9 +74,10 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {scope.readAll && (
+            {/* PG-49e — 「전사」 메뉴의 [취합] 탭으로 돌아가는 길. 그 탭의 문(canOpenOrgDesk)과 같은 판정으로만 그린다 (TACP-9) */}
+            {nav.orgDesk && (
               <Link href="/org" className="tab-pill">
-                ← 전사 취합
+                ← 전사 · 취합
               </Link>
             )}
             <WeekPicker weeks={weeks} selected={slot.isoKey} baseHref={baseHref} />

@@ -943,4 +943,74 @@ d('WS-19 주차 마감 예외 — 총괄이 정한다', () => {
     const res = await post(ID.coord, { mode: 'preview', noticeText: '주간업무 작성 요청드립니다.' });
     expect(res.status).toBe(422);
   });
+
+  // WS-19l · RU-58 — 「주차 일정」 카드 하나: 주차 줄마다 부서 마감과 (3단계를 쓰면) 단계 기한이 같이 있다
+  type Week = { isoKey: string; deadline: string; stages: { unitDue: string; hqDue: string; unitDueKo: string } | null };
+  const weeks = async (who: string): Promise<Week[]> => {
+    const { GET } = await route();
+    const res = await GET(nx('/api/schedule/deadline', who));
+    expect(res.status).toBe(200);
+    return (await res.json()).weeks;
+  };
+  const gap = (a: string, b: string) => (new Date(b).getTime() - new Date(a).getTime()) / 60_000;
+
+  it('[WS-T74] 3단계가 꺼져 있으면 줄에 단계 기한이 없다 — 아무도 쓰지 않는 기한을 그리지 않는다 (RU-52)', async () => {
+    const { prisma } = await import('@/server/db');
+    await prisma.orgRollupSetting.deleteMany({});
+    const ws = await weeks(ID.coord);
+    expect(ws).toHaveLength(2);
+    expect(ws.map((w) => w.stages)).toEqual([null, null]);
+  });
+
+  it('[WS-T75] ★ 켜면 줄마다 부서 마감 + 간격 — 마감을 옮기면 단계 기한도 같은 간격으로 따라간다', async () => {
+    const { prisma } = await import('@/server/db');
+    await prisma.orgRollupSetting.upsert({
+      where: { id: 'org' },
+      create: { id: 'org', enabled: true, unitDueMinutes: 60, hqDueMinutes: 120 },
+      update: { enabled: true, unitDueMinutes: 60, hqDueMinutes: 120 },
+    });
+    try {
+      const before = await weeks(ID.op);
+      for (const w of before) {
+        expect(gap(w.deadline, w.stages!.unitDue), w.isoKey).toBe(60);
+        expect(gap(w.deadline, w.stages!.hqDue), w.isoKey).toBe(120);
+      }
+      // 이 스위트의 부서 마감은 일 23:59 — 한 시간 뒤는 다음 날이라 날짜까지 적는다
+      expect(before[0].stages!.unitDueKo).toMatch(/월 \d+일\(월\) 00:59$/);
+
+      // 총괄이 마감을 옮긴다 → 그 주 줄의 단계 기한이 같은 간격으로 옮겨진다
+      const applied = await post(ID.coord, { mode: 'apply', external: await externalIn(50) });
+      expect(applied.status).toBe(200);
+      const { plan } = await applied.json();
+      const moved = (await weeks(ID.coord)).find((w) => w.isoKey === plan.isoKey)!;
+      expect(moved.deadline).toBe(plan.department);
+      expect(gap(moved.deadline, moved.stages!.unitDue)).toBe(60);
+      expect(gap(moved.deadline, moved.stages!.hqDue)).toBe(120);
+      // 미리보기(RU-58)와 같은 시각이다 — 같은 기준 시각에서 센다
+      expect(plan.schedule.map((r: { at: string }) => r.at)).toContain(moved.stages!.hqDue);
+    } finally {
+      await prisma.weekSlot.updateMany({ data: { deadlineDowOverride: null, deadlineTimeOverride: null, deadlineNote: null } });
+      await prisma.orgRollupSetting.deleteMany({});
+    }
+  });
+
+  it('[PG-T79] ★ 「전사」 탭 — [현황]은 readAll, [취합]은 운영자 늘·총괄은 3단계를 켠 뒤에만. 담당자에게는 둘 다 없다', async () => {
+    const { orgTabs, canOperate, requireScope } = await import('@/server/authz');
+    const { prisma } = await import('@/server/db');
+    const as = (who: string) => requireScope(new Headers({ 'x-test-identity': who }));
+    const [coord, op, lead] = [await as(ID.coord), await as(ID.op), await as(ID.aLead)];
+    await prisma.orgRollupSetting.deleteMany({}); // 기본 = 꺼짐
+    expect(await orgTabs(coord)).toEqual({ monitor: true, org: false });
+    expect(await orgTabs(op)).toEqual({ monitor: true, org: true });
+    expect(await orgTabs(lead)).toEqual({ monitor: false, org: false });
+    await prisma.orgRollupSetting.create({ data: { id: 'org', enabled: true } });
+    try {
+      expect(await orgTabs(coord)).toEqual({ monitor: true, org: true });
+      expect(await orgTabs(lead)).toEqual({ monitor: false, org: false });
+    } finally {
+      await prisma.orgRollupSetting.deleteMany({});
+    }
+    // PG-49c — 「← 운영」은 운영자에게만
+    expect([canOperate(op.user), canOperate(coord.user)]).toEqual([true, false]);
+  });
 });

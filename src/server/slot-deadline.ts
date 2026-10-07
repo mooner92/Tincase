@@ -240,12 +240,22 @@ export async function clearDeadline(scope: Scope, isoKey: string, now: Date = ne
   return { isoKey, label: slot.label, normal: toKstIso(normal), normalKo: ko(normal) };
 }
 
-/** 화면 첫 상태 — 이번 주와 다음 주 */
+/**
+ * 「주차 일정」 카드의 줄 — 이번 주와 다음 주 (WS-19l).
+ *
+ * 3단계를 쓰면(RU-52) 줄마다 **실·팀·본부 제출 기한**을 같이 싣는다(RU-58). 부서 마감과 단계 기한이 따로 다른
+ * 카드에 있으면 총괄이 마감을 옮긴 뒤 「본부 기한도 따라왔나」를 다른 화면에 가서 확인해야 했다 — 같은 줄에 두면
+ * 옮기는 순간 같이 바뀌는 것이 보인다. 꺼져 있으면 `stages`는 null — 아무도 쓰지 않는 기한을 그리지 않는다.
+ */
 export async function deadlineStatus(now: Date = new Date()) {
-  const ps = await policies();
+  // 순환 import를 피한다 — rollup/schedule이 이 파일의 weekAnchor를 쓴다 (rollupRows와 같은 이유)
+  const { loadOrgSetting } = await import('./rollup/tree');
+  const { stageCells } = await import('./rollup/schedule');
+  const [ps, setting] = await Promise.all([policies(), loadOrgSetting()]);
   const thisWeek = await ensureCurrentSlot(now);
   const next = await ensureCurrentSlot(new Date(now.getTime() + 7 * 86400_000));
   const row = (s: WeekSlot) => {
+    // RU-50 — 기준 시각 = 가장 이른 부서 마감(weekAnchor와 같은 식). 단계 기한은 여기서 센다
     const d = earliest(s, ps);
     return {
       isoKey: s.isoKey,
@@ -255,7 +265,10 @@ export async function deadlineStatus(now: Date = new Date()) {
       overridden: s.deadlineDowOverride !== null,
       note: s.deadlineNote,
       passed: d.getTime() <= now.getTime(),
+      stages: setting.enabled ? stageCells(d, setting) : null,
     };
   };
   return { weeks: [row(thisWeek), row(next)] };
 }
+
+export type DeadlineWeekRow = Awaited<ReturnType<typeof deadlineStatus>>['weeks'][number];

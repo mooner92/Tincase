@@ -27,11 +27,11 @@ export function AppHeader({
   userName: string;
   isLead: boolean;
   isOperator: boolean;
-  /** PG-49 — 전 부서 읽기 (총괄·운영자). 켜지면 `전사 현황` 메뉴가 생긴다 */
+  /** PG-49 — 전 부서 읽기 (총괄·운영자). 켜지면 `전사` 메뉴가 생긴다 ([현황] 탭) */
   readAll?: boolean;
   /** RU-31 — `본부 취합` 메뉴 (TACP-21) */
   hqDesk?: boolean;
-  /** RU-32 — `전사 취합` 메뉴 (TACP-21) */
+  /** RU-32 · PG-49e — `전사` 메뉴의 [취합] 탭 (TACP-21) */
   orgDesk?: boolean;
   viaCloudflare: boolean;
   /** NT-21 — 본인 알림 받기 상태. 드롭다운에서 바로 끌 수 있다 */

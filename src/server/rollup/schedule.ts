@@ -4,6 +4,7 @@
 // 단계마다 따로 시각을 적어 두면 옮길 때 하나를 빠뜨린다 (2026-10-07 요청).
 import type { WeekSlot } from '@prisma/client';
 import { weekAnchor } from '../slot-deadline';
+import { formatDeadlineKo, toKstIso } from '@/lib/week';
 import { loadOrgSetting } from './tree';
 
 export interface StageTimes {
@@ -22,6 +23,27 @@ export function stagesFrom(anchor: Date, s: { unitDueMinutes: number; hqDueMinut
     unitDue: new Date(anchor.getTime() + s.unitDueMinutes * 60_000),
     hqDue: new Date(anchor.getTime() + s.hqDueMinutes * 60_000),
   };
+}
+
+/** 「주차 일정」 카드 한 줄의 단계 기한 (KST ISO + 글자) */
+export interface StageCells {
+  unitDue: string;
+  unitDueKo: string;
+  hqDue: string;
+  hqDueKo: string;
+}
+
+/**
+ * WS-19l · RU-58 — 「주차 일정」 카드의 주차 한 줄에 붙이는 단계 기한. 순수 — 기준 시각(그 주 부서 마감)에서 센다.
+ *
+ * 부서 마감과 **같은 날이면 시각만** 적는다. 대개 같은 날 한두 시간 뒤라 날짜를 세 번 되풀이하면
+ * 정작 달라지는 숫자(시각)가 묻힌다. 날이 넘어가면(「다음 날 같은 시각」) 날짜까지 적는다 — 그때는 날짜가 정보다.
+ */
+export function stageCells(anchor: Date, s: { unitDueMinutes: number; hqDueMinutes: number }): StageCells {
+  const t = stagesFrom(anchor, s);
+  const day = (d: Date) => toKstIso(d).slice(0, 10);
+  const ko = (d: Date) => (day(d) === day(anchor) ? toKstIso(d).slice(11, 16) : formatDeadlineKo(d));
+  return { unitDue: toKstIso(t.unitDue), unitDueKo: ko(t.unitDue), hqDue: toKstIso(t.hqDue), hqDueKo: ko(t.hqDue) };
 }
 
 export async function stageTimes(slot: WeekSlot): Promise<StageTimes & { enabled: boolean; unitDueMinutes: number; hqDueMinutes: number }> {
