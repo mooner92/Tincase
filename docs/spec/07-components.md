@@ -350,6 +350,7 @@ interface FileDrawerProps {
 | CP-79 | 422 응답의 `problems[]`를 행 번호와 함께 표시 |
 | CP-80 | 절대 규칙 안내 패널 상시 노출 (PG-26 문구) |
 | CP-81 | 저장 전 이탈 시 confirm (편집 유실 방지) |
+| HM-48 | 「정렬」 카드 — [제출자 순 / 일자 순], 일자 순이면 「날짜 없는 줄」 [뒤 / 앞]. 고르는 칸마다 설명 한 줄 |
 
 ### `<TemplateManager>` · **Client**
 

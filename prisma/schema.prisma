@@ -32,6 +32,13 @@ model Division {
   mergeDropNotes  Boolean @default(true) // 특이사항이 비면 3번 표 삭제
   mergeRuleText   String  @default("") // 담당자가 쓰는 자연어 지침 — 모델에 그대로 전달
   /**
+   * HM-48 — 표 안의 줄 순서. "input" 제출자 순 | "date" 일자 오름차순 (분류를 쓰면 분류 안에서).
+   * 기본이 input인 이유: 이미 쓰는 부서의 다음 주 병합본이 말없이 바뀌면 안 된다
+   */
+  mergeSort       String  @default("input")
+  /// HM-48 — 날짜를 못 읽은 줄(상시·계속·집계성)의 자리. "last" | "first". mergeSort가 date일 때만 쓰인다
+  mergeUndated    String  @default("last")
+  /**
    * HM-33 — 「내용이 없다」는 뜻으로 보이는 낱말. 쉼표 구분. **비면 검사하지 않는다.**
    * 기본이 꺼짐인 이유: 이건 한 부서에서 실제로 겪은 일이라 전사 규칙이 아니다.
    * 찾기만 하고 **지우지 않는다** — 담당자 알림과 화면에 「확인해 주세요」로만 뜬다
