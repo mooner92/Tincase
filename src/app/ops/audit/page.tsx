@@ -10,6 +10,7 @@ import Link from 'next/link';
 import { prisma } from '@/server/db';
 import { getPageScope } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
+import { rollupNav } from '@/server/authz';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
 import { toKstIso } from '@/lib/week';
@@ -93,6 +94,7 @@ export default async function AuditPage({
         isLead={scope.isManager || scope.readAll}
         isOperator={scope.user.isOperator}
         readAll={scope.readAll}
+        {...(await rollupNav(scope))}
         viaCloudflare={scope.source === 'cloudflare'}
         notifyEnabled={ps.scope.user.notifyEnabled}
       />

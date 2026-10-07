@@ -52,6 +52,22 @@ model Division {
    */
   notifyEnabled Boolean @default(false)
 
+  /**
+   * RU-20 — **이 단위 아래**(본부라면 자기 문서 + 산하 실·팀)를 이어 붙이는 순서. Division.id의 JSON 배열.
+   * 목록에 없는 단위는 ERP 순서(등록 순서)로 뒤에 붙는다 — 새로 켠 실이 순서에서 사라지지 않게.
+   * 상하 관계는 따로 두지 않고 `parentKo`를 쓴다 — 인원 최신화(RS)가 이미 맞춰 주는 값이다
+   */
+  rollupOrder     String  @default("[]")
+  /// RU-21 — 순서·편집 메모. **사람이 읽는 것**이고 순서는 목록이 정한다 (같은 입력 → 같은 순서)
+  rollupNote      String  @default("")
+  /// RU-10 — 이어 붙일 때 둘째 단위부터 새 쪽에서 시작한다
+  rollupPageBreak Boolean @default(true)
+  /**
+   * RU-08 — 본부일 때 **본부 자기 문서**(본부 직속 인원이 쓴 것)도 이어 붙이는가.
+   * 본부가 켜져 있으면 기본으로 넣는다. 본부 담당자가 산하 실 것만 모으는 본부는 끈다 (Q3)
+   */
+  rollupSelf      Boolean @default(true)
+
   createdAt    DateTime      @default(now())
   users        User[]
   templates    Template[]
@@ -59,6 +75,8 @@ model Division {
   mergeRuns    MergeRun[]
   notifyLogs   NotifyLog[]
   slotOpenings SlotOpening[]
+  reportSubmissions ReportSubmission[]
+  rollupRuns        RollupRun[]
 }
 
 model User {
@@ -153,6 +171,8 @@ model WeekSlot {
   mergeRuns    MergeRun[]
   notifyLogs   NotifyLog[]
   slotOpenings SlotOpening[]
+  reportSubmissions ReportSubmission[]
+  rollupRuns        RollupRun[]
 
   @@index([opensAt])
 }
@@ -327,4 +347,79 @@ model NotifyLog {
 
   @@unique([divisionId, weekSlotId, kind])
   @@index([sentAt])
+}
+
+/**
+ * RU-01 — 위로 올린 **제출**. 실·팀 → 본부(`unit`), 본부 → 총괄(`hq`).
+ *
+ * 그 시점 병합본의 **사본**을 가리킨다 (RU-02). 하위가 다시 병합하거나 고쳐도 위가 보고 있던
+ * 문서는 바뀌지 않는다 — 새 판을 올리려면 다시 제출한다. 다시 내면 새 행이 생기고, 가장 최근의
+ * 취소되지 않은 행이 「지금 제출된 것」이다. 행은 지우지 않는다 — 언제 무엇을 올렸는지가 남는다.
+ */
+model ReportSubmission {
+  id          String    @id @default(cuid())
+  /// "unit" = 실·팀이 위로 · "hq" = 본부가 총괄로
+  level       String
+  divisionId  String
+  weekSlotId  String
+  /// 사본 (STORAGE_ROOT 기준). 원본 병합본 경로를 가리키지 않는다 — 원본은 다시 병합하면 덮인다
+  filePath    String
+  sha256      String
+  byteSize    Int
+  /// 어디서 나왔나 — unit: MergeRun.id · hq: RollupRun.id · 지난 자료 적재(RU-44): null
+  sourceRunId String?
+  /// "app" | "import" (RU-44 — 테스트 서버에 지난 자료를 넣은 것)
+  origin      String    @default("app")
+  submittedBy String // User.id
+  submittedAt DateTime  @default(now())
+  /// RU-03 — 제출 취소. 취소한 행은 「지금 제출된 것」에서 빠진다
+  withdrawnAt DateTime?
+  withdrawnBy String?
+
+  division Division @relation(fields: [divisionId], references: [id])
+  weekSlot WeekSlot @relation(fields: [weekSlotId], references: [id])
+
+  @@index([weekSlotId, level, divisionId, submittedAt])
+}
+
+/**
+ * RU-10 — 본부(`hq`)·전사(`org`) 이어 붙이기 한 번. 실·팀 병합(MergeRun)과 따로 둔다 —
+ * 연구 본부처럼 **같은 부서가 실·팀 병합과 본부 병합을 둘 다** 가질 수 있어서, 한 표에 두면
+ * 「그 부서의 최근 병합」이 어느 쪽인지 갈린다.
+ */
+model RollupRun {
+  id          String    @id @default(cuid())
+  /// "hq" | "org"
+  level       String
+  /// hq: 본부 Division.id · org: null (전사는 어느 부서의 것도 아니다)
+  divisionId  String?
+  weekSlotId  String
+  /// "running" | "succeeded" | "failed"
+  status      String
+  outputPath  String?
+  /// 이어 붙인 ReportSubmission.id — **붙인 순서 그대로** (JSON). 「바뀜」 판정이 이걸 본다
+  inputIds    String
+  /// 단위별 결과 — [{name, divisionId, submissionId, rows:{a,p,n}, emphasis}] (JSON)
+  unitsJson   String?
+  warnings    String?
+  errorText   String?
+  createdBy   String // User.id
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+
+  division Division? @relation(fields: [divisionId], references: [id])
+  weekSlot WeekSlot  @relation(fields: [weekSlotId], references: [id])
+
+  @@index([level, divisionId, weekSlotId, startedAt])
+}
+
+/** RU-20·21 — 전사 단계의 순서와 메모 (한 행). 본부 단계는 Division.rollupOrder에 있다 */
+model OrgRollupSetting {
+  id        String   @id @default("org")
+  /// 본부·본부 밖 단위의 Division.id 순서 (JSON)
+  order     String   @default("[]")
+  note      String   @default("")
+  pageBreak Boolean  @default(true)
+  updatedBy String?
+  updatedAt DateTime @updatedAt
 }

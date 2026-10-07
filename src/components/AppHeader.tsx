@@ -16,6 +16,8 @@ export function AppHeader({
   isLead,
   isOperator,
   readAll = false,
+  hqDesk = false,
+  orgDesk = false,
   viaCloudflare,
   notifyEnabled,
   foreign = false,
@@ -27,6 +29,10 @@ export function AppHeader({
   isOperator: boolean;
   /** PG-49 — 전 부서 읽기 (총괄·운영자). 켜지면 `전사 현황` 메뉴가 생긴다 */
   readAll?: boolean;
+  /** RU-31 — `본부 취합` 메뉴 (TACP-21) */
+  hqDesk?: boolean;
+  /** RU-32 — `전사 취합` 메뉴 (TACP-21) */
+  orgDesk?: boolean;
   viaCloudflare: boolean;
   /** NT-21 — 본인 알림 받기 상태. 드롭다운에서 바로 끌 수 있다 */
   notifyEnabled?: boolean;
@@ -53,7 +59,7 @@ export function AppHeader({
   }, [open]);
 
   // PG-49d — 역할별 메뉴는 buildNav 하나가 정한다
-  const items = buildNav({ slug, foreign, isLead, isOperator, readAll });
+  const items = buildNav({ slug, foreign, isLead, isOperator, readAll, hqDesk, orgDesk });
   const isActive = (href: string) => isNavActive(href, pathname, items, slug);
 
   const logout = () => {

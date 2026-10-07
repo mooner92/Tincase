@@ -21,6 +21,10 @@ export interface NavRole {
   isOperator: boolean;
   /** 전 부서 읽기 (총괄·운영자 — TACP `canReadAllDivisions`) */
   readAll: boolean;
+  /** RU-31 — 내 부서가 본부 단계가 있는 본부이고 내가 lead·head (TACP-21 `hasHqDesk`) */
+  hqDesk?: boolean;
+  /** RU-32 — 전사 이어 붙이기 (총괄·운영자 — TACP-21 `canRunOrgRollup`) */
+  orgDesk?: boolean;
 }
 
 export function buildNav(r: NavRole): NavItem[] {
@@ -39,8 +43,11 @@ export function buildNav(r: NavRole): NavItem[] {
             : []),
         ]
       : []),
+    // RU-31 — 본부 단계는 부서 메뉴 다음, 전사 메뉴 앞 (넓어지는 순서 그대로)
+    ...(r.hqDesk ? [{ href: '/hq', label: '본부 취합' }] : []),
     // PG-49a — 타 부서로 가는 길은 readAll에게 이것 하나뿐이다 (P5의 예외 그대로)
     ...(r.readAll ? [{ href: '/ops/monitor', label: '전사 현황' }] : []),
+    ...(r.orgDesk ? [{ href: '/org', label: '전사 취합' }] : []),
     ...(r.isOperator ? [{ href: '/ops', label: '운영' }] : []),
     // 안내는 **처음 쓰는 사람**이 찾는 것이다. 드롭다운 안은 이미 아는 사람만 여는 자리라
     // 정작 필요한 사람에게 안 보인다. 맨 끝에 두되 물음표를 붙여 업무 메뉴와 구분한다

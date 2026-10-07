@@ -1,7 +1,7 @@
 // 부서 스코프 레이아웃 — slug/별칭 해석(PG-01), AppHeader, 격리(404)
 import { notFound, redirect } from 'next/navigation';
 import { getPageScope, getDivisionView } from '@/server/page-scope';
-import { HttpError } from '@/server/authz';
+import { HttpError, rollupNav } from '@/server/authz';
 import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
 import { ForeignDivisionBanner } from '@/components/ForeignDivisionBanner';
@@ -32,6 +32,7 @@ export default async function DivisionLayout({
     throw e;
   }
   if (view.redirectTo) redirect(view.redirectTo); // 별칭 → 정식 슬러그
+  const nav = await rollupNav(view.scope); // RU-31·32 — 취합 메뉴 (TACP-21)
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -42,6 +43,7 @@ export default async function DivisionLayout({
         isLead={view.canManage}
         isOperator={view.scope.user.isOperator}
         readAll={view.scope.readAll}
+        {...nav}
         viaCloudflare={view.scope.source === 'cloudflare'}
         notifyEnabled={view.scope.user.notifyEnabled}
         foreign={!view.isOwn}

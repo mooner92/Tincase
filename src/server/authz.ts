@@ -6,6 +6,7 @@ import { prisma } from './db';
 import { audit } from './audit';
 import { openingOf } from './deadline';
 import { isSubmissionLocked } from '@/lib/deadline';
+import { hqNodeOf, loadTree, type RollupNode } from './rollup/tree';
 
 export class HttpError extends Error {
   constructor(
@@ -287,4 +288,112 @@ export async function requireMergedAccess(
 
   if (!scope.readAll) throw notFound();
   await audit(scope.user.email, 'cross_division_read', divisionId, 'merged');
+}
+
+// ── TACP-21 — 위로 올린 제출 (본부·전사 취합) ─────────────────────────────
+
+/** TACP-21 — 내 부서 결과를 위로 [제출]·취소. **내 부서의 lead·head만** — readAll도 대신 내지 않는다 */
+export async function requireReportSender(headers: Headers): Promise<Scope> {
+  const scope = await requireScope(headers);
+  if (!scope.isManager) throw notFound();
+  return scope;
+}
+
+/**
+ * TACP-21 — 본부 단계 **쓰기** 진입점. 내 부서가 본부 단계가 있는 본부(RU-07)이고 내가 lead·head일 때만.
+ * 「어느 본부인가」는 신원의 부서가 정한다 — 요청 값이 정하지 않는다 (TACP-6).
+ */
+export async function requireHqManager(headers: Headers): Promise<{ scope: Scope; node: RollupNode }> {
+  const scope = await requireScope(headers);
+  if (!scope.isManager) throw notFound();
+  const node = hqNodeOf(await loadTree(), scope.division.id);
+  if (!node) throw notFound();
+  return { scope, node };
+}
+
+/**
+ * TACP-21 — 본부 화면 **읽기** 대상 해석. 내 본부(lead·head) 또는 readAll의 다른 본부.
+ * TACP-7의 본부판이다 — 본부 화면은 이 함수가 돌려준 본부만 그린다.
+ */
+export async function resolveHqView(
+  scope: Scope,
+  slug?: string | null,
+): Promise<{ node: RollupNode; canWrite: boolean }> {
+  const tree = await loadTree();
+  const own = scope.isManager ? hqNodeOf(tree, scope.division.id) : null;
+  if (own && (!slug || slug === own.node.slug)) return { node: own, canWrite: true };
+  if (scope.readAll) {
+    const other = slug ? tree.nodes.find((n) => n.node.slug === slug && n.hasHqStep) : null;
+    if (other) {
+      if (other.node.id !== scope.division.id) {
+        await audit(scope.user.email, 'cross_division_read', other.node.id, `hq:${other.node.slug}`);
+      }
+      return { node: other, canWrite: false }; // TACP-8 — readAll은 읽기만
+    }
+  }
+  throw notFound();
+}
+
+/** TACP-21 — 전사 이어 붙이기를 할 수 있는가 (총괄·운영자 — §3.2 「전사 병합 실행」과 같은 칸) */
+export function canRunOrgRollup(user: Pick<User, 'isOperator' | 'isCoordinator'>): boolean {
+  return user.isOperator || user.isCoordinator;
+}
+
+export async function requireOrgRollup(headers: Headers): Promise<Scope> {
+  const scope = await requireScope(headers);
+  if (!canRunOrgRollup(scope.user)) throw notFound();
+  return scope;
+}
+
+/** 메뉴용 — 이 사람에게 본부 취합 화면이 있는가 (TACP-9: 할 수 없는 곳으로 가는 길은 그리지 않는다) */
+export async function hasHqDesk(scope: Scope): Promise<boolean> {
+  return scope.isManager && hqNodeOf(await loadTree(), scope.division.id) !== null;
+}
+
+/**
+ * TACP-21 — **보낸 사본** 읽기 판정. 반환되면 허용된 것이다.
+ *
+ *   보낸 부서            부서원 모두 (TACP-15와 같은 넓이 — 위로 보낸 내 부서 문서다)
+ *   받는 본부            그 본부의 lead·head — 산하 단위가 보낸 `unit` 사본만 + 감사
+ *   readAll             전부 + 감사 (타 부서일 때)
+ *   그 외               404
+ */
+export async function findReadableReport(scope: Scope, reportId: string) {
+  const r = await prisma.reportSubmission.findUnique({
+    where: { id: reportId },
+    include: { division: true, weekSlot: true },
+  });
+  if (!r) throw notFound();
+  if (r.divisionId === scope.division.id) return r;
+  if (r.level === 'unit' && scope.isManager) {
+    const node = hqNodeOf(await loadTree(), scope.division.id);
+    if (node?.contributors.some((c) => c.id === r.divisionId)) {
+      await audit(scope.user.email, 'cross_division_read', r.divisionId, `report:${r.id}`);
+      return r;
+    }
+  }
+  if (scope.readAll) {
+    await audit(scope.user.email, 'cross_division_read', r.divisionId, `report:${r.id}`);
+    return r;
+  }
+  throw notFound();
+}
+
+/** TACP-21 — 이어 붙인 결과 읽기. 본부본: 그 본부의 lead·head + readAll · 전사본: readAll */
+export async function findReadableRollup(scope: Scope, runId: string) {
+  const run = await prisma.rollupRun.findUnique({ where: { id: runId }, include: { weekSlot: true, division: true } });
+  if (!run) throw notFound();
+  if (run.level === 'hq' && run.divisionId === scope.division.id && scope.isManager) return run;
+  if (scope.readAll) {
+    if (run.divisionId && run.divisionId !== scope.division.id) {
+      await audit(scope.user.email, 'cross_division_read', run.divisionId, `rollup:${run.id}`);
+    }
+    return run;
+  }
+  throw notFound();
+}
+
+/** 메뉴에 그릴 취합 화면 — 헤더를 그리는 서버 쪽에서 한 번에 (TACP-9) */
+export async function rollupNav(scope: Scope): Promise<{ hqDesk: boolean; orgDesk: boolean }> {
+  return { hqDesk: await hasHqDesk(scope), orgDesk: canRunOrgRollup(scope.user) };
 }

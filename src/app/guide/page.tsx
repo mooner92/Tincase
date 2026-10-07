@@ -7,7 +7,7 @@
 // (scripts/seed-demo.ts). 실제 화면을 찍어 두면 저장소가 public이라 개인정보가 남는다.
 import { redirect } from 'next/navigation';
 import { requirePageScope } from '@/server/page-scope';
-import { canScheduleDeadlines } from '@/server/authz';
+import { canScheduleDeadlines, rollupNav } from '@/server/authz';
 import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
@@ -186,6 +186,7 @@ export default async function GuidePage() {
         isLead={scope.isManager || scope.readAll}
         isOperator={scope.user.isOperator}
         readAll={scope.readAll}
+        {...(await rollupNav(scope))}
         viaCloudflare={scope.source === 'cloudflare'}
         notifyEnabled={ps.scope.user.notifyEnabled}
       />

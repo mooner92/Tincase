@@ -58,3 +58,20 @@ describe('PG-49 활성 메뉴 판정', () => {
     expect(active('/psd/manage/settings')).toEqual(['부서 설정']);
   });
 });
+
+describe('RU-31·32 취합 메뉴 (TACP-21)', () => {
+  it('[PG-T67] 본부 담당자 — `본부 취합`이 부서 메뉴 다음, 전사 메뉴 앞에 (넓어지는 순서)', () => {
+    const l = labels({ isLead: true, hqDesk: true });
+    expect(l).toContain('본부 취합');
+    expect(l.indexOf('부서 설정')).toBeLessThan(l.indexOf('본부 취합'));
+    expect(labels({ isLead: true })).not.toContain('본부 취합');
+  });
+
+  it('[PG-T68] 총괄 — `전사 현황` 다음에 `전사 취합`. 부서원·담당자에게는 없다', () => {
+    const l = labels({ readAll: true, orgDesk: true });
+    expect(l.indexOf('전사 현황')).toBeLessThan(l.indexOf('전사 취합'));
+    expect(labels({ isLead: true })).not.toContain('전사 취합');
+    const nav = buildNav({ ...base, readAll: true, orgDesk: true });
+    expect(nav.filter((i) => isNavActive(i.href, '/org/board', nav, 'psd')).map((i) => i.label)).toEqual(['전사 취합']);
+  });
+});

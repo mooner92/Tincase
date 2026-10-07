@@ -7,7 +7,7 @@ import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
 import { OrgMonitor } from '@/components/OrgMonitor';
 import { DeadlineScheduler } from '@/components/DeadlineScheduler';
-import { canScheduleDeadlines } from '@/server/authz';
+import { canScheduleDeadlines, rollupNav } from '@/server/authz';
 import { layoutOrg, type DivisionNode } from '@/lib/orgtree';
 import { ensureCurrentSlot, effectiveDeadline } from '@/server/worklog';
 import { toKstIso, formatDeadlineKo } from '@/lib/week';
@@ -90,6 +90,7 @@ export default async function MonitorPage() {
         isLead={scope.isManager || scope.readAll}
         isOperator={scope.user.isOperator}
         readAll={scope.readAll}
+        {...(await rollupNav(scope))}
         viaCloudflare={scope.source === 'cloudflare'}
         notifyEnabled={ps.scope.user.notifyEnabled}
       />

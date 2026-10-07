@@ -11,6 +11,8 @@ import { CopyMissingButton } from '@/components/CopyMissingButton';
 import { SlotSelector } from '@/components/SlotSelector';
 import { SubmissionTableClient, type MemberRow } from '@/components/SubmissionTableClient';
 import { MergePanel, type MergeStateView } from '@/components/MergePanel';
+import { ReportSubmitCard } from '@/components/ReportSubmitCard';
+import { reportState } from '@/server/rollup/report';
 import { notFound } from 'next/navigation';
 
 interface ReviewPayload {
@@ -54,6 +56,9 @@ export async function ManageView({
     divisionStatus(division.id, slot.id),
     divisionSlots(division.id),
   ]);
+
+  // RU-30 — 위로 [제출]. 내 부서 담당자에게만 그린다 (TACP-21·TACP-9). 꺼진 부서면 보낼 곳이 없어 null
+  const report = canMerge ? await reportState(division.id, slot, 'unit') : null;
 
   // HM-26 — 최신 실행 하나만 본다. 재실행하면 새 기록이 쌓이고 최신이 유효하다
   const lastRun = await prisma.mergeRun.findFirst({
@@ -254,6 +259,19 @@ export async function ManageView({
           submitted={collected}
         />
       </div>
+
+      {report && (
+        <ReportSubmitCard
+          isoKey={slot.isoKey}
+          state={{
+            ...report,
+            current: report.current && {
+              ...report.current,
+              submittedAtKst: toKstIso(report.current.submittedAt).slice(5, 16).replace('T', ' '),
+            },
+          }}
+        />
+      )}
 
       {/* BulkActions (CP-58~61) */}
       <section className="mt-6 flex flex-wrap items-center gap-3">

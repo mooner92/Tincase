@@ -25,7 +25,14 @@ export type AuditAction =
   /** AU-30 — 본인이 링크로 비밀번호를 설정했다 */
   | 'setup_done'
   /** TACP-20 · WS-19 — 총괄·운영자가 주차 마감 예외를 설정·해제했다. 전·후와 이유가 남는다 */
-  | 'deadline_override';
+  | 'deadline_override'
+  /** TACP-21 — 위로 보냈다·취소했다. 어느 판(sha256)을 보냈는지 남는다 */
+  | 'report_submit'
+  | 'report_withdraw'
+  /** TACP-21 — 본부·전사 이어 붙이기. 무엇을 어떤 순서로 읽었는지 남는다 */
+  | 'rollup'
+  /** RU-20 — 이어 붙이는 순서·메모를 바꿨다 */
+  | 'rollup_order';
 
 export async function audit(
   actor: string,

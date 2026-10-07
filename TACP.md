@@ -4,8 +4,8 @@
 > 코드·스펙·UI가 이 문서와 어긋나면 **문서가 아니라 코드가 틀린 것**이다.
 > 규칙을 바꾸려면 §10 절차를 따른다. 코드를 먼저 고치는 것은 위반이다.
 
-버전 1.5 · 2026-10-06 · 대상 코드 v1.40.0
-관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md) · [ADR-0008](docs/adr/0008-head-principal.md)
+버전 1.6 · 2026-10-07 · 대상 코드 v1.41.0 (feat/org-rollup)
+관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md) · [ADR-0008](docs/adr/0008-head-principal.md) · [ADR-0012](docs/adr/0012-upward-submission.md)
 
 변경 이력:
 - v1.1 — `delete` Action 신설, TACP-8에 예외 하나(TACP-14) 추가
@@ -14,6 +14,9 @@
   제출하는 경로는 만들지 않는다 — 기록이 「누구 것인가」와 「누가 올렸나」로 갈리기 때문이다
 - v1.5 — **TACP-20 신설: 주차 마감 일정은 총괄이 정한다.** 연휴로 대외 마감이 당겨지면 그 주
   전 부서의 마감이 함께 움직인다. 공지하는 쪽이 기획조정실이므로 총괄·운영자가 바꾼다 (WS-19)
+- v1.6 — **TACP-21 신설: 위로 올린 제출(본부·전사 취합).** 실·팀이 [제출]로 **보낸 사본**은 받는 쪽
+  (본부 담당자·본부장, 총괄)이 읽는다. 받는 쪽이 하위 부서의 다른 것(제출물·병합본 원본)을 읽게 되는
+  것이 아니다 — 새로 열리는 것은 「보낸 사본」 하나다 (ADR-0012)
 - v1.3 — **`head`(부서장) Principal 신설** (TACP-16). 부서 문서 권한은 lead와 동일,
   다른 것은 권한이 아니라 **알림 시점**이다. 병합본 **작성자 열람**을 명문화 (TACP-17)
 
@@ -154,6 +157,37 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
 | 병합 **실행·재실행** | — | write | **write** | write(자기 부서) | write(자기 부서) |
 | **타 부서** 병합본 내려받기 | — | — | — | **read** | **read** |
 | 전사 병합 실행 | — | — | — | **write** | **write** |
+
+### TACP-21 — 위로 올린 제출은 **받는 쪽이 읽는다** (v1.6 신설)
+
+3단계 취합(실·팀 → 본부 → 전사, [12-org-rollup](docs/spec/12-org-rollup.md))에서 위로 가는 것은
+**[제출]로 보낸 병합본의 사본**(`ReportSubmission`) 하나뿐이다. 취합게시판에 올리던 것을 Tincase 안에서
+올리는 것과 같다 — 받는 사람에게 보낸 문서다.
+
+| Resource | member | lead | head | coordinator | operator |
+|---|:---:|:---:|:---:|:---:|:---:|
+| **내 부서** 병합본을 위로 [제출]·제출 취소 | — | **write** | **write** | — | — |
+| 내 부서가 보낸 사본·제출 상태 보기 | read | read | read | read | read |
+| **산하 단위가 보낸 사본** 읽기·이어 붙이기 (내 부서가 본부일 때) | — | **read** | **read** | read | read |
+| 본부 이어 붙이기·순서·[총괄에 제출] (내 부서가 본부일 때) | — | **write** | **write** | — | — |
+| 산하 단위의 **다른 것** (제출물·병합본 원본·작성자) | — | — | — | (§3.3) | (§3.3) |
+| 전사 이어 붙이기·본부 순서 | — | — | — | **write** | **write** |
+| 본부본·전사본 내려받기 | — | 본부: write와 같음 | 본부: write와 같음 | read | read |
+
+- **무엇이 새로 열리나**: 본부 담당자·본부장이 산하 실·팀의 **보낸 사본**을 읽는다. 그 밖의 §3.3 칸은
+  그대로 `—`다. 실·팀의 부서원 제출물·병합본 원본·작성자(TACP-17)는 여전히 그 실·팀의 것이다
+- **「산하」의 정의**: 내 부서가 최상위 단위(`parentKo` = 연구원)이고, 그 단위의 `parentKo`가 내 부서명인
+  부서. 상하 관계는 인원 최신화(RS)가 ERP에서 가져온다 — 요청 값이 정하지 않는다 (TACP-1)
+- **쓰기는 언제나 내 부서에** (TACP-6): [제출]은 내 부서의 병합본을, 본부 이어 붙이기는 내 부서(본부)의
+  결과를 만든다. 전사 결과는 어느 부서의 것도 아니며 총괄·운영자만 만든다 (§3.2 「전사 병합 실행」과 같은 칸)
+- **coordinator·operator는 읽기만이다** (TACP-8): 남의 실·팀을 대신 [제출]하거나, 남의 본부를 대신
+  이어 붙이거나 [총괄에 제출]하지 않는다. 대신 내주는 경로를 만들지 않는 이유는 TACP-18과 같다
+- **남게** (TACP-10): 산하 사본을 읽거나 이어 붙이면 `rollup` 감사 기록에 무엇을 읽었는지가 남는다.
+  제출·취소는 `report_submit`·`report_withdraw`
+- **본부 단계가 없는 본부**: 쓰는 단위가 하나뿐인 본부(연구 본부 등)는 그 단위의 [제출]이 곧 총괄로 간다
+  (RU-07). 받는 쪽은 총괄이다 — 권한이 새로 생기는 사람이 없다
+- 게이트: `resolveRollupNode`(내 본부 해석) · `requireHqManager`(본부 쓰기) · `requireOrgRollup`(전사 쓰기) ·
+  `findReadableReport`(사본 읽기 판정). 라우트에서 역할을 비교하지 않는다 (TACP-12)
 
 ### TACP-20 — 주차 마감 일정은 **총괄이 정한다** (v1.5 신설)
 
@@ -408,6 +442,9 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | `requireOwnManager(headers)` | lead·head 또는 operator — **병합본 수정 전용** (§3.2, coordinator 제외) | **404** |
 | `requireOperator(headers)` | operator | **404** |
 | `requireScheduler(headers)` | coordinator·operator — **주차 마감 예외 쓰기 전용** (TACP-20) | **404** |
+| `requireHqManager(headers)` | 내 부서가 **본부 단계가 있는 본부**이고 lead·head (TACP-21) | **404** |
+| `requireOrgRollup(headers)` | coordinator·operator — **전사 이어 붙이기 쓰기** (TACP-21) | **404** |
+| `findReadableReport(scope, id)` | 보낸 사본 **읽기** 판정 — 보낸 부서·받는 본부·readAll (TACP-21) | **404** |
 | `resolveTargetDivision(scope, slug?)` | 대상 부서 해석 (TACP-7) | **404** |
 | `findAccessibleSubmission(scope, id)` | 제출물 **읽기** 판정 | **404** |
 | `requireDeletableSubmission(scope, id)` | 제출물 **삭제** 판정 (TACP-14) | **404** / 409 |
@@ -469,6 +506,11 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | **WS-T70** | **coordinator가 주차 마감 예외를 설정 → 허용** + 감사 기록 (새로 허용된 것) |
 | **WS-T71** | **lead·head·member가 설정 → 404** (새로 금지된 것 — 한 부서가 전 부서를 움직이지 못한다) |
 | **WS-T72** | **이미 지난 마감은 못 옮긴다** — 지금 마감이나 새 마감이 과거면 409 |
+| **RU-T30** | **본부 담당자가 산하 단위의 보낸 사본을 읽고 이어 붙인다 → 허용** + 감사 기록 (새로 허용된 것) |
+| **RU-T31** | **본부 담당자가 산하 단위의 제출물·병합본 원본을 읽으려 하면 404** (그대로 금지인 것) |
+| **RU-T32** | **산하가 아닌 단위의 사본 → 404** — 다른 본부의 실 |
+| **RU-T33** | **member는 [제출]·본부 이어 붙이기 404** · **coordinator가 남의 실·팀을 [제출]하면 404** |
+| **RU-T34** | **coordinator가 전사 이어 붙이기 → 허용**, lead·head는 404 |
 
 새 Resource를 추가하면 **그 Resource의 격리 테스트를 같은 커밋에 넣는다.**
 
