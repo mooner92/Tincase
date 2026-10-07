@@ -221,6 +221,40 @@ export default async function GuidePage() {
           ))}
         </div>
 
+        {/* WA-20 · HM-47 — 담당자 첨삭과 부서장 승인. 할 수 있는 사람에게만 (TACP-9) */}
+        {scope.isManager && (
+          <div className="mt-8 space-y-6">
+            <section className="card px-7 py-6">
+              <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">고치기</p>
+              <h3 className="display mt-1 text-lg">부서원 업무일지를 직접 고치기 (첨삭)</h3>
+              <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
+                <li>[수합 관리]에서 이름을 눌러 제출물을 엽니다</li>
+                <li>오른쪽 위 <strong className="text-ink">[고치기]</strong> → 표를 고치고 <strong className="text-ink">[고쳐서 저장]</strong></li>
+                <li>병합본에 넣으려면 <strong className="text-ink">[다시 병합]</strong>을 누릅니다</li>
+              </ol>
+              <ul className="mt-4 space-y-1 text-sm text-muted">
+                <li>· 덮어쓰지 않습니다 — 그 사람의 <strong className="text-body">새 판</strong>이 생기고 원래 판은 그대로 남습니다</li>
+                <li>· 판 목록과 본인의 [내 이력]에 「○○ 고침」이 표시됩니다</li>
+                <li>· 마감이 지나도 고칠 수 있습니다. 가장 최근 판만 고칠 수 있습니다</li>
+              </ul>
+            </section>
+            {scope.isHead && (
+              <section className="card px-7 py-6">
+                <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">부서장</p>
+                <h3 className="display mt-1 text-lg">병합본 검토하고 승인하기</h3>
+                <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
+                  <li>「병합본 검토 부탁드려요」 알림을 받으면 [보관함]이나 [수합 관리]에서 병합본을 엽니다</li>
+                  <li>고칠 곳이 있으면 고쳐서 <strong className="text-ink">[수정 저장]</strong> — <strong className="text-ink">그 저장이 곧 승인</strong>입니다</li>
+                  <li>고칠 것이 없으면 <strong className="text-ink">[고칠 것 없음 · 승인]</strong></li>
+                </ol>
+                <p className="mt-3 text-sm text-muted">
+                  승인하는 순간 담당자에게 「승인 완료 · 바뀐 곳」 알림이 갑니다 — 담당자가 언제·무엇이 바뀌었는지 바로 압니다.
+                </p>
+              </section>
+            )}
+          </div>
+        )}
+
         {/*
           WS-19 · TACP-20 — 총괄담당 매뉴얼. 이 일을 할 수 있는 사람에게만 보인다 (TACP-9).
           글로 적는다 — 이 절은 쓰는 사람이 한두 명이고, 연휴에만 꺼내 보는 절차라
