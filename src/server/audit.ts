@@ -25,7 +25,9 @@ export type AuditAction =
   /** AU-30 — 본인이 링크로 비밀번호를 설정했다 */
   | 'setup_done'
   /** TACP-20 · WS-19 — 총괄·운영자가 주차 마감 예외를 설정·해제했다. 전·후와 이유가 남는다 */
-  | 'deadline_override';
+  | 'deadline_override'
+  /** TACP-22 — 담당자가 부서원 제출물을 새 판으로 고쳤다. 누구의 몇 판을 고쳤는지 남는다 */
+  | 'submission_revise';
 
 export async function audit(
   actor: string,

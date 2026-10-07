@@ -238,6 +238,32 @@ export async function requireDeletableSubmission(scope: Scope, submissionId: str
 }
 
 /**
+ * TACP-22 — 제출물 **첨삭** 판정. 읽기(`findAccessibleSubmission`)·삭제(`requireDeletableSubmission`)와 별개다.
+ *
+ *   내 부서의 lead·head   → 허용 (최신 판만 — 옛 판은 409)
+ *   그 외(member·coordinator·타 부서·operator의 타 부서)  → 404
+ *
+ * 마감은 보지 않는다 — 마감 뒤에 맞추는 것이 이 권한의 목적이다 (ADR-0013).
+ */
+export function canReviseSubmissions(scope: Pick<Scope, 'isManager'>): boolean {
+  return scope.isManager;
+}
+
+export async function requireRevisableSubmission(scope: Scope, submissionId: string) {
+  const sub = await prisma.submission.findUnique({
+    where: { id: submissionId },
+    include: { user: true, weekSlot: true, division: true },
+  });
+  if (!sub) throw notFound();
+  // TACP-6 — 쓰기는 신원의 부서에만. readAll은 읽기만이다 (TACP-8)
+  if (!canReviseSubmissions(scope) || sub.divisionId !== scope.division.id) throw notFound();
+  if (!sub.isLatest) {
+    throw new HttpError(409, 'not_latest', '가장 최근 판만 고칠 수 있습니다. 최신 판을 열어 고쳐 주세요.');
+  }
+  return sub;
+}
+
+/**
  * AU-13 — 대상 부서 해석의 **단일 출처**. 페이지·API가 모두 이걸 통과한다.
  *
  * 규칙:

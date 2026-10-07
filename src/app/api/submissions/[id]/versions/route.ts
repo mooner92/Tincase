@@ -16,10 +16,19 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
   const versions = await prisma.submission.findMany({
     where: { userId: sub.userId, weekSlotId: sub.weekSlotId },
     orderBy: { version: 'desc' },
-    select: { id: true, version: true, isLatest: true, uploadedAt: true, byteSize: true },
+    select: { id: true, version: true, isLatest: true, uploadedAt: true, byteSize: true, editedById: true },
   });
+  // TACP-22 — 담당자가 고친 판에는 고친 사람 이름을 붙인다
+  const editorIds = [...new Set(versions.map((v) => v.editedById).filter((x): x is string => !!x))];
+  const editors = new Map(
+    (await prisma.user.findMany({ where: { id: { in: editorIds } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]),
+  );
 
   return json({
-    versions: versions.map((v) => ({ ...v, uploadedAt: toKstIso(v.uploadedAt) })),
+    versions: versions.map(({ editedById, ...v }) => ({
+      ...v,
+      uploadedAt: toKstIso(v.uploadedAt),
+      editedBy: editedById ? (editors.get(editedById) ?? '담당자') : null,
+    })),
   });
 });

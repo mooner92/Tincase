@@ -21,6 +21,11 @@ export default async function HistoryPage() {
     where: { userId: ps.scope.user.id, weekSlotId: { in: slots.map((s) => s.id) }, isLatest: true },
   });
   const byId = new Map(subs.map((s) => [s.weekSlotId, s]));
+  // TACP-22 — 담당자가 고친 판이면 고친 사람 이름
+  const editorIds = [...new Set(subs.map((s) => s.editedById).filter((x): x is string => !!x))];
+  const editors = new Map(
+    (await prisma.user.findMany({ where: { id: { in: editorIds } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]),
+  );
 
   return (
     <main className="mt-6">
@@ -37,6 +42,7 @@ export default async function HistoryPage() {
             version: sub?.version ?? null,
             uploadedAtKst: sub ? toKstIso(sub.uploadedAt).slice(0, 16).replace('T', ' ') : null,
             monthly: slotKind(s) === 'monthly',
+            editedBy: sub?.editedById ? (editors.get(sub.editedById) ?? '담당자') : null,
           };
         })}
       />

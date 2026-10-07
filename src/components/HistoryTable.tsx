@@ -13,6 +13,8 @@ export interface HistoryRow {
   uploadedAtKst: string | null;
   /** WS-14 — 그 달 마지막 주. 이력에서도 월간이 어느 주였는지 보여야 한다 */
   monthly?: boolean;
+  /** TACP-22 — 담당자가 고친 판이면 고친 사람. 내 글이 바뀐 것을 본인이 안다 */
+  editedBy?: string | null;
 }
 
 export function HistoryTable({
@@ -76,6 +78,7 @@ export function HistoryTable({
                       {r.uploadedAtKst}
                       {r.version ? ` · v${r.version}` : ''}
                     </span>
+                    {r.editedBy && <span className="ml-1.5 text-warning">· {r.editedBy} 고침</span>}
                   </>
                 ) : (
                   <span className="text-muted-soft">미제출</span>
@@ -119,7 +122,10 @@ export function HistoryTable({
                     <span className="text-muted-soft">미제출</span>
                   )}
                 </td>
-                <td className="px-4 py-2.5 tabular-nums text-body">{r.version ? `v${r.version}` : '—'}</td>
+                <td className="px-4 py-2.5 tabular-nums text-body">
+                  {r.version ? `v${r.version}` : '—'}
+                  {r.editedBy && <span className="ml-1.5 text-xs text-warning">{r.editedBy} 고침</span>}
+                </td>
                 <td className="px-4 py-2.5 tabular-nums text-body">{r.uploadedAtKst ?? '—'}</td>
                 <td className="px-4 py-2.5 text-right">{actions(r)}</td>
               </tr>

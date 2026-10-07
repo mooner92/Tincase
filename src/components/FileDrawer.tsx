@@ -1,6 +1,8 @@
 'use client';
 // CP-70~77 — 제출물 열람 드로어. 읽기 전용, 파싱된 표 렌더, ←→ 제출자 이동, 버전 전환.
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useRouter } from 'next/navigation';
+import { SubmissionEditor, type EditRow } from './SubmissionEditor';
 
 export interface DrawerMember {
   userId: string;
@@ -9,9 +11,12 @@ export interface DrawerMember {
 }
 
 interface PreviewData {
-  submission: { id: string; version: number; uploadedAt: string; userName: string; userId: string };
+  submission: { id: string; version: number; uploadedAt: string; userName: string; userId: string; editedBy?: string | null };
   tables: { title: string; columns: string[]; rows: string[][] }[];
   warnings: string[];
+  /** WA-20 — 이 사람이 이 판을 고칠 수 있나 (내 부서 lead·head, 최신 판) */
+  canRevise?: boolean;
+  rowsByTable?: Record<'achievements' | 'plans' | 'notes', EditRow[]>;
 }
 interface VersionRow {
   id: string;
@@ -19,6 +24,8 @@ interface VersionRow {
   isLatest: boolean;
   uploadedAt: string;
   byteSize: number;
+  /** TACP-22 — 담당자가 고친 판이면 고친 사람 */
+  editedBy?: string | null;
 }
 
 export function FileDrawer({
@@ -35,6 +42,11 @@ export function FileDrawer({
   const [data, setData] = useState<PreviewData | null>(null);
   const [versions, setVersions] = useState<VersionRow[]>([]);
   const [error, setError] = useState<string | null>(null);
+  // WA-20 — 고치는 중인 판의 id. 다른 판·다른 사람으로 옮기면 저절로 풀린다
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editing = !!openId && editingId === openId;
+  const [savedNote, setSavedNote] = useState<string | null>(null);
+  const router = useRouter();
   const panelRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   // 로딩은 파생값 — 열려 있는데 그 id의 데이터가 아직 없으면 로딩 (effect 내 동기 setState 회피)
@@ -89,6 +101,8 @@ export function FileDrawer({
   useEffect(() => {
     if (!openId) return;
     const onKey = (e: KeyboardEvent) => {
+      // 고치는 중에는 화살표가 글자 사이를 오가야 한다 — 사람 이동·닫기로 쓰지 않는다
+      if (editing) return;
       if (e.key === 'Escape') onClose();
       else if (e.key === 'ArrowRight') navigate(1);
       else if (e.key === 'ArrowLeft') navigate(-1);
@@ -110,7 +124,7 @@ export function FileDrawer({
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [openId, onClose, navigate]);
+  }, [openId, onClose, navigate, editing]);
 
   if (!openId) return null;
 
@@ -134,6 +148,7 @@ export function FileDrawer({
                   {data.submission.userName}{' '}
                   <span className="font-normal text-muted">
                     · v{data.submission.version} · {data.submission.uploadedAt.slice(5, 16).replace('T', ' ')}
+                    {data.submission.editedBy && ` · ${data.submission.editedBy} 고침`}
                   </span>
                 </>
               ) : (
@@ -151,6 +166,7 @@ export function FileDrawer({
                   <option key={v.id} value={v.id}>
                     v{v.version}
                     {v.isLatest ? ' (현재본)' : ''} · {v.uploadedAt.slice(5, 16).replace('T', ' ')}
+                    {v.editedBy ? ` · ${v.editedBy} 고침` : ''}
                   </option>
                 ))}
               </select>
@@ -176,6 +192,17 @@ export function FileDrawer({
                   →
                 </button>
               </>
+            )}
+            {data?.canRevise && !editing && (
+              <button
+                onClick={() => {
+                  setSavedNote(null);
+                  setEditingId(data.submission.id);
+                }}
+                className="rounded border border-ink px-2.5 py-1 text-xs font-semibold text-ink hover:bg-surface-soft"
+              >
+                고치기
+              </button>
             )}
             {data && (
               <a
@@ -211,7 +238,25 @@ export function FileDrawer({
               <p className="mt-1 text-xs text-error">원본 다운로드로 내용을 확인해 주세요.</p>
             </div>
           )}
-          {data && !loading && (
+          {savedNote && !editing && (
+            <p className="mb-4 rounded-lg bg-brand-soft px-3 py-2 text-sm text-ink">{savedNote}</p>
+          )}
+          {data && !loading && editing && data.rowsByTable && (
+            <SubmissionEditor
+              submissionId={data.submission.id}
+              ownerName={data.submission.userName}
+              version={data.submission.version}
+              initial={data.rowsByTable}
+              onCancel={() => setEditingId(null)}
+              onSaved={(newId, v) => {
+                setEditingId(null);
+                setSavedNote(`v${v}로 저장했습니다 — 원래 판은 그대로 있습니다. 병합본에 넣으려면 [다시 병합]을 누르세요.`);
+                onNavigate(newId);
+                router.refresh();
+              }}
+            />
+          )}
+          {data && !loading && !editing && (
             <div className="space-y-6">
               {data.warnings.length > 0 && (
                 <p className="rounded bg-warning-soft px-3 py-2 text-xs text-body-strong">{data.warnings.join(' · ')}</p>

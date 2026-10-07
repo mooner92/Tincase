@@ -176,7 +176,12 @@ model Submission {
    * WA-04 — 사람이 만든 hwp인지 시스템이 만든 것인지 (통계·디버깅용).
    * 결과물 자체는 구별되지 않아야 하므로 처리 경로는 완전히 동일하다
    */
-  origin       String   @default("upload") // "upload" | "web"
+  origin       String   @default("upload") // "upload" | "web" | "lead_edit"
+  /**
+   * TACP-22 · WA-20 — **담당자가 고쳐 만든 판**이면 고친 사람(User.id). 주인(userId)은 그대로 그 부서원이다.
+   * 「누구 것인가」와 「누가 손댔나」를 둘 다 적어, 기록이 갈리지 않게 한다 (ADR-0013)
+   */
+  editedById   String?
 
   division Division @relation(fields: [divisionId], references: [id])
   user     User     @relation(fields: [userId], references: [id])
