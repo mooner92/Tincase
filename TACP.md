@@ -17,6 +17,7 @@
 - v1.6 — **TACP-21 신설: 위로 올린 제출(본부·전사 취합).** 실·팀이 [제출]로 **보낸 사본**은 받는 쪽
   (본부 담당자·본부장, 총괄)이 읽는다. 받는 쪽이 하위 부서의 다른 것(제출물·병합본 원본)을 읽게 되는
   것이 아니다 — 새로 열리는 것은 「보낸 사본」 하나다 (ADR-0012)
+- v1.5.2 — **TACP-22 신설: 담당자는 부서원 제출물을 새 판으로 고친다.** 덮어쓰지 않고, 누가 고쳤는지 남긴다 (ADR-0013)
 - v1.3 — **`head`(부서장) Principal 신설** (TACP-16). 부서 문서 권한은 lead와 동일,
   다른 것은 권한이 아니라 **알림 시점**이다. 병합본 **작성자 열람**을 명문화 (TACP-17)
 
@@ -140,6 +141,7 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
 | **내 제출물 삭제** | delete(마감 전) | delete(마감 전) | delete(마감 전) | delete(마감 전) | delete |
 | **남의 제출물 내용** | — | read | read | read | read |
 | **남의 제출물 삭제** | — | — | — | — | delete |
+| **남의 제출물 첨삭** (새 판으로) | — | **write** | **write** | — | write(자기 부서) |
 | 부서 양식 내려받기 | read | read | read | read | read |
 | 부서 양식 등록·교체 | — | write | write | write | write |
 | 작성 안내 · 병합 규칙 | read | write | write | write | write |
@@ -193,6 +195,23 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
   (RU-07). 받는 쪽은 총괄이다 — 권한이 새로 생기는 사람이 없다
 - 게이트: `resolveRollupNode`(내 본부 해석) · `requireHqManager`(본부 쓰기) · `requireOrgRollup`(전사 쓰기) ·
   `findReadableReport`(사본 읽기 판정). 라우트에서 역할을 비교하지 않는다 (TACP-12)
+
+### TACP-22 — 담당자는 부서원 제출물을 **새 판으로** 고친다 (v1.5.2 신설)
+
+운영자 결정(2026-10-07): 늦게 내고, 낸 뒤에 내용이 바뀌고, 고쳐 달라고 해도 다시 안 낸다 —
+담당자가 부서원에게 재제출을 부탁하는 길(TACP-14)만으로는 그 주 문서를 맞출 수 없었다.
+그래서 담당자·부서장이 부서원의 제출물을 **직접 고친다.** 다만 기록은 거짓말하지 않게:
+
+- **덮어쓰지 않는다.** 고치면 그 사람의 **새 판**(v+1)이 생기고, 원래 판은 그대로 남는다 —
+  「무엇을 냈었나」는 사라지지 않는다 (TACP-14의 정신은 그대로)
+- 새 판은 **그 사람의 것**(userId)이고, **누가 고쳤는지**(`editedById`)가 따로 붙는다.
+  화면과 이력에 「담당자 ○○ 고침」이 보인다 — 「누구 것인가」와 「누가 손댔나」를 둘 다 적어
+  TACP-18이 걱정한 「기록이 갈리는」 문제를 피한다
+- **가장 최근 판만** 고친다. 옛 판을 고치면 지금 판을 무르는 것과 같다
+- **마감과 상관없다** — 마감 뒤에 맞추는 것이 이 권한의 목적이다. 병합본에는 [다시 병합]으로 들어간다
+- **내 부서만** (TACP-6). coordinator는 readAll이지만 고치지 못한다(TACP-8). operator는 자기 부서에서만
+- 대신 내주는 것(안 낸 사람의 제출을 만드는 것)은 여전히 없다 (TACP-18) — 고치는 것은 **낸 것**이다
+- 게이트: `requireRevisableSubmission(scope, id)` · 감사 `submission_revise` · 결정 [ADR-0013](docs/adr/0013-lead-revises-submission.md)
 
 ### TACP-20 — 주차 마감 일정은 **총괄이 정한다** (v1.5 신설)
 
@@ -451,6 +470,7 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | `requireOrgRollup(headers)` | coordinator·operator — **전사 이어 붙이기 쓰기** (TACP-21) | **404** |
 | `findReadableReport(scope, id)` | 보낸 사본 **읽기** 판정 — 보낸 부서·받는 본부·readAll (TACP-21) | **404** |
 | `requireReviewer(headers)` | head(이면서 lead가 아님) — **병합본 승인 전용** (TACP-16, HM-47) | **404** |
+| `requireRevisableSubmission(scope, id)` | 제출물 **첨삭** 판정 — 내 부서 lead·head, 최신 판만 (TACP-22) | **404** / 409 |
 | `resolveTargetDivision(scope, slug?)` | 대상 부서 해석 (TACP-7) | **404** |
 | `findAccessibleSubmission(scope, id)` | 제출물 **읽기** 판정 | **404** |
 | `requireDeletableSubmission(scope, id)` | 제출물 **삭제** 판정 (TACP-14) | **404** / 409 |
@@ -519,6 +539,8 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | **RU-T34** | **coordinator가 전사 이어 붙이기 → 허용**, lead·head는 404 |
 | **HM-T110** | **head가 고쳐 저장 → 승인 기록 + 담당자 알림** · lead의 저장은 승인이 아니다 |
 | **HM-T111** | **[승인] — head만.** lead·member·타 부서 head → 404 |
+| **WA-T40** | **lead·head가 부서원 제출물을 고친다 → 새 판(v+1), 원래 판 보존, 고친 사람 기록** (새로 허용된 것) |
+| **WA-T41** | **member·coordinator·타 부서 lead의 첨삭 → 404** · 옛 판 첨삭 → 409 (그대로 금지인 것) |
 
 새 Resource를 추가하면 **그 Resource의 격리 테스트를 같은 커밋에 넣는다.**
 

@@ -149,6 +149,74 @@ export async function uploadSubmission(input: UploadInput, now = new Date()): Pr
   return { submission, replacedVersion, sameAsPrevious };
 }
 
+/**
+ * TACP-22 · WA-20 — 담당자가 부서원 제출물을 **새 판으로** 고친다.
+ *
+ * 업로드와 같은 트랜잭션 규칙(DM-05: 버전 부여·isLatest 전환을 한 번에)을 쓰되,
+ * 주인은 **그 부서원**, 주차는 **고친 제출물의 주차**다(지난 주차를 고칠 수도 있다).
+ * 마감은 보지 않는다 — 게이트(`requireRevisableSubmission`)가 이미 판정했다.
+ */
+export async function reviseSubmission(input: {
+  editor: Pick<User, 'id' | 'email' | 'name'>;
+  target: Submission & { user: User; weekSlot: WeekSlot; division: Division };
+  bytes: Buffer;
+  fileName: string;
+}): Promise<Submission> {
+  const { editor, target, bytes } = input;
+  try {
+    validateHwpUpload(bytes);
+  } catch (e) {
+    if (e instanceof UploadValidationError) throw new HttpError(422, 'invalid_file', e.message);
+    throw e;
+  }
+  const hash = sha256(bytes);
+  const { created, rel } = await prisma.$transaction(async (tx) => {
+    const last = await tx.submission.findFirst({
+      where: { userId: target.userId, weekSlotId: target.weekSlotId },
+      orderBy: { version: 'desc' },
+    });
+    // 게이트를 지난 뒤 그 사람이 새로 냈다면 — 우리가 고친 것이 그 사람의 새 판을 덮으면 안 된다
+    if (last && last.id !== target.id) {
+      throw new HttpError(409, 'not_latest', '그 사이 새 판이 올라왔습니다. 다시 열어 최신 판을 고쳐 주세요.');
+    }
+    await tx.submission.updateMany({
+      where: { userId: target.userId, weekSlotId: target.weekSlotId, isLatest: true },
+      data: { isLatest: false },
+    });
+    const version = (last?.version ?? 0) + 1;
+    const path = submissionRelPath(target.division.slug, target.weekSlot.year, target.weekSlot.label, target.user.name, version);
+    const sub = await tx.submission.create({
+      data: {
+        divisionId: target.divisionId, // DM-12 — 그 제출물의 부서 그대로
+        userId: target.userId, // 주인은 그 부서원이다
+        weekSlotId: target.weekSlotId,
+        version,
+        isLatest: true,
+        filePath: path,
+        originalName: input.fileName,
+        byteSize: bytes.length,
+        sha256: hash,
+        origin: 'lead_edit',
+        editedById: editor.id, // 누가 손댔나
+      },
+    });
+    return { created: sub, rel: path };
+  });
+  try {
+    await writeFileAtomic(rel, bytes);
+  } catch (e) {
+    logger.error({ err: String(e), submissionId: created.id, relPath: rel }, 'CRITICAL: file write failed after DB commit');
+    throw new HttpError(500, 'internal', '파일 저장에 실패했습니다. 다시 시도해 주세요.');
+  }
+  await audit(editor.email, 'submission_revise', target.divisionId, `submission:${created.id}`, {
+    owner: target.user.name,
+    slot: target.weekSlot.isoKey,
+    from: target.version,
+    to: created.version,
+  });
+  return created;
+}
+
 // ── 현황 (DM-08) ────────────────────────────────────────────
 export interface MemberStatusRow {
   user: Pick<User, 'id' | 'name' | 'sortOrder'>;

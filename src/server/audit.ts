@@ -32,7 +32,9 @@ export type AuditAction =
   /** TACP-21 — 본부·전사 이어 붙이기. 무엇을 어떤 순서로 읽었는지 남는다 */
   | 'rollup'
   /** RU-20 — 이어 붙이는 순서·메모를 바꿨다 */
-  | 'rollup_order';
+  | 'rollup_order'
+  /** TACP-22 — 담당자가 부서원 제출물을 새 판으로 고쳤다. 누구의 몇 판을 고쳤는지 남는다 */
+  | 'submission_revise';
 
 export async function audit(
   actor: string,

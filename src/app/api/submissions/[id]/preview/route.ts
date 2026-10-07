@@ -1,7 +1,8 @@
 // GET /api/submissions/:id/preview — 드로어 데이터 (API-22~25).
 // hwp를 서버에서 파싱해 구조화된 표로 반환. 원문 그대로, 요약·가공 없음 (API-25).
 import { NextRequest } from 'next/server';
-import { requireScope, findAccessibleSubmission, HttpError } from '@/server/authz';
+import { requireScope, findAccessibleSubmission, canReviseSubmissions, HttpError } from '@/server/authz';
+import { prisma } from '@/server/db';
 import { readStoredFile } from '@/server/storage';
 import { handler, json, rateLimit } from '@/server/http';
 import { audit } from '@/server/audit';
@@ -29,6 +30,11 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
 
   await audit(scope.user.email, 'preview', sub.divisionId, `submission:${sub.id}`); // API-24
 
+  // TACP-22 — 누가 고친 판인가 (주인과 다를 때만)
+  const editor = sub.editedById
+    ? await prisma.user.findUnique({ where: { id: sub.editedById }, select: { name: true } })
+    : null;
+
   return json({
     submission: {
       id: sub.id,
@@ -36,6 +42,20 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
       uploadedAt: toKstIso(sub.uploadedAt),
       userName: sub.user.name,
       userId: sub.userId,
+      editedBy: editor?.name ?? null,
+    },
+    // WA-20 — [고치기]는 내 부서 lead·head에게, 최신 판일 때만 (TACP-22). 판정은 저장 때 게이트가 다시 한다
+    canRevise: sub.isLatest && sub.divisionId === scope.division.id && canReviseSubmissions(scope),
+    // HM-37 — 행별 「공유」 표시. 고칠 때 잃지 않게 같이 보낸다 (빈 행을 뺀 순서 = 격자의 빈 행 뺀 순서)
+    emphasis: {
+      achievements: parsed.worklog.achievements.map((r) => r.emphasis === true),
+      plans: parsed.worklog.plans.map((r) => r.emphasis === true),
+      notes: parsed.worklog.notes.map((r) => r.emphasis === true),
+    },
+    rowsByTable: {
+      achievements: parsed.worklog.achievements,
+      plans: parsed.worklog.plans,
+      notes: parsed.worklog.notes,
     },
     tables: parsed.tables.slice(0, 3).map((t, i) => ({
       title: TABLE_TITLES[i] ?? `표 ${i + 1}`,
