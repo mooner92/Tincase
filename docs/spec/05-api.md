@@ -31,13 +31,22 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 | `not_registered` | 403 | DB에 없음 |
 | `division_not_onboarded` | 403 | 부서 미온보딩 (AU-04b) |
 | `not_found` | 404 | 없거나 **권한 없음** (격리 — 구별 불가) |
+| `cross_origin` | 403 | 다른 출처에서 온 상태 변경 요청 (API-56 · AU-33) |
 | `slot_locked` | 409 | 부서 마감 지남 |
 | `no_submissions` | 409 | 대상 0건 |
+| `edited` | 409 | 사람이 고친 병합본 — 확인 없이 다시 병합하지 않는다 (API-55 · HM-49) |
+| `too_large` | 413 | 본문이 너무 큼 — 읽기 전에 `Content-Length`로 거른다 (ST-04) |
 | `invalid_file` | 422 | 파일 검증 실패 (reason: ST-09) |
 | `invalid_rule` | 422 | 병합 규칙 검증 실패 (Phase 2) |
 | `conflict` | 409 | 버전 경합 |
 | `not_implemented` | 501 | Phase 2 예약 |
 | `internal` | 500 | 서버 오류 |
+
+### API-56 — 상태를 바꾸는 요청은 **같은 출처**에서만 (AU-33)
+
+`GET`·`HEAD`가 아닌 모든 요청은 공통 래퍼(`handler()`)가 출처를 먼저 본다. 다른 출처면 본문을 읽기 전에
+**403 `cross_origin`** 「다른 사이트에서 보낸 요청은 받지 않습니다 …」. 판정 규칙과 이유는 [AU-33](03-auth.md).
+`Origin`도 `Sec-Fetch-Site`도 없는 요청(스크립트·curl·테스트)은 통과한다 — 브라우저가 아니면 쿠키를 훔쳐 쓸 수 없다.
 
 ### API-04 — 시각 ISO 8601 `+09:00` · API-05 — 캐시 금지 `no-store` · API-06 — 마감은 서버 최종 판정
 
@@ -131,7 +140,7 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 | API-49 | 응답에 **게시판 답변 제목**을 함께 준다 — 주간 `8월3주차 연구운영회의 주간업무(부서)` · 월간 `8월 연구운영회의 월간업무(부서)` |
 | API-50 | `PUT` — 고친 표로 병합본을 **다시 쓴다**. `requireLead` + 신원의 부서만 (TACP-6). 본문에 `GET`이 준 판(`runId`·`sha256`)을 싣는다 — 그 사이 바뀌었으면 409 (HM-47). 칸의 **줄바꿈은 남기고**, 500자를 넘는 칸은 자르지 않고 422 |
 | API-51 | 구분 채번은 저장할 때 시스템이 다시 만든다 (ABS-5). 사람이 고친 번호는 버린다 |
-| API-52 | **제출자가 올린 원본은 건드리지 않는다.** 다시 병합하면 수정 내용은 사라진다 |
+| API-52 | **제출자가 올린 원본은 건드리지 않는다.** 다시 병합하면 수정 내용은 사라진다 — 그래서 저장마다 바뀐 곳을 남기고(`reviewJson.edits`), 다시 병합은 확인을 받는다 (HM-49 · API-55) |
 
 병합과 수정은 `composeMergedHwp` 하나를 쓴다 (HM-27) — 두 곳이 각자 조립하면
 표를 지우는 조건·채번 방식이 갈라진다.
@@ -204,6 +213,7 @@ member 응답은 축소판: `members[].{user.name, status, uploadedAt}` 만 —
 | API-23 | 권한: 본인 · lead(자기 부서) · coordinator/operator(전 부서, 감사 로그). 그 외 404 |
 | API-24 | 감사 로그 `preview` 기록 |
 | API-25 | 원문 텍스트 그대로 반환 — 요약·가공하지 않는다 (내용 검토가 목적) |
+| API-57 | `tables[].rows`에서 **본문 칸이 모두 빈 행**은 뺀다 — 병합본 보기(UX-03)와 같은 조건(`row.slice(1).some(c => c.trim())`). 양식의 빈 번호 줄(3-1~3-4)이 「잘못 냈나?」로 읽혔다. 머리행은 남긴다. 글자는 건드리지 않는다(API-25). `rowsByTable`은 원래 빈 행이 없고 [고치기]는 그것을 쓰므로 자리가 어긋날 일이 없다 (2026-10-08) |
 
 ### `GET /api/submissions/:id/versions`
 
@@ -264,6 +274,14 @@ lead에게는 이 엔드포인트가 존재하지 않는다(404).
 |---|---|
 | API-30 | Phase 1: 501. 버튼 비활성 + `준비 중 (Phase 2)` |
 | API-31 | 부서·슬롯당 동시 실행 1개 · 원본 불변 (HM-20) · `ruleSnapshot` 저장 (DM-13) |
+| API-55 | 그 주차의 최신 병합본을 **사람이 고쳤으면** 409 `edited` — 본문에 `overwriteEdits: true`가 있을 때만 다시 병합한다 (HM-49). 감사 로그에 덮은 곳 수 |
+
+```jsonc
+// 409 — 화면은 이것으로 확인 창을 띄운다
+{ "error": "edited", "message": "병합본에 사람이 고친 곳이 3곳 있어요 (홍길동 실장). 다시 병합하면 고친 내용이 사라져요.",
+  "detail": { "edits": { "places": 3, "saves": 1, "by": ["홍길동 실장"], "lastAtKst": "10-08 14:12" }, "runId": "c…" } }
+// 확인한 뒤: POST { "isoKey": "…", "overwriteEdits": true }
+```
 
 ---
 
@@ -294,6 +312,10 @@ lead에게는 이 엔드포인트가 존재하지 않는다(404).
 
 v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노출 금지.**
 
+- `checks.template` — 활성 부서마다 양식 **파일**이 있는가 (OPS-41 `templateStates`). 행만 있고 파일이 없는 부서가
+  하나라도 있으면 `fail: N active division(s) without template file` → `ok:false`. 부서 이름은 적지 않는다 — 누구나 부르는 주소다.
+- `checks.rootDisk` · 맨 위 `warnings[]` — 루트 디스크 여유. 판정은 [OPS-19](09-deployment-ops.md)
+
 ### API-34 — 속도 제한
 
 업로드 5분당 10회/사용자 · zip 분당 3회 · preview 분당 30회 · 그 외 분당 120회.
@@ -316,3 +338,6 @@ v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노�
 | API-T10 | health 200/503 + 민감정보 없음 |
 | API-T11 | 규칙 PUT: 절대 규칙 위반 지시 → 422 `invalid_rule` (Phase 2) |
 | API-T12 | 양식 교체: 깨진 파일 → 422, active 유지 (ST-T17와 연동) |
+| API-T13 | health — 활성 부서의 양식 파일이 없으면 `checks.template` fail · 503, 응답에 부서명 없음 · `warnings` 배열은 늘 있다 |
+| API-T14 | 병합 재실행 — 고친 병합본이면 409 `edited` + `detail.edits`, `overwriteEdits: true`면 실행 (API-55, HM-T136) |
+| API-T15 | 제출물 열람 — 빈 번호 줄은 `rows`에 없고 머리행은 남는다 · `rowsByTable`은 그대로 (API-57) |

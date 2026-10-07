@@ -2,14 +2,21 @@
 //
 //   DATABASE_URL=file:/data/worklog/db/worklog.db npx tsx scripts/apply-merge-rule-drafts.ts           # 미리 보기
 //   DATABASE_URL=file:/data/worklog/db/worklog.db ACTOR=<운영자 이메일> npx tsx scripts/apply-merge-rule-drafts.ts --apply
+//   … --apply --set-sort    # 이미 병합한 적 있는 부서의 정렬까지 초안 값으로 덮는다 (부서와 합의했을 때만)
 //
 // 출처: 2026-10-07 전사 최종 취합본(9월 4주차) 양식 분석 — 섹션마다 줄을 어떤 순서로 놓았나.
 // **초안이다.** 실제 순서는 부서 담당자가 안다. 그래서 지침 맨 앞에 「고쳐 쓰세요」를 붙이고,
 // 담당자가 이미 쓴 것은 덮지 않는다:
 //   - 분류 순서가 이미 있으면 그대로 둔다 (AI홍보전략실의 「AI-홍보-시스템-도서관」은 부서가 정한 것이다)
 //   - 지침이 이미 있으면 초안을 **뒤에 덧붙인다** — 한 번 넣은 초안은 다시 넣지 않는다 (MARK로 판별)
-//   - 정렬(제출자 순 / 일자 순)은 초안 값으로 맞춘다 — 이 값이 생긴 것이 오늘(HM-48)이라 고른 사람이 없다
+//   - 정렬(제출자 순 / 일자 순)은 **이미 병합한 적 있는 부서면 건드리지 않는다** (HM-48). 그 부서의 다음 주
+//     병합본 순서가 아무도 고르지 않았는데 바뀌기 때문이다 — 「기본값이 input인 이유」 그대로다. 대신
+//     「부서 순서 유지」라고 찍고, 담당자가 부서 설정 「정렬」에서 고르게 둔다. 덮으려면 --set-sort.
+//     아직 병합한 적 없는 부서는 초안 값으로 시작한다 — 바뀌는 「지금까지」가 없다.
+//   - 본부형 초안(과제 **유형 순**)은 `input`이다. 분류(HM-27)를 정하지 않은 채 `date`로 두면 날짜가 유형 순서를 흩는다.
+//   - 날짜 없는 줄의 자리는 부서에 하나다 — 표마다 다르게 둘 수 없다 (HM-48). 계획 표만 앞에 두는 부서는 손으로 옮긴다.
 //
+// 몇 번 돌려도 같다(멱등) — 두 번째부터는 「바꿀 것 없음」이다.
 // 감사 로그(rule_update)를 남긴다 — 병합본 순서가 바뀐 주에 「누가 언제 바꿨나」의 답이 거기 있어야 한다.
 import { PrismaClient } from '@prisma/client';
 import { parseCategories } from '../src/server/merge/rules';
@@ -52,17 +59,28 @@ const DRAFTS: Record<string, Draft> = {
   },
   경영지원실: { sort: 'date', undated: 'last', text: '실적은 일자 순. 날짜 없는 항목은 뒤에 모은다.' },
   국가지속가능발전연구센터: { sort: 'date', undated: 'last', text: '일자 순.' },
-  탄소중립에너지연구실: { sort: 'date', undated: 'last', text: HQ_TEXT },
-  순환경제연구실: { sort: 'date', undated: 'last', text: HQ_TEXT },
-  국토환경연구본부: { sort: 'date', undated: 'last', text: HQ_TEXT },
-  국가기후위기적응센터: { sort: 'date', undated: 'last', text: HQ_TEXT },
+  탄소중립에너지연구실: { sort: 'input', undated: 'last', text: HQ_TEXT },
+  순환경제연구실: { sort: 'input', undated: 'last', text: HQ_TEXT },
+  국토환경연구본부: { sort: 'input', undated: 'last', text: HQ_TEXT },
+  국가기후위기적응센터: { sort: 'input', undated: 'last', text: HQ_TEXT },
   환경평가본부: { sort: 'date', undated: 'last', text: '일자 오름차순 목록.' },
 };
 
 async function main() {
   const apply = process.argv.includes('--apply');
+  const setSort = process.argv.includes('--set-sort');
   const actor = process.env.ACTOR ?? 'script:apply-merge-rule-drafts';
   const divisions = await prisma.division.findMany({ where: { nameKo: { in: Object.keys(DRAFTS) } } });
+  // HM-48 — 한 번이라도 병합본을 만든 부서는 「지금까지의 순서」가 있다. 그 순서는 부서가 바꾼다
+  const merged = new Set(
+    (
+      await prisma.mergeRun.findMany({
+        where: { divisionId: { in: divisions.map((d) => d.id) }, status: 'succeeded' },
+        distinct: ['divisionId'],
+        select: { divisionId: true },
+      })
+    ).map((r) => r.divisionId),
+  );
 
   for (const [name, draft] of Object.entries(DRAFTS)) {
     const d = divisions.find((x) => x.nameKo === name);
@@ -81,10 +99,22 @@ async function main() {
       const body = `${MARK}\n${draft.text}`;
       data.mergeRuleText = d.mergeRuleText.trim() ? `${d.mergeRuleText.trimEnd()}\n\n${body}` : body;
     }
-    if (d.mergeSort !== draft.sort) data.mergeSort = draft.sort;
-    if (d.mergeUndated !== draft.undated) data.mergeUndated = draft.undated;
+    const sortDiffers = d.mergeSort !== draft.sort || d.mergeUndated !== draft.undated;
+    const keepSort = merged.has(d.id) && !setSort;
+    if (!keepSort) {
+      if (d.mergeSort !== draft.sort) data.mergeSort = draft.sort;
+      if (d.mergeUndated !== draft.undated) data.mergeUndated = draft.undated;
+    }
 
-    const kept = draft.categories && d.mergeCategories.trim() ? ` (분류는 부서 것 유지: ${d.mergeCategories})` : '';
+    const notes: string[] = [];
+    if (draft.categories && d.mergeCategories.trim()) notes.push(`분류는 부서 것 유지: ${d.mergeCategories}`);
+    if (keepSort && sortDiffers) {
+      notes.push(
+        `정렬은 부서 순서 유지(${d.mergeSort}${d.mergeSort === 'date' ? `·${d.mergeUndated}` : ''}) — 이미 병합한 부서라 바꾸지 않음. ` +
+          `초안은 ${draft.sort}${draft.sort === 'date' ? `·${draft.undated}` : ''}, 담당자가 부서 설정 「정렬」에서 바꿀 수 있어요 (덮으려면 --set-sort)`,
+      );
+    }
+    const kept = notes.length ? ` (${notes.join(' / ')})` : '';
     console.log(`${Object.keys(data).length ? '•' : '='} ${name}: ${Object.keys(data).join(', ') || '바꿀 것 없음'}${kept}`);
     if (!apply || Object.keys(data).length === 0) continue;
 
@@ -94,7 +124,13 @@ async function main() {
         actor,
         action: 'rule_update',
         divisionId: d.id,
-        detail: JSON.stringify({ fields: Object.keys(data), sort: draft.sort, undated: draft.undated, via: 'apply-merge-rule-drafts' }),
+        detail: JSON.stringify({
+          fields: Object.keys(data),
+          // 실제로 넣은 값만 — 유지한 정렬을 「바꿨다」고 적으면 감사 기록이 거짓말을 한다
+          ...(data.mergeSort !== undefined && { sort: data.mergeSort }),
+          ...(data.mergeUndated !== undefined && { undated: data.mergeUndated }),
+          via: 'apply-merge-rule-drafts',
+        }),
       },
     });
   }

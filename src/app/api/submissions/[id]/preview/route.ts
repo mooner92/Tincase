@@ -59,11 +59,19 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
       plans: parsed.worklog.plans,
       notes: parsed.worklog.notes,
     },
-    tables: parsed.tables.slice(0, 3).map((t, i) => ({
-      title: TABLE_TITLES[i] ?? `표 ${i + 1}`,
-      columns: [...TABLE_COLUMNS],
-      rows: tableGrid(t), // 헤더 행 포함 원문 격자
-    })),
+    tables: parsed.tables.slice(0, 3).map((t, i) => {
+      /*
+       * API-57 — 본문 칸이 모두 빈 행(양식의 빈 번호 줄 3-1~3-4)은 뺀다. 병합본 보기(UX-03)와 같은 조건이다.
+       * 거르지 않으면 부서원이 「빈 번호가 생겼네, 잘못 냈나?」 하고 묻는다. 글자는 건드리지 않는다(API-25).
+       * [고치기]는 이 격자가 아니라 `rowsByTable`을 쓰므로 거른다고 자리가 어긋나지 않는다.
+       */
+      const full = tableGrid(t); // 헤더 행 포함 원문 격자
+      return {
+        title: TABLE_TITLES[i] ?? `표 ${i + 1}`,
+        columns: [...TABLE_COLUMNS],
+        rows: [full[0] ?? [], ...full.slice(1).filter((r) => r.slice(1).some((c) => c.trim()))],
+      };
+    }),
     warnings: parsed.warnings,
   });
 });

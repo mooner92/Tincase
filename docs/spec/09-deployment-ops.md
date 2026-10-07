@@ -163,11 +163,39 @@ sqlite3 /data/worklog/db/worklog.db ".backup '/mnt/backup/worklog/db-$(date +%F)
 
 | 대상 | 주기 | 보존 | 목적지 |
 |---|---|---|---|
-| DB | 매일 03:00 | 30일 | `/mnt/backup/worklog/` (NFS, 실측 227T 여유) |
-| `divisions/**` | 매주 일 03:30 | 12주 | 〃 |
+| DB | 매일 03:00 | 30일 | `/mnt/backup/worklog/db/` (NFS, 실측 227T 여유) |
+| `divisions/**` + `org/**`(있을 때) | **매일 03:30** | 12주 | `/mnt/backup/worklog/files/divisions-날짜.tar.gz` |
 
 목적지는 **다른 노드의 NFS**(<NFS-내부-IP>) — 이 서버 디스크 장애에도 생존.
-NFS에는 백업 파일만 둔다. 라이브 SQLite 상주 금지 (ADR-0003).
+NFS에는 백업 파일만 둔다. 라이브 SQLite 상주 금지 (ADR-0003). 스크립트는 `scripts/backup.sh {db|files|verify}`.
+
+**파일도 매일이다 (2026-10-08).** 예전에는 일요일에만 묶었다. 그러면 어제 DB로 복원했을 때 지난 일요일 뒤에 낸
+제출물(최대 6일 치)은 **행만 있고 파일이 없다.** 묶음이 1.5MB 남짓이라 매일 돌려도 부담이 없다.
+
+**`org/`도 묶는다.** 3단계 취합(총괄이 올린 섹션 원본·전사 취합본)은 `STORAGE_ROOT/org/` 아래에 저장된다.
+DB 백업에는 그 행(`OrgSectionUpload`·`RollupRun`)이 들어가므로 파일이 빠지면 복원 뒤 「행은 있는데 파일이 없다」가 된다.
+`org/`가 아직 없는 서버에서는 빼고 묶는다 — 없는 디렉터리 때문에 `tar`가 실패하지 않게.
+
+**NFS가 마운트돼 있지 않으면 멈춘다.** `/mnt/backup`이 마운트 지점이 아니면 `backup.sh`는 아무것도 쓰지 않고
+`[backup] FATAL …`을 찍고 1로 끝난다. 재부팅 뒤 마운트가 빠지면 `/mnt/backup`은 **루트 디스크의 빈 디렉터리**가 되고,
+거기에 쓰면 「서버 디스크 장애에도 살아남을」 백업이 이미 찬 루트 디스크에 쌓이기 때문이다.
+지금 마운트는 손으로 한 것이라(fstab에 없음) 재부팅하면 빠진다 — **운영자가 fstab에 넣는다** (sudo, 1회):
+
+```bash
+findmnt -no SOURCE /mnt/backup            # 지금 붙어 있는 NFS 주소:경로 — 아래 줄에 그대로 쓴다
+sudo cp /etc/fstab /etc/fstab.bak-$(date +%F)
+echo '<NFS-내부-IP>:<경로>  /mnt/backup  nfs4  defaults,_netdev,nofail,hard,timeo=600  0  0' | sudo tee -a /etc/fstab
+sudo systemctl daemon-reload && sudo mount -a && findmnt /mnt/backup   # 오류 없이 같은 줄이 나오면 끝
+```
+
+`nofail`은 NFS가 없어도 부팅이 멈추지 않게, `_netdev`는 네트워크가 올라온 뒤 붙게 한다.
+
+**cron (mhchoi, 운영자가 바꾼다)** — files 줄의 요일 `0`을 `*`로:
+
+```
+0 3 * * *   /home/mhchoi/repman/scripts/backup.sh db     >> /home/mhchoi/kei-backups/worklog-backup.log 2>&1
+30 3 * * *  /home/mhchoi/repman/scripts/backup.sh files  >> /home/mhchoi/kei-backups/worklog-backup.log 2>&1
+```
 
 ### OPS-09 — 복구 리허설
 
@@ -219,6 +247,10 @@ JSON 한 줄. `pino` 권장.
 
 `GET /api/health` (API-31~33). Docker healthcheck + 외부 모니터링 양쪽에서 사용.
 
+- 양식은 **파일까지** 본다 — 활성 부서 중 양식 파일이 없는 곳이 있으면 `checks.template` fail (OPS-41과 같은 판정).
+  예전에는 `Template` 행 수만 세어서, 파일이 하나뿐인 2026-09-10 상태에서도 `ok`라고 답했을 것이다.
+- 루트 디스크는 `checks.rootDisk`와 맨 위 `warnings[]` — 판정은 OPS-19.
+
 ### OPS-14 — 화요일 아침 점검 (권장)
 
 마감 3시간 전(화 11:00) 제출 현황을 로그에 남긴다.
@@ -228,25 +260,44 @@ Phase 3 리마인드의 밑거름이 되고, 그 전에도 Sean이 로그만 봐
 
 ## 7. 릴리스
 
-### OPS-15 — 배포 절차
+### OPS-15 — 재배포 절차 ★ (2026-10-08 개정)
 
-```bash
-cd /srv/worklog/app
-git pull
-sqlite3 data/worklog.db ".backup 'backup/pre-deploy-$(date +%F-%H%M).db'"   # 필수
-docker compose build
-docker compose up -d
-sleep 10
-curl -fsS http://127.0.0.1:11111/api/health | jq .
-```
+명령은 [DEPLOY.md](../DEPLOY.md) §2b에 있다. 순서와 이유만 여기 둔다.
 
-### OPS-16 — 배포 금지 시간대 ★
+| 단계 | 하는 일 | 왜 |
+|---|---|---|
+| 0 | 이번 주 마감 확인 → 금지 시간대면 멈춘다 | OPS-16. 연휴 주는 마감이 당겨진다(WS-19) |
+| 1 | 디스크: `df -h /` 여유 5G 이상, 아니면 `docker image prune` · `builder prune` · npm/pip 캐시 | 빌드가 루트 디스크에 쌓인다(OPS-42). 2G대에서 빌드하면 도중에 ENOSPC로 죽는다 |
+| 2 | DB 스냅샷 — 컨테이너 안에서 `sqlite3 .backup` → `/data/db/worklog.db.predeploy-시각` | `cp` 금지(OPS-07). `tmp/`는 기동 때 지워지므로 거기 두지 않는다. 야간본(`backup.sh db`)을 손으로 돌리면 **그날 야간본을 덮는다** |
+| 3 | 지금 이미지를 `repman:rollback`으로 태그 | 빌드가 `repman:latest`를 덮으면 옛 이미지는 태그 없는(dangling) 이미지가 되고 일요일 prune에 지워진다. 그 뒤 롤백은 재빌드뿐이다 |
+| 4 | `git pull` → 스키마가 바뀌었으면 `prisma db push` (**chown 없이**) | 아래 「chown 하지 않는다」 |
+| 5 | 권한 확인: `stat` → `10001:mhchoi drwxrws---` · DB `-rw-rw----` | 틀어졌으면 백업이 조용히 멈춘다 |
+| 6 | 빌드 → 기동 → health `ok:true` | |
 
-**월요일 00:00 ~ 화요일 14:00 사이에는 배포하지 않는다.**
+**재배포 때는 chown 하지 않는다.** `/data/worklog`는 **`10001:mhchoi`, 그룹 쓰기, 디렉터리 setgid**다. 컨테이너(uid 10001)가
+주인이고, 호스트의 mhchoi는 **그룹으로** 읽고 쓴다 — `backup.sh`의 gzip·tar, `prisma db push`, `issue-passwords.ts`가 모두
+그 그룹 권한으로 돈다. 예전 문서대로 `chown -R 10001:10001`을 하면 그룹이 바뀌어 mhchoi가 디렉터리에 들어가지 못하고,
+03:00 백업이 매일 Permission denied로 실패한다 — 로그 파일에만 남고 알림은 없다. 반대로 `chown mhchoi:mhchoi`를 먼저 하면
+그 사이 컨테이너가 DB에 쓰지 못한다. 지금 권한에서는 mhchoi가 그룹으로 이미 쓸 수 있으므로 chown이 필요 없다.
 
-제출 창이 열려 있는 유일한 시간이다. 이때 장애가 나면 그 주차가 통째로 날아간다.
+**스키마는 「추가만」인지 본다.** `db push`가 데이터 손실 경고나 확인을 물으면 **멈춘다** — `--accept-data-loss`를 붙이지
+않는다. 추가만인 변경(새 표·기본값 있는 열)은 프롬프트 없이 끝나고, 돌고 있는 옛 앱도 그대로 동작한다.
 
-권장: **화요일 14:00 이후 ~ 일요일**.
+### OPS-16 — 배포 금지 시간대 ★ (2026-10-08 개정 — 목요일 마감 기준)
+
+**그 주 마감 전날 11:30 ~ 마감 +2시간 30분에는 배포하지 않는다.** 기본값(목 14:00 마감)이면 **수 11:30 ~ 목 16:30**.
+
+| 이 사이에 있는 것 | |
+|---|---|
+| 전날 11:45 · 당일 09:00 · 13:00 · 13:50 마감 전 알림 | NT-41·45·10·42 — 13:50은 창이 3분이다 |
+| 제출이 몰리는 시간 (전날 오후 ~ 마감) | 재기동 1분이 「마감 직전에 안 올라간다」가 된다 |
+| 14:01 자동 병합 · 14:10 검토 요청 · 14:30 제출 안내 | HM-25·NT-40 |
+| 15:00 대외업무 마감 · 3단계를 켰으면 16:00 본부 기한(마감 +2시간) | 그 뒤 30분은 여유 |
+
+**배포 전에 그 주 마감부터 본다.** 연휴 주는 총괄이 마감을 당긴다(WS-19) — 수요일 마감이면 금지 시간대도 하루 당겨진다.
+부서마다 마감이 다를 수 있으니 가장 이른 것을 기준으로 한다. 확인 명령은 DEPLOY.md §2b-0.
+
+권장: **목 16:30 이후 ~ 다음 주 화요일** (마감이 당겨진 주는 그만큼 앞당겨 끝낸다).
 
 ### OPS-16a — 자동 병합을 잠시 멈춰야 할 때
 
@@ -328,13 +379,18 @@ sudo sh -c 'du -sh /var/lib/containerd/*/ | sort -rh'
 마지막 줄에 `sudo sh -c`를 쓰는 이유: 글로브는 sudo **밖**에서 펼쳐져서, 읽을 권한이 없으면
 조용히 빈 결과가 나온다. 「아무것도 없다」와 「못 봤다」가 똑같이 보인다.
 
-### OPS-17 — 롤백
+### OPS-17 — 롤백 (2026-10-08 개정)
+
+**재빌드하지 않는다.** 배포 전에 태그해 둔 이미지로 되돌린다 — 디스크가 모자라도, 빌드가 깨져도 된다.
 
 ```bash
-git checkout <이전태그>
-docker compose up -d --build
-# 스키마가 바뀌었다면 백업 DB도 함께 복원
+sudo docker tag repman:rollback repman:latest
+sudo docker compose up -d --no-build --force-recreate
+curl -fsS http://127.0.0.1:11111/api/health
 ```
+
+**DB는 보통 되돌리지 않는다.** 스키마 변경이 「추가만」(OPS-15)이면 옛 앱은 새 열을 모르고 지나간다. DB 스냅샷(OPS-15 2단계)으로
+되돌리는 것은 데이터가 망가졌을 때만이다 — 배포 뒤에 들어온 제출·수정도 함께 사라진다. 절차는 DEPLOY.md §2b-롤백.
 
 마이그레이션이 파괴적이지 않게 관리하면(DM 마이그레이션 정책) 롤백이 단순해진다.
 
@@ -382,6 +438,20 @@ docker compose up -d --build
 | Docker 빌드는 `docker builder prune` 정기 실행과 함께 | 빌드 캐시가 `/var/lib/docker`(= `/`)에 쌓임 |
 | 이미지 태그 2세대만 유지 | 〃 |
 | 헬스체크에 루트 디스크 여유 감시 추가 — 5G 미만이면 경고 | 다른 서비스가 채워도 우리가 먼저 안다 |
+| 배포 직전 디스크 확인 — 5G 미만이면 먼저 비운다 | OPS-15 1단계 |
+
+**health가 디스크를 말하는 방법 (2026-10-08 결정).**
+
+| 루트 여유 | `checks.rootDisk` | 맨 위 `warnings[]` | `ok` · HTTP |
+|---|---|---|---|
+| 5G 이상 | `ok` | — | 그대로 |
+| 1G ~ 5G | `warn: 2.6G free` | `root disk low: 2.6G free` | **그대로 200** |
+| 1G 미만 | `fail: 0.8G free` | 같은 줄 | **`false` · 503** → 도커 `unhealthy` |
+
+1~5G에서 `ok`를 뒤집지 않는 이유: 이 서버는 평소 97~99%를 오간다. 그때마다 503이면 도커 상태가 늘 `unhealthy`라
+정말 위험할 때를 가려내지 못한다. 대신 **`warnings` 배열**로 따로 꺼내 둔다 — `jq '.warnings'` 한 번이면 보이고,
+값을 읽지 않는 healthcheck는 영향받지 않는다. 1G 밑은 SQLite 저널·로그 쓰기가 실패할 수 있는 수준이라 앱이 정말로
+건강하지 않다. 그때는 숨기지 않는다 (`restart: unless-stopped`는 unhealthy에 반응하지 않으므로 재기동 폭주도 없다).
 
 근본 대책(Docker data-root를 `/data`로 이전)은 **다른 서비스에 영향을 주므로 이 프로젝트
 범위 밖** — 운영자 판단 사항으로 기록만 한다 ([Q-17](../../OPEN-QUESTIONS.md)).

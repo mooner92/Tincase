@@ -25,8 +25,8 @@ export function worklogRows(buf: Buffer): Record<BucketKey, DiffRow[]> {
   return out;
 }
 
-/** 「홍길동 실장」 — 직책은 ERP에서 온다(DM-19). 없으면 「부서장」 */
-function titled(u: { name: string; jobTitle: string | null }): string {
+/** 「홍길동 실장」 — 직책은 ERP에서 온다(DM-19). 없으면 「부서장」. 고친 기록(HM-49)도 같은 이름을 쓴다 */
+export function titled(u: { name: string; jobTitle: string | null }): string {
   return `${u.name} ${u.jobTitle?.trim() || '부서장'}`;
 }
 

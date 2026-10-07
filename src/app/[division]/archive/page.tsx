@@ -5,8 +5,8 @@
 // 정작 그 글을 쓴 사람만 못 보고 있었다. 결과를 보면 다음 주에 뭘 어떻게 쓸지 감이 잡히고,
 // 잘못 들어간 것도 본인이 먼저 발견한다.
 import { redirect } from 'next/navigation';
-import { prisma } from '@/server/db';
 import { getPageScope, getDivisionView } from '@/server/page-scope';
+import { latestRunPerWeek } from '@/server/merge/archive';
 import { noticeFor } from '@/components/Notice';
 import { ArchiveList } from '@/components/ArchiveList';
 import { toKstIso, slotKind } from '@/lib/week';
@@ -23,28 +23,19 @@ export default async function ArchivePage({ params }: { params: Promise<{ divisi
   const { division: slugParam } = await params;
   const view = await getDivisionView(slugParam); // TACP-7 — 대상 부서는 단일 해석기로
 
-  const runs = await prisma.mergeRun.findMany({
-    where: { divisionId: view.division.id, status: 'succeeded', outputPath: { not: null } },
-    orderBy: { startedAt: 'desc' },
-    include: { weekSlot: true },
-    take: 60,
+  // 주차당 마지막 성공본만 — 다시 병합하면 같은 주차에 여러 건이 쌓인다. 주차를 먼저 고른다 (최근 n건을 접으면 옛 주차가 빠진다)
+  const runs = await latestRunPerWeek(view.division.id);
+  const items = runs.map((r) => {
+    const counts = r.rowCounts ? (JSON.parse(r.rowCounts) as Record<string, number>) : null;
+    return {
+      isoKey: r.weekSlot.isoKey,
+      label: `${r.weekSlot.year}년 ${r.weekSlot.label}`,
+      monthly: slotKind(r.weekSlot) === 'monthly',
+      madeAtKst: toKstIso(r.finishedAt ?? r.startedAt).slice(5, 16).replace('T', ' '),
+      sources: (JSON.parse(r.sourceIds) as string[]).length,
+      counts,
+    };
   });
-
-  // 주차당 마지막 성공본만 — 다시 병합하면 같은 주차에 여러 건이 쌓인다
-  const seen = new Set<string>();
-  const items = runs
-    .filter((r) => !seen.has(r.weekSlotId) && seen.add(r.weekSlotId))
-    .map((r) => {
-      const counts = r.rowCounts ? (JSON.parse(r.rowCounts) as Record<string, number>) : null;
-      return {
-        isoKey: r.weekSlot.isoKey,
-        label: `${r.weekSlot.year}년 ${r.weekSlot.label}`,
-        monthly: slotKind(r.weekSlot) === 'monthly',
-        madeAtKst: toKstIso(r.finishedAt ?? r.startedAt).slice(5, 16).replace('T', ' '),
-        sources: (JSON.parse(r.sourceIds) as string[]).length,
-        counts,
-      };
-    });
 
   return (
     <main className="pt-10">

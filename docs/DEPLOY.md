@@ -55,25 +55,32 @@ Excel에서 한글이 깨지면 인코딩 문제다 — `--bom`으로 다시 뽑
 ## 0. 사전 조건
 
 - [ ] `main` 최신 (`git pull`)
-- [ ] 로컬 검증: `npm test` 62개 통과, `npx next build` 성공
+- [ ] 로컬 검증: `npm test` **전부** 통과, `npx tsc --noEmit -p .` 통과
+- [ ] **재배포면 §2b부터** — §1·§2는 첫 설치 한 번뿐이다
 
 ## 1. 호스트 준비 (1회, sudo 필요)
 
 ```bash
 sudo mkdir -p /data/worklog/db
-sudo chown -R mhchoi:mhchoi /data/worklog       # 컨테이너 uid 10001과 공유 시 chmod 조정
-chmod 750 /data/worklog
+sudo chown -R mhchoi:mhchoi /data/worklog       # 스키마·시드는 mhchoi가 만든다 (§2)
 mkdir -p /mnt/backup/worklog                     # NFS 쓰기 확인
 touch /mnt/backup/worklog/.probe && rm /mnt/backup/worklog/.probe
 ```
 
-컨테이너는 uid 10001(app)로 돈다. 바인드 볼륨 권한:
+컨테이너는 uid 10001(app)로 돈다. 바인드 볼륨 권한은 **`10001:mhchoi` + 그룹 쓰기 + 디렉터리 setgid** 다 —
+컨테이너가 주인이고, 호스트의 mhchoi(백업 `backup.sh`·`prisma db push`·`issue-passwords.ts`)는 **그룹으로** 읽고 쓴다.
+setgid라 컨테이너가 새로 만드는 파일·디렉터리도 그룹이 mhchoi로 따라온다. (§2 끝에서 실행)
 
 ```bash
-sudo chown -R 10001:10001 /data/worklog
+sudo chown -R 10001:mhchoi /data/worklog
+sudo chmod -R g+rwX,o-rwx /data/worklog
+sudo find /data/worklog -type d -exec chmod g+s {} +
 ```
 
-## 2. 스키마 + 시드 (호스트에서, 컨테이너 기동 전) ⚠ 순서 중요
+⚠ **`chown -R 10001:10001`은 쓰지 않는다** — mhchoi는 그룹 10001이 아니어서 `/data/worklog`에 들어가지 못하고,
+03:00 백업이 매일 Permission denied로 조용히 실패한다 (OPS-15).
+
+## 2. 스키마 + 시드 (첫 설치, 호스트에서, 컨테이너 기동 전) ⚠ 순서 중요
 
 컨테이너는 스키마를 만들지 않는다 — DB가 비어 있으면 fail fast로 죽는다 (entrypoint).
 
@@ -89,11 +96,126 @@ STORAGE_ROOT=/data/worklog \
 SEED_TEMPLATE=1 npx tsx prisma/seed.ts
 # 기대 출력: 부서 30 · 사용자 337 · 파일럿 양식 v1 등록
 
-# ④ 컨테이너 uid로 넘긴다
-sudo chown -R 10001:10001 /data/worklog
+# ④ 컨테이너 uid로 넘긴다 — §1의 세 줄 (10001:mhchoi · 그룹 쓰기 · setgid)
+sudo chown -R 10001:mhchoi /data/worklog
+sudo chmod -R g+rwX,o-rwx /data/worklog
+sudo find /data/worklog -type d -exec chmod g+s {} +
 ```
 
-스키마 변경이 있는 재배포 때도 같은 절차 (①→②→④, 시드는 불필요).
+**재배포는 이 절차가 아니다 → §2b.** 예전에는 「스키마 변경이 있는 재배포 때도 ①→②→④」였는데, 그러면 ①과 ④
+사이에 돌고 있는 컨테이너가 DB에 쓰지 못하고, ④가 그룹까지 바꾸면 백업이 멈춘다.
+
+## 2b. 재배포 (매번) — OPS-15
+
+순서와 이유는 [spec 09 OPS-15](spec/09-deployment-ops.md). **chown 하지 않는다** — mhchoi는 그룹 권한으로 이미 쓸 수 있다.
+
+### 2b-0. 금지 시간대인가 (OPS-16)
+
+**그 주 마감 전날 11:30 ~ 마감 +2시간 30분에는 하지 않는다** (기본값: 수 11:30 ~ 목 16:30).
+연휴 주는 총괄이 마감을 당긴다(WS-19) — **이번 주 마감부터 본다**:
+
+```bash
+sudo docker exec repman sqlite3 /data/db/worklog.db \
+  "SELECT isoKey, label, deadlineDowOverride, deadlineTimeOverride, deadlineNote FROM WeekSlot ORDER BY opensAt DESC LIMIT 2;
+   SELECT deadlineDow, deadlineTime, COUNT(*) FROM Division WHERE isActive=1 GROUP BY 1,2;"
+# 위 두 줄: 최근 주차의 예외 (총괄이 다음 주를 미리 정했으면 다음 주가 맨 위다 — isoKey로 이번 주를 고른다. 칸이 비면 예외 없음)
+# 마지막 줄: 켜진 부서의 마감 (요일 1=월 … 4=목 … 7=일)
+# 예외가 있으면 그것이, 없으면 부서 값이 마감이다. 가장 이른 마감 기준으로 금지 시간대를 잡는다
+```
+
+### 2b-1. 디스크 (OPS-19 · OPS-42)
+
+루트 여유가 **5G 이상**이어야 빌드한다. 2G대에서 빌드하면 `npm ci`·이미지 레이어를 쓰다 ENOSPC로 죽는다.
+
+```bash
+df -h / | tail -1
+sudo docker image prune -f          # 태그 없는(dangling) 이미지만 — OPS-42가 안전하다고 정리한 명령
+sudo docker builder prune -f        # buildx가 없어 0B일 수 있다. 해는 없다
+npm cache clean --force             # mhchoi의 npm 캐시 (수 G). 다음에 다시 받을 뿐이다
+pip cache purge                     # 〃 pip
+df -h / | tail -1                   # 아직 5G 미만이면 멈추고: sudo du -sh /var/lib/containerd (OPS-42)
+```
+
+`docker system prune`은 쓰지 않는다 — 공용 서버라 남의 멈춘 컨테이너·볼륨까지 지운다.
+
+### 2b-2. DB 스냅샷 · 롤백 태그
+
+```bash
+TS=$(date +%Y%m%d-%H%M)
+# 컨테이너 안에서 .backup — cp 금지(OPS-07). tmp/는 기동 때 지워지므로 db/에 둔다.
+# backup.sh db를 손으로 돌리지 않는다 — 그날 야간본을 같은 이름으로 덮는다
+sudo docker exec repman sqlite3 /data/db/worklog.db ".backup '/data/db/worklog.db.predeploy-$TS'"
+ls -l /data/worklog/db/
+
+# 지금 이미지를 붙잡아 둔다 — 빌드가 repman:latest를 덮으면 옛 이미지는 dangling이 되어 일요일 prune에 지워진다
+sudo docker tag repman:latest repman:rollback
+git -C ~/repman log -1 --oneline    # 지금 돌고 있는 커밋 — 적어 둔다
+```
+
+### 2b-3. 코드 · 스키마 · 권한
+
+```bash
+cd ~/repman && git pull
+DATABASE_URL=file:/data/worklog/db/worklog.db npx prisma db push --skip-generate
+#   「already in sync」면 바뀐 것 없음. 추가만인 변경은 프롬프트 없이 끝나고, 돌고 있는 옛 앱도 그대로 동작한다.
+#   ⚠ 데이터 손실 경고·확인을 물으면 **멈춘다** — --accept-data-loss를 붙이지 않는다
+
+stat -c '%u:%G %A %n' /data/worklog /data/worklog/db /data/worklog/db/worklog.db
+#   10001:mhchoi drwxrws--- /data/worklog
+#   10001:mhchoi drwxrws--- /data/worklog/db
+#   10001:mhchoi -rw-rw---- /data/worklog/db/worklog.db
+#   다르면 §1의 세 줄로 되돌린다 — 이대로 두면 백업이 조용히 멈춘다
+```
+
+### 2b-4. 빌드 · 기동 · 확인
+
+```bash
+sudo docker compose build && sudo docker compose up -d
+sleep 15
+curl -sS http://127.0.0.1:11111/api/health | python3 -m json.tool   # -f를 빼야 503일 때도 본문(어느 check인가)이 보인다
+#   ok:true · checks 전부 ok · warnings 비어 있음 (있으면 읽는다 — 대개 루트 디스크, OPS-19)
+#   checks.template만 fail이면 배포 탓이 아니다 — 양식 파일이 빠진 켠 부서가 있다(OPS-41). 롤백하지 말고 /ops의 「파일 없음」을 본다
+sudo docker image prune -f && df -h / | tail -1
+```
+
+### 2b-롤백 — 재빌드하지 않는다 (OPS-17)
+
+```bash
+sudo docker tag repman:rollback repman:latest
+sudo docker compose up -d --no-build --force-recreate
+curl -sS http://127.0.0.1:11111/api/health | python3 -m json.tool
+```
+
+**DB는 보통 되돌리지 않는다.** 스키마가 「추가만」이면 옛 앱은 새 열을 모르고 지나간다. 데이터가 망가졌을 때만
+스냅샷으로 되돌린다 — 배포 뒤에 들어온 제출·수정도 함께 사라진다:
+
+```bash
+sudo docker compose stop app
+cp /data/worklog/db/worklog.db.predeploy-$TS /data/worklog/db/worklog.db   # 있는 파일에 덮는다 — 주인·권한이 그대로 남는다
+ls /data/worklog/db/                     # worklog.db-journal · -wal · -shm 이 남아 있으면 지운다
+sudo docker compose up -d
+```
+
+스냅샷(`worklog.db.predeploy-*`)은 다음 배포가 무사히 끝나면 지운다.
+
+## 2c. 복원 — NFS 백업에서 (OPS-08 · OPS-09)
+
+디스크가 망가졌거나 데이터를 날짜째로 되돌려야 할 때. **DB와 파일은 같은 날짜**를 쓴다.
+
+```bash
+sudo docker compose stop app
+D=2026-10-08                                                  # 되돌릴 날짜
+gunzip -c /mnt/backup/worklog/db/worklog-$D.db.gz > /data/worklog/db/worklog.db
+tar xzf /mnt/backup/worklog/files/divisions-$D.tar.gz -C /data/worklog
+# └ 이름은 divisions-지만 안에 divisions/와 (있으면) org/가 같이 들어 있다 — tar tzf로 확인할 수 있다
+sudo chown -R 10001:mhchoi /data/worklog && sudo chmod -R g+rwX,o-rwx /data/worklog \
+  && sudo find /data/worklog -type d -exec chmod g+s {} +     # §1의 세 줄
+sudo docker compose up -d && sleep 15 && curl -fsS http://127.0.0.1:11111/api/health | python3 -m json.tool
+```
+
+- 파일 묶음은 **2026-10-08부터 매일**이다. 그 전 날짜는 일요일 것만 있고, `org/`(3단계 취합)는 들어 있지 않다.
+- 파일 묶음(03:30)이 DB(03:00)보다 30분 늦다. 그 사이에 낸 파일은 행 없이 남는다 — 화면에 안 보일 뿐 해가 없다.
+- 복원한 뒤 health의 `checks.template`이 fail이면 양식 파일이 빠진 부서가 있다는 뜻이다 (OPS-41).
 
 ## 3. Cloudflare 대시보드 (AU-11)
 
@@ -165,16 +287,26 @@ df -h / | tail -1
 - [ ] `.hwpx` 업로드 시도 → 거부 문구에 변환 방법 표시
 - [ ] `docker compose restart` 후 health ok (재기동 내성)
 
-## 7. 백업 크론
+## 7. 백업 크론 (OPS-08)
 
 ```bash
 chmod +x ~/repman/scripts/backup.sh
 crontab -e
-# 추가:
-# 0 3 * * *   /home/mhchoi/repman/scripts/backup.sh db    >> /data/worklog/backup.log 2>&1
-# 30 3 * * 0  /home/mhchoi/repman/scripts/backup.sh files >> /data/worklog/backup.log 2>&1
-# 수동 1회 실행으로 확인:
+# 이 두 줄 — files도 매일이다 (2026-10-08 개정: 일요일 `0` → 매일 `*`. 이미 크론이 있으면 그 한 글자만 바꾼다)
+# 0 3 * * *   /home/mhchoi/repman/scripts/backup.sh db    >> /home/mhchoi/kei-backups/worklog-backup.log 2>&1
+# 30 3 * * *  /home/mhchoi/repman/scripts/backup.sh files >> /home/mhchoi/kei-backups/worklog-backup.log 2>&1
+# 수동 1회 실행으로 확인 (db는 그날 야간본을 같은 이름으로 덮는다 — 첫 설치 때만):
 ~/repman/scripts/backup.sh db && ~/repman/scripts/backup.sh verify
+```
+
+**NFS가 fstab에 있어야 한다.** `backup.sh`는 `/mnt/backup`이 마운트 지점이 아니면 `[backup] FATAL`을 찍고 멈춘다 —
+재부팅 뒤 마운트가 빠지면 루트 디스크에 쓰게 되기 때문이다. 지금 마운트는 손으로 한 것이라 운영자가 한 번 넣는다
+(sudo, 정확한 줄은 [spec 09 OPS-08](spec/09-deployment-ops.md)):
+
+```bash
+findmnt -no SOURCE /mnt/backup        # 이 값을 아래 <NFS-내부-IP>:<경로> 자리에
+echo '<NFS-내부-IP>:<경로>  /mnt/backup  nfs4  defaults,_netdev,nofail,hard,timeo=600  0  0' | sudo tee -a /etc/fstab
+sudo systemctl daemon-reload && sudo mount -a && findmnt /mnt/backup
 ```
 
 ## 8. 월요일 아침 안내문 (붙여넣기용 초안)
@@ -184,7 +316,7 @@ crontab -e
 > ① http://<서버-내부-IP>:11111 접속
 > ② KEI 이메일 + 개별 전달드린 임시 비밀번호로 로그인 → 비밀번호 변경
 > ③ [빈 양식 다운로드] → 작성 → 끌어다 놓기로 제출
-> 마감: 화요일 14:00 (이후 자동 잠김)
+> 마감: 목요일 14:00 (이후 자동 잠김)
 > ※ 한 번 로그인하면 한 달간 유지됩니다.
 > ※ 이번 주는 기존 이메일 제출도 병행합니다. 문제 있으면 저에게 바로 연락 주세요.
 
@@ -197,7 +329,10 @@ crontab -e
 
 ## 배포 금지 시간대 (OPS-16)
 
-**월 00:00 ~ 화 14:00 (제출 창) 동안 재배포 금지.** 배포는 화 14:00 이후~일요일.
+**그 주 마감 전날 11:30 ~ 마감 +2시간 30분 동안 재배포 금지.** 기본값(목 14:00 마감)이면 **수 11:30 ~ 목 16:30**.
+전날 11:45·당일 09:00·13:00·13:50 알림, 마감 직전 제출, 14:01 병합, 14:10·14:30 안내, 15:00 대외 마감,
+3단계를 켰으면 16:00 본부 기한까지가 이 안에 있다. 배포는 **목 16:30 이후 ~ 다음 주 화요일**.
+**연휴 주는 마감이 당겨진다** — 배포 전에 §2b-0으로 이번 주 마감부터 본다.
 
 
 ---

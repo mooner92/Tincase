@@ -11,6 +11,13 @@ process.env.STORAGE_ROOT = mkdtempSync(path.join(tmpdir(), 'repman-auth-'));
 process.env.CF_ACCESS_TEAM = 'aidt-kei';
 delete process.env.DEV_IDENTITY;
 
+/*
+ * AU-20 — scrypt(N=2^16)는 한 번에 수백 ms다. 아래 두 테스트는 그것을 여덟 번·여섯 번 돈다.
+ * 서버에 부하가 있으면(loadavg 25/40코어에서 실측 5054ms) 기본 5초를 넘겨 「실패」로 나오고,
+ * 배포 전 게이트가 빨갛게 보여 재실행을 반복하게 된다. 운영 파라미터는 낮추지 않고 기다리는 시간만 늘린다.
+ */
+const SCRYPT_TIMEOUT = 30_000;
+
 const EMAIL = 'pw@t.kei.re.kr';
 const OTHER = 'pw2@t.kei.re.kr';
 let INITIAL = '';
@@ -130,7 +137,7 @@ describe('[AU-21/23] 로그인', () => {
     const locked = await POST(jsonReq('/api/auth/login', { email: EMAIL, password: INITIAL }));
     expect(locked.status).toBe(429); // 올바른 비밀번호여도 잠금 중엔 거부
     await prisma.user.update({ where: { email: EMAIL }, data: { failedLoginCount: 0, lockedUntil: null } });
-  });
+  }, SCRYPT_TIMEOUT);
 });
 
 describe('[AU-21] 세션으로 신원 해석', () => {
@@ -206,7 +213,7 @@ describe('[AU-22/25] 비밀번호 변경', () => {
     expect((await login.POST(jsonReq('/api/auth/login', { email: EMAIL, password: NEW }))).status).toBe(200);
     expect((await login.POST(jsonReq('/api/auth/login', { email: EMAIL, password: INITIAL }))).status).toBe(401);
     INITIAL = NEW;
-  });
+  }, SCRYPT_TIMEOUT);
 });
 
 describe('[AU-27] 운영자 비밀번호 초기화', () => {

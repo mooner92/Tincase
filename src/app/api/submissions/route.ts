@@ -2,7 +2,8 @@
 import { NextRequest } from 'next/server';
 import { requireSubmitter, HttpError } from '@/server/authz';
 import { uploadSubmission } from '@/server/worklog';
-import { handler, json, rateLimit } from '@/server/http';
+import { handler, json, rateLimit, rejectOversizedBody } from '@/server/http';
+import { env } from '@/server/env';
 import { toKstIso } from '@/lib/week';
 
 export const dynamic = 'force-dynamic';
@@ -10,6 +11,7 @@ export const dynamic = 'force-dynamic';
 export const POST = handler(async (req: NextRequest) => {
   const scope = await requireSubmitter(req.headers); // API-45 — 명단 밖은 여기서 걸린다
   rateLimit(`upload:${scope.user.email}`, 10, 5 * 60_000); // API-34
+  rejectOversizedBody(req, env.MAX_UPLOAD_BYTES); // ST-04 — formData()가 본문 전체를 올리기 전에
 
   const form = await req.formData().catch(() => null);
   const file = form?.get('file');

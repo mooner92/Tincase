@@ -38,6 +38,28 @@ export interface HwpFile {
   previewText: string | null;
 }
 
+/*
+ * ST-07 — 압축 해제 **상한**. deflate는 0으로 채운 데이터를 약 1000:1로 줄인다 — 상한이 없을 때 260KB짜리 가짜
+ * hwp 하나가 256MiB로 풀리며 이벤트 루프를 2.3초 멈췄다(20MB 업로드면 약 20GB). 로그인한 부서원 한 명이 전 부서의
+ * 제출·병합을 멈출 수 있었다. 실제 업무일지 섹션은 수백 KB, 병합본도 몇 MB라 이 값은 그 수십 배다.
+ */
+export const INFLATE_LIMITS = { stream: 64 * 1024 * 1024, total: 128 * 1024 * 1024 } as const;
+export type InflateLimits = { stream: number; total: number };
+
+/** 상한까지만 푼다. 넘으면 끝까지 풀지 않고 멈춘다 — 다 풀고 나서 재면 이미 늦다 */
+function inflateBounded(raw: Buffer, name: string, perStream: number, budget: number): Buffer {
+  const limit = Math.min(perStream, budget);
+  if (limit < 1) throw new HwpFormatError('decompress_failed', `${name}을(를) 풀기 전에 합계 한도를 넘었습니다`);
+  try {
+    return inflateRawSync(raw, { maxOutputLength: limit }); // HM-07: raw deflate
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code === 'ERR_BUFFER_TOO_LARGE') {
+      throw new HwpFormatError('decompress_failed', `${name}이(가) 풀면 너무 큽니다 (한도 ${Math.floor(limit / 1024 / 1024)}MB)`);
+    }
+    throw new HwpFormatError('decompress_failed', `${name} 압축 해제에 실패했습니다`);
+  }
+}
+
 function streamOf(cf: CFB.CFB$Container, path: string): Buffer | null {
   const entry = CFB.find(cf, '/' + path);
   if (!entry || !entry.content) return null;
@@ -58,8 +80,8 @@ export function looksLikeZip(buf: Buffer): boolean {
   return buf.length >= 4 && buf[0] === 0x50 && buf[1] === 0x4b && buf[2] === 0x03 && buf[3] === 0x04;
 }
 
-/** .hwp 열기 + 구조 검증 (ST-07 1~5) */
-export function openHwp(buf: Buffer): HwpFile {
+/** .hwp 열기 + 구조 검증 (ST-07 1~5). `limits`는 시험용 — 운영 경로는 넘기지 않는다 */
+export function openHwp(buf: Buffer, limits: InflateLimits = INFLATE_LIMITS): HwpFile {
   if (!looksLikeOle(buf)) throw new HwpFormatError('not_ole', 'OLE 컨테이너가 아닙니다');
 
   let cf: CFB.CFB$Container;
@@ -91,33 +113,20 @@ export function openHwp(buf: Buffer): HwpFile {
   sectionIdx.sort((a, b) => a - b);
   if (sectionIdx.length === 0) throw new HwpFormatError('no_body', 'BodyText/Section0이 없습니다');
 
+  // 섹션을 여러 개 넣어 한도를 나눠 쓰는 것도 막는다 — 스트림마다 64MiB여도 합계는 128MiB까지 (ST-07)
+  let budget = limits.total;
   const sections: Buffer[] = [];
   for (const n of sectionIdx) {
     const raw = streamOf(cf, `BodyText/Section${n}`);
     if (!raw) throw new HwpFormatError('no_body', `BodyText/Section${n}을 읽을 수 없습니다`);
-    if (compressed) {
-      try {
-        sections.push(inflateRawSync(raw)); // HM-07: raw deflate
-      } catch {
-        throw new HwpFormatError('decompress_failed', `Section${n} 압축 해제에 실패했습니다`);
-      }
-    } else {
-      sections.push(raw);
-    }
+    const sec = compressed ? inflateBounded(raw, `Section${n}`, limits.stream, budget) : raw;
+    budget -= sec.length;
+    sections.push(sec);
   }
 
   const diRaw = streamOf(cf, 'DocInfo');
   if (!diRaw) throw new HwpFormatError('no_body', 'DocInfo가 없습니다');
-  let docInfo: Buffer;
-  if (compressed) {
-    try {
-      docInfo = inflateRawSync(diRaw);
-    } catch {
-      throw new HwpFormatError('decompress_failed', 'DocInfo 압축 해제에 실패했습니다');
-    }
-  } else {
-    docInfo = diRaw;
-  }
+  const docInfo = compressed ? inflateBounded(diRaw, 'DocInfo', limits.stream, budget) : diRaw;
 
   const prv = streamOf(cf, 'PrvText');
   const previewText = prv ? prv.toString('utf16le').replace(/\0+$/, '') : null;

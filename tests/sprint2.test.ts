@@ -104,6 +104,46 @@ d('preview API (API-22~25)', () => {
     });
     expect(res.status).toBe(404);
   });
+  it('[API-T15] 빈 번호 줄(본문 칸이 다 빈 행)은 rows에 없다 · 머리행은 남는다 · rowsByTable은 그대로 (API-57)', async () => {
+    const { prisma } = await import('@/server/db');
+    const { writeFileAtomic } = await import('@/server/storage');
+    // 양식을 그대로 낸 판 — 1-5~1-8 · 2-1~2-8 · 3-1~3-4가 번호만 있는 빈 줄이다
+    await writeFileAtomic('divisions/Div_A/submissions/blank-rows.hwp', hwp);
+    const v = await prisma.submission.findUniqueOrThrow({ where: { id: subId } });
+    const lead = await prisma.user.findFirstOrThrow({ where: { email: ID.lead } });
+    const sub = await prisma.submission.create({
+      data: {
+        divisionId: v.divisionId,
+        userId: lead.id,
+        weekSlotId: v.weekSlotId,
+        version: 1,
+        isLatest: true,
+        filePath: 'divisions/Div_A/submissions/blank-rows.hwp',
+        originalName: 'blank.hwp',
+        byteSize: hwp.length,
+        sha256: 'blank-rows',
+      },
+    });
+    try {
+      const { GET } = await import('@/app/api/submissions/[id]/preview/route');
+      const body = await (await GET(nx(`/api/submissions/${sub.id}/preview`, ID.lead), { params: Promise.resolve({ id: sub.id }) })).json();
+      const header = ['구분', '업무실적 내용', '일자', '장소', '참석자'];
+      expect(body.tables[0].rows[0]).toEqual(header);
+      expect(body.tables[0].rows.map((r: string[]) => r[0])).toEqual(['구분', '1-1', '1-2', '1-3', '1-4']);
+      // 다 빈 표는 머리행만 — 드로어가 「내용 없음」을 그린다
+      expect(body.tables[1].rows).toEqual([header]);
+      expect(body.tables[2].rows).toEqual([header]);
+      // 글자는 그대로 (API-25) — 날짜 자리표시자도 원문 그대로다
+      expect(body.tables[0].rows[1][2]).toBe('OO/OO');
+      // [고치기]·[다시 작성]이 쓰는 행 목록은 원래 빈 행이 없다
+      expect(body.rowsByTable.achievements).toHaveLength(4);
+      expect(body.rowsByTable.plans).toEqual([]);
+    } finally {
+      // 뒤 시험(병합·현황)이 이 판을 세지 않게 지운다
+      await prisma.submission.delete({ where: { id: sub.id } });
+    }
+  });
+
   it('preview는 감사 로그를 남긴다 (API-24)', async () => {
     const { prisma } = await import('@/server/db');
     const n = await prisma.auditLog.count({ where: { action: 'preview' } });
@@ -555,7 +595,14 @@ d('head Principal (TACP-16·17)', () => {
 
   it('[AU-T30b] head가 병합을 실행한다 — lead와 같은 권한 (TACP-16)', async () => {
     const { POST } = await import('@/app/api/division/merge/route');
-    const res = await POST(nx('/api/division/merge', ID.head, { method: 'POST' }));
+    // HM-49 — 바로 앞(AU-T30)에서 head가 병합본을 고쳤으므로 다시 병합은 확인을 받는다. 여기서 보는 것은 권한이라 확인을 싣는다
+    const res = await POST(
+      nx('/api/division/merge', ID.head, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ overwriteEdits: true }),
+      }),
+    );
     expect(res.status).toBe(200);
   });
 

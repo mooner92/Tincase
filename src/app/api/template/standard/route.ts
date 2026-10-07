@@ -4,7 +4,7 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
 import { HttpError, requireManager, requireOperator } from '@/server/authz';
-import { handler, json } from '@/server/http';
+import { handler, json, rejectOversizedBody } from '@/server/http';
 import { audit } from '@/server/audit';
 import { contentDisposition, readStoredFile, sha256, writeFileAtomic } from '@/server/storage';
 import { validateHwpUpload, UploadValidationError } from '@/lib/hwp/reader';
@@ -40,6 +40,7 @@ export const GET = handler(async (req: NextRequest) => {
 
 export const POST = handler(async (req: NextRequest) => {
   const scope = await requireOperator(req.headers); // TACP-12 — 판정은 게이트에만
+  rejectOversizedBody(req, env.MAX_UPLOAD_BYTES); // ST-04
 
   const form = await req.formData().catch(() => null);
   const file = form?.get('file');
