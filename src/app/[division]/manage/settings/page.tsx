@@ -6,6 +6,7 @@ import { getPageScope, getDivisionView } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { TemplateManager } from '@/components/TemplateManager';
 import { RuleEditor } from '@/components/RuleEditor';
+import { toPlan } from '@/server/merge/rules';
 import { toKstIso } from '@/lib/week';
 
 /** 타 부서 설정은 열람만 — 실수로 내 부서를 고치는 사고를 구조적으로 막는다 (AU-16) */
@@ -31,6 +32,8 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
   const view = await getDivisionView(slugParam);
   if (!view.canManage) notFound();
   const { division, isOwn } = view;
+  // HM-48 — 엔진과 **같은 해석**으로 보여준다. DB에 모르는 값이 있으면 엔진이 기본값으로 돌므로 화면도 그렇게
+  const plan = toPlan(division);
 
   const [template, users, standard] = await Promise.all([
     prisma.template.findFirst({ where: { divisionId: division.id, isActive: true } }),
@@ -84,6 +87,8 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
             initialCategories={division.mergeCategories}
             initialDedupe={division.mergeDedupe}
             initialDropNotes={division.mergeDropNotes}
+            initialSort={plan.sort}
+            initialUndated={plan.undated}
             initialRule={division.mergeRuleText}
             initialGuide={division.guideText}
             initialEmptyWords={division.emptyWords}
@@ -96,6 +101,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
               {[
                 division.mergeCategories && `분류 순서: ${division.mergeCategories}`,
                 `중복 묶기: ${division.mergeDedupe ? '켬' : '끔'}`,
+                `정렬: ${plan.sort === 'date' ? `일자 순 (날짜 없는 줄 ${plan.undated === 'first' ? '앞' : '뒤'})` : '제출자 순'}`,
                 division.mergeRuleText && `지침: ${division.mergeRuleText}`,
                 division.guideText,
               ]

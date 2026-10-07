@@ -57,6 +57,9 @@ export async function runMergeRecorded(
         dedupe: division.mergeDedupe,
         dropNotes: division.mergeDropNotes,
         guidance: division.mergeRuleText,
+        // HM-48 — 줄 순서를 바꾸는 설정. 빠지면 「왜 이 순서」의 답이 스냅샷에 없다
+        sort: division.mergeSort,
+        undated: division.mergeUndated,
       }),
     },
   });

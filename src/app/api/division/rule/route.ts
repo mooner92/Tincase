@@ -1,25 +1,38 @@
 // GET·PUT /api/division/rule — 부서 병합 설정 (API-28/29). lead 전용.
 // 문법이 없으므로 파싱 오류도 없다 (HM-18 v3). 길이·타입만 본다.
 import { NextRequest } from 'next/server';
+import { z } from 'zod';
 import { prisma } from '@/server/db';
 import { requireManager, HttpError } from '@/server/authz';
 import { handler, json } from '@/server/http';
 import { audit } from '@/server/audit';
-import { parseCategories } from '@/server/merge/rules';
+import { parseCategories, toPlan, MERGE_SORTS, MERGE_UNDATED } from '@/server/merge/rules';
 
 export const dynamic = 'force-dynamic';
 
 const MAX_TEXT_BYTES = 10_000;
 const MAX_CATEGORY_BYTES = 500;
 
+/*
+ * HM-48 — 고르는 값은 **목록에 있는 것만** 받는다. 글이 아니라 선택지이므로 길이가 아니라
+ * 값으로 본다. 엔진(`toPlan`)도 모르는 값을 기본값으로 읽지만, 저장 단계에서 막아야
+ * 「저장됐는데 왜 일자 순이 아니지」가 생기지 않는다.
+ */
+const SortSchema = z.enum(MERGE_SORTS);
+const UndatedSchema = z.enum(MERGE_UNDATED);
+
 export const GET = handler(async (req: NextRequest) => {
   const d = (await requireManager(req.headers)).division;
+  // HM-48 — 줄 순서는 엔진(`toPlan`)과 같은 해석으로 준다. DB에 모르는 값이 있으면 병합은 기본값으로 돈다
+  const { sort, undated } = toPlan(d);
   return json({
     categories: d.mergeCategories,
     dedupe: d.mergeDedupe,
     dropNotes: d.mergeDropNotes,
     ruleText: d.mergeRuleText,
     guideText: d.guideText,
+    sort,
+    undated,
     /** 화면에서 "이렇게 해석됩니다"를 보여주기 위해 (사람이 확인할 수 있어야 한다) */
     parsedCategories: parseCategories(d.mergeCategories),
   });
@@ -33,6 +46,8 @@ interface Body {
   guideText?: unknown;
   emptyWords?: unknown;
   emphasisWords?: unknown;
+  sort?: unknown;
+  undated?: unknown;
 }
 
 export const PUT = handler(async (req: NextRequest) => {
@@ -74,9 +89,24 @@ export const PUT = handler(async (req: NextRequest) => {
   flag('dedupe', 'mergeDedupe');
   flag('dropNotes', 'mergeDropNotes');
 
+  // HM-48 — 줄 순서. 값까지 감사 로그에 남긴다 — 병합본 순서가 바뀐 주에 「누가 언제 바꿨나」가 답이다
+  const choices: Record<string, string> = {};
+  const choice = (key: 'sort' | 'undated', col: string, schema: z.ZodEnum) => {
+    const v = body[key];
+    if (v === undefined) return;
+    const r = schema.safeParse(v);
+    if (!r.success) {
+      throw new HttpError(422, 'invalid_rule', `${key}는 ${schema.options.join(' · ')} 중 하나여야 합니다.`);
+    }
+    data[col] = r.data as string;
+    choices[key] = r.data as string;
+  };
+  choice('sort', 'mergeSort', SortSchema);
+  choice('undated', 'mergeUndated', UndatedSchema);
+
   if (Object.keys(data).length === 0) throw new HttpError(422, 'invalid_rule', '변경할 내용이 없습니다.');
 
   await prisma.division.update({ where: { id: scope.division.id }, data });
-  await audit(scope.user.email, 'rule_update', scope.division.id, undefined, { fields: Object.keys(data) });
+  await audit(scope.user.email, 'rule_update', scope.division.id, undefined, { fields: Object.keys(data), ...choices });
   return json({ ok: true, parsedCategories: parseCategories(String(data.mergeCategories ?? scope.division.mergeCategories)) });
 });

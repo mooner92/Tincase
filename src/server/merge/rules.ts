@@ -7,7 +7,7 @@
 //     날짜: 상시업무는 공란, 특정되는 업무만 작성
 //
 // 배워야 하는 문법·틀릴 수 있는 문법을 만들 이유가 없다.
-// 남은 것은 설정 3개와 자연어 지침 1개다.
+// 남은 것은 설정 3개와 자연어 지침 1개다. (HM-48로 줄 순서 설정 2개가 더해졌다 — 고르는 것이지 쓰는 것이 아니다)
 
 export interface MergePlan {
   /** 분류 순서 (예: AI · 홍보 · 시스템 · 도서관). 비면 제출자 순서를 그대로 쓴다 */
@@ -18,13 +18,37 @@ export interface MergePlan {
   dropEmptyNotes: boolean;
   /** 담당자가 쓴 자연어 지침 — 모델에 그대로 전달된다 */
   guidance: string;
+  /** HM-48 — 표 안의 줄 순서. `input` 제출자 순(지금까지) · `date` 일자 오름차순 */
+  sort: MergeSort;
+  /** HM-48 — 날짜를 못 읽은 줄의 자리. `sort`가 `date`일 때만 쓰인다 */
+  undated: MergeUndated;
 }
+
+/**
+ * HM-48 — 고를 수 있는 값. API(zod)·화면·엔진이 **이 목록 하나**를 본다.
+ * 첫 값이 기본값이다 — 스키마의 `@default`와 같아야 한다.
+ */
+export const MERGE_SORTS = ['input', 'date'] as const;
+export const MERGE_UNDATED = ['last', 'first'] as const;
+export type MergeSort = (typeof MERGE_SORTS)[number];
+export type MergeUndated = (typeof MERGE_UNDATED)[number];
 
 export interface RuleFields {
   mergeCategories: string;
   mergeDedupe: boolean;
   mergeDropNotes: boolean;
   mergeRuleText: string;
+  /** DB에는 문자열로 있다 (SQLite에 enum이 없다). 값은 `toPlan`이 좁힌다 */
+  mergeSort: string;
+  mergeUndated: string;
+}
+
+/**
+ * 모르는 값은 **기본값으로** 읽는다. API가 막지만 DB를 손으로 고칠 수도 있고,
+ * 그때 병합이 멈추거나 엉뚱하게 정렬되는 것보다 지금까지처럼 도는 편이 낫다 (HM-21).
+ */
+function oneOf<T extends string>(values: readonly T[], v: string): T {
+  return (values as readonly string[]).includes(v) ? (v as T) : values[0];
 }
 
 /** 분류 이름은 표시용이라 길 필요가 없다. 너무 길면 모델 프롬프트만 오염된다 */
@@ -52,6 +76,8 @@ export function toPlan(d: RuleFields): MergePlan {
     dedupe: d.mergeDedupe,
     dropEmptyNotes: d.mergeDropNotes,
     guidance: d.mergeRuleText.trim(),
+    sort: oneOf(MERGE_SORTS, d.mergeSort),
+    undated: oneOf(MERGE_UNDATED, d.mergeUndated),
   };
 }
 

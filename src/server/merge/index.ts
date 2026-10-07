@@ -15,6 +15,8 @@ import { toPlan, orderPeople } from './rules';
 import { groupDuplicates, MergeRow, GroupingResult } from './model';
 import type { RowGroup } from './dedupe';
 import { classifyRows, sortByCategory, OTHER } from './classify';
+import { sortByDate } from './order';
+import { dateKey } from '@/lib/date-key';
 import { findFlaggedRows, parseFlagWords, type FlaggedRow } from '@/lib/empty-content';
 import { parseEmphasisWords, stripEmphasisMarker } from '@/lib/emphasis-marker';
 import { mergeRowCells, pickRepresentative } from '@/lib/merge-rows';
@@ -322,7 +324,28 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
         grouped[bucket] = sortByCategory(grouped[bucket], (g) => g.category, plan.categories);
       }
     } else {
-      warnings.push(`분류 정렬을 건너뛰었습니다 — ${cls.fallbackReason}. 제출자 순서로 넣었습니다.`);
+      // HM-48 — 일자 순을 골랐으면 아래 2c가 표 전체를 일자로 놓는다. 「제출자 순서」라고 하면 문서와 다르다
+      const fallback = plan.sort === 'date' ? '표 전체를 일자 순으로' : '제출자 순서로';
+      warnings.push(`분류 정렬을 건너뛰었습니다 — ${cls.fallbackReason}. ${fallback} 넣었습니다.`);
+    }
+  }
+
+  /*
+   * ── 2c. 일자 정렬 (HM-48) — 부서가 「일자 순」을 골랐을 때만 ──
+   *
+   * `input`이면 이 블록에 **들어오지 않는다.** 정렬을 돌려 놓고 「키가 같으니 그대로겠지」에 기대면,
+   * 언젠가 키 계산이 바뀔 때 일자 순을 고르지 않은 부서의 문서까지 움직인다.
+   * 고르지 않은 부서는 지금까지와 바이트까지 같아야 한다 (HM-T125).
+   *
+   * 분류 정렬 **뒤에** 두는 이유: 일자는 분류 안에서 정렬된다. 분류가 실패했으면(모델 없음)
+   * 분류 축 없이 표 전체를 일자로 놓는다 — 분류를 못 했다고 일자까지 포기할 이유는 없다.
+   * 일자는 묶음의 것(HM-40 — 대표가 안 적었어도 다른 사람이 적은 날짜)으로 본다.
+   */
+  if (plan.sort === 'date') {
+    const week = { year: slot.year, month: slot.month };
+    const category = categoryInfo?.used ? { of: (g: MergedGroup) => g.category, order: plan.categories } : undefined;
+    for (const bucket of BUCKETS) {
+      grouped[bucket] = sortByDate(grouped[bucket], (g) => dateKey(g.row.date, week), plan.undated, category);
     }
   }
 

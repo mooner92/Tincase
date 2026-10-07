@@ -51,10 +51,26 @@ function Card({
   );
 }
 
+/** HM-48 — 서버 `MERGE_SORTS`·`MERGE_UNDATED`와 같은 값. 화면은 서버 모듈을 들이지 않는다 (preview와 같은 이유) */
+type SortChoice = 'input' | 'date';
+type UndatedChoice = 'last' | 'first';
+
+const SORT_OPTIONS: { value: SortChoice; label: string; hint: string }[] = [
+  { value: 'input', label: '제출자 순', hint: '명단 순서대로, 각자 적은 순서 그대로' },
+  { value: 'date', label: '일자 순', hint: '일자 칸의 첫 날짜가 빠른 줄부터 · 기간은 시작일' },
+];
+const UNDATED_OPTIONS: { value: UndatedChoice; label: string }[] = [
+  { value: 'last', label: '뒤' },
+  { value: 'first', label: '앞' },
+];
+
 export interface RuleEditorProps {
   initialCategories: string;
   initialDedupe: boolean;
   initialDropNotes: boolean;
+  /** HM-48 — 줄 순서 */
+  initialSort: SortChoice;
+  initialUndated: UndatedChoice;
   initialRule: string;
   initialGuide: string;
   initialEmptyWords: string;
@@ -65,6 +81,8 @@ export function RuleEditor(props: RuleEditorProps) {
   const [categories, setCategories] = useState(props.initialCategories);
   const [dedupe, setDedupe] = useState(props.initialDedupe);
   const [dropNotes, setDropNotes] = useState(props.initialDropNotes);
+  const [sort, setSort] = useState(props.initialSort);
+  const [undated, setUndated] = useState(props.initialUndated);
   const [rule, setRule] = useState(props.initialRule);
   const [guide, setGuide] = useState(props.initialGuide);
   const [emptyWords, setEmptyWords] = useState(props.initialEmptyWords);
@@ -77,6 +95,8 @@ export function RuleEditor(props: RuleEditorProps) {
     categories !== props.initialCategories ||
     dedupe !== props.initialDedupe ||
     dropNotes !== props.initialDropNotes ||
+    sort !== props.initialSort ||
+    undated !== props.initialUndated ||
     rule !== props.initialRule ||
     guide !== props.initialGuide ||
     emptyWords !== props.initialEmptyWords ||
@@ -104,6 +124,8 @@ export function RuleEditor(props: RuleEditorProps) {
         categories,
         dedupe,
         dropNotes,
+        sort,
+        undated,
         ruleText: rule,
         guideText: guide,
         emptyWords,
@@ -130,7 +152,7 @@ export function RuleEditor(props: RuleEditorProps) {
         />
         <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted">
           {parsed.length === 0 ? (
-            <span>비우면 제출자 순서로 넣습니다.</span>
+            <span>{sort === 'date' ? '비우면 표 전체를 일자 순으로 놓습니다.' : '비우면 제출자 순서로 넣습니다.'}</span>
           ) : (
             <>
               {parsed.map((c) => (
@@ -140,6 +162,48 @@ export function RuleEditor(props: RuleEditorProps) {
               ))}
               <span className="badge-pill bg-surface-card px-2 py-0.5 text-[11px] text-muted-soft">기타</span>
             </>
+          )}
+        </div>
+      </Card>
+
+      {/*
+        HM-48 — 줄 순서. 실제 최종 취합본은 대부분 일자 오름차순이고 날짜 없는 줄을 뒤에 둔다.
+        담당자가 매주 손으로 다시 놓던 것을 병합이 한다. 기본은 제출자 순 — 지금까지와 같다.
+        「날짜 없는 줄」은 일자 순일 때만 뜻이 있어서 그때만 보인다 — 안 쓰이는 설정을 늘어놓지 않는다.
+      */}
+      <Card title="정렬" hint="표 안에서 줄을 놓는 순서 · 분류를 정했으면 분류 안에서">
+        <div className="space-y-2">
+          {SORT_OPTIONS.map((o) => (
+            <label key={o.value} className="flex items-start gap-2.5 text-sm text-body">
+              <input
+                type="radio"
+                name="merge-sort"
+                checked={sort === o.value}
+                onChange={() => setSort(o.value)}
+                className="mt-1"
+              />
+              <span>
+                <span className="font-medium text-ink">{o.label}</span>
+                <span className="ml-1.5 text-xs text-muted">{o.hint}</span>
+              </span>
+            </label>
+          ))}
+          {sort === 'date' && (
+            <div className="ml-6 flex flex-wrap items-center gap-x-4 gap-y-1 border-l border-hairline pl-3 text-sm text-body">
+              <span className="font-medium text-ink">날짜 없는 줄</span>
+              {UNDATED_OPTIONS.map((o) => (
+                <label key={o.value} className="flex items-center gap-1.5">
+                  <input
+                    type="radio"
+                    name="merge-undated"
+                    checked={undated === o.value}
+                    onChange={() => setUndated(o.value)}
+                  />
+                  {o.label}
+                </label>
+              ))}
+              <span className="text-xs text-muted">상시·계속처럼 일자를 못 읽은 줄을 둘 곳</span>
+            </div>
           )}
         </div>
       </Card>

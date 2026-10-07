@@ -3,7 +3,8 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import { parseCategories, toPlan, orderPeople } from '@/server/merge/rules';
-import { sortByCategory, OTHER } from '@/server/merge/order';
+import { sortByCategory, sortByDate, OTHER } from '@/server/merge/order';
+import { dateKey } from '@/lib/date-key';
 import { parseTablePaste, parseHtmlTable, parseClipboardTable } from '@/lib/paste-table';
 import { exactDuplicates, validateGroups, type MergeRow } from '@/server/merge/dedupe';
 import { moveItem, rowNo, pickRepresentative, contentCovered, mergeRowCells } from '@/lib/merge-rows';
@@ -40,19 +41,29 @@ describe('HM-18 병합 규칙 — 문법 없는 설정', () => {
     expect(parseCategories(Array.from({ length: 30 }, (_, i) => `분류${i}`).join(','))).toHaveLength(12);
   });
 
-  it('[HM-T33] 설정 4종이 계획으로 옮겨진다', () => {
+  it('[HM-T33] 설정이 계획으로 옮겨진다 (HM-48 줄 순서 포함)', () => {
     const plan = toPlan({
       mergeCategories: 'AI, 홍보',
       mergeDedupe: false,
       mergeDropNotes: false,
       mergeRuleText: '  도서관 업무는 맨 뒤로  ',
+      mergeSort: 'date',
+      mergeUndated: 'first',
     });
     expect(plan).toEqual({
       categories: ['AI', '홍보'],
       dedupe: false,
       dropEmptyNotes: false,
       guidance: '도서관 업무는 맨 뒤로',
+      sort: 'date',
+      undated: 'first',
     });
+  });
+
+  it('[HM-T33b] HM-48 — 모르는 값은 기본값으로 읽는다 (DB를 손으로 고쳐도 병합은 지금까지처럼 돈다)', () => {
+    const base = { mergeCategories: '', mergeDedupe: true, mergeDropNotes: true, mergeRuleText: '' };
+    expect(toPlan({ ...base, mergeSort: 'random', mergeUndated: '' })).toMatchObject({ sort: 'input', undated: 'last' });
+    expect(toPlan({ ...base, mergeSort: 'DATE', mergeUndated: 'First' })).toMatchObject({ sort: 'input', undated: 'last' });
   });
 
   it('[HM-T34] 제출자 순서는 sortOrder — 규칙에 이름을 또 적게 하지 않는다', () => {
@@ -97,6 +108,68 @@ describe('HM-27 분류 정렬', () => {
     const got = sortByCategory(items, (x) => x.cat, cats);
     expect(got).toHaveLength(items.length);
     expect(new Set(got.map((x) => x.id))).toEqual(new Set(items.map((x) => x.id)));
+  });
+});
+
+describe('HM-48 일자 정렬', () => {
+  const week = { year: 2026, month: 9 };
+  const item = (id: number, date: string, cat = '') => ({ id, date, cat });
+  const ids = (xs: { id: number }[]) => xs.map((x) => x.id);
+  const key = (x: { date: string }) => dateKey(x.date, week);
+
+  // 실제 보고서 꼴을 섞은 한 표 — 제출자 순으로 들어온 그대로
+  const table = [
+    item(1, '9/30(수)'),
+    item(2, '상시'),
+    item(3, '9/24 14:00'),
+    item(4, '~9/22'),
+    item(5, '9/24 10:00'),
+    item(6, ''),
+    item(7, '9월 25일'),
+    item(8, '(계속)'),
+  ];
+
+  it('[HM-T126] 일자 오름차순, 날짜 없는 줄은 뒤 — 같은 날은 시각 순', () => {
+    expect(ids(sortByDate(table, key, 'last'))).toEqual([4, 5, 3, 7, 1, 2, 6, 8]);
+  });
+
+  it('[HM-T127] 날짜 없는 줄을 앞에 — 계획 표에서 그렇게 놓는 부서가 있다', () => {
+    expect(ids(sortByDate(table, key, 'first'))).toEqual([2, 6, 8, 4, 5, 3, 7, 1]);
+  });
+
+  it('[HM-T128] 같은 날·날짜 없는 줄끼리는 원래 순서 그대로 (안정 정렬 — ABS-6)', () => {
+    const ties = [item(1, '9/24'), item(2, '-'), item(3, '9/24(목)'), item(4, '미정'), item(5, '9월 24일'), item(6, '9/23')];
+    expect(ids(sortByDate(ties, key, 'last'))).toEqual([6, 1, 3, 5, 2, 4]);
+    expect(ids(sortByDate(ties, key, 'first'))).toEqual([2, 4, 6, 1, 3, 5]);
+    // 날짜가 하나도 없으면 아무것도 움직이지 않는다
+    const none = [item(1, ''), item(2, '상시'), item(3, '계속')];
+    expect(ids(sortByDate(none, key, 'last'))).toEqual([1, 2, 3]);
+  });
+
+  it('[HM-T129] 분류를 쓰면 **분류 안에서** 일자 순 — 분류가 먼저다, 기타는 맨 뒤', () => {
+    const cats = ['AI', '홍보'];
+    const rows = [
+      item(1, '9/30', '홍보'),
+      item(2, '9/21', OTHER),
+      item(3, '상시', 'AI'),
+      item(4, '9/22', '홍보'),
+      item(5, '9/29', 'AI'),
+      item(6, '9/23', 'AI'),
+    ];
+    const byCat = { of: (x: { cat: string }) => x.cat, order: cats };
+    expect(ids(sortByDate(rows, key, 'last', byCat))).toEqual([6, 5, 3, 4, 1, 2]);
+    expect(ids(sortByDate(rows, key, 'first', byCat))).toEqual([3, 6, 5, 4, 1, 2]);
+    // 분류를 안 주면 표 전체가 일자 순이다 (분류 모델이 실패한 주)
+    expect(ids(sortByDate(rows, key, 'last'))).toEqual([2, 4, 6, 5, 1, 3]);
+  });
+
+  it('[HM-T130] 행은 재배치될 뿐 사라지지 않는다 · 입력을 건드리지 않는다', () => {
+    const many = Array.from({ length: 60 }, (_, i) => item(i, ['9/3', '', '9/1 10:00', '상시', '8.30', '~9/2'][i % 6]));
+    const before = ids(many);
+    const got = sortByDate(many, key, 'last');
+    expect(got).toHaveLength(many.length);
+    expect(new Set(ids(got))).toEqual(new Set(before));
+    expect(ids(many)).toEqual(before);
   });
 });
 
