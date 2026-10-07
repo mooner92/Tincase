@@ -3,7 +3,7 @@
 //
 // 테스트 신원 주입: NODE_ENV=test에서만 x-test-identity 헤더 허용 (auth.ts).
 // DB: prisma/test.db — setup에서 초기화·시드.
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { execSync } from 'node:child_process';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -26,6 +26,11 @@ const hasFixtures = (() => {
     return false;
   }
 })();
+
+// PG-T79·T80 — 페이지(서버 컴포넌트)를 직접 불러 본다. 페이지의 신원은 next/headers에서 오므로 그것만 갈아 끼운다.
+// 라우트 핸들러는 요청 헤더를 그대로 쓰므로 영향이 없다 — next/headers를 읽는 곳은 page-scope 하나다.
+const pageAs = vi.hoisted(() => ({ who: '' }));
+vi.mock('next/headers', () => ({ headers: async () => new Headers(pageAs.who ? { 'x-test-identity': pageAs.who } : {}) }));
 
 // 시드 대신 테스트 전용 최소 데이터 (실명 없이)
 const A = { slug: 'Division_A', short: 'da', nameKo: '가부서' };
@@ -859,6 +864,28 @@ describe('HM-43 실패 재시도 간격', () => {
  * 이 예외는 한 부서가 아니라 그 주 전 부서의 마감을 움직인다. 그래서 지키는 것은 셋이다:
  * 정할 수 있는 사람만 정한다 · 부서 쪽은 존재조차 모른다(404) · 지난 마감은 옮기지 않는다.
  */
+/** PG-T79 — 서버 컴포넌트가 돌려준 요소 나무를 훑는다. 그리지는 않는다 — 무엇을 어떤 값으로 그리려 했는지만 본다 */
+type El = { type: unknown; props: Record<string, unknown> };
+function elements(node: unknown, out: El[] = []): El[] {
+  if (Array.isArray(node)) node.forEach((n) => elements(n, out));
+  else if (node && typeof node === 'object' && 'type' in node && 'props' in node) {
+    out.push(node as El);
+    for (const v of Object.values((node as El).props ?? {})) elements(v, out);
+  }
+  return out;
+}
+async function renderOrg(who: string, sp: Record<string, string> = {}) {
+  const { default: OrgPage } = await import('@/app/org/page');
+  pageAs.who = who;
+  const els = elements(await OrgPage({ searchParams: Promise.resolve(sp) }));
+  const named = (n: string) => els.filter((e) => typeof e.type === 'function' && (e.type as { name: string }).name === n);
+  return {
+    has: (n: string) => named(n).length > 0,
+    props: (n: string) => named(n)[0]?.props as Record<string, unknown> | undefined,
+    hrefs: els.map((e) => e.props.href).filter((h): h is string => typeof h === 'string'),
+  };
+}
+
 d('WS-19 주차 마감 예외 — 총괄이 정한다', () => {
   const route = () => import('@/app/api/schedule/deadline/route');
   /** 지금부터 h시간 뒤의 대외 마감을 `YYYY-MM-DDTHH:mm`(KST)로 */
@@ -994,23 +1021,115 @@ d('WS-19 주차 마감 예외 — 총괄이 정한다', () => {
     }
   });
 
-  it('[PG-T79] ★ 「전사」 탭 — [현황]은 readAll, [취합]은 운영자 늘·총괄은 3단계를 켠 뒤에만. 담당자에게는 둘 다 없다', async () => {
-    const { orgTabs, canOperate, requireScope } = await import('@/server/authz');
+  it('[PG-T79] ★ 「전사」 화면 — 누가 무엇을 보나. 제출 열은 readAll, 최종본 열·만들기·섹션 구성 편집·3단계 스위치는 운영자 늘·총괄은 3단계를 켠 뒤에만. 담당자는 404', async () => {
+    const { orgPageView, requireScope } = await import('@/server/authz');
     const { prisma } = await import('@/server/db');
     const as = (who: string) => requireScope(new Headers({ 'x-test-identity': who }));
     const [coord, op, lead] = [await as(ID.coord), await as(ID.op), await as(ID.aLead)];
     await prisma.orgRollupSetting.deleteMany({}); // 기본 = 꺼짐
-    expect(await orgTabs(coord)).toEqual({ monitor: true, org: false });
-    expect(await orgTabs(op)).toEqual({ monitor: true, org: true });
-    expect(await orgTabs(lead)).toEqual({ monitor: false, org: false });
-    await prisma.orgRollupSetting.create({ data: { id: 'org', enabled: true } });
+    await prisma.orgSection.deleteMany({});
+    expect(await orgPageView(coord)).toEqual({ open: true, progress: true, desk: false, schedule: true, operate: false });
+    expect(await orgPageView(op)).toEqual({ open: true, progress: true, desk: true, schedule: true, operate: true });
+    expect(await orgPageView(lead)).toEqual({ open: false, progress: false, desk: false, schedule: false, operate: false });
+
+    // 페이지가 실제로 그리는 것 — 같은 판정에서 나온다 (TACP-9: 못 하는 일의 열·버튼·링크를 그리지 않는다)
+    await prisma.user.updateMany({ where: { email: { in: [ID.coord, ID.op, ID.aLead] } }, data: { mustChangePassword: false } });
     try {
-      expect(await orgTabs(coord)).toEqual({ monitor: true, org: true });
-      expect(await orgTabs(lead)).toEqual({ monitor: false, org: false });
+      // 총괄, 3단계 꺼짐 — 제출 열만. 최종본 열·파일 올리기·만들기·섹션 구성 편집·운영 없음. 일정은 마감 바꾸기만
+      const c = await renderOrg(ID.coord);
+      expect(c.props('OrgBoard')?.columns).toEqual({ progress: true, final: false });
+      expect((c.props('OrgBoard')?.rows as { final: unknown; hq: unknown }[]).every((r) => r.final === null && r.hq === null)).toBe(true);
+      expect(c.has('OrgRunCard')).toBe(false);
+      expect(c.props('WeekSchedule')).toMatchObject({ canSchedule: true, rollup: null });
+      expect(c.has('ScheduleFold')).toBe(true);
+      expect(c.hrefs).toContain('/ops/audit');
+      expect(c.hrefs).not.toContain('/ops');
+      expect(c.hrefs.some((h) => h.includes('edit=sections'))).toBe(false);
+      // 편집 주소를 직접 쳐도 편집기는 오지 않는다 — 값이 없다
+      expect((await renderOrg(ID.coord, { edit: 'sections' })).has('SectionEditor')).toBe(false);
+      // PG-51d — 읽기만 하는 화면이 섹션 설정을 만들지 않았다
+      expect(await prisma.orgSection.count()).toBe(0);
+
+      // 운영자, 3단계 꺼짐 — 켜는 사람이므로 취합 부분이 다 보인다 (RU-52)
+      const o = await renderOrg(ID.op);
+      expect(o.props('OrgBoard')?.columns).toEqual({ progress: true, final: true });
+      expect((o.props('OrgBoard')?.rows as { no: number | null; final: unknown }[]).filter((r) => r.no !== null).every((r) => r.final !== null)).toBe(true);
+      expect(o.has('OrgRunCard')).toBe(true);
+      expect(o.props('WeekSchedule')).toMatchObject({ canSchedule: true, rollup: { enabled: false } });
+      expect(o.hrefs).toEqual(expect.arrayContaining(['/ops', '/ops/audit', '/org?edit=sections']));
+      const oe = await renderOrg(ID.op, { edit: 'sections' });
+      expect([oe.has('SectionEditor'), oe.has('OrgBoard')]).toEqual([true, false]);
+
+      // 3단계를 켜면 총괄에게도 취합 부분이 열린다
+      await prisma.orgRollupSetting.create({ data: { id: 'org', enabled: true } });
+      const on = await renderOrg(ID.coord);
+      expect(on.props('OrgBoard')?.columns).toEqual({ progress: true, final: true });
+      expect(on.has('OrgRunCard')).toBe(true);
+      expect(on.props('WeekSchedule')).toMatchObject({ canSchedule: true, rollup: { enabled: true } });
+      expect(on.hrefs).not.toContain('/ops');
+
+      // 담당자 — 화면이 없다 (TACP-5)
+      await expect(renderOrg(ID.aLead)).rejects.toMatchObject({ digest: 'NEXT_HTTP_ERROR_FALLBACK;404' });
     } finally {
       await prisma.orgRollupSetting.deleteMany({});
+      await prisma.orgSection.deleteMany({});
+      await prisma.user.updateMany({ where: { email: { in: [ID.coord, ID.op, ID.aLead] } }, data: { mustChangePassword: true } });
     }
-    // PG-49c — 「← 운영」은 운영자에게만
-    expect([canOperate(op.user), canOperate(coord.user)]).toEqual([true, false]);
+  });
+
+  it('[PG-T80] ★ 옛 주소 /ops/monitor → /org — 보던 주차를 들고 간다. 못 여는 사람에게는 보내지 않고 예전처럼 404', async () => {
+    const { prisma } = await import('@/server/db');
+    const { default: MonitorRedirect } = await import('@/app/ops/monitor/page');
+    const go = async (who: string, sp: Record<string, string> = {}) => {
+      pageAs.who = who;
+      try {
+        await MonitorRedirect({ searchParams: Promise.resolve(sp) });
+        return 'rendered';
+      } catch (e) {
+        return String((e as { digest?: string }).digest);
+      }
+    };
+    await prisma.user.updateMany({ where: { email: { in: [ID.coord, ID.op, ID.aLead] } }, data: { mustChangePassword: false } });
+    try {
+      expect(await go(ID.coord, { isoKey: '2026-W40' })).toBe('NEXT_REDIRECT;replace;/org?isoKey=2026-W40;307;');
+      expect(await go(ID.op)).toBe('NEXT_REDIRECT;replace;/org;307;');
+      // 주차 꼴이 아닌 값은 넘기지 않는다 — 받은 글자를 그대로 주소에 붙이지 않는다
+      expect(await go(ID.coord, { isoKey: '2026-W40&edit=sections' })).toBe('NEXT_REDIRECT;replace;/org;307;');
+      expect(await go(ID.aLead, { isoKey: '2026-W40' })).toBe('NEXT_HTTP_ERROR_FALLBACK;404');
+      // 로그인 전이면 로그인으로 (다른 보호 페이지와 같다 — AU-22)
+      expect(await go('')).toBe('NEXT_REDIRECT;replace;/login;307;');
+    } finally {
+      await prisma.user.updateMany({ where: { email: { in: [ID.coord, ID.op, ID.aLead] } }, data: { mustChangePassword: true } });
+    }
+  });
+
+  it('[PG-T83] 섹션 설정이 없으면 읽기만 — 기본 13개를 부서 이름으로 맞춰 보여 주고, 어느 섹션에도 안 닿는 집계 부서는 「섹션 밖」', async () => {
+    const { prisma } = await import('@/server/db');
+    const { DEFAULT_SECTIONS, sectionList } = await import('@/server/rollup/sections');
+    const { orgBoard } = await import('@/server/org-board');
+    const { rollupSlot } = await import('@/server/rollup/slot');
+    await prisma.orgSection.deleteMany({});
+    const divisions = await prisma.division.findMany({ select: { id: true, nameKo: true } });
+    const list = await sectionList(divisions);
+    expect(list.map((s) => s.title)).toEqual(DEFAULT_SECTIONS.map((s) => s.title));
+    // 이 스위트의 부서(가부서·나부서)는 기본 목록에 없다 — 부서 행은 못 찾아도 이름은 안다(PG-51c는 이름으로 맞춘다)
+    expect(list.every((s) => s.divisionId === null)).toBe(true);
+    expect(list.map((s) => s.divisionName)).toEqual(DEFAULT_SECTIONS.map((s) => s.division));
+
+    // 가부서를 집계 대상으로 — 어느 섹션에도 안 닿으므로 「섹션 밖」 줄로 (빠지면 합계가 감사 문서와 갈라진다)
+    await prisma.division.update({ where: { slug: A.slug }, data: { boardStatus: 'confirmed' } });
+    try {
+      const board = await orgBoard(await rollupSlot(null), { progress: true, desk: false }, '');
+      expect(board.rows.map((r) => r.title)).toEqual([...DEFAULT_SECTIONS.map((s) => s.title), '섹션 밖']);
+      const outside = board.rows.at(-1)!;
+      expect([outside.no, outside.final, outside.progress?.teams.map((t) => t.name)]).toEqual([null, null, ['가부서']]);
+      expect(board.totals).toMatchObject({ roster: outside.progress!.roster, submitted: outside.progress!.submitted });
+      expect(board.excludedNote).toEqual({ divisions: 1, people: expect.any(Number) }); // 나부서
+      // 취합 쪽 값은 계산하지도 내려보내지도 않는다 (PG-51e)
+      expect([board.ready, board.run, board.editor]).toEqual([null, null, null]);
+      expect(await prisma.orgSection.count()).toBe(0);
+    } finally {
+      await prisma.division.update({ where: { slug: A.slug }, data: { boardStatus: 'none' } });
+    }
   });
 });

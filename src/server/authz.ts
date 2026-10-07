@@ -429,7 +429,7 @@ export function canRunOrgRollup(user: Pick<User, 'isOperator' | 'isCoordinator'>
 }
 
 /**
- * TACP-21 · RU-52 — 전사 취합 **화면·API의 문**. `/org`·`/api/rollup/org/*`·메뉴가 이 하나를 본다.
+ * TACP-21 · RU-52 — 전사 취합의 문. `/api/rollup/org/*`·메뉴·「전사」 화면의 취합 부분(`orgPageView().desk`)이 이 하나를 본다.
  * 페이지가 `canRunOrgRollup`만 보고 스위치를 빠뜨리면, 꺼 둔 3단계가 총괄에게 그대로 열린다 — 판정을 복사하지 않는다 (TACP-12).
  */
 export async function canOpenOrgDesk(scope: Scope): Promise<boolean> {
@@ -445,19 +445,32 @@ export async function requireOrgRollup(headers: Headers): Promise<Scope> {
 }
 
 /**
- * PG-49 — 「전사」 [현황](`/ops/monitor`)의 문. 전 부서를 한 화면에 늘어놓으므로 readAll만 (TACP-5).
- * 페이지와 탭 막대가 이 하나를 본다 — 탭은 있는데 누르면 404인 일이 없게 (TACP-9).
+ * PG-49f · PG-51e — 「전사」 화면(`/org`)에서 **이 사람에게 그릴 것**. 화면은 이 값만 보고 그린다 (TACP-9·12).
+ *
+ *   progress  섹션별 제출 막대·미제출 이름·감사 링크 — 전 부서를 늘어놓으므로 readAll (TACP §3.2)
+ *   desk      최종본 열·파일 올리기·만들기·섹션 구성 편집·본부 취합 길·3단계 스위치 — `canOpenOrgDesk`(RU-52 스위치 포함)
+ *   schedule  마감 바꾸기 (TACP-20)
+ *   operate   「← 운영」 (`/ops`의 문)
+ *
+ * 문(`open`)은 둘 중 하나라도 있으면 열린다. 예전에는 [현황]·[취합] 두 탭이 각자 문을 가졌다(PG-49e) —
+ * 한 화면이 되면서 「무엇을 그리나」로 바뀌었다. 판정을 페이지에 풀어 적지 않는다 (TACP-12).
  */
-export function canOpenMonitor(scope: Pick<Scope, 'readAll'>): boolean {
-  return scope.readAll;
-}
-
-/**
- * PG-49e — 「전사」 탭 막대에 그릴 탭. **탭마다 그 화면의 문과 같은 판정**이다:
- * [현황] = `canOpenMonitor`, [취합] = `canOpenOrgDesk`(3단계가 꺼져 있으면 총괄에게도 없다 — RU-52).
- */
-export async function orgTabs(scope: Scope): Promise<{ monitor: boolean; org: boolean }> {
-  return { monitor: canOpenMonitor(scope), org: await canOpenOrgDesk(scope) };
+export async function orgPageView(scope: Scope): Promise<{
+  open: boolean;
+  progress: boolean;
+  desk: boolean;
+  schedule: boolean;
+  operate: boolean;
+}> {
+  const progress = canReadAllDivisions(scope.user);
+  const desk = await canOpenOrgDesk(scope);
+  return {
+    open: progress || desk,
+    progress,
+    desk,
+    schedule: canScheduleDeadlines(scope.user),
+    operate: canOperate(scope.user),
+  };
 }
 
 /** 메뉴용 — 이 사람에게 본부 취합 화면이 있는가 (TACP-9: 할 수 없는 곳으로 가는 길은 그리지 않는다) */

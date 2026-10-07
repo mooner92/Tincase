@@ -5,6 +5,7 @@
 // 결정론 결과를 쓴다 — 병합본이 안 나오는 것보다 안 묶인 게 낫다.
 
 import { env } from '../env';
+import { MODEL_NOT_CONFIGURED } from '@/lib/merge-rows';
 import {
   dropWeakGroups,
   exactDuplicates,
@@ -113,7 +114,7 @@ export async function groupDuplicates(
   extraRule = '',
   signal?: AbortSignal,
 ): Promise<GroupingResult> {
-  if (!env.MERGE_MODEL) return withoutModel(rows, '모델이 설정되지 않았습니다');
+  if (!env.MERGE_MODEL) return withoutModel(rows, MODEL_NOT_CONFIGURED);
   if (rows.length < 2) return withoutModel(rows, '묶을 행이 없습니다');
   if (rows.length > env.MERGE_MODEL_MAX_ROWS) {
     return withoutModel(rows, `행이 너무 많습니다 (${rows.length} > ${env.MERGE_MODEL_MAX_ROWS})`);

@@ -60,7 +60,7 @@ export function SetupForm({ token, email }: { token: string; email: string }) {
         autoComplete="new-password"
         required
         placeholder={`새 비밀번호 (${PASSWORD_MIN_LENGTH}자 이상)`}
-        className="w-full rounded-lg border border-border-strong px-3.5 py-2.5 text-sm focus:border-ink focus:outline-none"
+        className="input"
       />
       <input
         type="password"
@@ -69,9 +69,9 @@ export function SetupForm({ token, email }: { token: string; email: string }) {
         autoComplete="new-password"
         required
         placeholder="한 번 더"
-        className="w-full rounded-lg border border-border-strong px-3.5 py-2.5 text-sm focus:border-ink focus:outline-none"
+        className="input"
       />
-      {err && <p className="text-sm text-error">{err}</p>}
+      {err && <p className="callout callout-error">{err}</p>}
       <button type="submit" disabled={busy || !pw || !pw2} className="btn-primary w-full">
         {busy ? '설정 중…' : '비밀번호 설정'}
       </button>

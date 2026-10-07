@@ -71,6 +71,36 @@ export async function sectionTitles(divisions: readonly { id: string; nameKo: st
   );
 }
 
+/** 「전사」 화면의 한 줄이 가리키는 섹션 — 저장된 OrgSection이거나, 아직 없으면 기본 13개 중 하나 */
+export interface SectionItem {
+  /** OrgSection.id — 기본 목록에서 온 것은 `default-n` (저장된 행이 아니다) */
+  id: string;
+  title: string;
+  divisionId: string | null;
+  /** 섹션을 채우는 부서의 이름. 부서 행이 없어도 기본 목록이면 이름은 안다 — 제출 현황을 이름으로 맞춘다 (PG-51c) */
+  divisionName: string | null;
+  kind: string;
+}
+
+/**
+ * PG-51d — 화면용 섹션 목록, **읽기만**. 켜진 것만, 최종본 순서대로.
+ *
+ * loadSections와 달리 목록을 **만들지 않는다**: 3단계가 꺼져 있어 취합을 못 여는 총괄이 화면을 여는 것(GET)만으로
+ * 섹션 설정이 생기면 안 된다(sectionTitles와 같은 이유). 비어 있으면 기본 13개를 부서 이름으로 맞춰 보여 준다 —
+ * 취합을 처음 여는 사람에게 loadSections가 만들어 줄 목록과 같은 순서다.
+ */
+export async function sectionList(divisions: readonly { id: string; nameKo: string }[]): Promise<SectionItem[]> {
+  const rows = await prisma.orgSection.findMany({ orderBy: { sortOrder: 'asc' } });
+  const nameOf = new Map(divisions.map((d) => [d.id, d.nameKo]));
+  if (rows.length) {
+    return rows
+      .filter((r) => r.isActive)
+      .map((r) => ({ id: r.id, title: r.title, divisionId: r.divisionId, divisionName: r.divisionId ? (nameOf.get(r.divisionId) ?? null) : null, kind: r.kind }));
+  }
+  const idOf = new Map(divisions.map((d) => [d.nameKo, d.id]));
+  return DEFAULT_SECTIONS.map((s, i) => ({ id: `default-${i + 1}`, title: s.title, divisionId: idOf.get(s.division) ?? null, divisionName: s.division, kind: s.kind }));
+}
+
 export type SectionSourceKind = 'tincase' | 'upload' | 'waiting_hq' | 'missing';
 
 export interface SectionSource {

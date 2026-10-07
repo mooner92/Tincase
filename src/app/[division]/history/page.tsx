@@ -28,8 +28,9 @@ export default async function HistoryPage() {
   );
 
   return (
-    <main className="mt-6">
-      <h1 className="text-lg font-bold text-ink">내 제출 이력</h1>
+    <main className="pt-8">
+      <h1 className="page-title">내 제출 이력</h1>
+      <p className="page-sub">최근 26주. 낸 주는 열어 보거나 받을 수 있습니다.</p>
       <HistoryTable
         userId={ps.scope.user.id}
         userName={ps.scope.user.name}

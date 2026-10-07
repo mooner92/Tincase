@@ -331,12 +331,12 @@ export function MergedDrawer({
         role="dialog"
         aria-modal="true"
         aria-label="병합본 보기"
-        className="absolute inset-y-0 right-0 flex h-full w-full max-w-4xl flex-col border-l border-hairline bg-canvas"
+        className="absolute inset-y-0 right-0 flex h-full w-full max-w-4xl flex-col border-l border-hairline bg-canvas shadow-[0_8px_32px_rgba(0,0,0,0.12)]"
       >
-        <header className="flex items-start justify-between gap-3 border-b border-hairline px-6 py-4">
+        <header className="flex items-start justify-between gap-3 border-b border-hairline px-4 py-4 sm:px-6">
           <div className="min-w-0">
-            <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">병합본</p>
-            <h2 className="display mt-0.5 truncate text-lg">{data?.title ?? '불러오는 중…'}</h2>
+            <p className="text-sm text-muted">병합본</p>
+            <h2 className="card-title truncate">{data?.title ?? '불러오는 중…'}</h2>
           </div>
           <button
             onClick={() => (!dirty || confirm('저장하지 않은 수정이 있습니다. 닫을까요?')) && onClose()}
@@ -347,8 +347,13 @@ export function MergedDrawer({
           </button>
         </header>
 
-        {/* 제출 동선 그대로 — 제목 복사 → 표 복사 → 게시판에 붙여넣기 */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-hairline bg-surface-soft px-6 py-3">
+        {/*
+          제출 동선 그대로 — 제목 복사 → hwp 받기 → 한글에서 표 복사 → 게시판에 붙여넣기.
+          2026-10-07 — 버튼 넷이 모양 셋(테두리·초록·옅은 테두리·회색)이었다. 이 드로어의 주 버튼은 [수정 저장] 하나,
+          나머지는 보조·글자 버튼이다 (CP-99). 설명 글은 버튼 줄에 끼우지 않고 그 밑 한 줄로
+        */}
+        <div className="border-b border-hairline px-4 py-3 sm:px-6">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={async () => {
               if (!data) return;
@@ -357,7 +362,7 @@ export function MergedDrawer({
               else setErr('제목을 복사하지 못했습니다.');
             }}
             disabled={!data}
-            className="btn-secondary btn-sm"
+            className="btn-ghost"
           >
             제목 복사
           </button>
@@ -371,21 +376,16 @@ export function MergedDrawer({
           */}
           <a
             href={`/api/division/merged?division=${divisionSlug}&isoKey=${isoKey}`}
-            className="btn-primary btn-sm"
+            className="btn-secondary btn-sm"
           >
             hwp로 받기
           </a>
-          <span className="text-sm text-muted">→ 한글에서 열어 표를 복사해 게시판에 붙여넣습니다</span>
           {/* TACP-17 — 서버가 작성자를 보낸 사람에게만 보이는 토글 */}
           {data?.canSeeAuthors && (
             <button
               onClick={() => setShowAuthors((v) => !v)}
               aria-pressed={showAuthors}
-              className={`btn-sm rounded-lg border px-2.5 py-1 text-sm ${
-                showAuthors
-                  ? 'border-ink bg-ink text-canvas'
-                  : 'border-hairline bg-canvas text-body hover:border-ink'
-              }`}
+              className={`tab-pill py-1.5 ${showAuthors ? 'tab-pill-active' : ''}`}
             >
               작성자 {showAuthors ? '숨기기' : '보기'}
             </button>
@@ -396,20 +396,23 @@ export function MergedDrawer({
             )}
             {dirty && !copied && <span className="text-warning">저장하지 않은 수정</span>}
           </span>
-          {canEdit && (
+          {/* 주 버튼은 고친 것이 있을 때만 나타난다 — 늘 회색으로 누워 있으면 좁은 화면에서 한 줄을 차지한다 */}
+          {canEdit && (dirty || busy) && (
             <button onClick={save} disabled={!dirty || busy} className="btn-primary btn-sm">
               {busy ? '저장 중…' : '수정 저장'}
             </button>
           )}
         </div>
+        <p className="mt-1.5 text-xs text-muted">hwp로 받아 한글에서 열고, 표를 복사해 게시판에 붙여넣습니다</p>
+        </div>
 
         {/* HM-47 — 승인 상태. 부서장에게는 [고칠 것 없음 · 승인] — 고쳐 저장하면 그 저장이 승인이다 */}
         {data && (data.review || data.canApprove) && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline-soft bg-surface-soft px-6 py-2.5 text-sm">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline-soft bg-surface-soft px-4 py-2.5 text-sm sm:px-6">
             {data.review ? (
               <>
-                <span className={data.review.changedAfter ? 'font-semibold text-warning' : 'font-semibold text-success'}>
-                  {data.review.changedAfter ? '승인 뒤 바뀜' : '✓ 승인 완료'}
+                <span className={`chip ${data.review.changedAfter ? 'chip-warn' : 'chip-ok'}`}>
+                  {data.review.changedAfter ? '승인 뒤 바뀜' : '승인 완료'}
                 </span>
                 <span className="text-ink">{data.review.by}</span>
                 <span className="text-muted">
@@ -427,24 +430,25 @@ export function MergedDrawer({
           </div>
         )}
 
-        <div ref={bodyRef} className="flex-1 overflow-y-auto px-6 py-5">
-          {err && <p className="card border-error/40 bg-error-soft px-4 py-3 text-sm text-error">{err}</p>}
+        <div ref={bodyRef} className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+          {err && <p className="callout callout-error mb-4">{err}</p>}
           {!data && !err && <p className="text-sm text-muted">불러오는 중…</p>}
 
           {data?.tables.map((t, ti) => {
             const rows = bodyRows(t);
             return (
               <section key={t.key} className="mb-7">
-                <h3 className="label">
-                  {t.title} <span className="font-normal text-muted-soft">{rows.length}행</span>
+                <h3 className="mb-2 text-[15px] font-semibold text-ink">
+                  {t.title} <span className="text-sm font-normal text-muted">{rows.length}행</span>
                 </h3>
                 {rows.length === 0 ? (
-                  <p className="card px-4 py-3 text-sm text-muted-soft">내용 없음</p>
+                  <p className="callout callout-muted text-muted">내용 없음</p>
                 ) : (
-                  <div className="card overflow-x-auto">
-                    <table className="w-full text-sm">
+                  /* 좁은 화면에서 칸을 짜부라뜨리지 않는다 — 한 글자씩 세로로 쪼개지던 것을 가로 스크롤로 */
+                  <div className="overflow-x-auto rounded-lg border border-hairline">
+                    <table className="w-full min-w-[640px] text-sm">
                       <thead>
-                        <tr className="table-head border-b border-hairline">
+                        <tr className="table-head border-b border-hairline bg-surface-soft">
                           {/* CP-90 — 손잡이 자리. 노션처럼 표 왼쪽 여백에 둔다 */}
                           {canEdit && <th className="w-7" />}
                           {t.columns.map((c, i) => (
@@ -484,7 +488,7 @@ export function MergedDrawer({
                               moveRow(ti, drag.from, ri);
                               setDrag(null);
                             }}
-                            className={`border-b border-hairline-soft last:border-0 ${edge} ${
+                            className={`group border-b border-hairline-soft last:border-0 ${edge} ${
                               dragging ? 'opacity-40' : ''
                             }`}
                           >
@@ -510,7 +514,8 @@ export function MergedDrawer({
                                   }}
                                   aria-label={`${rowNo(t.key, ri)}행 옮기기 — 끌거나 위·아래 화살표`}
                                   title="끌어서 옮기기 · ↑↓ 키로도 됩니다"
-                                  className="cursor-grab rounded px-1 py-1.5 text-muted-soft hover:bg-surface-soft hover:text-body focus:text-body focus:outline-none focus-visible:ring-2 focus-visible:ring-ink active:cursor-grabbing"
+                                  // 줄마다 늘 보이면 스물네 줄에 손잡이·공유·✕가 일흔두 개다 — 그 줄에 손이 갔을 때만 (넓은 화면)
+                                  className="cursor-grab rounded px-1 py-1.5 text-muted-soft hover:bg-surface-soft hover:text-body focus:text-body focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink active:cursor-grabbing sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
                                 >
                                   <GripIcon />
                                 </button>
@@ -531,16 +536,16 @@ export function MergedDrawer({
                                       HM-37 — 강조 줄의 내용 칸은 **화면에서도 파랗게** 보인다.
                                       문서에서 파란색인 것을 화면에서는 회색 배지로만 알리면,
                                       담당자가 «제출본이 어떻게 보이는지»를 확인할 길이 없다.
-                                      실제 색(#0000ff)을 그대로 쓴다 — 비슷한 파랑이 아니라.
+                                      실제 색(emphasis 토큰 = hwp의 그 파랑)을 그대로 쓴다 — 비슷한 파랑이 아니라.
                                     */
                                     className={`block w-full resize-none overflow-hidden rounded border border-transparent bg-transparent px-2 py-1.5 text-sm leading-snug hover:border-hairline focus:border-ink focus:bg-canvas focus:outline-none ${
-                                      ci === 1 && t.emphasis?.[ri] ? 'font-medium text-[#0000ff]' : 'text-ink'
+                                      ci === 1 && t.emphasis?.[ri] ? 'font-medium text-emphasis' : 'text-ink'
                                     }`}
                                   />
                                 ) : (
                                   <span
                                     className={`block px-2 py-1.5 whitespace-nowrap tabular-nums ${
-                                      ci === 1 && t.emphasis?.[ri] ? 'font-medium text-[#0000ff]' : 'text-body'
+                                      ci === 1 && t.emphasis?.[ri] ? 'font-medium text-emphasis' : 'text-body'
                                     }`}
                                   >
                                     {/*
@@ -573,16 +578,16 @@ export function MergedDrawer({
                                   aria-pressed={t.emphasis?.[ri] === true}
                                   aria-label={`${rowNo(t.key, ri)}행 공유 표시`}
                                   title="전체 공유·전달이 필요한 주요 사항 — 문서에 파란색으로 나갑니다"
-                                  className={`rounded border px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap transition-colors ${
+                                  className={`rounded border px-1.5 py-0.5 text-xs font-semibold whitespace-nowrap transition-colors ${
                                     t.emphasis?.[ri]
-                                      ? 'border-[#0000ff] bg-[#0000ff] text-white'
-                                      : 'border-hairline bg-canvas text-muted-soft hover:border-ink hover:text-ink'
+                                      ? 'border-emphasis bg-emphasis text-white'
+                                      : 'border-hairline bg-canvas text-muted-soft hover:border-ink hover:text-ink focus:opacity-100 sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100'
                                   }`}
                                 >
                                   공유
                                 </button>
                               ) : t.emphasis?.[ri] ? (
-                                <span className="text-[11px] font-semibold text-[#0000ff]">공유</span>
+                                <span className="text-xs font-semibold text-emphasis">공유</span>
                               ) : null}
                             </td>
                             {canEdit && (
@@ -590,7 +595,7 @@ export function MergedDrawer({
                                 <button
                                   onClick={() => removeRow(ti, ri)}
                                   aria-label={`${ri + 1}행 삭제`}
-                                  className="rounded px-1.5 py-1 text-muted-soft hover:bg-error-soft hover:text-error"
+                                  className="rounded px-1.5 py-1 text-muted-soft hover:bg-error-soft hover:text-error focus:opacity-100 sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
                                 >
                                   ✕
                                 </button>
@@ -608,7 +613,7 @@ export function MergedDrawer({
           })}
 
           {data && canEdit && (
-            <p className="text-xs text-muted-soft">
+            <p className="text-xs leading-5 text-muted">
               고친 내용은 [수정 저장]을 눌러야 병합본에 반영됩니다. 구분 번호(1-1, 1-2…)는 저장할 때
               시스템이 다시 매깁니다. <strong className="font-medium">제출자가 올린 원본 파일은 바뀌지 않습니다.</strong>
             </p>

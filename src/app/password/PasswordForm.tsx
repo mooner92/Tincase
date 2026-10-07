@@ -40,7 +40,7 @@ export function PasswordForm({ first, hasPassword }: { first: boolean; hasPasswo
     <form onSubmit={submit} className="space-y-4">
       {hasPassword && (
         <div>
-          <label htmlFor="cur" className="mb-1 block text-xs font-medium text-body">
+          <label htmlFor="cur" className="label">
             {first ? '발급받은 임시 비밀번호' : '현재 비밀번호'}
           </label>
           <input
@@ -51,13 +51,13 @@ export function PasswordForm({ first, hasPassword }: { first: boolean; hasPasswo
             autoFocus
             value={current}
             onChange={(e) => setCurrent(e.target.value)}
-            className="w-full rounded-xl border border-hairline px-3 py-2 text-sm"
+            className="input"
           />
         </div>
       )}
       <div>
-        <label htmlFor="new" className="mb-1 block text-xs font-medium text-body">
-          새 비밀번호 <span className="font-normal text-muted-soft">(10자 이상)</span>
+        <label htmlFor="new" className="label">
+          새 비밀번호 <span className="font-normal">(10자 이상)</span>
         </label>
         <input
           id="new"
@@ -67,11 +67,11 @@ export function PasswordForm({ first, hasPassword }: { first: boolean; hasPasswo
           minLength={10}
           value={next}
           onChange={(e) => setNext(e.target.value)}
-          className="w-full rounded-xl border border-hairline px-3 py-2 text-sm"
+          className="input"
         />
       </div>
       <div>
-        <label htmlFor="confirm" className="mb-1 block text-xs font-medium text-body">
+        <label htmlFor="confirm" className="label">
           새 비밀번호 확인
         </label>
         <input
@@ -81,22 +81,22 @@ export function PasswordForm({ first, hasPassword }: { first: boolean; hasPasswo
           required
           value={confirm}
           onChange={(e) => setConfirm(e.target.value)}
-          className="w-full rounded-xl border border-hairline px-3 py-2 text-sm"
+          className="input"
         />
       </div>
       {error && (
-        <p aria-live="polite" className="rounded-xl bg-error/10 px-3 py-2 text-sm text-error">
+        <p aria-live="polite" className="callout callout-error">
           {error}
         </p>
       )}
       <button
         type="submit"
         disabled={busy}
-        className="w-full rounded-xl bg-ink px-4 py-2.5 text-sm font-medium text-white hover:bg-ink-active disabled:opacity-50"
+        className="btn-primary w-full"
       >
         {busy ? '변경 중…' : '비밀번호 변경'}
       </button>
-      <p className="text-center text-xs text-muted-soft">변경하면 다른 기기의 로그인은 모두 해제됩니다.</p>
+      <p className="text-center text-xs text-muted">변경하면 다른 기기의 로그인은 모두 해제됩니다.</p>
     </form>
   );
 }

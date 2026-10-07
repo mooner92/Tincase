@@ -54,9 +54,9 @@ export function ForgotForm() {
         autoComplete="username"
         required
         placeholder="name@kei.re.kr"
-        className="w-full rounded-lg border border-border-strong px-3.5 py-2.5 text-sm focus:border-ink focus:outline-none"
+        className="input"
       />
-      {err && <p className="text-sm text-error">{err}</p>}
+      {err && <p className="callout callout-error">{err}</p>}
       <button type="submit" disabled={busy || !email} className="btn-primary w-full">
         {busy ? '보내는 중…' : '재설정 링크 받기'}
       </button>

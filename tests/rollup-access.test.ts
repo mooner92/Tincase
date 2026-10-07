@@ -404,7 +404,7 @@ d('RU-50~58 단계 일정 · 스위치 · 본부장 승인', () => {
     }
   });
 
-  it('[RU-T45] ★ 전사 취합의 문은 하나(canOpenOrgDesk) — 꺼져 있으면 총괄에게도 닫힌다. /org 페이지도 같은 게이트', async () => {
+  it('[RU-T45] ★ 전사 취합의 문은 하나(canOpenOrgDesk) — 꺼져 있으면 총괄에게도 닫힌다. 「전사」 화면의 취합 부분도 같은 게이트', async () => {
     const { prisma } = await import('@/server/db');
     const { canOpenOrgDesk, requireScope } = await import('@/server/authz');
     const opEmail = 'op@test.kei.re.kr';
@@ -419,12 +419,18 @@ d('RU-50~58 단계 일정 · 스위치 · 본부장 승인', () => {
     } finally {
       await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { enabled: true } });
     }
-    // 페이지가 canRunOrgRollup만 보면 스위치를 건너뛴다 — 판정을 복사하지 않고 게이트를 부른다 (TACP-12)
-    for (const f of ['src/app/org/page.tsx']) {
-      const src = readFileSync(path.resolve(__dirname, '..', f), 'utf8');
-      expect(src, f).toContain('canOpenOrgDesk(');
-      expect(src, f).not.toMatch(/canRunOrgRollup\(/);
+    // 페이지가 canRunOrgRollup만 보면 스위치를 건너뛴다 — 판정을 복사하지 않고 게이트를 부른다 (TACP-12).
+    // 「전사」 화면은 orgPageView를 부르고, 그 안의 「취합 부분」(desk)이 이 게이트다 (PG-49f·51e)
+    const src = (f: string) => readFileSync(path.resolve(__dirname, '..', f), 'utf8');
+    for (const f of ['src/app/org/page.tsx', 'src/app/ops/monitor/page.tsx']) {
+      expect(src(f), f).toContain('orgPageView(');
+      expect(src(f), f).not.toMatch(/canRunOrgRollup\(/);
     }
+    const authz = src('src/server/authz.ts');
+    const view = authz.slice(authz.indexOf('export async function orgPageView'));
+    expect(view.slice(0, view.indexOf('\n}\n'))).toContain('const desk = await canOpenOrgDesk(scope);');
+    const { orgPageView } = await import('@/server/authz');
+    expect((await orgPageView(coord)).desk).toBe(await canOpenOrgDesk(coord));
   });
 
   it('[RU-T46] [제출] 카드는 내 부서 lead·head에게만 — 총괄(readAll)에게는 누르면 404인 버튼을 그리지 않는다', async () => {
@@ -490,6 +496,57 @@ d('RU-50~58 단계 일정 · 스위치 · 본부장 승인', () => {
     expect(b.subject).toContain('1/3곳 도착');
     expect(b.contents).toContain('아직 2곳: 환경평가본부·임원실');
     expect(hqDueSoonMessage(p, slot, new Date('2026-10-15T07:00:00Z')).contents).toContain('16:00까지');
+  });
+});
+
+d('PG-51 「전사」 한 화면 — 섹션 표', () => {
+  it('[PG-T81] ★ 열마다 그 열을 보는 사람에게만 값이 온다 · 본부 단계가 있는 섹션은 본부 취합 길 · 어느 섹션에도 안 닿는 집계 부서는 「섹션 밖」', async () => {
+    const { prisma } = await import('@/server/db');
+    const { orgBoard } = await import('@/server/org-board');
+    const { progressNodes } = await import('@/server/monitor');
+    const { rollupSlot } = await import('@/server/rollup/slot');
+    const { layoutOrg } = await import('@/lib/orgtree');
+    const slot = await rollupSlot(isoKey);
+    const ids = Object.values(divId);
+    // 모든 단위를 집계 대상으로. 섹션은 RU-T34의 넷(실하나·실둘·실셋·단독단) — 본부가·본부나 자신은 섹션이 없다
+    await prisma.division.updateMany({ where: { id: { in: ids } }, data: { boardStatus: 'confirmed' } });
+    try {
+      const titles = ['본부가(실하나)', '본부가(실둘)', '본부나(실셋)', '단독단'];
+      const full = await orgBoard(slot, { progress: true, desk: true }, 'isoKey=2026-W01');
+      expect(full.rows.map((r) => r.title)).toEqual([...titles, '섹션 밖']);
+      expect(full.rows.map((r) => r.progress?.teams.map((t) => t.name))).toEqual([['실하나'], ['실둘'], ['실셋'], ['단독단'], ['본부가', '본부나']]);
+      // 최종본 열 — 섹션마다 RU-60의 출처 판정 그대로, 「섹션 밖」에는 없다
+      expect(full.rows.map((r) => r.final && r.final.sectionId === r.key)).toEqual([true, true, true, true, null]);
+      expect(full.rows.slice(0, 4).every((r) => ['tincase', 'upload', 'waiting_hq', 'missing'].includes(r.final!.source))).toBe(true);
+      // 본부 단계가 있는 본부(본부가: 실 둘 · 본부나: 자체 + 실 하나)의 섹션만 본부 취합으로 — 보던 주차를 들고 간다
+      expect(full.rows.map((r) => r.hq?.href ?? null)).toEqual([
+        '/hq?node=HQ_A&isoKey=2026-W01',
+        '/hq?node=HQ_A&isoKey=2026-W01',
+        '/hq?node=HQ_B&isoKey=2026-W01',
+        null,
+        null,
+      ]);
+      // 합계 = 섹션 + 「섹션 밖」 = 감사 문서 (PG-T73과 같은 약속을 실제 DB로)
+      const report = layoutOrg((await progressNodes(slot)).nodes);
+      expect([full.totals!.submitted, full.totals!.roster]).toEqual([report.totals.submitted, report.totals.roster]);
+      expect(full.ready).toBe(full.rows.filter((r) => r.final?.source === 'tincase' || r.final?.source === 'upload').length);
+      expect(full.editor?.sections.map((x) => x.title)).toEqual(titles);
+
+      // 읽기만(3단계가 꺼진 총괄) — 최종본 열·본부 취합 길·만들기·편집기 값이 아예 없다
+      const read = await orgBoard(slot, { progress: true, desk: false }, '');
+      expect(read.rows.map((r) => r.title)).toEqual([...titles, '섹션 밖']);
+      expect(read.rows.every((r) => r.final === null && r.hq === null)).toBe(true);
+      expect([read.ready, read.run, read.editor]).toEqual([null, null, null]);
+      expect(read.totals).toEqual(full.totals);
+
+      // 취합만(전 부서 읽기 없이) — 제출 열·이름·합계가 없고, 사람을 세는 「섹션 밖」 줄도 없다
+      const desk = await orgBoard(slot, { progress: false, desk: true }, '');
+      expect(desk.rows.map((r) => r.title)).toEqual(titles);
+      expect(desk.rows.every((r) => r.progress === null && r.final !== null)).toBe(true);
+      expect([desk.totals, desk.excludedNote, desk.capturedAtKst]).toEqual([null, null, null]);
+    } finally {
+      await prisma.division.updateMany({ where: { id: { in: ids } }, data: { boardStatus: 'none' } });
+    }
   });
 });
 

@@ -180,6 +180,7 @@ type UploadState =
 | 코드 | 화면 문구 |
 |---|---|
 | `slot_locked` | 마감되어 제출되지 않았습니다. 다음 주차에 제출해 주세요. |
+| `upload_closed` | HWP 업로드는 닫혔습니다 — 웹에서 작성해 주세요. (스위치를 끄기 전에 띄워 둔 화면에서만 보인다. 끈 뒤에는 드롭존 자체가 없다 — PG-11) |
 | `invalid_file` / `not_hwp` | 한글 파일이 아닙니다. 한글에서 저장한 .hwp 파일을 올려주세요. |
 | `invalid_file` / `hwpx_not_allowed` | .hwpx는 받지 않습니다. [다른 이름으로 저장] → [한글 문서(*.hwp)]로 저장 후 올려주세요. |
 | `invalid_file` / `too_large` | 파일이 너무 큽니다 (최대 20MB). |
@@ -424,31 +425,72 @@ shadcn/ui 도입 계획은 폐기. `@layer components`의 유틸 클래스
 (`.btn-primary` `.card` `.badge-pill` `.input` `.tab-pill`)로 충분하다.
 의존성을 늘리지 않고 토큰과 1:1로 붙는다.
 
-### CP-68 — 색 팔레트
+### CP-68 — 색 팔레트 (2026-10-07 개정 — 실제 토큰과 맞춤)
+
+> 이 절은 v1.3의 크림 캔버스(#fffaf0)·brand-teal/peach 팔레트를 적고 있었는데, 그 색은 코드 어디에도 없었다.
+> 지금 `globals.css`의 값으로 다시 적는다. 2026-10-07 사용자: 「전체적으로 가독성 좀 좋게 … 컴포넌트별로 구분이 잘 안되는 부분들이 있어」.
 
 | 역할 | 토큰 | 용도 |
 |---|---|---|
-| 캔버스 | `canvas` #fffaf0 | 페이지 바닥. **크림 틴트가 이 시스템의 정체성** — 쿨그레이로 바꾸지 않는다 |
-| 표면 | `surface-soft` / `surface-card` / `surface-strong` | 보조 카드·비활성 영역 |
-| 잉크 | `ink` #0a0a0a | 헤드라인·기본 CTA |
-| 본문 | `body` / `muted` / `muted-soft` | 본문·부가·캡션 |
-| 헤어라인 | `hairline` / `hairline-soft` | 1px 경계 (그림자 대신) |
-| 포인트 | `brand-teal` `brand-peach` `brand-mint` `brand-lavender` `brand-ochre` `brand-coral` | 피처 카드 |
-| 의미 | `success` `warning` `error` | 상태 |
+| 바닥 | `ground` #f3f4f3 | 페이지 바닥. 이 위에 바로 놓는 글자는 `muted` 이상 |
+| 캔버스 | `canvas` #fff | 카드·입력칸·드로어·메뉴·헤더 |
+| 표면 | `surface-soft` / `surface-strong` | 카드 **안**의 표 머리·hover·callout / 진행 막대 바탕·회색 칩 |
+| 잉크 | `ink` #222 | 제목·탭 표시 |
+| 본문 | `body` / `muted` / `muted-soft` | 본문·부가·캡션 (`muted-soft`는 흰 카드 안에서만) |
+| 선 | `hairline` / `hairline-soft` / `border-strong` | 카드 테두리 / 카드 안 구분선 / 입력칸 경계 |
+| 브랜드 | `brand` #0a3711 | 주 버튼(CTA)·진행 막대. 큰 면을 칠하지 않는다 (CP-100) |
+| 상태 | `success` `warning` `error` `info` + 각 `-soft` | 칩·callout. 글자는 같은 이름의 `-soft` 위에서 4.5:1 이상 |
+| 공유 | `emphasis` #0000ff | HM-37 「공유」 — hwp에 나가는 실제 색. 이것만 hex 그대로다 |
 
-**포인트 색은 의미를 갖는다** — teal은 요약/집계(featured), peach는 행동 유도(양식 받기),
-mint는 완료, ochre는 주의, coral은 임박. 같은 색을 연속으로 두지 않는다.
+### CP-69 — 깊이는 바닥 대비 + 아주 얕은 그림자 한 단계
 
-### CP-69 — 깊이는 그림자가 아니라 색 대비로
-
-카드는 `border-hairline` 1px + 배경색 차이로 분리한다. 그림자는 오버레이(드로어)에만.
+흰 카드가 회색 바닥 위에 놓인다(면으로 구분). 카드 테두리는 옅게(`hairline`), 그림자는 `0 1px 2px rgb(0 0 0/.04)` 하나.
+드로어·메뉴만 그보다 깊은 그림자를 쓴다.
 
 ### CP-70b — 라운드 스케일
 
-버튼·입력 `rounded-xl`(12px) · 콘텐츠 카드 `rounded-2xl`(16px) ·
-피처 카드 `rounded-3xl`(24px) · 배지·탭 `rounded-full`.
+버튼·입력·callout `rounded-lg`(8px) · 카드 `rounded-xl`(12px) · 칩·배지·탭 `rounded-full`.
 
 ### CP-71b — 타이포
 
-`.display` = 600 무게 + `-0.03em` 자간. 헤드라인 전용이며 본문에 쓰지 않는다.
-섹션 라벨은 12px/600/대문자+`tracking-[0.12em]`.
+크기는 12 · 14 · 15 · 17 · 26~28px만, 통계 숫자만 40px. **12px 미만은 쓰지 않는다** (`text-[11px]` 폐지).
+페이지 제목 `.page-title`(26/28px·600), 부제 `.page-sub`(15px·`muted`·최대 68자 폭), 카드 제목 `.card-title`(17px·600).
+대문자+자간 라벨(`text-xs tracking-[0.12em] uppercase`)은 **쓰지 않는다** — 한글에서는 「부 서 제 출 현 황」으로 읽힌다.
+
+### CP-97 — 카드는 한 단계
+
+- 화면의 묶음은 `.card` 하나로 그린다 (흰 면·`hairline` 테두리·`p-5 sm:p-6`). 표를 담으면 `.card .card-flush`
+- **카드 안에 카드를 넣지 않는다.** 안쪽은 선으로 나눈다 — `.card-section`(위 구분선 + 20px 여백)
+- 꼭 상자가 필요하면 테두리 없는 `.callout` 하나 — `-muted` · `-warn` · `-error` · `-info`
+- 상태를 **면 색으로 칠하지 않는다** — 「완료」 카드를 초록으로, 「아직」 카드를 회색으로 칠하던 것(`card-feature`·`card-cream`)을 없앴다. 상태는 칩이 말한다 (CP-100)
+- 카드 사이 간격 `space-y-4`(휴대폰) · `lg:space-y-6`. 그리드 간격도 같은 값
+
+### CP-98 — 카드마다 제목 하나
+
+- 머리: `.card-head`(왼쪽 `.card-title` + `.card-desc`, 오른쪽에 행동 하나 또는 상태 칩)
+- 페이지는 `.page-title` 하나 + 필요하면 `.page-sub`. 제목 위 작은 라벨(눈썹)은 두지 않는다 — 메뉴가 이미 어디인지 말한다
+- 페이지 위 여백 `pt-8`, 제목에서 본문까지 `mt-6`
+
+### CP-99 — 버튼 위계: 카드마다 주 버튼 하나
+
+| 클래스 | 쓰는 곳 |
+|---|---|
+| `.btn-primary` (브랜드 그린, 44px) | 그 카드에서 지금 할 일 하나 — 작성하기·수정 저장·제출 |
+| `.btn-secondary` (`border-strong` 테두리, 500) | 그 밖의 독립된 행동 — 받기·열어보기·다시 병합 |
+| `.btn-ghost` (테두리 없음, 36px) | 줄마다 붙는 행동 — 열기·받기·복사·올리기 |
+| `.btn-link-danger` (글자) | 되돌릴 수 없는 행동 — 제출 취소·삭제 |
+
+검정 채운 버튼(`bg-ink`)과 흰 버튼(`btn-oncolor`)은 쓰지 않는다. 한 화면에 주 버튼이 둘이면 둘 다 주가 아니다.
+
+### CP-100 — 상태·탭·접기·표
+
+- **상태 칩** `.chip` + `-ok`·`-warn`·`-muted`·`-info`·`-error` — 낱말 하나(「제출」·「본부 대기」·「올린 파일」). 점은 `.dot`(낸 사람)·`.dot-hollow`(안 낸 사람)으로 그린다 — 「●○✓」 글자는 글꼴마다 크기가 달랐다
+- **큰 초록 면 금지** — `bg-brand`로 칠한 요약 띠·「완료」 카드를 두지 않는다. 진행은 흰 카드 안의 6px 막대(`brand` / `surface-strong`)
+- **탭** — 카드 안 토글은 `.tab-pill`, 페이지 탭(필터)은 `.tab-line`(잉크 밑줄)
+- **접기** — 매주 바꾸지 않는 설정은 `details.disclosure` 뒤에 둔다(「…바꾸기」·「고급 설정」)
+- **표** — `.table`: 머리는 `surface-soft` 띠·12px `muted`, 줄 44px, 숫자 `tabular-nums`. 640px 미만은 표 대신 줄 목록으로 쌓는다(UX-02)
+
+| ID | 검사 |
+|---|---|
+| UI-T92 | `src/**/*.tsx`에 hex 임의값(`[#…]`)과 Tailwind 기본 팔레트(`blue-600`·`green-100`·`amber-100` 등)가 없다 — 색은 토큰으로만 (CP-66). 「공유」 파랑도 `emphasis` 토큰으로 쓴다 |
+| UI-T93 | 없앤 모양이 돌아오지 않는다 — `card-feature`·`card-cream`·`btn-oncolor`·`surface-card`·`text-[10px]`·`text-[11px]`·대문자 자간 라벨 |

@@ -1,5 +1,5 @@
 'use client';
-// WS-19l — 「주차 일정」 카드 하나 (「전사」 [현황] 탭 위쪽).
+// WS-19l — 「주차 일정」 카드 하나 (「전사」 화면 머리글의 [일정 바꾸기]를 누르면 펼쳐진다 — PG-51a).
 //
 // 예전에는 카드가 둘이었다 — 전사 현황의 「주차 마감」(WS-19)과 전사 취합의 「단계 일정」(RU-51·52).
 // 둘 다 **그 주 부서 마감 하나**에서 출발하는데 화면이 갈라져 있어서, 총괄이 연휴 공지로 마감을 옮긴 뒤
@@ -124,15 +124,17 @@ export function WeekSchedule({
   };
 
   return (
-    <section id="schedule" className="card mb-6 scroll-mt-24 px-6 py-5">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-sm font-semibold text-ink">
-          주차 일정
-          <span className="ml-2 text-xs font-normal text-muted">
+    <section id="schedule" className="card scroll-mt-24">
+      <div className="card-head">
+        <div className="min-w-0">
+          <h2 className="card-title">
+            주차 일정
+          </h2>
+          <p className="card-desc">
             {canSchedule ? '연휴로 대외 마감이 바뀌면 여기서 바꿉니다 — ' : ''}
             {stagesOn ? '전 부서 마감과 3단계 기한이 한꺼번에 따라갑니다' : '전 부서에 한꺼번에 적용됩니다'}
-          </span>
-        </h2>
+          </p>
+        </div>
         {canSchedule && !editing && (
           <button onClick={() => setEditing(true)} className="btn-secondary btn-sm">
             마감 바꾸기
@@ -173,11 +175,11 @@ export function WeekSchedule({
         ))}
       </ul>
 
-      {done && <p className="mt-3 rounded-lg bg-brand-soft px-3 py-2 text-sm text-ink">{done}</p>}
-      {err && <p className="mt-3 rounded-lg bg-error-soft px-3 py-2 text-sm text-error">{err}</p>}
+      {done && <p className="callout mt-3 bg-success-soft text-ink">{done}</p>}
+      {err && <p className="callout callout-error mt-3">{err}</p>}
 
       {canSchedule && editing && (
-        <div className="mt-4 border-t border-hairline-soft pt-4">
+        <div className="card-section">
           <div className="flex gap-2 text-sm">
             <button
               onClick={() => setHow('paste')}
@@ -244,7 +246,7 @@ export function WeekSchedule({
           </div>
 
           {plan && (
-            <div className="mt-4 rounded-xl border border-hairline px-4 py-3 text-sm">
+            <div className="callout callout-muted mt-4">
               <p className="text-ink">
                 <span className="font-semibold">{plan.weekLabel}</span> 부서 마감{' '}
                 {plan.beforeKo !== plan.departmentKo && (
@@ -275,12 +277,12 @@ export function WeekSchedule({
               </p>
 
               {plan.warnings.map((w) => (
-                <p key={w} className="mt-2 rounded-lg bg-warning-soft px-3 py-1.5 text-xs text-ink">
+                <p key={w} className="callout callout-warn mt-2 py-2 text-xs">
                   {w}
                 </p>
               ))}
               {plan.blocked ? (
-                <p className="mt-2 rounded-lg bg-error-soft px-3 py-1.5 text-xs text-error">{plan.blocked}</p>
+                <p className="callout callout-error mt-2 py-2 text-xs">{plan.blocked}</p>
               ) : (
                 <button onClick={() => post('apply')} disabled={busy} className="btn-primary btn-sm mt-3">
                   {busy ? '적용 중…' : '이대로 적용'}
@@ -325,7 +327,7 @@ function RollupStages({ enabled, unitDueMinutes, hqDueMinutes }: RollupScheduleS
       });
       const b = await r.json().catch(() => ({}));
       if (!r.ok) setErr(b.message ?? '저장하지 못했습니다.');
-      else router.refresh(); // 주차 줄의 단계 기한·탭·메뉴가 같이 바뀐다
+      else router.refresh(); // 주차 줄의 단계 기한·최종본 열·메뉴가 같이 바뀐다
     } catch {
       setErr('네트워크 오류로 저장하지 못했습니다.');
     } finally {
@@ -336,7 +338,7 @@ function RollupStages({ enabled, unitDueMinutes, hqDueMinutes }: RollupScheduleS
   const opts = (cur: number) => [...new Set([...OPTIONS, cur])].sort((a, b) => a - b);
 
   return (
-    <div className="mt-4 border-t border-hairline-soft pt-4">
+    <div className="card-section">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-ink">
           3단계 취합
@@ -356,8 +358,8 @@ function RollupStages({ enabled, unitDueMinutes, hqDueMinutes }: RollupScheduleS
       </div>
 
       {turningOff && (
-        <div className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-warning-soft px-3 py-2 text-sm text-ink">
-          <span>끄면 실·팀의 [제출] 카드, 본부 취합·[취합] 탭, 단계 알림이 모두 사라집니다. 다시 켜는 것은 운영자만 할 수 있습니다.</span>
+        <div className="callout callout-warn mt-2 flex flex-wrap items-center gap-2">
+          <span>끄면 실·팀의 [제출] 카드, 본부 취합, 「전사」의 최종본 열, 단계 알림이 모두 사라집니다. 다시 켜는 것은 운영자만 할 수 있습니다.</span>
           <button onClick={() => save({ enabled: false })} disabled={busy} className="btn-secondary btn-sm">
             끄기
           </button>
@@ -367,8 +369,8 @@ function RollupStages({ enabled, unitDueMinutes, hqDueMinutes }: RollupScheduleS
         </div>
       )}
       {!enabled && (
-        <p className="mt-2 rounded-lg bg-warning-soft px-3 py-2 text-sm text-ink">
-          꺼져 있습니다 — 실·팀의 [제출] 카드, 본부 취합·[취합] 탭, 단계 알림이 아무에게도 보이지 않습니다. 켜는 순간 나타납니다.
+        <p className="callout callout-warn mt-2">
+          꺼져 있습니다 — 실·팀의 [제출] 카드, 본부 취합, 단계 알림이 나타나지 않고 「전사」의 최종본 열은 운영자에게만 보입니다. 켜는 순간 나타납니다.
         </p>
       )}
 
@@ -411,7 +413,7 @@ function RollupStages({ enabled, unitDueMinutes, hqDueMinutes }: RollupScheduleS
           {busy ? '저장 중…' : '단계 시각 저장'}
         </button>
       )}
-      {err && <p className="mt-3 rounded-lg bg-error-soft px-3 py-2 text-sm text-error">{err}</p>}
+      {err && <p className="callout callout-error mt-3">{err}</p>}
     </div>
   );
 }

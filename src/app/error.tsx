@@ -14,7 +14,7 @@ export default function ErrorPage({ error, reset }: { error: Error & { digest?: 
       >
         다시 시도
       </button>
-      <p className="mt-3 text-xs text-muted-soft">(오류 코드: {code})</p>
+      <p className="mt-3 text-xs text-muted">(오류 코드: {code})</p>
     </main>
   );
 }

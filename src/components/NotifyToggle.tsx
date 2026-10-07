@@ -36,7 +36,7 @@ export function NotifyToggle({ initial }: { initial: boolean }) {
     >
       <span>
         알림 받기
-        <span className="mt-0.5 block text-[11px] text-muted-soft">마감 1시간 전 안내</span>
+        <span className="mt-0.5 block text-xs text-muted">마감 1시간 전 안내</span>
       </span>
       {/* 스위치 — 켜짐/꺼짐이 색과 위치 둘 다로 보여야 한다 */}
       <span
