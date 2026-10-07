@@ -116,9 +116,9 @@ export function UploadDropzone({ hasPrevious }: { hasPrevious: boolean }) {
           if (state.kind === 'dragover') setState({ kind: 'idle' });
           onFiles(e.dataTransfer.files);
         }}
-        className={`card-feature flex min-h-44 cursor-pointer flex-col items-center justify-center border-2 border-dashed px-6 py-10 text-center transition-colors ${
+        className={`flex min-h-40 cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed px-6 py-8 text-center transition-colors ${
           state.kind === 'dragover'
-            ? 'border-ink bg-surface-card'
+            ? 'border-ink bg-surface-soft'
             : busy
               ? 'cursor-wait border-hairline bg-surface-soft'
               : 'border-hairline bg-canvas hover:border-muted-soft hover:bg-surface-soft'
@@ -151,7 +151,7 @@ export function UploadDropzone({ hasPrevious }: { hasPrevious: boolean }) {
           </div>
         ) : (
           <>
-            <p className="display text-lg">
+            <p className="text-[15px] font-semibold text-ink">
               hwp 파일을 끌어다 놓거나 <span className="underline underline-offset-4">클릭해서 선택</span>
             </p>
             <p className="mt-2 text-[13px] text-muted">
@@ -163,13 +163,13 @@ export function UploadDropzone({ hasPrevious }: { hasPrevious: boolean }) {
 
       <div aria-live="polite">
         {state.kind === 'success' && (
-          <p className="mt-3 rounded-2xl bg-brand-soft px-5 py-3.5 text-sm font-medium text-ink">
-            <span className="text-success">✓</span> 제출 완료 (v{state.version})
+          <p className="callout mt-3 bg-success-soft font-medium text-ink">
+            제출 완료 (v{state.version})
             {state.sameAsPrevious && ' — 이전 버전과 내용이 동일합니다'}
           </p>
         )}
         {state.kind === 'error' && (
-          <div className="mt-3 flex items-start justify-between gap-3 rounded-2xl border border-error/30 bg-error/5 px-5 py-3.5 text-sm text-body-strong">
+          <div className="callout callout-error mt-3 flex items-start justify-between gap-3">
             <p>{state.message}</p>
             {state.canRetry && (
               <button onClick={() => lastFileRef.current && send(lastFileRef.current)} className="btn-secondary btn-sm shrink-0">

@@ -33,13 +33,13 @@ export default async function SetupPage({ params }: { params: Promise<{ token: s
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
-      <div className="card px-8 py-9">
+      <div className="card px-6 py-8 sm:px-8 sm:py-9">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/brand/tincase-stacked.svg" alt="Tincase" className="mx-auto h-[84px] w-auto" />
 
         {state.ok ? (
           <>
-            <h1 className="display mt-5 text-center text-xl">
+            <h1 className="mt-5 text-center text-xl font-semibold text-ink">
               {state.user.name} 님의 비밀번호를 설정합니다
             </h1>
             <p className="mt-1.5 text-center text-sm text-muted">
@@ -51,7 +51,7 @@ export default async function SetupPage({ params }: { params: Promise<{ token: s
           </>
         ) : (
           <>
-            <h1 className="display mt-5 text-center text-xl">{MESSAGE[state.reason].title}</h1>
+            <h1 className="mt-5 text-center text-xl font-semibold text-ink">{MESSAGE[state.reason].title}</h1>
             <p className="mt-3 text-center text-sm leading-6 text-body">{MESSAGE[state.reason].body}</p>
             {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- 인증 밖 페이지 */}
             <a href="/login" className="btn-secondary mt-7 w-full">

@@ -1,4 +1,4 @@
-// `/hq` — 본부 취합 (RU-31 · TACP-21). 본부 단계가 있는 본부의 담당자·본부장, 그리고 readAll(읽기만).
+// `/hq` — 본부 취합 (RU-31 · TACP-21 · PG-54). 본부 단계가 있는 본부의 담당자·본부장, 그리고 readAll(읽기만).
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { requirePageScope } from '@/server/page-scope';
@@ -44,6 +44,10 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
   const hqReport = canWrite ? await reportState(node.node.id, slot, 'hq') : null;
   const sent = board.units.filter((u) => u.report).length;
   const baseHref = canWrite ? '/hq' : `/hq?node=${encodeURIComponent(node.node.slug)}`;
+  // RU-55 · CP-99 — 본부장에게 승인할 본부본이 있으면 그것이 주 버튼이고, [총괄에 제출]은 승인 뒤에 주 버튼이 된다
+  const canApprove = canWrite && isReviewer(scope);
+  const awaitingApproval =
+    canApprove && board.lastRun?.status === 'succeeded' && (!approval || approval.changedAfter);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -59,32 +63,32 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
         notifyEnabled={scope.user.notifyEnabled}
       />
       <main className="mx-auto w-full max-w-[1120px] flex-1 px-5 pt-8 pb-10">
-        <div className="flex flex-wrap items-end justify-between gap-3">
-          <div>
-            <p className="text-sm text-muted">본부 취합</p>
-            <h1 className="display text-2xl">
+        <div className="page-head">
+          <div className="min-w-0">
+            <h1 className="page-title">
               {node.node.nameKo} <span className="text-muted">·</span> {slot.label}
             </h1>
-            <p className="mt-1 text-sm text-body">
-              실·팀 제출 기한 {stages.unitDueKo} · 총괄 제출 기한 <strong className="text-ink">{stages.hqDueKo}</strong>
-            </p>
-            <p className="mt-0.5 text-sm text-body">
-              산하 {board.units.length}개 단위 중 <strong className="text-ink">{sent}개 제출</strong>
-              {!canWrite && <span className="ml-2 text-muted">— 읽기 전용 (총괄·운영자)</span>}
+            {/* 머리 밑은 한 줄 — 기한 둘과 진행. 읽기 전용이면 그 사실도 같은 줄에 */}
+            <p className="page-sub">
+              실·팀 기한 {stages.unitDueKo} · 총괄 기한 <strong className="font-semibold text-ink">{stages.hqDueKo}</strong>
+              {' · '}산하 {board.units.length}곳 중 <strong className="font-semibold text-ink">{sent}곳 제출</strong>
+              {!canWrite && <span> · 읽기 전용</span>}
             </p>
           </div>
           <div className="flex items-center gap-2">
-            {/* PG-49e — 「전사」 메뉴의 [취합] 탭으로 돌아가는 길. 그 탭의 문(canOpenOrgDesk)과 같은 판정으로만 그린다 (TACP-9) */}
+            {/* PG-49f — 「전사」 화면으로 돌아가는 길. 그 화면의 취합 부분과 같은 문(canOpenOrgDesk)으로만 그린다 (TACP-9) —
+                이 화면을 읽기로 여는 총괄·운영자는 그 문을 이미 지나왔다(RU-52) */}
             {nav.orgDesk && (
-              <Link href="/org" className="tab-pill">
-                ← 전사 · 취합
+              <Link href={`/org${sp.isoKey ? `?isoKey=${slot.isoKey}` : ''}`} className="btn-ghost">
+                ← 전사
               </Link>
             )}
             <WeekPicker weeks={weeks} selected={slot.isoKey} baseHref={baseHref} />
           </div>
         </div>
 
-        <div className="mt-6 space-y-6">
+        {/* PG-54 — 카드 둘: 산하 제출·순서 / 본부본(결과 · 본부장 승인 · 총괄에 제출) */}
+        <div className="mt-6 space-y-4 lg:space-y-6">
           <OrderList
             key={board.units.map((u) => u.division.id).join()}
             rows={board.units.map(unitRow)}
@@ -103,26 +107,29 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
             ready={sent}
             title="아직 이어 붙이지 않았습니다"
             resultWord="본부본"
-          />
-          {/* RU-55 — 본부장 승인. 버튼은 본부의 head에게만 (HM-47과 같은 규칙) */}
-          {board.lastRun?.status === 'succeeded' && (
-            <HqApprovalCard isoKey={slot.isoKey} approval={approval} canApprove={canWrite && isReviewer(scope)} />
-          )}
-          {hqReport && (
-            <ReportSubmitCard
-              isoKey={slot.isoKey}
-              state={{
-                ...hqReport,
-                current: hqReport.current && { ...hqReport.current, submittedAtKst: kst(hqReport.current.submittedAt)! },
-              }}
-            />
-          )}
-          {!canWrite && board.hqReport && (
-            <p className="text-sm text-body">
-              총괄에 제출됨 · {kst(board.hqReport.submittedAt)} · {board.hqReport.submittedBy}
-            </p>
-          )}
-          <p className="px-1 text-xs text-muted-soft">
+          >
+            {/* RU-55 — 본부장 승인. 버튼은 본부의 head에게만 (HM-47과 같은 규칙) */}
+            {board.lastRun?.status === 'succeeded' && (
+              <HqApprovalCard isoKey={slot.isoKey} approval={approval} canApprove={canApprove} />
+            )}
+            {hqReport && (
+              <ReportSubmitCard
+                bare
+                isoKey={slot.isoKey}
+                primary={!awaitingApproval}
+                state={{
+                  ...hqReport,
+                  current: hqReport.current && { ...hqReport.current, submittedAtKst: kst(hqReport.current.submittedAt)! },
+                }}
+              />
+            )}
+            {!canWrite && board.hqReport && (
+              <p className="card-section text-sm text-body">
+                총괄에 제출됨 · {kst(board.hqReport.submittedAt)} · {board.hqReport.submittedBy}
+              </p>
+            )}
+          </RunCard>
+          <p className="px-1 text-xs leading-5 text-muted">
             본부본은 여기서 고치지 않습니다 — 단위 안의 내용은 그 실·팀의 것입니다. 고칠 곳이 있으면 그 실·팀이 고쳐 다시
             제출하고, 여기서 다시 이어 붙이세요.
           </p>

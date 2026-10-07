@@ -3,56 +3,61 @@
 /*
  * 디자인 토큰 — Airbnb 구조 언어 + Tincase 그린.
  *
- * 흰 캔버스 · 넉넉한 여백 · 부드러운 모서리 · 절제된 글자 굵기 · **강조색 하나**.
+ * 넉넉한 여백 · 부드러운 모서리 · 절제된 글자 굵기 · **강조색 하나**.
  * Airbnb는 Rausch 핑크 하나로 모든 CTA를 끌고 가는데, 우리 브랜드색은 로고의
  * 딥 그린이므로 그 자리를 그린이 대신한다. 색을 여러 개 쓰면 강조가 강조를 잃는다.
  *
- * 그림자는 **한 단계만** 쓴다 (Airbnb도 그렇다) — 떠오르는 카드와 드롭다운에만.
+ * **바닥은 옅은 회색, 카드는 흰색이다 (CP-97, 2026-10-07).**
+ * 그 전까지는 바닥도 카드도 흰색이라 카드가 1.67:1짜리 가는 선 하나로만 구분됐다.
+ * 「컴포넌트별로 구분이 잘 안 된다」는 피드백이 거기서 나왔다 — 선을 진하게 하면 화면이
+ * 격자가 되므로, 선이 아니라 **면**으로 나눈다: 흰 카드가 회색 바닥 위에 놓인다.
  */
 @theme {
-  /* 표면 — 흰 캔버스 위에 회색 계조 */
-  --color-canvas: #ffffff;
-  --color-surface-soft: #f7f7f7;
-  --color-surface-card: #ffffff;
-  --color-surface-strong: #f2f2f2;
+  /* 바닥과 표면 */
+  --color-ground: #f3f4f3; /* 페이지 바닥. 이 위에 바로 놓는 글자는 muted 이상 (#767676은 4.12:1로 떨어진다) */
+  --color-canvas: #ffffff; /* 카드·입력칸·드로어·메뉴·헤더 */
+  --color-surface-soft: #f7f7f7; /* 카드 안 — 표 머리·hover·callout */
+  --color-surface-strong: #ececec; /* 카드 안 — 진행 막대 바탕·회색 칩 */
 
   /* 글자 */
   --color-ink: #222222;
   --color-ink-active: #000000;
   --color-body: #3f3f3f;
   --color-body-strong: #222222;
-  --color-muted: #6a6a6a; /* 5.4:1 */
+  --color-muted: #6a6a6a; /* 5.4:1 (흰색) · 4.9:1 (바닥) */
   /*
-   * 회색 계조는 **재서 정했다** (v1.28.0). 「테두리가 너무 연해서 직관적이지 않고
-   * ✕ 같은 것도 잘 안 보인다」는 실제 피드백에서 값을 다시 계산했다.
-   *
-   *   muted-soft   #929292 → 3.11:1  작은 글자인데 4.5:1에 못 미쳤다 (✕ 버튼이 이 색이었다)
-   *   hairline     #dddddd → 1.36:1  입력칸 테두리인데 «있는지 없는지» 수준이었다
-   *   hairline-soft #ebebeb → 1.19:1 사실상 안 보인다
-   *
+   * 회색 계조는 **재서 정했다** (v1.28.0, 2026-10-07 다시 잼).
    * 기준: 글자는 4.5:1(WCAG AA), 조작 요소의 경계는 3:1(WCAG 1.4.11).
    * 다만 **장식용 구분선까지 3:1로 올리면 화면이 격자로 뒤덮인다** — 그래서 층을 나눈다:
    *   border-strong  입력칸처럼 «여기를 누르거나 적는다»를 알려야 하는 경계   ≈3:1
-   *   hairline       카드의 바깥 테두리                                      보이되 조용하게
-   *   hairline-soft  카드 안 행 구분선                                        장식
+   *   hairline       카드의 바깥 테두리 — 카드는 이제 면(흰색 대 바닥)으로 구분되므로 한 단계 옅게
+   *   hairline-soft  카드 안 행·구역 구분선                                  장식
    */
-  --color-muted-soft: #767676; /* 4.54:1 — 작은 글자 하한 */
-  --color-hairline: #c8c8c8; /* 1.67:1 — 카드 테두리 */
-  --color-hairline-soft: #dedede; /* 1.35:1 — 행 구분선 */
+  --color-muted-soft: #767676; /* 4.54:1 (흰색) — 흰 카드 안에서만. 바닥 위에서는 muted를 쓴다 */
+  --color-hairline: #d6d6d6; /* 1.32:1 (바닥) — 카드 테두리 */
+  --color-hairline-soft: #e6e6e6; /* 카드 안 구분선 */
   --color-border-strong: #9a9a9a; /* 2.81:1 — 입력칸·조작 경계 */
 
   /* 브랜드 — 로고와 **같은 값**을 유지한다 (public/brand/*.svg) */
-  --color-brand: #0a3711; /* 딥 그린. 기본 CTA·강조 */
+  --color-brand: #0a3711; /* 딥 그린. 기본 CTA·강조 — 큰 면을 칠하지 않는다 (CP-100) */
   --color-brand-active: #06250b;
   --color-brand-tint: #7fb98c; /* 어두운 배경 위에서만 */
   --color-brand-soft: #eef4ef; /* 아주 옅은 배경 */
 
-  /* 상태 */
+  /* 상태 — 「-soft」 위에 같은 이름의 글자를 얹는다. 비율은 그 조합으로 쟀다 */
   --color-success: #0a7d2c;
-  --color-warning: #b26a00;
+  --color-success-soft: #e7f3ea; /* success 글자 4.62:1 */
+  --color-warning: #945800; /* warning-soft 위 5.22:1 (#b26a00은 3.85:1이라 낮췄다) */
   --color-warning-soft: #fdf3e2;
   --color-error: #c13515;
   --color-error-soft: #fdeceb;
+  --color-info: #2f5bd3; /* info-soft 위 5.26:1 — 「올린 파일」 같은 중립 정보. 여러 파랑(#5b82e0·blue-600…)을 이것 하나로 */
+  --color-info-soft: #edf2fd;
+  /*
+   * HM-37 — 「공유」 표시. 기획조정실 규칙의 **실제 hwp 색**이라 비슷한 파랑으로 바꾸지 않는다.
+   * 화면에서 이 색을 쓰는 곳은 «문서에서 파랗게 나간다»를 보여 주는 자리뿐이다.
+   */
+  --color-emphasis: #0000ff;
 
   /* 페이퍼로지 — layout.tsx의 next/font/local이 --font-paperlogy를 채운다.
      뒤의 목록은 글꼴이 뜨기 전·못 뜰 때만 쓰인다 (한글 있는 것으로만 골랐다) */
@@ -61,73 +66,184 @@
 }
 
 body {
-  background: var(--color-canvas);
+  background: var(--color-ground);
   color: var(--color-body);
   font-family: var(--font-sans);
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
 }
 
 @layer components {
   /*
-   * 제목 — 굵기로 밀어붙이지 않는다. 22~28px에 600 정도면 충분하고,
-   * 무게는 여백과 대비가 만든다 (Airbnb가 700+ 대신 500~600을 쓰는 이유).
+   * 제목 — 굵기로 밀어붙이지 않는다. 무게는 여백과 대비가 만든다.
+   * 크기는 몇 개만 쓴다 (CP-98): 12 · 14 · 15 · 17 · 26~28px, 통계 숫자만 40px.
    */
-  .display {
-    @apply font-semibold text-ink;
-    letter-spacing: -0.02em;
+  /* 페이지 제목 하나 — 예전에는 화면마다 40·32·24px·xl·lg로 제각각이었다 */
+  .page-title {
+    @apply text-[26px] leading-tight font-semibold tracking-[-0.02em] text-ink sm:text-[28px];
+  }
+  .page-sub {
+    @apply mt-1.5 max-w-[68ch] text-[15px] leading-6 text-muted;
+  }
+  /* 제목 줄 — 왼쪽 제목, 오른쪽 그 화면의 곁가지(주차 고르기 등) */
+  .page-head {
+    @apply flex flex-wrap items-end justify-between gap-x-6 gap-y-3;
   }
 
-  /* 버튼 — 8px 모서리, 48px 높이. 모든 상호작용 요소는 둥글다 */
+  /* 버튼 — 카드마다 주 버튼(primary)은 하나 (CP-99) */
   .btn-primary {
-    @apply inline-flex h-12 items-center justify-center gap-1.5 rounded-lg bg-brand px-6 text-[15px] font-semibold text-white transition-colors hover:bg-brand-active disabled:cursor-not-allowed disabled:bg-hairline disabled:text-muted-soft;
+    @apply inline-flex h-11 items-center justify-center gap-1.5 rounded-lg bg-brand px-5 text-[15px] font-semibold whitespace-nowrap text-white transition-colors hover:bg-brand-active disabled:cursor-not-allowed disabled:bg-hairline disabled:text-muted-soft;
   }
   .btn-secondary {
-    @apply inline-flex h-12 items-center justify-center gap-1.5 rounded-lg border border-ink bg-canvas px-6 text-[15px] font-semibold text-ink transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:border-hairline disabled:text-muted-soft;
+    @apply inline-flex h-11 items-center justify-center gap-1.5 rounded-lg border border-border-strong bg-canvas px-5 text-[15px] font-medium whitespace-nowrap text-ink transition-colors hover:border-ink hover:bg-surface-soft disabled:cursor-not-allowed disabled:border-hairline disabled:text-muted-soft;
   }
-  /* 어두운 배경 위 — 흰 버튼 */
-  .btn-oncolor {
-    @apply inline-flex h-10 items-center justify-center rounded-lg bg-canvas px-4 text-sm font-semibold text-ink transition-colors hover:bg-surface-soft;
+  /* 줄마다 붙는 행동(열기·받기·복사) — 테두리 없이. 여러 줄에 늘어서도 표가 버튼 밭이 되지 않는다 */
+  .btn-ghost {
+    @apply inline-flex h-9 items-center justify-center gap-1 rounded-lg px-3 text-sm font-medium whitespace-nowrap text-body transition-colors hover:bg-surface-soft hover:text-ink disabled:cursor-not-allowed disabled:text-muted-soft disabled:hover:bg-transparent;
+  }
+  /* 제출 취소·삭제 — 되돌릴 수 없는 행동은 다른 버튼과 같은 무게로 두지 않는다 */
+  .btn-link-danger {
+    @apply inline-flex items-center rounded px-1 text-sm whitespace-nowrap text-muted underline-offset-2 transition-colors hover:text-error hover:underline disabled:cursor-not-allowed disabled:text-muted-soft disabled:no-underline;
   }
   .btn-sm {
-    @apply h-9 rounded-lg px-4 text-sm;
+    @apply h-9 rounded-lg px-3.5 text-sm;
   }
 
-  /* 카드 — 14px. 기본은 헤어라인만, 떠오를 때만 그림자 한 단계 */
+  /*
+   * 카드 — **한 단계만** (CP-97). 흰 면 + 옅은 테두리 + 아주 얕은 그림자.
+   * 카드 안에 카드를 넣지 않는다: 안쪽은 선(`card-section`)으로 나누고,
+   * 꼭 상자가 필요하면 테두리 없는 `callout` 하나만 쓴다.
+   */
   .card {
-    @apply rounded-[14px] border border-hairline bg-canvas;
+    @apply rounded-xl border border-hairline bg-canvas p-5 sm:p-6;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
   }
-  .card-cream {
-    @apply rounded-[14px] bg-surface-soft;
+  /* 표를 담는 카드 — 표가 가장자리까지 */
+  .card-flush {
+    @apply overflow-hidden p-0 sm:p-0;
   }
-  .card-feature {
-    @apply rounded-[20px];
+  /* 카드 머리 — 왼쪽 제목, 오른쪽 행동 하나 */
+  .card-head {
+    @apply flex flex-wrap items-start justify-between gap-x-4 gap-y-2;
   }
-  .elevated {
-    box-shadow:
-      rgba(0, 0, 0, 0.02) 0 0 0 1px,
-      rgba(0, 0, 0, 0.04) 0 2px 6px,
-      rgba(0, 0, 0, 0.1) 0 4px 8px;
+  .card-title {
+    @apply text-[17px] leading-6 font-semibold text-ink;
+  }
+  .card-desc {
+    @apply mt-1 text-sm leading-6 text-muted;
+  }
+  .card-section {
+    @apply mt-5 border-t border-hairline-soft pt-5;
+  }
+
+  /* 카드 안의 유일한 상자 — 테두리 없이 색만 */
+  .callout {
+    @apply rounded-lg px-4 py-3 text-sm leading-6 text-body;
+  }
+  .callout-muted {
+    @apply bg-surface-soft;
+  }
+  .callout-warn {
+    @apply bg-warning-soft text-ink;
+  }
+  .callout-error {
+    @apply bg-error-soft text-error;
+  }
+  .callout-info {
+    @apply bg-info-soft text-ink;
+  }
+
+  /*
+   * 상태 (CP-100) — 칩 하나에 낱말 하나. 「●○✓」 글자 대신 `.dot`을 그린다:
+   * 그 기호들은 글꼴마다 크기가 달라 한 줄 안에서 들쭉날쭉했다.
+   */
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[13px] leading-5 font-medium whitespace-nowrap;
+  }
+  .chip-ok {
+    @apply bg-success-soft text-success;
+  }
+  .chip-warn {
+    @apply bg-warning-soft text-warning;
+  }
+  .chip-muted {
+    @apply bg-surface-strong text-muted;
+  }
+  .chip-info {
+    @apply bg-info-soft text-info;
+  }
+  .chip-error {
+    @apply bg-error-soft text-error;
+  }
+  .dot {
+    @apply inline-block h-2 w-2 shrink-0 rounded-full bg-current;
+  }
+  /* 안 낸 사람 — 속이 빈 점 */
+  .dot-hollow {
+    @apply bg-transparent;
+    box-shadow: inset 0 0 0 1.5px currentColor;
   }
 
   /* 필·탭·배지 — 완전한 원형 모서리 */
   .badge-pill {
     @apply inline-flex items-center gap-1 rounded-full border border-hairline bg-canvas px-3 py-1 text-[13px] font-medium text-ink;
   }
+  /* 카드 안의 토글 */
   .tab-pill {
     @apply rounded-full px-4 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-soft hover:text-ink;
   }
   .tab-pill-active {
     @apply bg-ink text-white hover:bg-ink hover:text-white;
   }
+  /* 페이지 탭 — 밑줄. 색은 잉크 하나 (예전의 blue-600 밑줄은 이 화면에만 있던 색이었다) */
+  .tab-line {
+    @apply -mb-px inline-flex items-center gap-1.5 border-b-2 border-transparent px-1 pt-1 pb-2.5 text-sm font-medium whitespace-nowrap text-muted transition-colors hover:text-ink;
+  }
+  .tab-line-active {
+    @apply border-ink text-ink;
+  }
+
+  /*
+   * 접기 — 매주 바꾸지 않는 것은 「…바꾸기」 뒤에 둔다 (CP-100).
+   * 화살표는 글자가 아니라 선으로 그린다 — ▸▾는 페이퍼로지에 없어 다른 글꼴로 샌다.
+   */
+  details.disclosure > summary {
+    @apply inline-flex cursor-pointer items-center gap-2 rounded text-sm font-medium text-ink select-none hover:underline;
+    list-style: none;
+  }
+  details.disclosure > summary::-webkit-details-marker {
+    display: none;
+  }
+  details.disclosure > summary::before {
+    content: "";
+    @apply inline-block h-1.5 w-1.5 border-r-[1.5px] border-b-[1.5px] border-current transition-transform;
+    transform: rotate(-45deg);
+  }
+  details.disclosure[open] > summary::before {
+    transform: rotate(45deg) translateY(-2px);
+  }
 
   /* 입력 — 초점은 잉크 테두리로. 브랜드색은 CTA에만 쓴다 */
   .input {
-    @apply h-12 w-full rounded-lg border border-hairline bg-canvas px-4 text-[15px] text-ink transition-colors placeholder:text-muted-soft focus:border-ink focus:outline-none;
+    @apply h-11 w-full rounded-lg border border-border-strong bg-canvas px-3.5 text-[15px] text-ink transition-colors placeholder:text-muted-soft focus:border-ink focus:outline-none;
+  }
+  .select {
+    @apply h-9 rounded-lg border border-border-strong bg-canvas px-3 text-sm text-ink focus:border-ink focus:outline-none;
   }
   .label {
     @apply mb-1.5 block text-[13px] font-medium text-muted;
   }
 
+  /* 표 — 머리는 옅은 회색 띠, 줄은 44px. 숫자는 자리를 맞춘다 */
+  .table {
+    @apply w-full text-sm tabular-nums;
+  }
+  .table thead th {
+    @apply bg-surface-soft px-4 py-2.5 text-left text-xs font-medium whitespace-nowrap text-muted;
+  }
+  .table tbody td {
+    @apply h-11 border-t border-hairline-soft px-4 py-1.5;
+  }
   .table-head {
     @apply text-left text-xs font-medium text-muted;
   }

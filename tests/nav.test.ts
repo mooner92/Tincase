@@ -20,11 +20,11 @@ describe('PG-49 역할별 메뉴', () => {
     expect(l).not.toContain('운영');
   });
 
-  it('[PG-T62] ★ 총괄 — `전사`가 보이고(/ops/monitor로 들어간다) `운영`은 안 보인다', () => {
+  it('[PG-T62] ★ 총괄 — `전사`가 보이고(/org로 들어간다 — PG-49f) `운영`은 안 보인다', () => {
     // 기획조정실 총괄: 부서원 + 총괄. 업무일지 내용은 전권, 인원·페이지 관리는 아니다
     const items = buildNav({ ...base, readAll: true });
     expect(items.map((i) => i.label)).toContain('전사');
-    expect(items.find((i) => i.label === '전사')?.href).toBe('/ops/monitor');
+    expect(items.find((i) => i.label === '전사')?.href).toBe('/org');
     expect(items.map((i) => i.label)).not.toContain('운영');
   });
 
@@ -45,9 +45,9 @@ describe('PG-49 활성 메뉴 판정', () => {
   const op = buildNav({ ...base, isLead: true, isOperator: true, readAll: true, orgDesk: true });
   const active = (path: string) => op.filter((i) => isNavActive(i.href, path, op, 'psd')).map((i) => i.label);
 
-  it('[PG-T65] 전사 현황을 보는 동안 `운영`이 같이 켜지지 않는다 (/ops/monitor는 /ops 아래지만 다른 메뉴)', () => {
-    expect(active('/ops/monitor')).toEqual(['전사']);
-    expect(active('/ops/monitor/graph')).toEqual(['전사']);
+  it('[PG-T65] 「전사」를 보는 동안 `운영`이 같이 켜지지 않고, 운영 화면에서는 `전사`가 켜지지 않는다', () => {
+    // 예전 「전사」 주소 /ops/monitor는 /ops 아래라 둘이 같이 켜질 뻔했다 — 지금은 /org로 보낸다(PG-49f), 거기서 헤더를 그리지 않는다
+    expect(active('/org')).toEqual(['전사']);
     expect(active('/ops')).toEqual(['운영']);
     expect(active('/ops/audit')).toEqual(['운영']);
   });
@@ -77,17 +77,20 @@ describe('RU-31·32 취합 메뉴 (TACP-21)', () => {
   });
 });
 
-describe('PG-49e 「전사」 메뉴 하나 · 탭 둘', () => {
+describe('PG-49f 「전사」 메뉴 하나 · 화면 하나', () => {
   const nav = (r: Partial<NavRole>) => buildNav({ ...base, ...r });
   const lit = (items: ReturnType<typeof buildNav>, path: string) =>
     items.filter((i) => isNavActive(i.href, path, items, 'psd')).map((i) => i.label);
 
-  it('[PG-T74] ★ [취합] 탭(/org)에 있는 동안에도 `전사`에 불이 들어온다 — 다른 메뉴로 나온 것처럼 보이지 않는다', () => {
+  it('[PG-T74] ★ `전사`는 주소 하나(/org) — 누가 보든 같은 곳으로 가고 거기서 불이 들어온다. 탭 주소를 거느리지 않는다', () => {
     const op = nav({ isLead: true, isOperator: true, readAll: true, orgDesk: true });
-    expect(lit(op, '/org')).toEqual(['전사']);
     const coord = nav({ readAll: true, orgDesk: true });
-    expect(lit(coord, '/ops/monitor')).toEqual(['전사']);
-    expect(lit(coord, '/org')).toEqual(['전사']);
+    for (const items of [op, coord]) {
+      expect(items.find((i) => i.label === '전사')).toEqual({ href: '/org', label: '전사' });
+      expect(lit(items, '/org')).toEqual(['전사']);
+    }
+    // 옛 탭 시절의 「같이 속하는 주소」(also)가 남아 있지 않다
+    expect(op.some((i) => 'also' in i)).toBe(false);
   });
 
   it('[PG-T75] `/ops`·`/ops/audit`에서는 `전사`가 켜지지 않는다 — 운영 화면은 운영 메뉴의 것이다', () => {
@@ -99,13 +102,13 @@ describe('PG-49e 「전사」 메뉴 하나 · 탭 둘', () => {
     expect(lit(op, '/organization')).toEqual([]);
   });
 
-  it('[PG-T76] [취합]을 못 여는 사람에게는 `전사`가 /org를 거느리지 않는다 (TACP-9 — 3단계가 꺼진 총괄)', () => {
+  it('[PG-T76] 3단계가 꺼진 총괄(취합 없음)에게도 `전사`는 /org — 화면이 제출 열만으로 선다 (PG-51d)', () => {
     const coordOff = nav({ readAll: true, orgDesk: false });
-    expect(coordOff.find((i) => i.label === '전사')).toMatchObject({ href: '/ops/monitor', also: [] });
-    expect(lit(coordOff, '/org')).toEqual([]);
+    expect(coordOff.find((i) => i.label === '전사')).toEqual({ href: '/org', label: '전사' });
+    expect(lit(coordOff, '/org')).toEqual(['전사']);
   });
 
-  it('[PG-T77] [현황]을 못 여는데 [취합]만 열 수 있으면 `전사`는 /org로 바로 간다 — 누르자마자 404인 링크를 주지 않는다', () => {
+  it('[PG-T77] 전 부서 읽기 없이 취합만 열 수 있어도 `전사`는 /org — 화면의 문이 둘 중 하나면 열리므로 (PG-49f)', () => {
     const items = nav({ readAll: false, orgDesk: true });
     expect(items.find((i) => i.label === '전사')?.href).toBe('/org');
     expect(lit(items, '/org')).toEqual(['전사']);

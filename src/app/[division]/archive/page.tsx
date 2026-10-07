@@ -47,16 +47,15 @@ export default async function ArchivePage({ params }: { params: Promise<{ divisi
     });
 
   return (
-    <main className="pt-10">
-      <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">보관함</p>
-      <h1 className="display mt-1 text-[32px] leading-[1.15]">{view.division.nameKo} 주간업무</h1>
-      <p className="mt-2 max-w-[60ch] text-[15px] text-body">
+    <main className="pt-8">
+      <h1 className="page-title">{view.division.nameKo} 주간업무</h1>
+      <p className="page-sub">
         마감 후 자동으로 합쳐진 부서 업무일지입니다. 취합게시판에 올라가는 그 문서이고,
-        <strong className="font-semibold text-ink"> 부서원 누구나 열어볼 수 있습니다.</strong>{' '}
+        <strong className="font-semibold text-body"> 부서원 누구나 열어볼 수 있습니다.</strong>{' '}
         고칠 부분이 보이면 담당자에게 알려주세요.
       </p>
 
-      <div className="mt-7">
+      <div className="mt-6">
         <ArchiveList items={items} divisionSlug={view.division.slug} canEdit={view.canEditMerged} />
       </div>
     </main>

@@ -41,8 +41,8 @@ const KIND_LABEL: Record<string, string> = {
 
 /** 퇴사는 되돌리기 번거로우므로 눈에 띄어야 한다 */
 const KIND_STYLE: Record<string, string> = {
-  create: 'bg-brand-soft text-ink',
-  deactivate: 'bg-error-soft text-error',
+  create: 'chip-ok',
+  deactivate: 'chip-error',
 };
 
 export function RosterSync() {
@@ -78,26 +78,32 @@ export function RosterSync() {
     plan && !plan.applied && plan.blockers.length === 0 && plan.changes.length + plan.backfills.length > 0;
 
   return (
-    <section className="card px-6 py-5">
-      <h2 className="display text-lg">인원 최신화</h2>
-      <p className="mt-1 max-w-[70ch] text-sm text-body">
+    <section className="card">
+      <h2 className="card-title">인원 최신화</h2>
+      <p className="card-desc max-w-[70ch]">
         ERP에서 <strong className="font-medium text-ink">부서별 인원 현황</strong>을 엑셀로 내려받아 올리면
         실별 인원을 맞춥니다. <strong className="font-medium text-ink">담당자·집계 여부·알림 설정·비밀번호는
         그대로 둡니다</strong> — 사람이 정한 값은 엑셀이 덮지 않습니다.
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
-        <input
-          type="file"
-          accept=".xlsx"
-          onChange={(e) => {
-            setFile(e.target.files?.[0] ?? null);
-            setPlan(null); // 파일이 바뀌면 앞의 계획은 더 이상 그 파일의 것이 아니다
-            setErr(null);
-          }}
-          className="text-sm text-body file:mr-3 file:rounded-lg file:border file:border-hairline file:bg-canvas file:px-3 file:py-1.5 file:text-sm file:text-ink hover:file:border-ink"
-        />
-        <button onClick={() => send('preview')} disabled={!file || busy} className="btn-secondary btn-sm">
+        {/* 기본 파일 입력은 브라우저 말(「Choose File」)로 그려져 화면 말과 섞인다 — 우리 버튼으로 감싼다 */}
+        <label className="btn-secondary btn-sm cursor-pointer focus-within:ring-2 focus-within:ring-ink">
+          엑셀 선택
+          <input
+            type="file"
+            accept=".xlsx"
+            onChange={(e) => {
+              setFile(e.target.files?.[0] ?? null);
+              setPlan(null); // 파일이 바뀌면 앞의 계획은 더 이상 그 파일의 것이 아니다
+              setErr(null);
+            }}
+            className="sr-only"
+          />
+        </label>
+        <span className="min-w-0 truncate text-sm text-muted">{file ? file.name : '선택한 파일 없음'}</span>
+        {/* 주 버튼은 그때 할 일 하나 — 미리보기 전에는 [보기], 본 뒤에는 [반영하기] (CP-99) */}
+        <button onClick={() => send('preview')} disabled={!file || busy} className={canApply ? 'btn-secondary btn-sm' : 'btn-primary btn-sm'}>
           {busy ? '읽는 중…' : '무엇이 바뀌는지 보기'}
         </button>
         {canApply && (
@@ -117,12 +123,12 @@ export function RosterSync() {
         )}
       </div>
 
-      {err && <p className="mt-3 rounded-lg bg-error-soft px-3 py-2 text-sm text-error">{err}</p>}
+      {err && <p className="callout callout-error mt-3">{err}</p>}
 
       {plan && (
         <div className="mt-5 space-y-3">
           {plan.applied ? (
-            <p className="rounded-lg bg-brand-soft px-4 py-3 text-sm text-ink">
+            <p className="callout bg-success-soft text-ink">
               <strong className="font-semibold">반영 완료</strong> — 신규 {plan.applied.created} · 수정{' '}
               {plan.applied.updated} · 비활성 {plan.applied.deactivated}
               {plan.applied.divisionsCreated > 0 && ` · 새 부서 ${plan.applied.divisionsCreated}`}
@@ -140,20 +146,20 @@ export function RosterSync() {
 
           {/* 막힌 이유는 가장 먼저 보여야 한다 */}
           {plan.blockers.map((b, i) => (
-            <p key={i} className="rounded-lg border border-error/40 bg-error-soft px-4 py-3 text-sm text-error">
+            <p key={i} className="callout callout-error">
               ✋ {b}
             </p>
           ))}
 
           {/* 담당자 소실 — 조용히 넘어가면 그 부서가 무주공산이 된다 (RS-10) */}
           {plan.leadWarnings.map((w, i) => (
-            <p key={i} className="rounded-lg border border-warning/40 bg-warning/5 px-4 py-3 text-sm text-body">
+            <p key={i} className="callout callout-warn">
               ⚠ {w}
             </p>
           ))}
 
           {plan.conflicts.map((c, i) => (
-            <p key={i} className="rounded-lg bg-surface-soft px-4 py-2 text-sm text-body">
+            <p key={i} className="callout callout-muted">
               {c}
             </p>
           ))}
@@ -161,18 +167,18 @@ export function RosterSync() {
           {plan.newDivisions.length > 0 && (
             <p className="text-sm text-body">
               새 부서 {plan.newDivisions.length}개 — {plan.newDivisions.map((d) => d.nameKo).join(', ')}
-              <span className="ml-1 text-muted-soft">(비활성 상태로 만들어집니다)</span>
+              <span className="ml-1 text-muted">(비활성 상태로 만들어집니다)</span>
             </p>
           )}
 
           {plan.changes.length > 0 && (
-            <div className="max-h-80 overflow-y-auto rounded-xl border border-hairline">
+            <div className="max-h-80 overflow-y-auto rounded-lg border border-hairline">
               <table className="w-full text-sm">
                 <tbody>
                   {plan.changes.map((c, i) => (
                     <tr key={i} className="border-b border-hairline-soft last:border-0">
                       <td className="w-20 px-3 py-1.5 align-top">
-                        <span className={`badge-pill py-0 text-[11px] ${KIND_STYLE[c.kind] ?? 'bg-surface-card text-body'}`}>
+                        <span className={`chip text-xs ${KIND_STYLE[c.kind] ?? 'chip-muted'}`}>
                           {KIND_LABEL[c.kind] ?? c.kind}
                         </span>
                       </td>
@@ -186,12 +192,12 @@ export function RosterSync() {
           )}
 
           {plan.needPassword && plan.needPassword.length > 0 && (
-            <div className="rounded-xl border border-hairline bg-surface-soft px-4 py-3 text-sm">
+            <div className="callout callout-muted">
               <p className="font-medium text-ink">비밀번호 발급이 필요한 사람 {plan.needPassword.length}명</p>
               <p className="mt-0.5 text-muted">
                 {plan.needPassword.map((u) => `${u.division} ${u.name}`).join(', ')}
               </p>
-              <p className="mt-1 text-[11px] text-muted-soft">
+              <p className="mt-1 text-xs text-muted">
                 비밀번호는 개인별로 전달해야 하므로 여기서 만들지 않습니다 — 위 [비밀번호 발급]에서 진행하세요.
               </p>
             </div>

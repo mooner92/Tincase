@@ -199,55 +199,55 @@ export function WebComposer({
    * 연한 칸이 스무 개 늘어서 있으면 표가 아니라 회색 얼룩으로 보인다.
    */
   const cell =
-    'h-8 rounded-md border border-border-strong bg-canvas px-2 text-[13px] text-ink ' +
+    'h-8 w-full rounded-md border border-border-strong bg-canvas px-2 text-[13px] text-ink ' +
     'focus:border-ink focus:ring-1 focus:ring-ink focus:outline-none';
 
+  /*
+   * 2026-10-07 — 표 위의 띠를 걷었다. 예전에는 머리 아래에 띠가 셋(붙여넣기 안내 초록 · 작성 안내 회색 ·
+   * 지난번에 낸 것)이 쌓여 표가 화면 3분의 2 지점에서야 시작했다. 붙여넣기 안내는 머리 한 줄과
+   * 첫 칸의 안내 문구가 이미 말하고, 작성 안내는 접어 둔다(펼치면 그대로 보인다).
+   * 「지난번에 낸 것」은 그대로 펼쳐 둔다 — 접어 두었을 때 「있는지도 모르겠다」는 말을 들었다(WA-13).
+   */
   return (
     <div className="fixed inset-0 z-40 h-screen">
       <div className="absolute inset-0 bg-ink/40" onClick={onClose} aria-hidden />
       <div
         role="dialog"
         aria-modal="true"
-        aria-label="웹에서 업무일지 작성"
-        className="absolute inset-y-0 right-0 flex h-full w-full max-w-5xl flex-col border-l border-hairline bg-canvas"
+        aria-label="업무일지 작성"
+        className="absolute inset-y-0 right-0 flex h-full w-full max-w-5xl flex-col border-l border-hairline bg-canvas shadow-[0_8px_32px_rgba(0,0,0,0.12)]"
       >
-        {/* 머리 */}
-        <div className="flex items-center justify-between border-b border-hairline px-7 py-4">
-          <div>
-            <h2 className="display text-xl">웹에서 작성</h2>
+        {/* 머리 — 제목 하나 + 붙여넣기 한 줄. 이걸 모르면 한 칸씩 옮겨 적는다 */}
+        <div className="flex items-start justify-between gap-3 border-b border-hairline px-4 py-4 sm:px-7">
+          <div className="min-w-0">
+            <h2 className="card-title">업무일지 작성</h2>
             <p className="mt-0.5 text-sm text-muted">
-              한글 없이 바로 제출합니다 · 제출하면 부서 양식으로 만들어집니다
+              제출하면 부서 양식으로 만들어집니다 · 한글 표를 복사(Ctrl+C)해 첫 칸에 붙여넣을 수 있습니다
             </p>
           </div>
-          <button
-            onClick={onClose}
-            aria-label="닫기"
-            className="rounded-full px-3 py-1 text-xl leading-none text-muted-soft hover:bg-surface-soft hover:text-body"
-          >
-            ×
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {pasted && <span className="text-sm font-medium text-success">{pasted}</span>}
+            <button onClick={onClose} aria-label="닫기" className="btn-ghost h-9 w-9 px-0 text-xl leading-none text-muted">
+              ×
+            </button>
+          </div>
         </div>
-
-        {/* 붙여넣기 안내 — 이걸 모르면 한 칸씩 옮겨 적는다 */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline-soft bg-brand-soft px-7 py-2.5 text-xs text-body-strong">
-          <span className="font-semibold">한글 표를 그대로 붙여넣을 수 있습니다</span>
-          <span className="text-body">
-            한글에서 표를 드래그 → <kbd className="rounded border border-border-strong bg-canvas px-1 font-sans">Ctrl</kbd>
-            <kbd className="ml-0.5 rounded border border-border-strong bg-canvas px-1 font-sans">C</kbd> → 아래 첫 칸에 붙여넣기
-          </span>
-          {pasted && <span className="ml-auto font-semibold text-success">{pasted}</span>}
-        </div>
-
-        {guideLines.length > 0 && (
-          <ul className="border-b border-hairline-soft bg-surface-soft px-7 py-2.5 text-xs leading-5 text-body">
-            {guideLines.map((l) => (
-              <li key={l}>· {l}</li>
-            ))}
-          </ul>
-        )}
 
         {/* 본문 */}
-        <div className="flex-1 overflow-y-auto px-7 py-5">
+        <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-7">
+          {guideLines.length > 0 && (
+            <details className="disclosure mb-4">
+              <summary>부서 작성 안내 {guideLines.length}줄</summary>
+              <ul className="mt-2 space-y-1 pl-4 text-sm leading-6 text-body">
+                {guideLines.map((l) => (
+                  <li key={l} className="flex items-baseline gap-2.5">
+                    <span aria-hidden className="dot relative -top-px text-border-strong" />
+                    {l}
+                  </li>
+                ))}
+              </ul>
+            </details>
+          )}
           {/*
             WA-13 — 지난번 낸 내용. **본문 맨 위**다.
 
@@ -261,32 +261,32 @@ export function WebComposer({
             onCopyPlansToAchievements={(rows) => appendRows('achievements', rows)}
           />
           {SECTIONS.map((s) => (
-            <section key={s.key} className="mb-5">
-              <div className="mb-2 flex items-baseline gap-2">
-                <h3 className="text-[15px] font-bold text-ink">
+            <section key={s.key} className="mb-6">
+              <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <h3 className="text-[15px] font-semibold text-ink">
                   {s.no}. {s.title}
                 </h3>
-                <span className="text-xs text-muted-soft">{s.hint}</span>
-                <span className="ml-auto text-xs font-medium text-muted">{filled[s.key]}줄</span>
+                <span className="text-xs text-muted">{s.hint}</span>
+                <span className="ml-auto text-xs font-medium text-muted tabular-nums">{filled[s.key]}줄</span>
                 {filled[s.key] > 0 && (
                   <button
                     onClick={() => clearSection(s.key)}
-                    className="rounded-md px-2 py-0.5 text-xs text-muted-soft hover:bg-error/10 hover:text-error"
+                    className="rounded-md px-2 py-0.5 text-xs text-muted hover:bg-error-soft hover:text-error"
                   >
                     비우기
                   </button>
                 )}
               </div>
 
-              <div className="overflow-hidden rounded-xl border border-hairline">
-                {/* 머리글 — 한글 표와 같은 이름·순서 */}
-                <div className="flex gap-1.5 border-b border-hairline bg-surface-card px-2.5 py-1.5 text-[11px] font-semibold text-muted">
+              <div className="overflow-hidden rounded-lg border border-hairline">
+                {/* 머리글 — 한글 표와 같은 이름·순서. 좁은 화면에서는 칸이 두 줄로 쌓이므로 머리글을 감춘다 */}
+                <div className="hidden gap-1.5 border-b border-hairline bg-surface-soft px-2.5 py-1.5 text-xs font-medium text-muted sm:flex">
                   <span className="w-9 shrink-0 text-center">구분</span>
                   <span className="flex-1">업무 내용</span>
                   <span className="w-[74px] shrink-0">일자</span>
                   <span className="w-28 shrink-0">장소</span>
                   <span className="w-28 shrink-0">참석자</span>
-                  <span className="w-5 shrink-0" />
+                  <span className="w-[4.25rem] shrink-0" />
                 </div>
 
                 {data[s.key].map((row, i) => {
@@ -308,72 +308,84 @@ export function WebComposer({
                     ? `${s.no}-${data[s.key].slice(0, i + 1).filter((r) => r.content.trim()).length}`
                     : '';
                   return (
+                    /*
+                      한 줄 = 내용 + 일자·장소·참석자. 넓은 화면은 한글 표처럼 한 줄로,
+                      좁은 화면(400px)은 내용을 한 줄 다 쓰고 나머지 셋을 그 밑에 셋으로 나눈다 —
+                      한 줄에 다섯 칸을 우겨넣으면 「업무 내용」 머리글이 한 글자씩 세로로 쪼개졌다.
+                    */
                     <div
                       key={i}
-                      className={`flex items-center gap-1.5 px-2.5 py-1 ${i % 2 ? 'bg-surface-soft/60' : ''}`}
+                      className={`group grid grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-x-1.5 gap-y-1 px-2 py-1.5 sm:flex sm:px-2.5 sm:py-1 ${
+                        i > 0 ? 'border-t border-hairline-soft sm:border-t-0' : ''
+                      } ${i % 2 ? 'sm:bg-surface-soft/60' : ''}`}
                     >
-                      <span className="w-9 shrink-0 text-center text-[10px] tabular-nums text-muted">
-                        {no}
-                      </span>
+                      <span className="text-center text-xs text-muted tabular-nums sm:w-9 sm:shrink-0">{no}</span>
                       <input
                         value={row.content}
                         onChange={(e) => set(s.key, i, 'content', e.target.value)}
                         onPaste={(e) => onPaste(s.key, i, e)}
                         placeholder={isPasteTarget ? '여기에 한글 표를 붙여넣으세요 (Ctrl+V) · 직접 입력해도 됩니다' : ''}
+                        aria-label={`${s.title} ${i + 1}번째 줄 업무 내용`}
                         aria-describedby={looksEmpty ? `empty-hint-${s.key}-${i}` : undefined}
-                        className={`${cell} flex-1 ${
+                        className={`${cell} sm:flex-1 ${
                           isPasteTarget
                             ? 'border-2 border-dashed border-brand bg-brand-soft placeholder:text-body-strong'
                             : looksEmpty
-                              ? 'border border-warning/50 bg-warning/5'
+                              ? 'border border-warning/50 bg-warning-soft'
                               : ''
                         }`}
                       />
-                      <input
-                        value={row.date}
-                        onChange={(e) => set(s.key, i, 'date', e.target.value)}
-                        placeholder={i === 0 ? '8/20' : ''}
-                        className={`${cell} w-[74px] shrink-0`}
-                      />
-                      <input
-                        value={row.place}
-                        onChange={(e) => set(s.key, i, 'place', e.target.value)}
-                        placeholder={i === 0 ? '중회의실' : ''}
-                        className={`${cell} w-28 shrink-0`}
-                      />
-                      <input
-                        value={row.attendee}
-                        onChange={(e) => set(s.key, i, 'attendee', e.target.value)}
-                        placeholder={i === 0 ? '원장 외 3명' : ''}
-                        className={`${cell} w-28 shrink-0`}
-                      />
-                      {/*
-                        HM-37 — 「공유」. 켜면 이 줄이 병합본에 **파란색**으로 나간다.
-                        체크박스가 아니라 **누르는 표식**인 것은 의도다 — 체크박스 스무 개가
-                        칸 옆에 늘어서면 적는 칸보다 체크박스가 먼저 보인다.
-                        켜진 줄만 눈에 띄면 된다.
-                      */}
-                      <button
-                        onClick={() => toggleEmphasis(s.key, i)}
-                        aria-pressed={row.emphasis === true}
-                        aria-label={`${i + 1}번째 줄 공유 표시`}
-                        title="전체 공유·전달이 필요한 주요 사항 — 병합본에 파란색으로 나갑니다"
-                        className={`shrink-0 rounded border px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap transition-colors ${
-                          row.emphasis
-                            ? 'border-[#0000ff] bg-[#0000ff] text-white'
-                            : 'border-hairline bg-canvas text-muted-soft hover:border-ink hover:text-ink'
-                        }`}
-                      >
-                        공유
-                      </button>
+                      {/* 줄 지우기 — 늘 보이면 스무 줄에 ×가 스무 개다. 그 줄에 손이 갔을 때만 (좁은 화면은 늘) */}
                       <button
                         onClick={() => removeRow(s.key, i)}
                         aria-label={`${i + 1}번째 줄 지우기`}
-                        className="w-5 shrink-0 rounded text-base leading-none text-muted-soft hover:text-error"
+                        className="h-8 w-6 shrink-0 rounded text-base leading-none text-muted-soft hover:text-error focus:opacity-100 sm:order-last sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
                         title="이 줄 지우기"
                       >
                         ×
                       </button>
+                      <div className="col-start-2 col-end-4 grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1fr)_auto] gap-1.5 sm:contents">
+                        <input
+                          value={row.date}
+                          onChange={(e) => set(s.key, i, 'date', e.target.value)}
+                          placeholder={i === 0 ? '8/20' : ''}
+                          aria-label={`${s.title} ${i + 1}번째 줄 일자`}
+                          className={`${cell} sm:w-[74px] sm:shrink-0`}
+                        />
+                        <input
+                          value={row.place}
+                          onChange={(e) => set(s.key, i, 'place', e.target.value)}
+                          placeholder={i === 0 ? '중회의실' : ''}
+                          aria-label={`${s.title} ${i + 1}번째 줄 장소`}
+                          className={`${cell} sm:w-28 sm:shrink-0`}
+                        />
+                        <input
+                          value={row.attendee}
+                          onChange={(e) => set(s.key, i, 'attendee', e.target.value)}
+                          placeholder={i === 0 ? '원장 외 3명' : ''}
+                          aria-label={`${s.title} ${i + 1}번째 줄 참석자`}
+                          className={`${cell} sm:w-28 sm:shrink-0`}
+                        />
+                        {/*
+                          HM-37 — 「공유」. 켜면 이 줄이 병합본에 **파란색**으로 나간다.
+                          체크박스가 아니라 **누르는 표식**인 것은 의도다 — 체크박스 스무 개가
+                          칸 옆에 늘어서면 적는 칸보다 체크박스가 먼저 보인다.
+                          켜진 줄만 눈에 띄면 된다.
+                        */}
+                        <button
+                          onClick={() => toggleEmphasis(s.key, i)}
+                          aria-pressed={row.emphasis === true}
+                          aria-label={`${i + 1}번째 줄 공유 표시`}
+                          title="전체 공유·전달이 필요한 주요 사항 — 병합본에 파란색으로 나갑니다"
+                          className={`h-8 shrink-0 rounded-md border px-2 text-xs font-semibold whitespace-nowrap transition-colors ${
+                            row.emphasis
+                              ? 'border-emphasis bg-emphasis text-white'
+                              : 'border-hairline bg-canvas text-muted hover:border-ink hover:text-ink'
+                          }`}
+                        >
+                          공유
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -382,7 +394,7 @@ export function WebComposer({
                   잔소리는 다음부터 안 읽힌다. 「비워두셔도 됩니다」가 이 안내의 전부다.
                 */}
                 {emptyWords.length > 0 && data[s.key].some((r) => flagWordOf(r.content, emptyWords)) && (
-                  <p className="px-2.5 py-1.5 text-xs leading-5 text-body">
+                  <p className="border-t border-hairline-soft px-2.5 py-1.5 text-xs leading-5 text-body">
                     <span className="font-medium text-ink">「없음」이라고 적으신 칸이 있어요.</span>{' '}
                     적을 내용이 없으면 <strong className="font-medium">비워두셔도 됩니다</strong> — 그대로 두셔도 제출은 됩니다.
                   </p>
@@ -391,24 +403,24 @@ export function WebComposer({
             </section>
           ))}
 
-          <p className="pb-2 text-xs leading-6 text-muted-soft">
+          <p className="pb-2 text-xs leading-6 text-muted">
             일자는 특정 날짜가 있는 업무만 적습니다 (상시 업무는 비워 두세요) ·
             빈 줄은 저장되지 않습니다 · 구분 번호는 제출할 때 다시 매겨집니다
           </p>
         </div>
 
-        {/* 바닥 */}
-        <div className="flex items-center justify-between gap-3 border-t border-hairline bg-surface-soft px-7 py-3.5">
+        {/* 바닥 — 이 화면의 주 버튼은 [제출] 하나다 */}
+        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-hairline bg-canvas px-4 py-3 sm:px-7">
           <span aria-live="polite" className={`text-sm font-medium ${msg?.ok ? 'text-success' : 'text-error'}`}>
             {msg?.text}
           </span>
-          <div className="flex items-center gap-4">
+          <div className="ml-auto flex items-center gap-3 sm:gap-4">
             {total > 0 && (
-              <button onClick={clearAll} className="text-sm text-muted-soft hover:text-error">
+              <button onClick={clearAll} className="btn-link-danger">
                 전체 지우기
               </button>
             )}
-            <span className="text-sm text-muted">
+            <span className="hidden text-sm text-muted tabular-nums sm:inline">
               실적 {filled.achievements} · 계획 {filled.plans}
               {filled.notes > 0 && ` · 특이 ${filled.notes}`}
             </span>

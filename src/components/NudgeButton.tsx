@@ -32,7 +32,7 @@ export function NudgeButton({
   const message = [
     `[주간 업무일지 제출 안내]`,
     `${weekLabel} 업무일지 마감이 ${deadlineText}입니다.`,
-    `아직 제출하지 않으셨다면 아래에서 올려 주세요.`,
+    `아직 제출하지 않으셨다면 아래 주소에서 제출해 주세요.`,
     baseUrlHint ?? (typeof window !== 'undefined' ? window.location.origin : ''),
     ``,
     `대상: ${names.join(', ')}`,
@@ -42,11 +42,12 @@ export function NudgeButton({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <button onClick={() => copy(names.join(', '), 'names')} className="tab-pill">
-        {copied === 'names' ? '복사됨 ✓' : `이름 ${names.length}명 복사`}
+      {/* 글자처럼 보이면 누를 수 있는 줄 모른다 — 테두리 있는 작은 버튼 (CP-99) */}
+      <button onClick={() => copy(names.join(', '), 'names')} className="btn-secondary btn-sm">
+        {copied === 'names' ? '복사됨' : `이름 ${names.length}명 복사`}
       </button>
-      <button onClick={() => copy(message, 'message')} className="tab-pill">
-        {copied === 'message' ? '복사됨 ✓' : '안내문 복사'}
+      <button onClick={() => copy(message, 'message')} className="btn-secondary btn-sm">
+        {copied === 'message' ? '복사됨' : '안내문 복사'}
       </button>
     </div>
   );

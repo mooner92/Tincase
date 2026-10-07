@@ -6,7 +6,7 @@
 // 빠뜨리는 순간 기록이 거짓말을 한다. 열면 **낸 사람이 자기 이름으로** 낸다.
 //
 // **열려 있는 동안은 눈에 거슬려야 한다.** 마감이 풀린 상태는 예외이지 평상이 아니고,
-// 조용하면 열어 둔 것을 잊는다. 그래서 배지가 아니라 **경고 띠**로 그린다.
+// 조용하면 열어 둔 것을 잊는다. 그래서 수합 관리의 제출 현황 카드에 **경고 칩과 경고 callout**이 함께 뜬다.
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -40,25 +40,25 @@ export function DeadlineOpener({
 
   if (!open) {
     return (
-      <div className="flex flex-col items-end gap-1">
-        <button onClick={() => call('POST')} disabled={busy} className="btn-oncolor">
+      <>
+        <button onClick={() => call('POST')} disabled={busy} className="btn-secondary btn-sm">
           {busy ? '여는 중…' : `마감 ${minutes}분 열기`}
         </button>
-        {err && <span className="text-xs text-white/80">{err}</span>}
-      </div>
+        {err && <span className="text-sm text-error">{err}</span>}
+      </>
     );
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
-      <button onClick={() => call('DELETE')} disabled={busy} className="btn-oncolor">
+    <>
+      <button onClick={() => call('DELETE')} disabled={busy} className="btn-secondary btn-sm">
         {busy ? '닫는 중…' : '지금 닫기'}
       </button>
-      <span className="text-xs text-white/80">
-        {openedBy && `${openedBy} `}
+      <span className="text-sm text-muted">
+        {openedBy && `${openedBy} 열어 둠 · `}
         {openUntilKo}까지
       </span>
-      {err && <span className="text-xs text-white/80">{err}</span>}
-    </div>
+      {err && <span className="text-sm text-error">{err}</span>}
+    </>
   );
 }

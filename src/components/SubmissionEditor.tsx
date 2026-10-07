@@ -126,17 +126,17 @@ export function SubmissionEditor({
 
   return (
     <div ref={rootRef} className="space-y-5">
-      <p className="rounded-lg bg-brand-soft px-3 py-2 text-xs text-body-strong">
+      <p className="callout callout-info">
         <strong>{ownerName}</strong>님의 업무일지를 고칩니다. 저장하면 <strong>새 판(v{version + 1})</strong>이 생기고,
         지금 판(v{version})은 그대로 남습니다. 판 목록에 「고친 사람」이 함께 표시됩니다.
       </p>
       {SECTIONS.map((s) => (
         <section key={s.key}>
-          <h3 className="mb-1.5 text-sm font-semibold text-body">
+          <h3 className="mb-1.5 text-[15px] font-semibold text-ink">
             {s.no}. {s.title}
           </h3>
-          <div className="overflow-hidden rounded-xl border border-hairline">
-            <div className="flex gap-1.5 border-b border-hairline bg-surface-card px-2 py-1.5 text-[11px] font-semibold text-muted">
+          <div className="overflow-hidden rounded-lg border border-hairline">
+            <div className="flex gap-1.5 border-b border-hairline bg-surface-soft px-2 py-1.5 text-xs font-medium text-muted">
               <span className="w-8 shrink-0 text-center">구분</span>
               <span className="flex-1">업무 내용</span>
               <span className="w-16 shrink-0">일자</span>
@@ -150,7 +150,7 @@ export function SubmissionEditor({
                 <span className="w-8 shrink-0 pt-1.5 text-center text-xs tabular-nums text-muted">
                   {s.no}-{i + 1}
                 </span>
-                {field(s.key, i, 'content', `${s.title} ${i + 1} 내용`, `min-w-0 flex-1 ${r.emphasis ? 'text-[#1d4ed8]' : ''}`)}
+                {field(s.key, i, 'content', `${s.title} ${i + 1} 내용`, `min-w-0 flex-1 ${r.emphasis ? 'text-emphasis' : ''}`)}
                 {field(s.key, i, 'date', '일자', 'w-16 shrink-0')}
                 {field(s.key, i, 'place', '장소', 'w-20 shrink-0')}
                 {field(s.key, i, 'attendee', '참석자', 'w-20 shrink-0')}
@@ -168,7 +168,7 @@ export function SubmissionEditor({
           </button>
         </section>
       ))}
-      {err && <p className="rounded-lg bg-error-soft px-3 py-2 text-sm text-error">{err}</p>}
+      {err && <p className="callout callout-error">{err}</p>}
       <div className="sticky bottom-0 flex items-center gap-2 border-t border-hairline bg-canvas py-3">
         <button onClick={save} disabled={busy} className="btn-primary btn-sm">
           {busy ? '저장 중…' : `고쳐서 저장 (v${version + 1})`}

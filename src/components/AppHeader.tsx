@@ -27,11 +27,11 @@ export function AppHeader({
   userName: string;
   isLead: boolean;
   isOperator: boolean;
-  /** PG-49 — 전 부서 읽기 (총괄·운영자). 켜지면 `전사` 메뉴가 생긴다 ([현황] 탭) */
+  /** PG-49 — 전 부서 읽기 (총괄·운영자). 켜지면 `전사` 메뉴가 생긴다 (「전사」 화면의 제출 열) */
   readAll?: boolean;
   /** RU-31 — `본부 취합` 메뉴 (TACP-21) */
   hqDesk?: boolean;
-  /** RU-32 · PG-49e — `전사` 메뉴의 [취합] 탭 (TACP-21) */
+  /** RU-32 · PG-49f — 「전사」 화면의 취합 부분 (TACP-21). 이것만 있어도 `전사` 메뉴가 생긴다 */
   orgDesk?: boolean;
   viaCloudflare: boolean;
   /** NT-21 — 본인 알림 받기 상태. 드롭다운에서 바로 끌 수 있다 */
@@ -96,13 +96,19 @@ export function AppHeader({
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src="/brand/tincase-lockup.svg" alt="Tincase" className="h-[30px] w-auto" />
             </Link>
-            {/* 부서 배지는 좁은 화면에서 감춘다 — 부서는 페이지 제목에도 있다 */}
+            {/*
+              부서 이름은 좁은 화면에서 감춘다 — 부서는 페이지 제목에도 있다.
+              테두리 배지였을 때는 오른쪽 사용자 알약과 같은 모양이 둘 늘어서 버튼처럼 보였다 — 글자로 둔다.
+              남의 부서를 보는 중일 때만 경고 칩으로 눈에 띄게 (AU-15·16)
+            */}
             <span
-              className={`badge-pill hidden max-w-44 truncate sm:inline-block ${foreign ? 'bg-warning-soft text-body-strong' : ''}`}
+              className={`hidden max-w-44 truncate sm:inline-block ${
+                foreign ? 'chip chip-warn' : 'border-l border-hairline pl-3 text-sm font-medium text-muted'
+              }`}
               title={foreign ? `${divisionName} (타 부서 열람 중)` : divisionName}
             >
               {divisionName}
-              {foreign && <span className="ml-1 text-[11px] font-semibold">열람</span>}
+              {foreign && <span className="ml-1 font-semibold">열람</span>}
             </span>
           </div>
 
@@ -164,14 +170,16 @@ export function AppHeader({
           >
             <span
               aria-hidden
-              className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-soft text-[11px] font-bold text-ink"
+              className="flex h-6 w-6 items-center justify-center rounded-full bg-brand-soft text-xs font-semibold text-ink"
             >
               {userName.slice(0, 1)}
             </span>
             {userName}
-            <span aria-hidden className="text-[10px] text-muted">
-              ▾
-            </span>
+            {/* 화살표는 선으로 — ▾는 페이퍼로지에 없어 다른 글꼴로 샌다 */}
+            <span
+              aria-hidden
+              className="relative -top-0.5 ml-0.5 inline-block h-1.5 w-1.5 rotate-45 border-r-[1.5px] border-b-[1.5px] border-muted"
+            />
           </button>
           {open && (
             <div

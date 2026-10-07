@@ -7,6 +7,7 @@
 import { env } from '../env';
 import type { MergeRow } from './dedupe';
 import { OTHER } from './order';
+import { MODEL_NOT_CONFIGURED } from '@/lib/merge-rows';
 
 export { OTHER, sortByCategory } from './order';
 
@@ -74,7 +75,7 @@ export async function classifyRows(
   signal?: AbortSignal,
 ): Promise<ClassifyResult> {
   if (categories.length === 0) return empty('분류가 설정되지 않았습니다');
-  if (!env.MERGE_MODEL) return empty('모델이 설정되지 않았습니다');
+  if (!env.MERGE_MODEL) return empty(MODEL_NOT_CONFIGURED);
   if (rows.length === 0) return empty('분류할 행이 없습니다');
   if (rows.length > env.MERGE_MODEL_MAX_ROWS) {
     return empty(`행이 너무 많습니다 (${rows.length} > ${env.MERGE_MODEL_MAX_ROWS})`);

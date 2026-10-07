@@ -14,7 +14,22 @@ export interface ReportStateView {
   changedSinceSubmit: boolean;
 }
 
-export function ReportSubmitCard({ state, isoKey }: { state: ReportStateView; isoKey: string }) {
+export function ReportSubmitCard({
+  state,
+  isoKey,
+  primary = true,
+  bare = false,
+}: {
+  state: ReportStateView;
+  isoKey: string;
+  /**
+   * CP-99 — 이 화면의 주 버튼인가. 부서장이 승인할 판이 남아 있으면 그 화면의 주 버튼은 [승인]이라
+   * 여기는 보조로 물러난다 — 한 화면에 초록 버튼이 둘이면 어느 것을 먼저 누를지 모른다
+   */
+  primary?: boolean;
+  /** 다른 카드(본부본)의 아래 구역으로 그린다 — 카드 안에 카드를 넣지 않는다 (CP-97) */
+  bare?: boolean;
+}) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -42,23 +57,15 @@ export function ReportSubmitCard({ state, isoKey }: { state: ReportStateView; is
   const withdraw = () => state.current && call({ method: 'DELETE' }, `/api/rollup/report?id=${state.current.id}`);
 
   const sent = state.current;
+  const needsSubmit = !sent || state.changedSinceSubmit;
   return (
-    <section className={`card mt-6 px-6 py-5 ${sent && !state.changedSinceSubmit ? 'border-success/40' : ''}`}>
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <section className={bare ? 'card-section' : 'card'} aria-labelledby={`report-${state.level}`}>
+      <div className="card-head">
         <div className="min-w-0">
-          <h2 className="text-base font-semibold text-ink">
-            {sent ? (
-              <>
-                <span aria-hidden className="mr-1.5 text-success">
-                  ✓
-                </span>
-                {target}에 제출했습니다
-              </>
-            ) : (
-              `${target}에 제출`
-            )}
+          <h2 id={`report-${state.level}`} className={bare ? 'text-[15px] font-semibold text-ink' : 'card-title'}>
+            {target}에 제출
           </h2>
-          <p className="mt-1 text-sm text-body">
+          <p className="card-desc">
             {sent
               ? `${sent.submittedAtKst} · ${sent.submittedBy}${sent.origin === 'import' ? ' · 지난 자료 적재' : ''}`
               : state.hasOutput
@@ -66,41 +73,60 @@ export function ReportSubmitCard({ state, isoKey }: { state: ReportStateView; is
                 : `${what}이 생기면 제출할 수 있습니다.`}
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {sent && <a href={`/api/rollup/report/${sent.id}`} className="btn-secondary btn-sm">보낸 것 받기</a>}
-          {(!sent || state.changedSinceSubmit) && (
-            <button onClick={submit} disabled={busy || !state.hasOutput} className="btn-primary btn-sm">
-              {busy ? '제출 중…' : sent ? '다시 제출' : `${target}에 제출`}
-            </button>
-          )}
-        </div>
+        {sent ? (
+          state.changedSinceSubmit ? (
+            <span className="chip chip-warn">제출 뒤 바뀜</span>
+          ) : (
+            <span className="chip chip-ok">
+              <span aria-hidden className="dot" />
+              제출함
+            </span>
+          )
+        ) : (
+          <span className="chip chip-muted">아직 안 냄</span>
+        )}
       </div>
 
       {sent && state.changedSinceSubmit && (
-        <p className="mt-3 rounded-lg bg-warning-soft px-3 py-2 text-sm text-ink">
+        <p className="callout callout-warn mt-4">
           제출한 뒤 {what}이 바뀌었습니다 — <strong>다시 제출해야</strong> 바뀐 내용이 {target}에 갑니다. 지금은 앞서 낸 판이 가 있습니다.
         </p>
       )}
-      {sent && (
-        <div className="mt-3 text-xs text-muted">
-          {confirmWithdraw ? (
-            <span className="flex flex-wrap items-center gap-2">
+
+      <div className="mt-5 flex flex-wrap items-center gap-2">
+        {needsSubmit && (
+          <button
+            onClick={submit}
+            disabled={busy || !state.hasOutput}
+            className={primary ? 'btn-primary' : 'btn-secondary'}
+          >
+            {busy ? '제출 중…' : sent ? '다시 제출' : `${target}에 제출`}
+          </button>
+        )}
+        {sent && (
+          <a href={`/api/rollup/report/${sent.id}`} className="btn-ghost">
+            보낸 것 받기
+          </a>
+        )}
+        {/* 되돌리는 행동은 글자 링크로, 줄 끝에. 누르면 그 자리에서 한 번 더 묻는다 */}
+        {sent &&
+          (confirmWithdraw ? (
+            <span className="ml-auto flex flex-wrap items-center gap-2 text-sm">
               <span className="text-body">제출을 취소할까요? {target}에서 「미제출」로 보입니다.</span>
               <button onClick={withdraw} disabled={busy} className="btn-secondary btn-sm">
                 제출 취소
               </button>
-              <button onClick={() => setConfirmWithdraw(false)} className="underline">
+              <button onClick={() => setConfirmWithdraw(false)} className="btn-ghost">
                 아니오
               </button>
             </span>
           ) : (
-            <button onClick={() => setConfirmWithdraw(true)} className="underline">
+            <button onClick={() => setConfirmWithdraw(true)} className="btn-link-danger ml-auto">
               제출 취소
             </button>
-          )}
-        </div>
-      )}
-      {err && <p className="mt-3 rounded-lg bg-error-soft px-3 py-2 text-sm text-error">{err}</p>}
+          ))}
+      </div>
+      {err && <p className="callout callout-error mt-4">{err}</p>}
     </section>
   );
 }

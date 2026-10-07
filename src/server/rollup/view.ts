@@ -11,7 +11,9 @@ export function chipOf(u: Pick<UnitStatus, 'report' | 'merged'>): StatusChip {
   if (u.report) {
     return {
       kind: 'sent',
-      label: `제출 ${kst(u.report.submittedAt)} · ${u.report.submittedBy}${u.report.origin === 'import' ? ' (적재)' : ''}`,
+      // 칩에는 「제출 시각」만, 낸 사람은 칩 옆에 흐리게 — 칩 하나에 낱말 셋이면 칩이 문장이 된다 (CP-100)
+      label: `제출 ${kst(u.report.submittedAt)}`,
+      by: `${u.report.submittedBy}${u.report.origin === 'import' ? ' (적재)' : ''}`,
       href: `/api/rollup/report/${u.report.id}`,
     };
   }

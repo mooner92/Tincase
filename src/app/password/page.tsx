@@ -17,8 +17,8 @@ export default async function PasswordPage({
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
-      <div className="card px-8 py-9">
-      <h1 className="display text-[24px] leading-tight">
+      <div className="card px-6 py-8 sm:px-8 sm:py-9">
+      <h1 className="page-title">
         {isFirst ? '비밀번호를 변경해 주세요' : '비밀번호 변경'}
       </h1>
       <p className="mt-1 mb-6 text-sm text-muted">

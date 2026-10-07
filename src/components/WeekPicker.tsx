@@ -22,7 +22,7 @@ export function WeekPicker({
         const w = weeks.find((x) => x.isoKey === e.target.value);
         router.push(w?.isCurrent ? baseHref : `${baseHref}${join}isoKey=${e.target.value}`);
       }}
-      className="rounded-xl border border-hairline bg-canvas px-3 py-1.5 text-sm"
+      className="select max-w-full"
     >
       {weeks.map((w) => (
         <option key={w.isoKey} value={w.isoKey}>

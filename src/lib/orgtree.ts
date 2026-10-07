@@ -1,7 +1,7 @@
 // 조직 트리 레이아웃 — 방사형 덴드로그램 (순수 계산, 외부 의존성 없음).
 //
 // 지금 이 그림을 쓰는 곳은 **감사 문서(OPS-30, `server/report.ts`)** 하나다 — 인쇄해 보관하는 기록이다.
-// 화면에서 같은 그림을 보여 주던 조직도 그래프(/ops/monitor/graph)는 본판(본부별 팀 막대, PG-50)과 겹쳐
+// 화면에서 같은 그림을 보여 주던 조직도 그래프(/ops/monitor/graph)는 그때의 본판(본부별 팀 막대, PG-50)과 겹쳐
 // 2026-10-07에 걷어 냈다(PG-50e). 그래프만 쓰던 필드(사람 평면 목록·반지름 사본·Tincase 사용 부서 수)도
 // 함께 뺐다 — 쓰이지 않는 필드는 언젠가 틀린 채로 남는다.
 //
@@ -66,8 +66,8 @@ export interface OrgLayout {
   parents: LaidOutParent[];
   divisions: LaidOutDivision[];
   /**
-   * 집계 대상(`counted`)이면서 **Tincase를 쓰는(`isActive`)** 부서만 센다 — 본판(OrgProgress·`groupByHq`)과 같은 식.
-   * 미사용 부서는 취합게시판으로 내므로 여기서는 언제나 「0명 제출」이다. 분모에 넣으면 본판과 감사 문서의
+   * 집계 대상(`counted`)이면서 **Tincase를 쓰는(`isActive`)** 부서만 센다 — 「전사」 화면(`groupBySection`, PG-51)과 같은 식.
+   * 미사용 부서는 취합게시판으로 내므로 여기서는 언제나 「0명 제출」이다. 분모에 넣으면 화면과 감사 문서의
    * 숫자가 갈라진다 ([PG-T73])
    */
   totals: { submitted: number; roster: number; divisions: number };

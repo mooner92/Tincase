@@ -46,50 +46,68 @@ export function OrgRunCard({ run, isoKey, ready }: { run: OrgRunCardView | null;
   const toCheck = run?.sections.filter((s) => s.warnings.length || s.status === 'failed') ?? [];
   const fixedCount = run?.sections.reduce((n, s) => n + s.fixed.length, 0) ?? 0;
 
+  // 다음 할 일이 「만들기」일 때만 그 버튼이 주 버튼이다 (CP-99)
+  const runIsNext = !ok || !!run?.stale;
+
+  // 2026-10-07 — 초록 칠한 카드 안에 흰 칩 상자가 들어 있던 것을 흰 카드 한 장으로 (CP-97)
   return (
-    <section className={`card-feature px-7 py-6 ${ok && !run?.stale ? 'bg-brand-soft' : 'bg-surface-strong'}`}>
-      <div className="flex flex-wrap items-start justify-between gap-4">
+    <section className="card" aria-labelledby="org-run">
+      <div className="card-head">
         <div className="min-w-0">
-          <h2 className="display text-xl">
+          <h2 id="org-run" className="card-title">
+            전사 취합본
+          </h2>
+          <p className="card-desc">
             {ok ? (
               <>
-                <span aria-hidden className="mr-1.5 text-success">✓</span>전사 취합본 준비됨
+                {run!.sections.length}개 섹션 중 {copied}개 들어감 · 자동 수정 {fixedCount}건 · 확인할 곳 {toCheck.length}
               </>
             ) : run?.status === 'failed' ? (
-              '만들지 못했습니다'
+              <span className="text-error">{run.errorText}</span>
+            ) : ready > 0 ? (
+              `들어온 ${ready}개 섹션으로 최종본 꼴을 만듭니다. 빠진 섹션은 「미제출」로 자리를 둡니다.`
             ) : (
-              '아직 만들지 않았습니다'
+              '아직 들어온 섹션이 없습니다.'
             )}
-          </h2>
-          {ok && (
-            <p className="mt-1 text-sm text-body">
-              {run!.sections.length}개 섹션 중 {copied}개 들어감 · 자동 수정 {fixedCount}건 · 확인할 곳 {toCheck.length}
-              {run!.finishedAtKst && ` · ${run!.finishedAtKst}`}
-            </p>
-          )}
-          {run?.status === 'failed' && <p className="mt-1 text-sm text-error">{run.errorText}</p>}
-          {!run && <p className="mt-1 text-sm text-body">{ready > 0 ? `들어온 ${ready}개 섹션으로 최종본 꼴을 만듭니다. 빠진 섹션은 「미제출」로 자리를 둡니다.` : '아직 들어온 섹션이 없습니다.'}</p>}
+          </p>
         </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {ok && (
-            <a href={`/api/rollup/run/${run!.id}`} className="btn-oncolor">
-              전사본 받기
-            </a>
-          )}
-          <button onClick={go} disabled={busy || ready === 0} className="btn-secondary btn-sm">
-            {busy ? '만드는 중…' : ok ? '다시 만들기' : '전사 취합본 만들기'}
-          </button>
-        </div>
+        {ok ? (
+          run!.stale ? (
+            <span className="chip chip-warn">섹션이 바뀜</span>
+          ) : (
+            <span className="chip chip-ok">
+              <span aria-hidden className="dot" />
+              준비됨{run!.finishedAtKst && ` ${run!.finishedAtKst}`}
+            </span>
+          )
+        ) : run?.status === 'failed' ? (
+          <span className="chip chip-error">만들지 못함</span>
+        ) : (
+          <span className="chip chip-muted">아직 안 만듦</span>
+        )}
       </div>
+
       {ok && run!.stale && (
-        <p className="mt-3 rounded-lg bg-warning-soft px-3 py-2 text-sm text-ink">
+        <p className="callout callout-warn mt-4">
           만든 뒤 섹션이 바뀌었습니다(새로 냄·올림·취소·순서) — <strong>다시 만들기</strong>를 누르세요.
         </p>
       )}
+
+      <div className="mt-5 flex flex-wrap items-center gap-2">
+        <button onClick={go} disabled={busy || ready === 0} className={runIsNext ? 'btn-primary' : 'btn-ghost'}>
+          {busy ? '만드는 중…' : ok ? '다시 만들기' : '전사 취합본 만들기'}
+        </button>
+        {ok && (
+          <a href={`/api/rollup/run/${run!.id}`} className="btn-secondary">
+            전사본 받기
+          </a>
+        )}
+      </div>
+
       {ok && toCheck.length > 0 && (
-        <div className="mt-4 rounded-xl border border-warning/40 bg-warning/5 px-4 py-3">
-          <p className="text-sm font-semibold text-ink">한글에서 확인할 곳</p>
-          <ul className="mt-1.5 space-y-1 text-sm text-body">
+        <div className="callout callout-warn mt-4">
+          <p className="font-semibold">한글에서 확인할 곳</p>
+          <ul className="mt-1.5 space-y-1 text-body">
             {toCheck.map((s) => (
               <li key={s.title}>
                 <span className="font-medium text-ink">{s.title}</span> — {s.status === 'failed' ? `옮기지 못함: ${s.error}` : s.warnings.join(' · ')}
@@ -99,26 +117,38 @@ export function OrgRunCard({ run, isoKey, ready }: { run: OrgRunCardView | null;
         </div>
       )}
       {ok && (
-        <button onClick={() => setOpen((v) => !v)} className="mt-3 text-xs text-muted underline">
-          {open ? '섹션별 처리 접기' : '섹션별 처리 보기'}
-        </button>
+        <div className="card-section">
+          <button
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+            className="flex items-center gap-2 text-sm font-medium text-ink hover:underline"
+          >
+            <span
+              aria-hidden
+              className={`relative -top-px inline-block h-1.5 w-1.5 border-r-[1.5px] border-b-[1.5px] border-current transition-transform ${
+                open ? 'rotate-45' : '-rotate-45'
+              }`}
+            />
+            섹션별 처리
+          </button>
+          {open && (
+            <ol className="mt-3 text-sm">
+              {run!.sections.map((s, i) => (
+                <li key={s.title} className="flex flex-wrap items-baseline gap-x-2 border-t border-hairline-soft py-2 first:border-t-0">
+                  <span className="w-5 text-right tabular-nums text-muted">{i + 1}</span>
+                  <span className="font-medium text-ink">{s.title}</span>
+                  <span className="text-xs text-muted">
+                    {s.status === 'missing' ? '미제출 자리' : s.status === 'failed' ? '실패' : s.label}
+                    {s.fixed.length > 0 && ` · ${s.fixed.join(' · ')}`}
+                    {s.dropped.length > 0 && ` · 뺀 것: ${s.dropped.join(', ')}`}
+                  </span>
+                </li>
+              ))}
+            </ol>
+          )}
+        </div>
       )}
-      {ok && open && (
-        <ol className="mt-2 space-y-1 text-sm">
-          {run!.sections.map((s, i) => (
-            <li key={s.title} className="rounded-lg bg-surface-card/70 px-3 py-1.5">
-              <span className="mr-2 tabular-nums text-muted">{i + 1}</span>
-              <span className="font-medium text-ink">{s.title}</span>
-              <span className="ml-2 text-xs text-muted">
-                {s.status === 'missing' ? '미제출 자리' : s.status === 'failed' ? '실패' : s.label}
-                {s.fixed.length > 0 && ` · ${s.fixed.join(' · ')}`}
-                {s.dropped.length > 0 && ` · 뺀 것: ${s.dropped.join(', ')}`}
-              </span>
-            </li>
-          ))}
-        </ol>
-      )}
-      {err && <p className="mt-3 rounded-lg bg-error-soft px-3 py-2 text-sm text-error">{err}</p>}
+      {err && <p className="callout callout-error mt-4">{err}</p>}
     </section>
   );
 }

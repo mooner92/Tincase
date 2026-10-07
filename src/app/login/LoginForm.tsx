@@ -35,7 +35,7 @@ export function LoginForm() {
   return (
     <form onSubmit={submit} className="space-y-4">
       <div>
-        <label htmlFor="email" className="mb-1 block text-xs font-medium text-body">
+        <label htmlFor="email" className="label">
           KEI 이메일
         </label>
         <input
@@ -47,11 +47,11 @@ export function LoginForm() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="hong@kei.re.kr"
-          className="w-full rounded-xl border border-hairline px-3 py-2 text-sm"
+          className="input"
         />
       </div>
       <div>
-        <label htmlFor="password" className="mb-1 block text-xs font-medium text-body">
+        <label htmlFor="password" className="label">
           비밀번호
         </label>
         <input
@@ -61,18 +61,18 @@ export function LoginForm() {
           required
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded-xl border border-hairline px-3 py-2 text-sm"
+          className="input"
         />
       </div>
       {error && (
-        <p aria-live="polite" className="rounded-xl bg-error/10 px-3 py-2 text-sm text-error">
+        <p aria-live="polite" className="callout callout-error">
           {error}
         </p>
       )}
       <button
         type="submit"
         disabled={busy}
-        className="w-full rounded-xl bg-ink px-4 py-2.5 text-sm font-medium text-white hover:bg-ink-active disabled:opacity-50"
+        className="btn-primary w-full"
       >
         {busy ? '로그인 중…' : '로그인'}
       </button>
@@ -83,7 +83,7 @@ export function LoginForm() {
       {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- 인증 밖 페이지 */}
       <a
         href="/forgot"
-        className="block text-center text-xs text-muted underline underline-offset-2 hover:text-ink"
+        className="block text-center text-sm text-muted underline underline-offset-2 hover:text-ink"
       >
         비밀번호를 잊으셨나요? 메신저로 재설정 링크 받기
       </a>

@@ -77,11 +77,11 @@ export function RosterDrawer({
           기본 동작이 된다 — 운영 화면에서 매번 옆으로 밀어야 하는 건 일이다.
           6xl로 넓히고, 그래도 모자라면 그때 스크롤한다.
         */
-        className="absolute inset-y-0 right-0 flex h-full w-full max-w-6xl flex-col border-l border-hairline bg-canvas"
+        className="absolute inset-y-0 right-0 flex h-full w-full max-w-6xl flex-col border-l border-hairline bg-canvas shadow-[0_8px_32px_rgba(0,0,0,0.12)]"
       >
         <div className="flex items-center justify-between border-b border-hairline px-5 py-3">
           <div>
-            <h2 ref={titleRef} tabIndex={-1} className="text-base font-bold text-ink outline-none">
+            <h2 ref={titleRef} tabIndex={-1} className="text-base font-semibold text-ink outline-none">
               {divisionName} <span className="font-normal text-muted">· 인원 관리</span>
             </h2>
             <p className="mt-0.5 text-xs text-muted">
@@ -109,7 +109,7 @@ export function RosterDrawer({
             })()}
           <button
             onClick={onClose}
-            className="rounded px-2 py-1 text-lg leading-none text-muted-soft hover:text-body"
+            className="btn-ghost w-9 px-0 text-xl leading-none text-muted"
             aria-label="닫기"
           >
             ×
@@ -125,7 +125,7 @@ export function RosterDrawer({
         */}
         <div className="flex-1 overflow-auto">
           <table className="w-max min-w-full text-sm">
-            <thead className="sticky top-0 bg-canvas shadow-[0_1px_0_0_var(--color-hairline)]">
+            <thead className="sticky top-0 bg-surface-soft shadow-[0_1px_0_0_var(--color-hairline)]">
               <tr className="text-left text-xs text-muted">
                 <th className="px-4 py-2 font-medium whitespace-nowrap">이름</th>
                 <th className="px-4 py-2 font-medium whitespace-nowrap">이메일</th>
@@ -146,8 +146,8 @@ export function RosterDrawer({
                 >
                   <td className="whitespace-nowrap px-4 py-2 font-medium">
                     {u.name}
-                    {u.isOperator && <span className="ml-1 rounded bg-surface-strong px-1 text-[11px] text-ink">운영</span>}
-                    {u.isCoordinator && <span className="ml-1 rounded bg-warning-soft px-1 text-[11px] text-body-strong">총괄</span>}
+                    {u.isOperator && <span className="chip chip-muted ml-1 px-1.5 py-0 text-xs">운영</span>}
+                    {u.isCoordinator && <span className="chip chip-warn ml-1 px-1.5 py-0 text-xs">총괄</span>}
                   </td>
                   <td className="px-4 py-2 font-mono text-xs text-muted">{u.email}</td>
                   <td className="px-4 py-2">
@@ -156,7 +156,7 @@ export function RosterDrawer({
                       value={u.divisionRole}
                       disabled={busy}
                       onChange={(e) => onPatch(u.id, { divisionRole: e.target.value })}
-                      className="rounded border border-hairline px-1 py-0.5 text-xs"
+                      className="rounded border border-border-strong px-1 py-0.5 text-xs"
                     >
                       <option value="member">제출자</option>
                       <option value="lead">담당자 (제출)</option>
@@ -183,7 +183,7 @@ export function RosterDrawer({
                           e.target.value.trim() !== (u.rosterNote ?? '') &&
                           onPatch(u.id, { rosterNote: e.target.value })
                         }
-                        className="mt-1 w-24 rounded border border-hairline px-1 py-0.5 text-xs"
+                        className="mt-1 w-24 rounded border border-border-strong px-1 py-0.5 text-xs"
                       />
                     )}
                   </td>
@@ -198,7 +198,7 @@ export function RosterDrawer({
                         e.target.value.trim() !== (u.employeeNo ?? '') &&
                         onPatch(u.id, { employeeNo: e.target.value })
                       }
-                      className="w-20 rounded border border-hairline px-1 py-0.5 text-xs tabular-nums"
+                      className="w-20 rounded border border-border-strong px-1 py-0.5 text-xs tabular-nums"
                     />
                   </td>
                   <td className="px-4 py-2 text-center">
@@ -221,25 +221,25 @@ export function RosterDrawer({
                       onBlur={(e) =>
                         Number(e.target.value) !== u.sortOrder && onPatch(u.id, { sortOrder: Number(e.target.value) })
                       }
-                      className="w-16 rounded border border-hairline px-1 py-0.5 text-xs tabular-nums"
+                      className="w-16 rounded border border-border-strong px-1 py-0.5 text-xs tabular-nums"
                     />
                   </td>
                   <td className="whitespace-nowrap px-4 py-2">
                     <div className="flex items-center gap-1.5">
                       {!u.hasPassword ? (
-                        <span className="rounded bg-surface-card px-1.5 py-0.5 text-[11px] whitespace-nowrap text-muted">미발급</span>
+                        <span className="chip chip-muted px-2 py-0 text-xs">미발급</span>
                       ) : u.locked ? (
-                        <span className="rounded bg-error/10 px-1.5 py-0.5 text-[11px] whitespace-nowrap text-error">잠김</span>
+                        <span className="chip chip-error px-2 py-0 text-xs">잠김</span>
                       ) : u.mustChangePassword ? (
-                        <span className="rounded bg-warning-soft px-1.5 py-0.5 text-[11px] whitespace-nowrap text-body-strong">변경 대기</span>
+                        <span className="chip chip-warn px-2 py-0 text-xs">변경 대기</span>
                       ) : (
-                        <span className="rounded bg-brand-soft px-1.5 py-0.5 text-[11px] whitespace-nowrap text-success">사용 중</span>
+                        <span className="chip chip-ok px-2 py-0 text-xs">사용 중</span>
                       )}
                       <button
                         disabled={busy}
                         onClick={() => onSendSetupLink([u.id])}
                         title="이 사람 메신저로 설정 링크를 보냅니다 — 기존 비밀번호는 바뀌지 않습니다"
-                        className="rounded border border-hairline bg-surface-card px-2 py-0.5 text-xs font-medium whitespace-nowrap text-ink hover:bg-surface-strong disabled:opacity-50"
+                        className="rounded border border-border-strong bg-canvas px-2 py-0.5 text-xs font-medium whitespace-nowrap text-ink hover:border-ink hover:bg-surface-soft disabled:opacity-50"
                       >
                         링크 보내기
                       </button>

@@ -32,6 +32,7 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 | `division_not_onboarded` | 403 | 부서 미온보딩 (AU-04b) |
 | `not_found` | 404 | 없거나 **권한 없음** (격리 — 구별 불가) |
 | `slot_locked` | 409 | 부서 마감 지남 |
+| `upload_closed` | 410 | HWP 업로드 경로가 닫힘 — 웹 작성만 받는다 (API-54 · WA-31) |
 | `no_submissions` | 409 | 대상 0건 |
 | `invalid_file` | 422 | 파일 검증 실패 (reason: ST-09) |
 | `invalid_rule` | 422 | 병합 규칙 검증 실패 (Phase 2) |
@@ -82,6 +83,7 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 | API-12 | 검증 순서: 인증→사용자→부서 활성→잠금→크기→확장자(.hwp)→매직→구조(표 파싱 포함) |
 | API-13 | 버전 부여·`isLatest` 전환 단일 트랜잭션 (DM-05) · 감사 로그 · 실패 시 tmp 정리 |
 | API-14 | 응답에 `sameAsPrevious`(직전 버전과 sha256 동일) 포함 (DM-07) |
+| API-54 | `SUBMIT_HWP_UPLOAD=off`면 **410 `upload_closed`** — 인증 다음, 속도 제한·본문 읽기보다 먼저. 파일·DB 행·감사 기록을 남기지 않는다. 권한이 아니라 누구에게나 닫힌 길이라 404가 아니다 (WA-30~34 · [ADR-0014](../adr/0014-web-only-submission.md)) |
 
 ### `GET /api/submissions/:id/download`
 

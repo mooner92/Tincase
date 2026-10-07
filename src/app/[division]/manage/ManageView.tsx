@@ -1,5 +1,8 @@
-// 수합 관리 화면 (서버 컴포넌트) — 현재/과거 주차 공용 (PG §4)
-// 요약은 teal 피처 카드(featured tier 패턴), 표는 캔버스 카드.
+// 수합 관리 화면 (서버 컴포넌트) — 현재/과거 주차 공용 (PG §4 · PG-52)
+//
+// 위에서 아래로 담당자가 한 주에 하는 순서 그대로: 제출 현황 → 병합본(검토) → 위로 제출 → 부서원 표.
+// 2026-10-07 — 요약을 짙은 초록 띠로 칠하던 것을 흰 카드로 바꿨다(CP-100: 큰 초록 면 금지).
+// 긴 표가 맨 위에 있으면 병합본·제출 카드가 스크롤 아래로 밀려 「할 일」이 안 보였다.
 import { prisma } from '@/server/db';
 import type { Division } from '@prisma/client';
 import { divisionStatus, divisionSlots, effectiveDeadline, ensureCurrentSlot } from '@/server/worklog';
@@ -119,159 +122,120 @@ export async function ManageView({
   // "제출된 파일이 없습니다"라고 하면서 병합은 되는 모순이 생긴다
   const collected = summary.submitted + summary.extras;
 
-  const tableRows: MemberRow[] = members.map((m) => ({
+  // HM-47 · CP-99 — 부서장이 승인할 판이 있으면 그 화면의 주 버튼은 [승인]이다. 그동안 [위로 제출]은 보조로 물러난다
+  const awaitingMyApproval =
+    canApprove && mergeState.status === 'succeeded' && (!mergeState.review || mergeState.review.changedAfter);
+  const zipHref = `/api/division/download-zip?slot=${slot.isoKey}&division=${encodeURIComponent(division.slug)}`;
+  const toRow = (m: (typeof members)[number]): MemberRow => ({
     user: { id: m.user.id, name: m.user.name },
     status: m.status,
     latest: m.latest && {
       id: m.latest.id,
       version: m.latest.version,
-      byteSize: m.latest.byteSize,
       uploadedAtKst: toKstIso(m.latest.uploadedAt).slice(5, 16).replace('T', ' '),
     },
     versionCount: m.versionCount,
-  }));
+    notifiedAtKst: m.notifiedAtKst,
+  });
 
   return (
-    <main className="pt-10">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">수합 관리</p>
-          <h1 className="display mt-1 flex flex-wrap items-center gap-2.5 text-[32px] leading-[1.15]">
-            {slot.year}년 {slot.label}
-            {/* WS-14 — 이 주에 모으는 것이 월간이면 담당자가 먼저 알아야 한다 */}
-            {slotKind(slot) === 'monthly' && (
-              <span className="rounded-full bg-brand px-2.5 py-1 text-[13px] font-semibold text-white">
-                {slot.month}월 월간
-              </span>
-            )}
-          </h1>
-        </div>
-        <div className="pb-1">
-          <SlotSelector
-            baseHref={`/${division.slug}/manage`}
-            selected={slot.isoKey}
-            roster={slotList.roster}
-            slots={slotList.slots.map((s) => ({
-              isoKey: s.isoKey,
-              label: s.label,
-              year: s.year,
-              submitted: slotList.submittedOf(s.id),
-              isCurrent: s.isoKey === currentKey,
-              monthly: slotKind(s) === 'monthly',
-            }))}
-          />
-        </div>
-      </div>
-
-      {/* StatusSummary — teal 피처 카드 (CP-44~47) */}
-      <section className="card-feature mt-6 bg-brand px-8 py-7 text-white">
-        <div className="flex flex-wrap items-end justify-between gap-5">
-          <div>
-            <p className="text-xs font-semibold tracking-[0.12em] text-brand-tint uppercase">제출 현황</p>
-            <p className="mt-1 text-[44px] leading-none font-semibold tracking-tight">
-              {summary.submitted}
-              <span className="text-xl font-normal text-white/60"> / {summary.roster}</span>
-              {summary.missing === 0 && summary.roster > 0 && (
-                <span className="ml-3 align-middle text-base font-medium text-brand-tint">✓ 전원 제출</span>
-              )}
-            </p>
-          </div>
-          <div className="flex flex-col items-end gap-2.5">
-            {/*
-              WS-18 — 예외 주차면 이 배지가 붉어진다. 부서원 화면과 같은 규칙이다 —
-              새 요소를 더하지 않고 **이미 보는 것의 색을 바꾼다.**
-              다만 여기는 짙은 초록 띠 위다. 반투명 빨강을 깔면 초록과 섞여 **탁한 갈색**이
-              되어 경고로 안 읽힌다. 불투명 빨강에 흰 글자라야 색이 색으로 남는다.
-            */}
-            <span
-              className={`inline-flex items-center rounded-full px-3 py-1 text-[13px] font-medium ${
-                slot.deadlineNote && !locked && !opened
-                  ? 'bg-error font-semibold text-white'
-                  : locked
-                    ? 'bg-white/10 text-white/70'
-                    : 'bg-white/15 text-brand-tint'
-              }`}
-            >
-              {/* 열려 있을 땐 원래 마감 날짜가 아니라 **언제까지인지**가 알아야 할 것이다 */}
-              {opened
-                ? `열어 둠 · ${openUntilKo}까지`
-                : `${locked ? '마감됨' : '진행 중'} · ${formatDeadlineKo(deadline)}`}
-            </span>
-            {slot.deadlineNote && (
-              <p className="text-right text-[12px] leading-4 text-white/60">{slot.deadlineNote}</p>
-            )}
-            <CopyMissingButton names={missing} />
-            {/*
-              DM-20 — 마감이 지난 뒤에만 보인다. 마감 전에는 누구나 낼 수 있으므로
-              열 것이 없고, 그때 버튼이 있으면 «지금도 잠겨 있나?»로 읽힌다 (TACP-9).
-            */}
-            {canMerge && closed && (
-              <DeadlineOpener
-                open={opened}
-                openUntilKo={openUntilKo}
-                openedBy={opening?.openedBy ?? null}
-                minutes={OPEN_MINUTES}
-              />
-            )}
-          </div>
-        </div>
-        {opened && (
-          <p className="mt-4 rounded-xl bg-white/15 px-4 py-2.5 text-sm text-white">
-            <strong className="font-semibold">마감을 열어 두었습니다</strong> — {openUntilKo}까지 부서원 누구나
-            제출할 수 있습니다. 시각이 지나면 저절로 닫히고, 닫힌 뒤 병합이 한 번 더 돕니다.
-          </p>
-        )}
-        <div
-          className="mt-5 h-2 w-full overflow-hidden rounded-full bg-white/15"
-          role="progressbar"
-          aria-valuenow={summary.submitted}
-          aria-valuemin={0}
-          aria-valuemax={summary.roster}
-        >
-          <div className="h-full rounded-full bg-brand-soft transition-all" style={{ width: `${pct}%` }} />
-        </div>
-      </section>
-
-      {/* SubmissionTable + 드로어 (CP-48~53, PG-19/20) */}
-      <div className="mt-6">
-        <SubmissionTableClient
-          caption={`${division.nameKo} ${slot.label} 제출 현황`}
-          members={tableRows}
-          canDelete={canDeleteAny}
+    <main className="pt-8">
+      <div className="page-head">
+        <h1 className="page-title flex flex-wrap items-center gap-2.5">
+          {slot.year}년 {slot.label}
+          {/* WS-14 — 이 주에 모으는 것이 월간이면 담당자가 먼저 알아야 한다 */}
+          {slotKind(slot) === 'monthly' && <span className="chip chip-ok">{slot.month}월 월간</span>}
+        </h1>
+        <SlotSelector
+          baseHref={`/${division.slug}/manage`}
+          selected={slot.isoKey}
+          roster={slotList.roster}
+          slots={slotList.slots.map((s) => ({
+            isoKey: s.isoKey,
+            label: s.label,
+            year: s.year,
+            submitted: slotList.submittedOf(s.id),
+            isCurrent: s.isoKey === currentKey,
+            monthly: slotKind(s) === 'monthly',
+          }))}
         />
       </div>
-      {/* DM-17 — 명단 밖인데 낸 사람. 분모에는 없지만 병합에는 들어간다 */}
-      {extras.length > 0 && (
-        <section className="mt-6">
-          <h2 className="label">추가 제출 — 집계 대상은 아니지만 병합에 포함됩니다</h2>
-          <SubmissionTableClient
-            caption={`${division.nameKo} ${slot.label} 추가 제출`}
-            members={extras.map((m) => ({
-              user: { id: m.user.id, name: m.user.name },
-              status: m.status,
-              latest: m.latest && {
-                id: m.latest.id,
-                version: m.latest.version,
-                byteSize: m.latest.byteSize,
-                uploadedAtKst: toKstIso(m.latest.uploadedAt).slice(5, 16).replace('T', ' '),
-              },
-              versionCount: m.versionCount,
-              notifiedAtKst: m.notifiedAtKst,
-            }))}
-            canDelete={canDeleteAny}
-          />
+
+      <div className="mt-6 space-y-4 lg:space-y-6">
+        {/* StatusSummary (CP-44~47) — 흰 카드 하나: 숫자 · 막대 · 마감 칩 · 미제출 복사 */}
+        <section className="card" aria-labelledby="status-summary">
+          <div className="card-head">
+            <div>
+              <h2 id="status-summary" className="card-title">
+                제출 현황
+              </h2>
+              <p className="mt-2 flex items-baseline gap-2 tabular-nums">
+                <span className="text-[40px] leading-none font-semibold tracking-tight text-ink">{summary.submitted}</span>
+                <span className="text-[17px] text-muted">/ {summary.roster}</span>
+                {summary.missing === 0 && summary.roster > 0 && (
+                  <span className="chip chip-ok ml-1 self-center">
+                    <span aria-hidden className="dot" />
+                    전원 제출
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="flex flex-col items-start gap-1.5 sm:items-end">
+              {/*
+                WS-18 — 예외 주차면 이 칩이 붉어진다. 부서원 화면과 같은 규칙이다 —
+                새 요소를 더하지 않고 **이미 보는 것의 색을 바꾼다.**
+              */}
+              <span
+                className={`chip ${
+                  opened ? 'chip-warn' : slot.deadlineNote && !locked ? 'chip-error font-semibold' : 'chip-muted'
+                }`}
+              >
+                {/* 열려 있을 땐 원래 마감 날짜가 아니라 **언제까지인지**가 알아야 할 것이다 */}
+                {opened
+                  ? `열어 둠 · ${openUntilKo}까지`
+                  : `${locked ? '마감됨' : '진행 중'} · ${formatDeadlineKo(deadline)}`}
+              </span>
+              {slot.deadlineNote && <p className="text-xs text-muted sm:text-right">{slot.deadlineNote}</p>}
+            </div>
+          </div>
+
+          <div
+            className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-surface-strong"
+            role="progressbar"
+            aria-label="제출 진행"
+            aria-valuenow={summary.submitted}
+            aria-valuemin={0}
+            aria-valuemax={summary.roster}
+          >
+            <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${pct}%` }} />
+          </div>
+
+          {(missing.length > 0 || (canMerge && closed)) && (
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <CopyMissingButton names={missing} />
+              {/*
+                DM-20 — 마감이 지난 뒤에만 보인다. 마감 전에는 누구나 낼 수 있으므로
+                열 것이 없고, 그때 버튼이 있으면 «지금도 잠겨 있나?»로 읽힌다 (TACP-9).
+              */}
+              {canMerge && closed && (
+                <DeadlineOpener
+                  open={opened}
+                  openUntilKo={openUntilKo}
+                  openedBy={opening?.openedBy ?? null}
+                  minutes={OPEN_MINUTES}
+                />
+              )}
+            </div>
+          )}
+          {opened && (
+            <p className="callout callout-warn mt-4">
+              <strong className="font-semibold">마감을 열어 두었습니다</strong> — {openUntilKo}까지 부서원 누구나
+              제출할 수 있습니다. 시각이 지나면 저절로 닫히고, 닫힌 뒤 병합이 한 번 더 돕니다.
+            </p>
+          )}
         </section>
-      )}
 
-      {offRoster.length > 0 && (
-        <p className="mt-2 px-1 text-xs text-muted-soft">
-          집계 제외: {offRoster.map((u) => (u.note ? `${u.name}(${u.note})` : u.name)).join(', ')} —
-          내실 수는 있고, 내시면 위에 «추가 제출»로 표시됩니다. 명단 변경은 운영자에게
-        </p>
-      )}
-
-      {/* HM-26 — 병합 결과. 목요일 14:10에 이게 이미 준비돼 있는 게 목표다 */}
-      <div className="mt-8">
+        {/* HM-26 — 병합 결과. 목요일 14:10에 이게 이미 준비돼 있는 게 목표다 */}
         <MergePanel
           state={mergeState}
           isoKey={slot.isoKey}
@@ -282,36 +246,56 @@ export async function ManageView({
           canDownload={canDownloadMerged}
           submitted={collected}
         />
-      </div>
 
-      {report && (
-        <ReportSubmitCard
-          isoKey={slot.isoKey}
-          state={{
-            ...report,
-            current: report.current && {
-              ...report.current,
-              submittedAtKst: toKstIso(report.current.submittedAt).slice(5, 16).replace('T', ' '),
-            },
-          }}
-        />
-      )}
-
-      {/* BulkActions (CP-58~61) */}
-      <section className="mt-6 flex flex-wrap items-center gap-3">
-        {collected > 0 ? (
-          <a
-            href={`/api/division/download-zip?slot=${slot.isoKey}&division=${encodeURIComponent(division.slug)}`}
-            className="btn-primary"
-          >
-            전체 zip 받기 ({collected}개)
-          </a>
-        ) : (
-          <button disabled title="제출된 파일이 없습니다" className="btn-primary">
-            전체 zip 받기 (0개)
-          </button>
+        {report && (
+          <ReportSubmitCard
+            isoKey={slot.isoKey}
+            primary={!awaitingMyApproval}
+            state={{
+              ...report,
+              current: report.current && {
+                ...report.current,
+                submittedAtKst: toKstIso(report.current.submittedAt).slice(5, 16).replace('T', ' '),
+              },
+            }}
+          />
         )}
-      </section>
+
+        {/* SubmissionTable + 드로어 (CP-48~53, PG-19/20). 전체 zip은 표의 머리에 — 표 전체에 대한 행동이다 (CP-58~61) */}
+        <SubmissionTableClient
+          caption={`${division.nameKo} ${slot.label} 제출 현황`}
+          title={`부서원 ${members.length}명`}
+          action={
+            collected > 0 ? (
+              <a href={zipHref} className="btn-ghost">
+                전체 zip 받기 ({collected}개)
+              </a>
+            ) : (
+              <button disabled title="제출된 파일이 없습니다" className="btn-ghost">
+                전체 zip 받기 (0개)
+              </button>
+            )
+          }
+          members={members.map(toRow)}
+          canDelete={canDeleteAny}
+          footnote={
+            offRoster.length > 0
+              ? `집계 제외: ${offRoster.map((u) => (u.note ? `${u.name}(${u.note})` : u.name)).join(', ')} — 내실 수는 있고, 내시면 «추가 제출»로 표시됩니다. 명단 변경은 운영자에게`
+              : undefined
+          }
+        />
+
+        {/* DM-17 — 명단 밖인데 낸 사람. 분모에는 없지만 병합에는 들어간다 */}
+        {extras.length > 0 && (
+          <SubmissionTableClient
+            caption={`${division.nameKo} ${slot.label} 추가 제출`}
+            title="추가 제출"
+            subtitle="집계 대상은 아니지만 병합에 포함됩니다"
+            members={extras.map(toRow)}
+            canDelete={canDeleteAny}
+          />
+        )}
+      </div>
     </main>
   );
 }

@@ -1,6 +1,8 @@
 'use client';
-import Link from 'next/link';
-// PG-33~35 — 운영 화면 (operator). 테넌시 + 인원 배치 + 비밀번호.
+// PG-33~35 — 운영 화면 (operator). 부서 + 인원 배치 + 비밀번호.
+//
+// PG-55 (2026-10-07) — 부서 표는 **읽기가 기본**이다. 줄마다 요일·시각·업무일지 고르기와 활성 단추가 늘 열려 있어
+// 열네 줄이 입력칸 밭이었고, 지나가다 잘못 건드리면 그대로 저장됐다(바꾸는 즉시 저장한다). 이제 [편집]을 누른 줄만 열린다.
 // 부서를 취합게시판 제출 이력으로 탭 분리한다 — 온보딩 우선순위가 곧 그 순서다 (DM-15).
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RosterDrawer, type UserRow } from './RosterDrawer';
@@ -55,6 +57,8 @@ export function OpsClient() {
   const [busy, setBusy] = useState(false);
   const [issued, setIssued] = useState<IssuedPassword[]>([]);
   const [copied, setCopied] = useState<string | null>(null);
+  /** PG-55 — 지금 고치고 있는 부서 한 줄. 나머지 줄은 읽기만 */
+  const [editingId, setEditingId] = useState<string | null>(null);
 
   const loadDivisions = useCallback(() => {
     fetch('/api/ops/divisions')
@@ -199,21 +203,9 @@ export function OpsClient() {
   const selectedName = divisions.find((d) => d.id === selected)?.nameKo ?? null;
 
   return (
-    <div className="space-y-5">
-      <div className="flex items-center justify-between gap-3">
-        <div aria-live="polite" className="h-5 text-sm text-ink">
-          {msg}
-        </div>
-        {/* 모니터로 가는 길 — 없으면 만들어도 아무도 못 간다. 이름은 상단 메뉴·탭과 같게 (PG-49e — 「전사」의 [현황]).
-            「조직도」는 뺐다 — 원형 조직도 그래프는 걷어 냈다(2026-10-07, PG-50e) */}
-        <div className="flex shrink-0 gap-2">
-          <Link href="/ops/monitor" className="btn-secondary btn-sm">
-            전사 · 현황
-          </Link>
-          <Link href="/ops/audit" className="btn-secondary btn-sm">
-            감사 로그
-          </Link>
-        </div>
+    <div className="space-y-4 lg:space-y-6">
+      <div aria-live="polite" className="min-h-5 text-sm text-ink empty:hidden">
+        {msg}
       </div>
 
       {/* RS-15 — 주 1회 하는 일이라 부서 목록보다 위에 둔다. 아래에 있으면 스크롤해야 보인다 */}
@@ -221,30 +213,29 @@ export function OpsClient() {
 
       {/* AU-27 — 발급된 임시 비밀번호. 화면을 벗어나면 다시 볼 수 없다 */}
       {issued.length > 0 && (
-        <section className="rounded-xl border-2 border-warning/40 bg-warning-soft px-5 py-4">
-          <div className="flex items-center justify-between">
-            <h2 className="text-sm font-bold text-ink">발급된 임시 비밀번호 — 지금 전달하세요</h2>
-            <button onClick={() => setIssued([])} className="text-xs text-body-strong hover:underline">
+        <section className="card border-warning/50" aria-labelledby="issued">
+          <div className="card-head items-center">
+            <h2 id="issued" className="card-title">
+              발급된 임시 비밀번호 — 지금 전달하세요
+            </h2>
+            <button onClick={() => setIssued([])} className="btn-ghost">
               목록 지우기
             </button>
           </div>
-          <p className="mt-1 text-xs text-body-strong">
+          <p className="callout callout-warn mt-3">
             서버에는 해시만 저장되어 <strong>이 화면을 닫으면 다시 볼 수 없습니다.</strong> 개인별로 전달하세요
             (단체 메시지 금지).
           </p>
-          <ul className="mt-3 space-y-1.5">
+          <ul className="mt-4 space-y-2">
             {issued.map((x) => (
               <li key={x.userId} className="flex flex-wrap items-center gap-2 text-sm">
                 <span className="w-20 font-medium text-ink">{x.name}</span>
                 <span className="w-52 font-mono text-xs text-muted">{x.email}</span>
-                <code className="rounded bg-canvas px-2 py-1 font-mono text-sm font-bold tracking-wider text-ink">
+                <code className="rounded bg-surface-soft px-2 py-1 font-mono text-sm font-bold tracking-wider text-ink">
                   {x.password}
                 </code>
-                <button
-                  onClick={() => copy(x.password, x.userId)}
-                  className="rounded border border-warning/40 bg-canvas px-2 py-1 text-xs font-medium text-body-strong hover:bg-amber-100"
-                >
-                  {copied === x.userId ? '복사됨 ✓' : '복사'}
+                <button onClick={() => copy(x.password, x.userId)} className="btn-secondary btn-sm">
+                  {copied === x.userId ? '복사됨' : '복사'}
                 </button>
                 <button
                   onClick={() =>
@@ -253,9 +244,9 @@ export function OpsClient() {
                       `msg-${x.userId}`,
                     )
                   }
-                  className="rounded border border-hairline bg-canvas px-2 py-1 text-xs text-body hover:bg-surface-soft"
+                  className="btn-ghost"
                 >
-                  {copied === `msg-${x.userId}` ? '복사됨 ✓' : '안내문 복사'}
+                  {copied === `msg-${x.userId}` ? '복사됨' : '안내문 복사'}
                 </button>
               </li>
             ))}
@@ -263,144 +254,161 @@ export function OpsClient() {
         </section>
       )}
 
-      {/* 탭 — 취합게시판 제출 이력 기준 */}
-      <div>
-        <div className="flex gap-1 border-b border-hairline" role="tablist">
-          {TABS.map((t) => (
-            <button
-              key={t.key}
-              role="tab"
-              aria-selected={tab === t.key}
-              onClick={() => setTab(t.key)}
-              className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition-colors ${
-                tab === t.key
-                  ? 'border-blue-600 text-ink'
-                  : 'border-transparent text-muted hover:text-body'
-              }`}
-            >
-              {t.label}{' '}
-              <span className={`ml-1 rounded px-1.5 py-0.5 text-xs ${tab === t.key ? 'bg-surface-card' : 'bg-surface-card'}`}>
-                {counts[t.key]}
-              </span>
-            </button>
-          ))}
-        </div>
-        <p className="mt-2 text-xs text-muted">{TABS.find((t) => t.key === tab)?.hint}</p>
-      </div>
-
-      <section className="overflow-x-auto card">
-        {/* OPS-40 — 칸을 짜부라뜨리지 않는다. `w-full`만 두면 「비활성」이 세로로 쪼개진다 */}
-        <table className="w-max min-w-full text-sm">
-          <thead>
-            <tr className="border-b border-hairline text-left text-xs text-muted">
-              <th className="px-4 py-2 font-medium whitespace-nowrap">부서</th>
-              <th className="px-4 py-2 font-medium whitespace-nowrap">별칭</th>
-              <th className="px-4 py-2 font-medium whitespace-nowrap">인원</th>
-              <th className="px-4 py-2 font-medium whitespace-nowrap">양식</th>
-              <th className="px-4 py-2 font-medium whitespace-nowrap">마감</th>
-              <th className="px-4 py-2 font-medium whitespace-nowrap">업무일지</th>
-              <th className="px-4 py-2 font-medium whitespace-nowrap">활성</th>
-              <th className="px-4 py-2 font-medium whitespace-nowrap">인원 관리</th>
-            </tr>
-          </thead>
-          <tbody>
-            {shown.map((d) => (
-              <tr key={d.id} className={`border-b border-hairline-soft last:border-0 ${d.isActive ? '' : 'text-muted-soft'}`}>
-                <td className="px-4 py-2">
-                  <span className="font-medium">{d.nameKo}</span>
-                  {d.boardNote && (
-                    <p className="mt-0.5 max-w-md text-[11px] leading-4 text-muted-soft">{d.boardNote}</p>
-                  )}
-                </td>
-                <td className="whitespace-nowrap px-4 py-2 font-mono text-xs">/{d.shortSlug ?? '—'}</td>
-                <td className="px-4 py-2 tabular-nums">{d.memberCount}</td>
-                <td className="px-4 py-2">
-                  {/*
-                    OPS-41 — 세 상태를 구분한다. 예전에는 등록 기록만 보고 「✓」를 찍어서,
-                    파일이 없는 부서도 켤 수 있어 보였다 — 켠 뒤에야 알게 된다.
-                  */}
-                  {d.templateState === 'missing' ? (
-                    <span
-                      title="등록 기록은 있는데 파일이 저장소에 없습니다 — 부서 설정에서 다시 올려주세요"
-                      className="whitespace-nowrap rounded bg-warning-soft px-1.5 py-0.5 text-[11px] font-medium text-body-strong"
-                    >
-                      파일 없음
-                    </span>
-                  ) : d.hasTemplate ? (
-                    <span className="text-success">✓</span>
-                  ) : (
-                    <span className="text-error">없음</span>
-                  )}
-                </td>
-                <td className="whitespace-nowrap px-4 py-2">
-                  <select
-                    aria-label={`${d.nameKo} 마감 요일`}
-                    value={d.deadlineDow}
-                    disabled={busy}
-                    onChange={(e) => patchDivision(d.id, { deadlineDow: Number(e.target.value) })}
-                    className="rounded border border-hairline px-1 py-0.5 text-xs"
-                  >
-                    {[1, 2, 3, 4, 5, 6, 7].map((n) => (
-                      <option key={n} value={n}>
-                        {DOW[n]}
-                      </option>
-                    ))}
-                  </select>{' '}
-                  <input
-                    aria-label={`${d.nameKo} 마감 시각`}
-                    type="time"
-                    defaultValue={d.deadlineTime}
-                    disabled={busy}
-                    onBlur={(e) =>
-                      e.target.value !== d.deadlineTime && patchDivision(d.id, { deadlineTime: e.target.value })
-                    }
-                    className="rounded border border-hairline px-1 py-0.5 text-xs"
-                  />
-                </td>
-                <td className="px-4 py-2">
-                  {/* 집계 대상 — 조사(R-002)가 초기값이지만 현실이 바뀌면 운영자가 고친다.
-                      코드에만 있으면 부서가 새로 시작해도 손댈 방법이 없다 */}
-                  <select
-                    aria-label={`${d.nameKo} 업무일지 제출 여부`}
-                    value={d.boardStatus}
-                    disabled={busy}
-                    onChange={(e) => patchDivision(d.id, { boardStatus: e.target.value })}
-                    className="rounded border border-hairline px-1 py-0.5 text-xs"
-                  >
-                    <option value="confirmed">제출함 (집계)</option>
-                    <option value="none">안 냄</option>
-                  </select>
-                </td>
-                <td className="px-4 py-2">
-                  <button
-                    disabled={busy}
-                    onClick={() => patchDivision(d.id, { isActive: !d.isActive })}
-                    className={`rounded px-2 py-0.5 text-xs font-medium whitespace-nowrap ${
-                      d.isActive ? 'bg-green-100 text-ink' : 'bg-surface-card text-muted hover:bg-surface-strong'
-                    }`}
-                  >
-                    {d.isActive ? '활성' : '비활성'}
-                  </button>
-                </td>
-                <td className="px-4 py-2">
-                  <button
-                    onClick={() => openRoster(d.id)}
-                    className="rounded border border-hairline px-2 py-0.5 text-xs whitespace-nowrap text-body hover:bg-surface-soft"
-                  >
-                    열기
-                  </button>
-                </td>
-              </tr>
+      <section className="card card-flush" aria-labelledby="divisions">
+        <div className="px-5 pt-5 sm:px-6">
+          <h2 id="divisions" className="card-title">
+            부서
+          </h2>
+          {/* 탭 — 취합게시판 제출 이력 기준. 페이지 탭은 잉크 밑줄 (CP-100) */}
+          <div className="mt-3 flex gap-5 border-b border-hairline-soft" role="tablist">
+            {TABS.map((t) => (
+              <button
+                key={t.key}
+                role="tab"
+                aria-selected={tab === t.key}
+                onClick={() => setTab(t.key)}
+                className={`tab-line ${tab === t.key ? 'tab-line-active' : ''}`}
+              >
+                {t.label}
+                <span className="chip chip-muted px-2 py-0 text-xs">{counts[t.key]}</span>
+              </button>
             ))}
-            {shown.length === 0 && (
+          </div>
+          <p className="py-3 text-sm text-muted">{TABS.find((t) => t.key === tab)?.hint}</p>
+        </div>
+
+        <div className="overflow-x-auto">
+          {/* OPS-40 — 칸을 짜부라뜨리지 않는다. `w-full`만 두면 「비활성」이 세로로 쪼개진다 */}
+          <table className="table w-max min-w-full">
+            <thead>
               <tr>
-                <td colSpan={7} className="px-4 py-6 text-center text-sm text-muted-soft">
-                  이 분류에 해당하는 부서가 없습니다.
-                </td>
+                <th>부서</th>
+                <th>별칭</th>
+                <th>인원</th>
+                <th>양식</th>
+                <th>마감</th>
+                <th>업무일지</th>
+                <th>상태</th>
+                <th className="text-right">편집 · 인원</th>
               </tr>
-            )}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {shown.map((d) => {
+                const editing = editingId === d.id;
+                return (
+                  <tr key={d.id} className={editing ? 'bg-surface-soft' : ''}>
+                    <td className="py-2">
+                      <span className={`font-medium ${d.isActive ? 'text-ink' : 'text-muted'}`}>{d.nameKo}</span>
+                      {d.boardNote && <p className="mt-0.5 max-w-md text-xs leading-4 text-muted">{d.boardNote}</p>}
+                    </td>
+                    <td className="font-mono text-xs whitespace-nowrap text-muted">/{d.shortSlug ?? '—'}</td>
+                    <td className="tabular-nums">{d.memberCount}</td>
+                    <td>
+                      {/*
+                        OPS-41 — 세 상태를 구분한다. 예전에는 등록 기록만 보고 「✓」를 찍어서,
+                        파일이 없는 부서도 켤 수 있어 보였다 — 켠 뒤에야 알게 된다.
+                      */}
+                      {d.templateState === 'missing' ? (
+                        <span
+                          title="등록 기록은 있는데 파일이 저장소에 없습니다 — 부서 설정에서 다시 올려주세요"
+                          className="chip chip-warn text-xs"
+                        >
+                          파일 없음
+                        </span>
+                      ) : d.hasTemplate ? (
+                        <span className="chip chip-ok text-xs">있음</span>
+                      ) : (
+                        <span className="chip chip-error text-xs">없음</span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap">
+                      {editing ? (
+                        <>
+                          <select
+                            aria-label={`${d.nameKo} 마감 요일`}
+                            value={d.deadlineDow}
+                            disabled={busy}
+                            onChange={(e) => patchDivision(d.id, { deadlineDow: Number(e.target.value) })}
+                            className="select h-8 px-2"
+                          >
+                            {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+                              <option key={n} value={n}>
+                                {DOW[n]}
+                              </option>
+                            ))}
+                          </select>{' '}
+                          <input
+                            aria-label={`${d.nameKo} 마감 시각`}
+                            type="time"
+                            defaultValue={d.deadlineTime}
+                            disabled={busy}
+                            onBlur={(e) =>
+                              e.target.value !== d.deadlineTime && patchDivision(d.id, { deadlineTime: e.target.value })
+                            }
+                            className="select h-8 px-2"
+                          />
+                        </>
+                      ) : (
+                        <span className="text-body">
+                          {DOW[d.deadlineDow]} {d.deadlineTime}
+                        </span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap">
+                      {/* 집계 대상 — 조사(R-002)가 초기값이지만 현실이 바뀌면 운영자가 고친다.
+                          코드에만 있으면 부서가 새로 시작해도 손댈 방법이 없다 */}
+                      {editing ? (
+                        <select
+                          aria-label={`${d.nameKo} 업무일지 제출 여부`}
+                          value={d.boardStatus}
+                          disabled={busy}
+                          onChange={(e) => patchDivision(d.id, { boardStatus: e.target.value })}
+                          className="select h-8 px-2"
+                        >
+                          <option value="confirmed">제출함 (집계)</option>
+                          <option value="none">안 냄</option>
+                        </select>
+                      ) : (
+                        <span className="text-body">{d.boardStatus === 'confirmed' ? '제출함 (집계)' : '안 냄'}</span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap">
+                      {editing ? (
+                        <button
+                          disabled={busy}
+                          onClick={() => patchDivision(d.id, { isActive: !d.isActive })}
+                          aria-pressed={d.isActive}
+                          className="btn-secondary h-8 px-3 text-sm"
+                        >
+                          {d.isActive ? '활성 · 끄기' : '비활성 · 켜기'}
+                        </button>
+                      ) : (
+                        <span className={`chip text-xs ${d.isActive ? 'chip-ok' : 'chip-muted'}`}>
+                          {d.isActive ? '활성' : '비활성'}
+                        </span>
+                      )}
+                    </td>
+                    <td className="py-0 text-right whitespace-nowrap">
+                      <button onClick={() => setEditingId(editing ? null : d.id)} className="btn-ghost">
+                        {editing ? '완료' : '편집'}
+                      </button>
+                      <button onClick={() => openRoster(d.id)} className="btn-ghost">
+                        열기
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+              {shown.length === 0 && (
+                <tr>
+                  <td colSpan={8} className="py-6 text-center text-sm text-muted">
+                    이 분류에 해당하는 부서가 없습니다.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
 
       {/* 스크롤 없이 바로 보이도록 드로어로 (기존엔 표 아래에 펼쳐져 스크롤이 필요했다) */}

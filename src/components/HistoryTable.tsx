@@ -33,18 +33,12 @@ export function HistoryTable({
   /** 열기·받기 — 표와 카드가 같은 것을 쓴다 (두 벌이면 갈라진다) */
   const actions = (r: HistoryRow) =>
     r.submissionId && (
-      <span className="inline-flex gap-1.5">
-        <button
-          onClick={() => setOpenId(r.submissionId)}
-          className="rounded border border-hairline px-2.5 py-1 text-xs font-medium text-ink hover:bg-surface-soft"
-        >
+      <span className="inline-flex gap-0.5">
+        <button onClick={() => setOpenId(r.submissionId)} className="btn-ghost">
           열기
         </button>
-        <a
-          href={`/api/submissions/${r.submissionId}/download`}
-          className="rounded border border-hairline px-2.5 py-1 text-xs font-medium text-body hover:bg-surface-soft"
-        >
-          ↓ 받기
+        <a href={`/api/submissions/${r.submissionId}/download`} className="btn-ghost">
+          받기
         </a>
       </span>
     );
@@ -57,25 +51,21 @@ export function HistoryTable({
         390px에서 머리글이 「버\n전」「제출\n시각」처럼 세로로 쪼개져 읽을 수 없었다 (실측).
         가로 스크롤로 바꿔도 버튼이 화면 밖에 있어 불편하다. 그래서 좁은 화면은 카드로 쌓는다.
       */}
-      <ul className="mt-4 space-y-2 sm:hidden">
+      <ul className="card card-flush mt-6 divide-y divide-hairline-soft sm:hidden">
         {rows.map((r) => (
-          <li
-            key={r.slotId}
-            className={`card flex items-center justify-between gap-3 px-4 py-3 ${!r.submissionId ? 'bg-surface-soft/60' : ''}`}
-          >
+          <li key={r.slotId} className="flex items-center justify-between gap-3 px-4 py-2.5">
             <div className="min-w-0">
               <p className="font-medium text-ink">
                 {r.label}
-                {r.monthly && (
-                  <span className="ml-2 rounded-full bg-brand-soft px-2 py-0.5 text-[11px] font-semibold text-brand">
-                    월간
-                  </span>
-                )}
+                {r.monthly && <span className="chip chip-ok ml-2 px-2 text-xs">월간</span>}
               </p>
               <p className="mt-0.5 text-xs">
                 {r.submissionId ? (
                   <>
-                    <span className="text-success">● 제출</span>
+                    <span className="inline-flex items-center gap-1.5 text-success">
+                      <span aria-hidden className="dot" />
+                      제출
+                    </span>
                     <span className="ml-1.5 tabular-nums text-muted">
                       {r.uploadedAtKst}
                       {r.version ? ` · v${r.version}` : ''}
@@ -87,7 +77,7 @@ export function HistoryTable({
                     )}
                   </>
                 ) : (
-                  <span className="text-muted-soft">미제출</span>
+                  <span className="text-muted">미제출</span>
                 )}
               </p>
             </div>
@@ -96,39 +86,38 @@ export function HistoryTable({
         ))}
       </ul>
 
-      <div className="card mt-4 hidden overflow-x-auto sm:block">
-        <table className="w-full text-sm whitespace-nowrap">
+      <div className="card card-flush mt-6 hidden overflow-x-auto sm:block">
+        <table className="table whitespace-nowrap">
           <thead>
-            <tr className="border-b border-hairline text-left text-xs text-muted">
-              <th className="px-4 py-2.5 font-medium">주차</th>
-              <th className="px-4 py-2.5 font-medium">상태</th>
-              <th className="px-4 py-2.5 font-medium">버전</th>
-              <th className="px-4 py-2.5 font-medium">제출시각</th>
-              <th className="px-4 py-2.5 text-right font-medium">열람 · 받기</th>
+            <tr>
+              <th>주차</th>
+              <th>상태</th>
+              <th>버전</th>
+              <th>제출시각</th>
+              <th className="text-right">열람 · 받기</th>
             </tr>
           </thead>
           <tbody>
             {rows.map((r) => (
-              <tr
-                key={r.slotId}
-                className={`border-b border-hairline-soft last:border-0 ${!r.submissionId ? 'bg-surface-soft/60' : ''}`}
-              >
-                <td className="px-4 py-2.5 font-medium text-ink">
+              <tr key={r.slotId}>
+                <td className="font-medium text-ink">
                   {r.label}
-                  {r.monthly && (
-                    <span className="ml-2 rounded-full bg-brand-soft px-2 py-0.5 text-[11px] font-semibold text-brand">
-                      월간
+                  {r.monthly && <span className="chip chip-ok ml-2 px-2 text-xs">월간</span>}
+                </td>
+                <td>
+                  {r.submissionId ? (
+                    <span className="inline-flex items-center gap-1.5 text-success">
+                      <span aria-hidden className="dot" />
+                      제출
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1.5 text-muted">
+                      <span aria-hidden className="dot dot-hollow text-border-strong" />
+                      미제출
                     </span>
                   )}
                 </td>
-                <td className="px-4 py-2.5">
-                  {r.submissionId ? (
-                    <span className="text-success">● 제출</span>
-                  ) : (
-                    <span className="text-muted-soft">미제출</span>
-                  )}
-                </td>
-                <td className="px-4 py-2.5 tabular-nums text-body">
+                <td className="text-body">
                   {r.version ? `v${r.version}` : '—'}
                   {r.editedBy && (
                     <span className="ml-1.5 text-xs text-warning">
@@ -136,8 +125,8 @@ export function HistoryTable({
                     </span>
                   )}
                 </td>
-                <td className="px-4 py-2.5 tabular-nums text-body">{r.uploadedAtKst ?? '—'}</td>
-                <td className="px-4 py-2.5 text-right">{actions(r)}</td>
+                <td className="text-body">{r.uploadedAtKst ?? '—'}</td>
+                <td className="py-0 text-right">{actions(r)}</td>
               </tr>
             ))}
           </tbody>

@@ -129,6 +129,7 @@ services:
 | `CF_ACCESS_AUD` | `a1b2…` | ✔ | Access 앱 AUD ([Q-04](../../OPEN-QUESTIONS.md)) |
 | `TZ` | `Asia/Seoul` | ✔ | |
 | `MAX_UPLOAD_BYTES` | `20971520` | | 기본 20MB |
+| `SUBMIT_HWP_UPLOAD` | `off` | | 기본 `on`. `off`면 hwp 업로드 제출을 닫고 웹 작성만 받는다 — 테스트 서버만 `off` (WA-30 · [ADR-0014](../adr/0014-web-only-submission.md)) |
 | `DEV_IDENTITY` | `me@kei.re.kr` | | **개발 전용** (AU-03) |
 
 ### OPS-06 — 기동 시 환경변수 검증

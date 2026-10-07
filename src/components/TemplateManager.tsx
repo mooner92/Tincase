@@ -46,22 +46,20 @@ export function TemplateManager({
             <span className="ml-2 text-muted-soft">{current.uploadedAtKst} 등록</span>
           </p>
         ) : (
-          <p className="text-sm text-error">등록된 양식이 없습니다 — 등록 전까지 부서원 업로드가 막힙니다.</p>
+          <p className="text-sm text-error">등록된 양식이 없습니다 — 등록 전까지 부서원이 제출할 수 없습니다.</p>
         )}
-        <div className="flex gap-2">
+        <div className="flex items-center gap-2">
           {current && (
             /* eslint-disable-next-line @next/next/no-html-link-for-pages -- 파일 다운로드, 내비게이션 아님 */
-            <a
-              href="/api/template"
-              className="rounded border border-hairline px-3 py-1.5 text-xs font-medium text-body hover:bg-surface-soft"
-            >
+            <a href="/api/template" className="btn-ghost">
               현재 양식 받기
             </a>
           )}
           <button
             onClick={() => inputRef.current?.click()}
             disabled={st.kind === 'uploading'}
-            className="rounded bg-ink px-3 py-1.5 text-xs font-medium text-white hover:bg-ink-active disabled:opacity-50"
+            // 양식이 없으면 등록이 이 카드의 할 일이다 — 주 버튼. 있으면 교체는 가끔 하는 일이라 보조 버튼 (CP-99)
+            className={current ? 'btn-secondary btn-sm' : 'btn-primary btn-sm'}
           >
             {st.kind === 'uploading' ? '등록 중…' : current ? '양식 교체' : '양식 등록'}
           </button>
@@ -97,14 +95,14 @@ export function TemplateManager({
       </p>
       <div aria-live="polite">
         {st.kind === 'done' && (
-          <div className="rounded-xl bg-brand-soft px-4 py-3 text-sm text-ink">
-            ✓ v{st.version} 등록 완료 · 표 {st.summary.length}개 (
+          <div className="callout mt-1 bg-success-soft text-ink">
+            v{st.version} 등록 완료 · 표 {st.summary.length}개 (
             {st.summary.map((t) => `${t.rows}행`).join(' · ')}) 파싱 확인 {/* CP-83 */}
             {st.warnings.length > 0 && <p className="mt-1 text-xs text-body-strong">{st.warnings.join(' · ')}</p>}
           </div>
         )}
         {st.kind === 'error' && (
-          <p className="rounded-xl bg-error/10 px-4 py-3 text-sm text-error">
+          <p className="callout callout-error">
             {st.message} {/* CP-84 — 기존 양식 유지는 서버 메시지에 포함 */}
           </p>
         )}
