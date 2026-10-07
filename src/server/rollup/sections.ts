@@ -16,7 +16,9 @@ import { currentReport } from './report';
 import { loadTree, type OrgTree } from './tree';
 
 /**
- * 9월 4주차 최종본의 실제 순서(분석 §6.1) + 제목 통일안(§6.3 — AI홍보전략실·경영지원실에도 `기획경영본부(…)`).
+ * 9월 4주차 최종본의 실제 순서(분석 §6.1) + 제목 통일안(§6.3 — AI홍보전략실에도 `기획경영본부(…)`).
+ * 경영지원실만 접두 없이 `경영지원실`이다(RU-61) — 실제 최종본이 그렇게 쓴다(2026-10-07 실측). 통일안대로 붙이면
+ * 총괄이 매주 받는 최종본과 제목이 갈라진다. 이미 만들어진 섹션 목록은 바뀌지 않는다 — 처음 만들 때의 기본값일 뿐이다.
  * 부서 이름은 공개 조직도에 있는 이름이다 (사람 이름 아님).
  */
 export const DEFAULT_SECTIONS: { title: string; division: string; kind: string }[] = [
@@ -26,7 +28,7 @@ export const DEFAULT_SECTIONS: { title: string; division: string; kind: string }
   { title: '기획경영본부(연구관리실)', division: '연구관리실', kind: 'unit' },
   { title: '기획경영본부(AI홍보전략실)', division: 'AI홍보전략실', kind: 'unit' },
   { title: '기획경영본부(인사관리실)', division: '인사관리실', kind: 'unit' },
-  { title: '기획경영본부(경영지원실)', division: '경영지원실', kind: 'unit' },
+  { title: '경영지원실', division: '경영지원실', kind: 'unit' },
   { title: '기후대기전략연구본부', division: '기후대기전략연구본부', kind: 'hq' },
   { title: '생활환경연구본부', division: '생활환경연구본부', kind: 'hq' },
   { title: '국토환경연구본부', division: '국토환경연구본부', kind: 'hq' },

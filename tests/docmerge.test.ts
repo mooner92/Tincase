@@ -10,8 +10,10 @@ import { readFileSync } from 'node:fs';
 import { openHwp } from '@/lib/hwp/ole';
 import { parseRecords, paraText, TAG, type HwpRecord } from '@/lib/hwp/record';
 import { DocInfoMerger, remapBody, checkReferences } from '@/lib/hwp/docmerge';
-import { composeOrgDocument, extractSectionBody } from '@/lib/hwp/orgdoc';
+import { composeOrgDocument, extractSectionBody, stripLeadingControls } from '@/lib/hwp/orgdoc';
 import { readWorklog } from '@/lib/hwp/reader';
+import { charShapeColors } from '@/lib/hwp/charshape';
+import { editSection, packHwp, setParagraphText, topParagraphs } from '@/lib/hwp/writer';
 
 const load = (f: string) => readFileSync(`fixtures/${f}`);
 const hasFix = (() => {
@@ -176,6 +178,27 @@ describe('RU-63·64 정규화·검증', () => {
     const recs = parseRecords(f.sections[0]);
     expect(checkReferences(parseRecords(f.docInfo), recs)).toEqual([]);
     expect(headerMismatches(recs)).toEqual([]);
+  });
+
+  t('[RU-T69] 본문 앞의 빨간 「※ … 작성 必」은 뺀 것에 「안내문」으로 적는다 — 섹션 제목과 구별 (RU-63 R7)', async () => {
+    const src = await merged('인사관리실', ['채용 공고']);
+    const f = openHwp(src);
+    const red = charShapeColors(parseRecords(f.docInfo)).indexOf(0x0000ff); // 양식의 빨간 안내문 글자 모양
+    expect(red).toBeGreaterThanOrEqual(0);
+    // 제목 문단 바로 뒤에 같은 꼴의 문단 — 구역 정의는 걷고, 글자 전체를 빨강 한 구간으로
+    const sec = editSection(f.sections[0], (recs) => {
+      const [title] = topParagraphs(recs);
+      const note = stripLeadingControls(recs.slice(title.start, title.end));
+      setParagraphText(note, { start: 0, end: note.length }, '※ 1페이지 이내로 작성 必');
+      const cs = note.findIndex((r) => r.tag === TAG.PARA_CHAR_SHAPE && r.level === 1);
+      const run = Buffer.alloc(8);
+      run.writeUInt32LE(red, 4);
+      note[cs] = { ...note[cs], data: run };
+      note[0].data.writeUInt16LE(1, 12);
+      recs.splice(title.end, 0, ...note);
+    });
+    const { dropped } = extractSectionBody(packHwp(src, [sec]));
+    expect(dropped).toEqual(['제목 「인사관리실」', '안내문 「※ 1페이지 이내로 작성 必」']);
   });
 
   t('[RU-T59] 번호가 어긋난 줄(복사해 온 「2-1」 등)을 표 머리에 맞춰 다시 매긴다 — 분석 §9.1', async () => {

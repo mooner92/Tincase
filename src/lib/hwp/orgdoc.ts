@@ -152,7 +152,9 @@ export function extractSectionBody(bytes: Buffer): { body: HwpRecord[]; docInfo:
   if (first < 0) throw new DocMergeError('본문(표)을 찾지 못했습니다');
   for (const b of blocks.slice(0, first)) {
     const t = ownText(recs, b).trim();
-    if (t) dropped.push(`제목 「${t.slice(0, 30)}」`);
+    // RU-63 R7 — 본문 앞의 빨간 「※ … 작성 必」도 여기서 빠진다. 기록에는 제목과 구별해 「안내문」으로 적는다 —
+    // 총괄이 「무엇을 뺐나」를 보고 판단하는데, 안내문을 「제목」이라 적으면 섹션 이름을 잘못 뺀 것처럼 읽힌다
+    if (t) dropped.push(`${t.startsWith('※') && allRed(recs, b, colors) ? '안내문' : '제목'} 「${t.slice(0, 30)}」`);
   }
   const body: HwpRecord[] = [];
   for (const [i, b] of blocks.slice(first).entries()) {

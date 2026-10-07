@@ -1,13 +1,18 @@
 // RU-63·64 — 옮겨 온 섹션 본문의 **정규화(자동 수정)와 검증(경고)**. 분석 §9·§10의 반복 오류를 도구가 맡는다.
 //
+// 표 종류는 **머리행 글자로** 가른다(스펙 §11a 「RU-63 정규화 규칙」 R1~R7). 열 수·칸 수만 보면 실제 최종본에서
+// 멀쩡한 표를 고쳐 버린다(2026-10-07 실측 — 자문회의 집계표의 「-」 줄 삭제, 병합 아래 항목 번호 중복).
+// **알아보지 못한 표·행은 건드리지 않는다.** 놓친 것은 경고로 남지만 잘못 고친 것은 아무도 모른 채 최종본에 들어간다.
+//
 // 자동 수정 (원본 서식은 그대로 — 칸 글자만 바꾸거나 빈 줄을 들어낸다):
-//   · 표 번호 다시 매기기 — 실형 5열은 「표번호-순번」, 본부형 6열은 항목 행 번호를 표 전체 연속(분석 Q7 기본)
-//   · 내용 없이 번호만 남은 줄 삭제 (5열 표, 병합 칸이 없을 때만)
+//   · 표 번호 다시 매기기 — 실형 5열 업무 표(R1)는 「표번호-순번」, 본부형 과제 표(R3, 6·7열)는 항목 행(R4)
+//     번호를 표 전체 연속(분석 Q7 기본)
+//   · 내용 없이 번호만 남은 줄 삭제 (업무 표, 병합 칸이 없을 때만 — 집계표는 업무 표가 아니다, R2)
 //   · 비어 버린 3번 표에 「특이사항 없음」 한 줄 (분석 Q5 기본)
-//   · 머리행 이름 통일 — 「업무 기간」→「일자」, 「업무 담당 또는 참석자」→「참석자」 (V10)
+//   · 머리행 이름 통일 — 「업무 기간」→「일자」, 「업무 담당 또는 참석자/참석 인원」→「참석자」 (V10 · R5)
 // 경고만 (사람이 확인):
 //   · 양식 잔재 — `OO/OO` · `해당 과제 실적` · `개최건수(없을 시` · `OOO 실` (V3)
-//   · 일자 표기 — `M/D` · `M/D~M/D` · `M/D~D` · `~M/D` · `M/D(요일)` · 쉼표 나열 밖의 것 (V8)
+//   · 일자 표기 — `M/D` · `M/D~M/D` · `M/D~D` · `~M/D` · `M/D(요일)` · 쉼표 나열 밖의 것 (V8). 뒤에 붙은 시각은 뗀다(R6)
 import { HwpRecord, paraText, TAG } from './record';
 import { locateTables, setCellText, type TableSpan } from './writer';
 import { titleBucket } from './rollup';
@@ -47,6 +52,13 @@ function tablePrefixes(recs: readonly HwpRecord[]): Map<number, number> {
 }
 
 const NUM = /^\s*\d+\s*-\s*\d+\s*$/;
+/** R6 — 일자 뒤의 시각(「10/1 14:00」 「10/1(수)14:00~16:00」). 시각을 적는 것은 정상이라 떼고 일자만 본다 */
+const TIME = /(?:\s+|(?<=\)))\d{1,2}:\d{2}(?:\s*~\s*\d{1,2}:\d{2})?/g;
+/** R5 — 머리행 이름 통일. 빈칸·줄바꿈을 지운 글자로 비교한다(「업무 담당 또는⏎참석 인원」처럼 한 문단 안에서 줄이 갈린다) */
+const HEADER_UNIFY: [RegExp, string][] = [
+  [/^업무기간$/, '일자'],
+  [/^업무담당또는참석(자|인원)$/, '참석자'],
+];
 const RESIDUE = [/O{2,}\s*\/\s*O{2,}/i, /해당\s*과제\s*실적/, /개최\s*건수\s*\(\s*없을\s*시/, /O{3}\s*실/];
 const DATE_OK = /^(\d{1,2}\/\d{1,2}(\([월화수목금토일]\))?(\s*~\s*(\d{1,2}\/)?\d{1,2}(\([월화수목금토일]\))?)?|~\s*\d{1,2}\/\d{1,2})(\s*,\s*\d{1,2}\/\d{1,2}(\([월화수목금토일]\))?)*$/;
 
@@ -108,14 +120,25 @@ export function normalizeSectionBody(recs: HwpRecord[]): NormalizeReport {
     const prefixes = tablePrefixes(recs);
     const prefix = prefixes.get(t.tableIdx);
     const header = t.cells.filter((c) => c.row === 0).map((c) => cellText(recs, c));
-    const isFive = t.cols === 5 && header[0]?.replace(/\s/g, '') === '구분';
-    const isSix = t.cols === 6;
+    const h = header.map((x) => x.replace(/\s/g, ''));
+    // R1 업무 표만 — 3열이 일자 칸(「일자」·「업무 기간」)인 것. R2: 본부·센터의 「※ 자문회의 실적」 표(구분|자문회의|
+    // 전문가 세미나…)도 5열에 「구분」으로 시작하지만 집계표다 — 실마다 「-」뿐인 줄이 정상이라 지우면 그 실이 표에서
+    // 사라지고, 「1건」 같은 칸이 일자 경고로 뜬다 (2026-10-07 실측)
+    const isFive = t.cols === 5 && h[0] === '구분' && /일자|기간/.test(h[2] ?? '');
+    // R3 본부형 과제 표 — 머리행 「구분|유형|과제명|책임자」. 실제로는 6열과 7열(일자 칸 두 칸 병합)이 섞여 있다.
+    // 열 수만 보면 7열은 놓치고, 머리행이 다른 6열 표까지 번호 칸으로 알고 고친다
+    const isSix = t.cols >= 6 && h[0] === '구분' && h[1] === '유형';
 
     if (isFive) {
-      // 머리행 이름 통일 (V10)
+      // 머리행 이름 통일 (V10 · R5)
       for (const c of t.cells.filter((x) => x.row === 0)) {
-        const v = cellText(recs, c).replace(/\s+/g, ' ');
-        const want = v === '업무 기간' ? '일자' : v === '업무 담당 또는 참석자' ? '참석자' : null;
+        // 글자 든 문단이 둘 이상인 칸(Enter로 「업무 담당 또는」⏎「참석 인원」)은 건드리지 않는다 — setCellText는 첫 문단만
+        // 바꾸므로 「참석자⏎참석 인원」 「일자⏎기간」이 된다. 한 문단 안의 줄바꿈(Shift+Enter)은 한 글자라 괜찮다 (R5)
+        let texts = 0;
+        for (let k = c.start; k < c.end; k++) if (recs[k].tag === TAG.PARA_TEXT) texts++;
+        if (texts > 1) continue;
+        const v = cellText(recs, c).replace(/\s/g, '');
+        const want = HEADER_UNIFY.find(([re]) => re.test(v))?.[1] ?? null;
         if (want) {
           setCellText(recs, c, want);
           headers++;
@@ -172,22 +195,29 @@ export function normalizeSectionBody(recs: HwpRecord[]): NormalizeReport {
       }
       // 일자 표기 (경고만)
       for (const c of t.cells.filter((x) => x.row >= 1 && x.col === 2)) {
-        const v = cellText(recs, c).replace(/\n/g, ' ').trim();
+        // R6 — 시각(「10/1 14:00」)은 일자 뒤에 붙어도 된다. 떼고 일자만 본다 (실측: 시각을 적은 칸이 경고로 떴다)
+        const v = cellText(recs, c).replace(/\n/g, ' ').replace(TIME, '').trim();
         // 양식 자리표시(`OO/OO`)는 잔재 경고가 이미 말한다 — 두 번 세지 않는다
         if (v && v !== '-' && !DATE_OK.test(v) && !RESIDUE.some((re) => re.test(v))) dates.add(v);
       }
     } else if (isSix && prefix && prefix <= 2) {
-      // 본부형 6열 — 항목 행(6칸)의 번호 칸(1열)만, 표 전체 연속으로 (분석 Q7 기본). 과제 행(병합 4칸)은 손대지 않는다
+      // R3·R4 본부형 과제 표 — 항목 행의 번호 칸(1열)만, 표 전체 연속으로 (분석 Q7 기본). 과제 행은 손대지 않는다
       let n = 0;
       const rows = [...new Set(t.cells.map((c) => c.row))].filter((r) => r >= 1).sort((a, b) => a - b);
       const targets: { cell: Cell; text: string }[] = [];
       for (const r of rows) {
         const cells = t.cells.filter((c) => c.row === r);
-        if (cells.length !== 6) continue; // 과제 행·머리행
+        // R4 항목 행 = 2열(번호 칸)이 「1-3」 꼴인 줄. 칸 수로 가르면 안 된다 — 「구분」(실 이름)이 여러 줄 병합되면
+        // 그 아래 항목 행은 5칸·3칸이 되어, 예전 판정(6칸만 항목)은 그 줄들을 건너뛰고 뒤쪽만 1부터 다시 매겨
+        // 멀쩡한 1-1…1-5를 중복 번호로 바꿨다 (2026-10-07 실측). 2열이 유형(기본·수탁…)이면 과제 행이다.
+        // 번호가 빈 줄은 3열(과제명·항목명)이 책임자 칸 바로 앞까지 병합되지 않았을 때만 항목 행으로 본다 —
+        // 과제 행과 구별되지 않는 줄은 건드리지 않는다
         const no = cells.find((c) => c.col === 1);
         if (!no) continue;
         const cur = cellText(recs, no);
-        if (!cur || NUM.test(cur)) targets.push({ cell: no, text: `${prefix}-${++n}` });
+        const name = cells.find((c) => c.col === 2);
+        const blankItem = !cur && !!name && name.col + spanOf(recs, name).col < t.cols - 1;
+        if (NUM.test(cur) || blankItem) targets.push({ cell: no, text: `${prefix}-${++n}` });
       }
       for (const x of targets.reverse()) {
         if (cellText(recs, x.cell) !== x.text) {
