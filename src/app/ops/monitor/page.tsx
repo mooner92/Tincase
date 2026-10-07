@@ -1,7 +1,9 @@
 // `/ops/monitor` — 전사 제출 현황. 운영자·총괄 전용 (TACP §3.2 readAll).
 //
 // PG-50 (2026-10-07) — 본판은 **본부별 팀 막대**다. 원형 조직도는 예쁘지만 「어느 팀이 몇 명 남았나」가
-// 안 읽혔다. 원형은 구석의 [조직도 그래프 ↗]로 새 탭에서 연다. 연속 미제출은 뺐다(2026-10-07 — 쓸 일이 없다).
+// 안 읽혔다. 연속 미제출은 뺐다(2026-10-07 — 쓸 일이 없다).
+// 새 탭으로 열던 원형 조직도 그래프(/ops/monitor/graph)도 걷어 냈다(2026-10-07 — 겹치는 기능 정리, PG-50e).
+// 같은 숫자를 다른 그림으로 한 번 더 보여 줄 뿐이었고, 화면이 둘이면 숫자가 갈라질 자리도 둘이 된다.
 import { redirect, notFound } from 'next/navigation';
 import { getPageScope } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
@@ -63,10 +65,6 @@ export default async function MonitorPage() {
               CSV
             </a>
           </div>
-          {/* PG-50 — 원형 조직도는 구석에서 새 탭으로 */}
-          <a href="/ops/monitor/graph" target="_blank" rel="noopener" className="text-sm text-muted underline hover:text-ink">
-            조직도 그래프 ↗
-          </a>
         </div>
 
         {/* WS-19 · TACP-20 — 주차 마감은 총괄이 정한다. 바꿀 수 있는 사람에게만 그린다 (TACP-9) */}

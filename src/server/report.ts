@@ -54,7 +54,11 @@ export function reportCsv(layout: OrgLayout, meta: ReportMeta): string {
   return '﻿' + header + rows.join('\n') + '\n';
 }
 
-/** 조직도를 정적 SVG로. 화면 컴포넌트와 달리 애니메이션·상호작용이 없다 (인쇄물이므로) */
+/**
+ * 조직도를 정적 SVG로. 인쇄물이므로 애니메이션·상호작용이 없다.
+ * 같은 그림을 화면에 띄우던 조직도 그래프는 걷어 냈다(2026-10-07, PG-50e) — 원형 그림은 이제 여기에만 있다.
+ * 화면은 본판(팀 막대)이 맡고, 이 문서는 「그 시점 전원의 제출 사실」을 한 장에 고정하는 일을 맡는다.
+ */
 function orgSvg(layout: OrgLayout): string {
   const S = 1000;
   const parts: string[] = [];

@@ -204,10 +204,11 @@ export function OpsClient() {
         <div aria-live="polite" className="h-5 text-sm text-ink">
           {msg}
         </div>
-        {/* 모니터로 가는 길 — 없으면 만들어도 아무도 못 간다 */}
+        {/* 모니터로 가는 길 — 없으면 만들어도 아무도 못 간다.
+            「조직도」는 뺐다 — 전사 현황은 본부별 팀 막대이고, 원형 조직도 그래프는 걷어 냈다(2026-10-07, PG-50e) */}
         <div className="flex shrink-0 gap-2">
           <Link href="/ops/monitor" className="btn-secondary btn-sm">
-            전사 제출 현황 조직도
+            전사 제출 현황
           </Link>
           <Link href="/ops/audit" className="btn-secondary btn-sm">
             감사 로그
