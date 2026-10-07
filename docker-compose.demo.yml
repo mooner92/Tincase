@@ -1,0 +1,50 @@
+# RU-45 — **시연 서버 (11113).** 11/2(월) 운영회의 강당 화면용. 사람·업무가 전부 지어낸 것인 DB만 쓴다. 절차: docs/DEMO.md
+#
+#   sudo docker compose -f docker-compose.demo.yml -p repman-demo up -d      ← -p repman-demo를 빼지 않는다
+#
+# 왜 테스트 서버(11112)를 쓰지 않나: 테스트 DB는 운영의 사본이라 **실명과 실제 제출 현황**이 들어 있다.
+# 운영(11111)은 누르면 실제 사람에게 알림이 간다. 그래서 같은 이미지로 DB·저장소·쿠키만 다른 세 번째 인스턴스를 둔다.
+#
+# 이미지 — 이미 구운 `repman:test`를 그대로 쓴다(`build:`가 없다). 루트 디스크가 거의 차 있어(2026-10 기준 여유 ~4GB)
+# 여기서 굽지 않는다. 다시 구워야 하는 때와 방법은 docs/DEMO.md 「이미지」 — 굽지 않아도 되면 굽지 않는다.
+#
+# 분리하는 것 — 컨테이너·DB·저장소(/data/worklog-demo)·세션 쿠키 이름.
+# 끄는 것     — 메신저·자동 병합 스케줄러·Cloudflare·hwp 업로드 제출(ADR-0014). 테스트 서버와 같다.
+# .env.production을 읽지 않는다 — 거기 든 메신저 설정이 딸려 오면 시연 중에 실제 알림이 나간다.
+services:
+  app-demo:
+    image: repman:test
+    container_name: repman-demo
+    restart: unless-stopped
+    ports:
+      - "0.0.0.0:11113:3000"                  # 강당 PC가 사내망으로 들어온다 — 인증은 앱의 비밀번호 로그인
+    environment:
+      NODE_ENV: production
+      TZ: Asia/Seoul
+      TINCASE_ENV: demo                       # RU-47 — 화면 맨 위 「시연 서버 — 사람과 업무는 모두 지어낸 것입니다」 띠
+      DATABASE_URL: file:/data/db/worklog.db
+      STORAGE_ROOT: /data
+      # Cloudflare 경로는 **통과할 수 없게** 막는다(테스트 서버와 같은 이유) — 어떤 Cloudflare 앱에도 없는 무작위 값.
+      # 비밀이 아니다 — 맞는 토큰이 존재할 수 없다는 것이 이 값의 역할이다
+      CF_ACCESS_TEAM: tincase-demo-disabled
+      CF_ACCESS_AUD: "79afb677b899d9dda5e1518d637fff55355b5ef3d4ce02e20d10eeda60443110"
+      SESSION_COOKIE_NAME: repman_demo_session  # RU-42와 같은 이유 — 같은 호스트의 다른 포트는 쿠키를 공유한다
+      MESSENGER_URL: ""                       # 알림 끔 — 가짜 사람에게 보낼 곳도 없다
+      MESSENGER_ALLOWLIST: ""
+      MERGE_SCHEDULER: "off"                  # 병합은 버튼으로만 — 시연 중 14:01 자동 병합이 화면을 바꾸지 않게
+      SUBMIT_HWP_UPLOAD: "off"                # WA-30 · ADR-0014 — 제출은 웹 작성만(슬라이드와 같은 화면)
+      MERGE_MODEL: hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M   # 운영·테스트와 같은 모델 — 시연 전에 데워 둔다(docs/DEMO.md D-0)
+      MERGE_MODEL_URL: http://host.docker.internal:11437
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    volumes:
+      - /data/worklog-demo:/data              # 10001:mhchoi · g+rwX · setgid (scripts/demo-snapshot.sh perms)
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options: { max-size: "10m", max-file: "3" }
