@@ -16,6 +16,7 @@
 // 확인 창(confirm)은 쓰지 않는다 — 미리보기 화면 자체가 확인 단계다.
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { STAGE_HQ, STAGE_UNIT } from '@/lib/rollup-stages';
 
 export interface WeekScheduleRow {
   isoKey: string;
@@ -150,8 +151,9 @@ export function WeekSchedule({
             <span className={w.overridden ? 'font-semibold text-error' : 'text-ink'}>부서 마감 {w.deadlineKo}</span>
             {w.stages && (
               <span className="text-body">
-                <span className="text-muted">· 실·팀 제출</span> {w.stages.unitDueKo}{' '}
-                <span className="text-muted">· 본부 제출</span> {w.stages.hqDueKo}
+                {/* RU-59 — 「전사」 머리글·/hq·알림과 같은 이름 한 쌍 */}
+                <span className="text-muted">· {STAGE_UNIT}</span> {w.stages.unitDueKo}{' '}
+                <span className="text-muted">· {STAGE_HQ}</span> {w.stages.hqDueKo}
               </span>
             )}
             {w.overridden && <span className="text-xs text-muted">· {w.note}</span>}
@@ -342,7 +344,7 @@ function RollupStages({ enabled, unitDueMinutes, hqDueMinutes }: RollupScheduleS
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h3 className="text-sm font-semibold text-ink">
           3단계 취합
-          <span className="ml-2 text-xs font-normal text-muted">실·팀 → 본부 → 총괄 제출 기한 · 부서 마감에서 셉니다</span>
+          <span className="ml-2 text-xs font-normal text-muted">{STAGE_UNIT} · {STAGE_HQ} 기한 · 부서 마감에서 셉니다</span>
         </h3>
         <label className="flex items-center gap-2 text-sm">
           <input
@@ -376,12 +378,12 @@ function RollupStages({ enabled, unitDueMinutes, hqDueMinutes }: RollupScheduleS
 
       <div className="mt-3 space-y-2 text-sm">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="w-36 text-muted">실·팀 → 위로 제출</span>
+          <span className="w-36 text-muted">{STAGE_UNIT}</span>
           <select
             value={unit}
             onChange={(e) => setUnit(Number(e.target.value))}
             className="rounded-lg border border-border-strong px-2 py-1 text-sm"
-            aria-label="실·팀 제출 기한"
+            aria-label={`${STAGE_UNIT} 기한`}
           >
             {opts(unit).map((m) => (
               <option key={m} value={m}>
@@ -392,12 +394,12 @@ function RollupStages({ enabled, unitDueMinutes, hqDueMinutes }: RollupScheduleS
           <span className="text-xs text-muted">본부 담당자에게 산하 제출 현황 알림</span>
         </div>
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
-          <span className="w-36 text-muted">본부 → 총괄 제출</span>
+          <span className="w-36 text-muted">{STAGE_HQ}</span>
           <select
             value={hq}
             onChange={(e) => setHq(Number(e.target.value))}
             className="rounded-lg border border-border-strong px-2 py-1 text-sm"
-            aria-label="본부 제출 기한"
+            aria-label={`${STAGE_HQ} 기한`}
           >
             {opts(hq).map((m) => (
               <option key={m} value={m}>

@@ -523,6 +523,24 @@ export async function findReadableRollup(scope: Scope, runId: string) {
   throw notFound();
 }
 
+/**
+ * TACP-21 · RU-60 — 총괄이 올린 **섹션 파일** 내려받기 판정. 반환되면 허용된 것이고, 기록은 이미 남았다.
+ *
+ *   전사 취합의 문(`canOpenOrgDesk`)을 지나는 사람만 — 그 외 404
+ *   취소한 파일          → 404. 최종본에서 빠진 파일이 id만 알면 계속 받히면 「취소」가 화면에서만 일어난 일이 된다
+ *   받으면               → `download` 기록 (TACP-10 — 남의 부서 업무일지 본문이다. 본부본·사본 받기와 같다)
+ *
+ * 라우트가 업로드 행을 직접 조회하던 것을 여기로 옮겼다(TACP-12 — 판정 대상 조회도 판정의 일부다).
+ */
+export async function findReadableSectionUpload(scope: Scope, uploadId: string) {
+  if (!(await canOpenOrgDesk(scope))) throw notFound();
+  const u = await prisma.orgSectionUpload.findUnique({ where: { id: uploadId } });
+  if (!u || u.withdrawnAt) throw notFound();
+  const section = await prisma.orgSection.findUnique({ where: { id: u.sectionId }, select: { divisionId: true } });
+  await audit(scope.user.email, 'download', section?.divisionId ?? null, `org-section-upload:${u.id}`);
+  return u;
+}
+
 /** 메뉴에 그릴 취합 화면 — 헤더를 그리는 서버 쪽에서 한 번에 (TACP-9) */
 export async function rollupNav(scope: Scope): Promise<{ hqDesk: boolean; orgDesk: boolean }> {
   return { hqDesk: await hasHqDesk(scope), orgDesk: await canOpenOrgDesk(scope) };

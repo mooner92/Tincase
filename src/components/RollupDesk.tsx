@@ -30,7 +30,8 @@ export interface RunView {
   id: string;
   status: string;
   finishedAtKst: string | null;
-  units: { name: string; rows: { achievements: number; plans: number; notes: number }; emphasis: number }[];
+  /** fixed — RU-19: 엔진이 이미 고친 것. 「확인해 주세요」와 따로 접어 둔다 (옛 기록에는 없다) */
+  units: { name: string; rows: { achievements: number; plans: number; notes: number }; emphasis: number; fixed?: string[] }[];
   warnings: string[];
   errorText: string | null;
   stale: boolean;
@@ -260,6 +261,7 @@ export function RunCard({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [showFixed, setShowFixed] = useState(false);
   const ok = run?.status === 'succeeded';
   // 다음에 할 일이 「이어 붙이기」인가 — 그때만 이 버튼이 주 버튼이다 (CP-99)
   const runIsNext = !ok || !!run?.stale;
@@ -279,6 +281,8 @@ export function RunCard({
     }
   };
 
+  const fixedUnits = run?.units.filter((u) => u.fixed?.length) ?? [];
+  const fixedCount = fixedUnits.reduce((n, u) => n + u.fixed!.length, 0);
   const total = run?.units.reduce(
     (a, u) => ({ a: a.a + u.rows.achievements, p: a.p + u.rows.plans, n: a.n + u.rows.notes, e: a.e + u.emphasis }),
     { a: 0, p: 0, n: 0, e: 0 },
@@ -367,6 +371,32 @@ export function RunCard({
               <li key={i}>{w}</li>
             ))}
           </ul>
+        </div>
+      )}
+      {/*
+        RU-19 — 엔진이 이미 고친 것은 주황 상자에 넣지 않는다. 할 일이 없는 줄이 [승인] 바로 위에서 경고처럼 뜨면
+        「무엇을 확인하라는 거지?」로 멈춘다(2026-10-08). 전사 카드처럼 중립 글자로 접어 두고, 궁금하면 펼친다
+      */}
+      {ok && fixedUnits.length > 0 && (
+        <div className="mt-3 text-sm">
+          <button onClick={() => setShowFixed((v) => !v)} aria-expanded={showFixed} className="flex items-center gap-2 text-muted hover:text-ink hover:underline">
+            <span
+              aria-hidden
+              className={`relative -top-px inline-block h-1.5 w-1.5 border-r-[1.5px] border-b-[1.5px] border-current transition-transform ${
+                showFixed ? 'rotate-45' : '-rotate-45'
+              }`}
+            />
+            자동으로 고친 것 {fixedCount}건
+          </button>
+          {showFixed && (
+            <ul className="mt-2 space-y-1 pl-4 text-xs text-muted">
+              {fixedUnits.map((u, i) => (
+                <li key={`${u.name}-${i}`}>
+                  <span className="text-body">{u.name}</span> — {u.fixed!.join(' · ')}
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
       )}
       {err && <p className="callout callout-error mt-4">{err}</p>}

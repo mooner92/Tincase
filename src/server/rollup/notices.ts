@@ -14,6 +14,7 @@ import { readStoredFile, sha256 } from '../storage';
 import { ensureCurrentSlot } from '../worklog';
 import { weekAnchor } from '../slot-deadline';
 import { formatDeadlineKo, slotKind, toKstIso } from '@/lib/week';
+import { STAGE_HQ, STAGE_UNIT } from '@/lib/rollup-stages';
 import { currentReport } from './report';
 import { loadOrgSetting, loadTree, type RollupNode } from './tree';
 import { stagesFrom } from './schedule';
@@ -59,13 +60,13 @@ async function deliver(kind: string, divisionId: string, slot: WeekSlot, to: Per
 
 const link = (path: string) => (env.MESSENGER_LINK_BASE ? `${env.MESSENGER_LINK_BASE}${path}` : undefined);
 
-/** RU-54 — 본부 담당자: 산하 제출 현황 */
-export function hqCollectMessage(p: { name: string; employeeNo: string }, slot: WeekSlot, node: string, sent: string[], missing: string[]) {
+/** RU-54 — 본부 담당자: 산하 제출 현황. 기한 이름은 화면과 같은 한 쌍이다 (RU-59) */
+export function hqCollectMessage(p: { name: string; employeeNo: string }, slot: WeekSlot, node: string, sent: string[], missing: string[], due?: Date) {
   const label = `${slot.label} ${slotKind(slot) === 'monthly' ? '월간' : '주간'}`;
   return {
     subject: `[Tincase] ${node} 산하 ${sent.length}/${sent.length + missing.length}곳 제출 — 이어 붙여 주세요`,
     contents: [
-      `[${p.employeeNo}]${p.name}님 ${label} 실·팀 제출 기한이 됐어요.`,
+      `[${p.employeeNo}]${p.name}님 ${label} 「${STAGE_UNIT}」 기한${due ? `(${hhmm(due)})` : ''}이 됐어요.`,
       '',
       `제출 ${sent.length}곳${sent.length ? `: ${sent.join('·')}` : ''}`,
       ...(missing.length ? [`아직 ${missing.length}곳: ${missing.join('·')}`] : []),
@@ -78,7 +79,7 @@ export function hqCollectMessage(p: { name: string; employeeNo: string }, slot: 
 /** RU-56 — 본부 담당자: 총괄 제출 기한 임박 */
 export function hqDueSoonMessage(p: { name: string; employeeNo: string }, slot: WeekSlot, due: Date) {
   return {
-    subject: `[Tincase] ${slot.label} 총괄 제출 ${HQ_DUE_SOON_MINUTES}분 전이에요`,
+    subject: `[Tincase] ${slot.label} 「${STAGE_HQ}」 기한 ${HQ_DUE_SOON_MINUTES}분 전이에요`,
     contents: [
       `[${p.employeeNo}]${p.name}님 ${hhmm(due)}까지 본부본을 총괄에 제출해야 해요.`,
       '',
@@ -92,7 +93,7 @@ export function orgArrivalMessage(p: { name: string; employeeNo: string }, slot:
   return {
     subject: `[Tincase] ${slot.label} ${arrived.length}/${arrived.length + missing.length}곳 도착 — 전사 취합`,
     contents: [
-      `[${p.employeeNo}]${p.name}님 ${slot.label} 본부 제출 기한이 됐어요.`,
+      `[${p.employeeNo}]${p.name}님 ${slot.label} 「${STAGE_HQ}」 기한이 됐어요.`,
       '',
       `도착 ${arrived.length}곳${arrived.length ? `: ${arrived.join('·')}` : ''}`,
       ...(missing.length ? [`아직 ${missing.length}곳: ${missing.join('·')}`] : []),
@@ -139,7 +140,7 @@ export async function runDueRollupNotices(now = new Date()) {
         const status = await Promise.all(n.contributors.map(async (c) => ({ c, r: await currentReport(c.id, slot.id, 'unit') })));
         const sent = status.filter((x) => x.r).map((x) => x.c.nameKo);
         const missing = status.filter((x) => !x.r).map((x) => x.c.nameKo);
-        const r = await deliver('ru_hq_collect', n.node.id, slot, leads, (p) => hqCollectMessage(p, slot, n.node.nameKo, sent, missing), link('/hq'));
+        const r = await deliver('ru_hq_collect', n.node.id, slot, leads, (p) => hqCollectMessage(p, slot, n.node.nameKo, sent, missing, t.unitDue), link('/hq'));
         if (r) out.push(r);
       }
       if (atSoon && !(await currentReport(n.node.id, slot.id, 'hq'))) {

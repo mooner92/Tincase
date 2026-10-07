@@ -125,6 +125,16 @@ export async function ManageView({
   // HM-47 · CP-99 — 부서장이 승인할 판이 있으면 그 화면의 주 버튼은 [승인]이다. 그동안 [위로 제출]은 보조로 물러난다
   const awaitingMyApproval =
     canApprove && mergeState.status === 'succeeded' && (!mergeState.review || mergeState.review.changedAfter);
+  // RU-30 — 부서장이 있는 부서에서 지금 판이 아직 승인 전이면 [위로 제출] 카드가 같은 줄에 그렇게 말하고 보조로 물러난다.
+  // 승인 상태가 병합본 카드에만 있으면, 바로 아래 초록 [제출]이 「승인 전에 보내도 된다」로 읽혔다(2026-10-08)
+  const headApproval =
+    mergeState.hasHead && mergeState.status === 'succeeded'
+      ? !mergeState.review
+        ? ('pending' as const)
+        : mergeState.review.changedAfter
+          ? ('changed' as const)
+          : null
+      : null;
   const zipHref = `/api/division/download-zip?slot=${slot.isoKey}&division=${encodeURIComponent(division.slug)}`;
   const toRow = (m: (typeof members)[number]): MemberRow => ({
     user: { id: m.user.id, name: m.user.name },
@@ -251,6 +261,7 @@ export async function ManageView({
           <ReportSubmitCard
             isoKey={slot.isoKey}
             primary={!awaitingMyApproval}
+            headApproval={headApproval}
             state={{
               ...report,
               current: report.current && {

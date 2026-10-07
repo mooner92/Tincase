@@ -4,7 +4,7 @@
 // 그래서 테스트는 「열린 것이 열렸나」와 「나머지는 그대로 닫혀 있나」를 같은 무게로 본다 (TACP §10-4).
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { execSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -364,9 +364,10 @@ d('TACP-21 위로 올린 제출', () => {
     const { readUnits } = await import('@/lib/hwp/rollup');
     const units = readUnits(await readStoredFile(run.outputPath!), 'x').units;
     expect(units.map((u) => u.name)).toEqual(['본부가(실둘)', '본부가(실하나)']);
-    // 섹션 결과(자동 수정 등)는 제목을 앞에 단 경고로 남는다. 생성한 제목으로 바꾼 부서명 줄은 소음이라 알리지 않는다
+    // RU-19 — 자동 수정은 「확인해 주세요」(warnings)가 아니라 단위의 fixed로 따로 (2026-10-08). 생성한 제목으로 바꾼 부서명 줄은 소음이라 알리지 않는다
     const warnings: string[] = JSON.parse(run.warnings ?? '[]');
-    expect(warnings.some((w) => w.startsWith('본부가(실둘): 자동 수정'))).toBe(true);
+    expect(warnings.join(' ')).not.toContain('자동 수정');
+    expect(b.board.lastRun.units.every((u: { fixed: string[] }) => u.fixed.length > 0)).toBe(true); // 빈 3번 표에 「특이사항 없음」
     expect(warnings.join(' ')).not.toContain('제목 「실둘」');
     // 섹션 설정을 읽기만 한다 — 본부 실행이 총괄의 섹션 목록을 만들거나 바꾸지 않는다
     expect(await prisma.orgSection.count()).toBe(4);
@@ -496,6 +497,34 @@ d('RU-50~58 단계 일정 · 스위치 · 본부장 승인', () => {
     expect(b.subject).toContain('1/3곳 도착');
     expect(b.contents).toContain('아직 2곳: 환경평가본부·임원실');
     expect(hqDueSoonMessage(p, slot, new Date('2026-10-15T07:00:00Z')).contents).toContain('16:00까지');
+  });
+
+  it('[RU-T76] RU-59 — 두 기한의 이름은 어디서나 한 쌍(「실·팀 → 본부」·「본부 → 총괄」) · 알림에도 시각이 있다 (RU-53)', async () => {
+    const { hqCollectMessage, orgArrivalMessage, hqDueSoonMessage } = await import('@/server/rollup/notices');
+    const { submitLines } = await import('@/server/notify/merge-notices');
+    const slot = { label: '10월 2주차', opensAt: new Date('2026-10-11T15:00:00Z'), year: 2026, month: 10, weekOfMonth: 2 } as never;
+    const p = { name: '담당', employeeNo: '1' };
+    expect(hqCollectMessage(p, slot, '본부가', ['실하나'], [], new Date('2026-10-15T06:00:00Z')).contents).toContain('「실·팀 → 본부」 기한(15:00)이 됐어요');
+    expect(orgArrivalMessage(p, slot, ['본부가'], []).contents).toContain('「본부 → 총괄」 기한이 됐어요');
+    expect(hqDueSoonMessage(p, slot, new Date('2026-10-15T07:00:00Z')).subject).toContain('「본부 → 총괄」 기한 15분 전');
+    // 실·팀 담당자의 마감 +30분 알림 — 언제까지 어느 버튼인지 (3단계를 안 쓰면 게시판 문구 그대로)
+    expect(submitLines({ submitTo: '본부가', submitDue: '15:00' })).toEqual(['15:00까지 Tincase 수합 관리에서 [본부가에 제출]을 눌러주세요.']);
+    expect(submitLines({ submitTo: null, submitDue: null })[0]).toContain('취합게시판');
+    // 옛 이름이 화면·알림 글자에 남지 않는다 (주석은 보지 않는다 — 사용 안내는 따로 다시 쓰는 중이라 뺀다)
+    const walk = (dir: string): string[] =>
+      readdirSync(path.resolve(__dirname, '..', dir), { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() ? walk(path.join(dir, e.name)) : /\.tsx?$/.test(e.name) ? [path.join(dir, e.name)] : [],
+      );
+    const old = ['본부 기한', '총괄 기한', '실·팀 기한', '실·팀 제출', '본부 제출 기한', '총괄 제출 기한', '→ 위로'];
+    const hits = walk('src')
+      .filter((f) => !f.startsWith(path.join('src', 'app', 'guide')))
+      .flatMap((f) => {
+        const code = readFileSync(path.resolve(__dirname, '..', f), 'utf8')
+          .replace(/\/\*[\s\S]*?\*\//g, '')
+          .replace(/(^|[^:])\/\/.*$/gm, '$1');
+        return old.filter((w) => code.includes(w)).map((w) => `${f}: ${w}`);
+      });
+    expect(hits).toEqual([]);
   });
 });
 
@@ -690,5 +719,207 @@ d('RU-02 · RU-08 · HM-47 · RU-57 — 바뀜 판정 · 본부 스위치 · 승
       vi.resetModules();
       await new Promise<void>((r) => server.close(() => r()));
     }
+  });
+});
+
+d('RU-60~68 · TACP-21 — 전사 섹션: 경계 · 본부본에 없음 · 본부 자신의 섹션 · 누락·중복 · 양식 (2026-10-08 점검)', () => {
+  const U3_LEAD = 'u3-lead@test.kei.re.kr';
+  const OP2 = 'op2@test.kei.re.kr';
+  type SectionRow = { id: string; title: string; divisionId: string | null; isActive: boolean };
+  const activeSections = async (): Promise<SectionRow[]> => {
+    const { prisma } = await import('@/server/db');
+    return (await prisma.orgSection.findMany({ where: { isActive: true }, orderBy: { sortOrder: 'asc' } })).map((x) => ({
+      id: x.id,
+      title: x.title,
+      divisionId: x.divisionId,
+      isActive: true,
+    }));
+  };
+  const putSections = async (who: string, list: SectionRow[]) => {
+    const { PUT } = await import('@/app/api/rollup/org/sections/route');
+    return PUT(nx('/api/rollup/org/sections', who, jsonInit('PUT', { sections: list })));
+  };
+  const orgView = async () => {
+    const { orgBoard } = await import('@/server/org-board');
+    const { rollupSlot } = await import('@/server/rollup/slot');
+    return orgBoard(await rollupSlot(isoKey), { progress: false, desk: true }, '');
+  };
+  const lastOrgRunOf = async (who: string) => {
+    const org = await import('@/app/api/rollup/org/route');
+    return (await (await org.GET(nx(`/api/rollup/org?isoKey=${isoKey}`, who))).json()).lastRun as {
+      stale: boolean;
+      template: string | null;
+      warnings: string[];
+      sections: { title: string; status: string; source: string }[];
+    };
+  };
+  const makeOrg = async (who: string) => {
+    const org = await import('@/app/api/rollup/org/route');
+    return (await org.POST(nx('/api/rollup/org', who, jsonInit('POST', { isoKey })))).status;
+  };
+
+  it('[RU-T70] ★ TACP-21 — 전사 섹션 경로(파일 올리기·받기·취소, 섹션 저장, 전사본 받기): member·lead·본부 담당자 404, 총괄 200 + 기록 1건 · 취소한 파일은 받기 404', async () => {
+    const { prisma } = await import('@/server/db');
+    const { readStoredFile } = await import('@/server/storage');
+    const section = await prisma.orgSection.findFirstOrThrow({ where: { title: '단독단' } });
+    const solo = await prisma.reportSubmission.findFirstOrThrow({ where: { divisionId: divId.solo, level: 'unit', withdrawnAt: null } });
+    const bytes = await readStoredFile(solo.filePath);
+    const outsiders = [ID.u1Member, ID.u1Lead, ID.hqLead];
+    const logs = () => prisma.auditLog.count({ where: { actor: ID.coord } });
+
+    // 파일 올리기
+    const upload = await import('@/app/api/rollup/org/sections/upload/route');
+    const post = (who: string) => {
+      const fd = new FormData();
+      fd.set('file', new File([new Uint8Array(bytes)], 'board.hwp'));
+      fd.set('sectionId', section.id);
+      fd.set('isoKey', isoKey);
+      return upload.POST(nx('/api/rollup/org/sections/upload', who, { method: 'POST', body: fd }));
+    };
+    for (const who of outsiders) expect((await post(who)).status, who).toBe(404);
+    let before = await logs();
+    const res = await post(ID.coord);
+    expect(res.status).toBe(200);
+    const uploadId: string = (await res.json()).id;
+    expect(await logs()).toBe(before + 1);
+
+    // 올린 파일 받기 — 판정·기록은 findReadableSectionUpload 하나 (라우트가 직접 조회하지 않는다)
+    const one = await import('@/app/api/rollup/org/sections/upload/[id]/route');
+    const get = (who: string) => one.GET(nx(`/api/rollup/org/sections/upload/${uploadId}`, who), { params: Promise.resolve({ id: uploadId }) });
+    for (const who of outsiders) expect((await get(who)).status, who).toBe(404);
+    before = await logs();
+    expect((await get(ID.coord)).status).toBe(200);
+    expect(await logs()).toBe(before + 1);
+    expect(await prisma.auditLog.count({ where: { actor: ID.coord, action: 'download', target: `org-section-upload:${uploadId}` } })).toBe(1);
+    expect(readFileSync(path.resolve(__dirname, '../src/app/api/rollup/org/sections/upload/[id]/route.ts'), 'utf8')).not.toContain('prisma');
+
+    // 섹션 저장
+    const list = await activeSections();
+    for (const who of outsiders) expect((await putSections(who, list)).status, who).toBe(404);
+    before = await logs();
+    expect((await putSections(ID.coord, list)).status).toBe(200);
+    expect(await logs()).toBe(before + 1);
+
+    // 전사본 받기 — 본부 담당자도 전사본은 404 (본부본만 그 본부의 것)
+    const orgRun = await prisma.rollupRun.findFirstOrThrow({ where: { level: 'org', status: 'succeeded' }, orderBy: { startedAt: 'desc' } });
+    const run = await import('@/app/api/rollup/run/[id]/route');
+    const getRun = (who: string) => run.GET(nx(`/api/rollup/run/${orgRun.id}`, who), { params: Promise.resolve({ id: orgRun.id }) });
+    for (const who of outsiders) expect((await getRun(who)).status, who).toBe(404);
+    before = await logs();
+    expect((await getRun(ID.coord)).status).toBe(200);
+    expect(await logs()).toBe(before + 1);
+
+    // 취소 — 취소한 파일은 id를 알아도 받기 404 (최종본에서 빠진 파일이 계속 받히면 취소가 화면에서만 일어난 일이 된다)
+    const del = (who: string) => upload.DELETE(nx(`/api/rollup/org/sections/upload?id=${uploadId}`, who, { method: 'DELETE' }));
+    for (const who of outsiders) expect((await del(who)).status, who).toBe(404);
+    before = await logs();
+    expect((await del(ID.coord)).status).toBe(200);
+    expect(await logs()).toBe(before + 1);
+    expect((await get(ID.coord)).status).toBe(404);
+  });
+
+  it('[RU-T71] ★ RU-32 — 실은 냈는데 본부가 낸 판에 없으면 「본부본에 없음」(그 본부 취합 길), 회색 「미제출」이 아니다', async () => {
+    const { prisma } = await import('@/server/db');
+    await prisma.user.create({ data: { email: U3_LEAD, name: 'u3-lead', divisionId: divId.u3, divisionRole: 'lead' } });
+    const hq = await import('@/app/api/rollup/hq/route');
+    const report = await import('@/app/api/rollup/report/route');
+    // 본부나 = 자체 + 실셋 (RU-T39에서 자체 켬). 본부나가 자기 몫만 이어 붙여 총괄에 낸 **뒤에** 실셋이 낸다
+    await merged('hq2', '본부나 자체 내용');
+    expect((await submitUnit(ID.hq2Lead)).status).toBe(200);
+    expect((await hq.POST(nx('/api/rollup/hq', ID.hq2Lead, jsonInit('POST', { isoKey })))).status).toBe(200);
+    expect((await report.POST(nx('/api/rollup/report', ID.hq2Lead, jsonInit('POST', { level: 'hq', isoKey })))).status).toBe(200);
+    await merged('u3', '실셋 내용');
+    expect((await submitUnit(U3_LEAD)).status).toBe(200);
+
+    const row = (await orgView()).rows.find((r) => r.title === '본부나(실셋)')!;
+    expect(row.final).toMatchObject({ source: 'not_in_hq', label: '본부나에서 다시 이어 붙여야 합니다' });
+    expect(row.hq?.href).toBe('/hq?node=HQ_B');
+  });
+
+  it('[RU-T72] ★ RU-67 · RU-64 — 본부 자신의 섹션은 본부본의 남은 사본을 다 담는다 · 어느 섹션에도 없는 사본은 「전사」 화면과 결과에 경고', async () => {
+    const { prisma } = await import('@/server/db');
+    // 점검의 buildTree 사례 그대로 — 본부가 직접 쓰고(rollupSelf) 산하 실도 켜져 기여 단위가 둘 → 본부 단계가 있다
+    const { loadTree } = await import('@/server/rollup/tree');
+    const node = (await loadTree()).nodes.find((x) => x.node.id === divId.hq2)!;
+    expect([node.hasHqStep, node.contributors.map((c) => c.nameKo)]).toEqual([true, ['본부나', '실셋']]);
+    // 본부나의 본부본에는 본부나 자기 사본이 있는데 그 부서를 가리키는 섹션이 없다 → 최종본에서 빠진다는 경고
+    let board = await orgView();
+    expect(board.coverage).toEqual([expect.stringContaining('「본부나」 사본이 어느 섹션에도 없어 최종본에서 빠집니다')]);
+    expect(await makeOrg(ID.coord)).toBe(200);
+    expect((await lastOrgRunOf(ID.coord)).warnings[0]).toContain('「본부나」 사본이 어느 섹션에도 없어');
+
+    // 본부나가 실셋까지 넣어 다시 이어 붙여 내면 실셋 섹션은 Tincase로
+    const hq = await import('@/app/api/rollup/hq/route');
+    const report = await import('@/app/api/rollup/report/route');
+    expect((await hq.POST(nx('/api/rollup/hq', ID.hq2Lead, jsonInit('POST', { isoKey })))).status).toBe(200);
+    expect((await report.POST(nx('/api/rollup/report', ID.hq2Lead, jsonInit('POST', { level: 'hq', isoKey })))).status).toBe(200);
+    board = await orgView();
+    expect(board.rows.find((r) => r.title === '본부나(실셋)')!.final!.source).toBe('tincase');
+
+    // 본부 자신의 섹션을 두면 — 실셋 사본은 실셋 섹션이 가져가고, 본부나 섹션에는 본부나 사본만
+    await prisma.orgSection.create({ data: { sortOrder: 35, title: '본부나', divisionId: divId.hq2 } });
+    const ownCopy = await prisma.reportSubmission.findFirstOrThrow({ where: { divisionId: divId.hq2, level: 'unit', withdrawnAt: null } });
+    const hqRep = await prisma.reportSubmission.findFirstOrThrow({ where: { divisionId: divId.hq2, level: 'hq', withdrawnAt: null }, orderBy: { submittedAt: 'desc' } });
+    board = await orgView();
+    expect(board.coverage).toEqual([]);
+    const own = board.rows.find((r) => r.title === '본부나')!.final!;
+    expect([own.source, own.refId]).toEqual(['tincase', ownCopy.id]);
+
+    // 실셋 섹션을 끄면 본부나 섹션이 실셋 사본까지 — 본부본에 붙은 순서·제목 그대로(본부장이 검토한 꼴, RU-11).
+    // 예전에는 본부 자신의 섹션이 본부의 실·팀 사본 하나만 집어 실셋의 것이 경고 없이 빠졌다
+    await prisma.orgSection.updateMany({ where: { title: '본부나(실셋)' }, data: { isActive: false } });
+    board = await orgView();
+    expect(board.coverage).toEqual([]);
+    const both = board.rows.find((r) => r.title === '본부나')!.final!;
+    expect(both.label).toContain('2개 단위');
+    expect(both.refId).toBe(hqRep.id); // 받기는 본부가 낸 본부본 그대로
+    expect(await makeOrg(ID.coord)).toBe(200);
+    const last = await lastOrgRunOf(ID.coord);
+    expect(last.warnings.join(' ')).not.toContain('어느 섹션에도 없어');
+    expect(last.sections.find((x) => x.title === '본부나')).toMatchObject({ status: 'copied', source: 'tincase' });
+    const run = await prisma.rollupRun.findFirstOrThrow({ where: { level: 'org' }, orderBy: { startedAt: 'desc' } });
+    const { readStoredFile } = await import('@/server/storage');
+    const { readUnits } = await import('@/lib/hwp/rollup');
+    const names = readUnits(await readStoredFile(run.outputPath!), 'x').units.map((u) => u.name);
+    const at = names.indexOf('본부나');
+    expect(names.slice(at, at + 2)).toEqual(['본부나', '본부나(실셋)']);
+  });
+
+  it('[RU-T73] RU-60 · RU-64 — 같은 부서를 두 섹션에 두면 422(어느 부서·어느 섹션인지) · 만든 뒤 제목만 고쳐도 「섹션이 바뀜」', async () => {
+    const list = await activeSections();
+    const res = await putSections(
+      ID.coord,
+      list.map((x) => (x.title === '단독단' ? { ...x, divisionId: divId.u1 } : x)),
+    );
+    expect(res.status).toBe(422);
+    expect((await res.json()).message).toBe('한 부서는 한 섹션에만 둘 수 있습니다 — 실하나(「본부가(실하나)」·「단독단」)');
+    // 바로 앞(RU-T72)에서 만든 전사본은 아직 그대로다. 제목만 바꿔도 받은 파일의 제목은 옛것이므로 「바뀜」
+    expect((await lastOrgRunOf(ID.coord)).stale).toBe(false);
+    expect((await putSections(ID.coord, list.map((x) => (x.title === '단독단' ? { ...x, title: '단독단(새 제목)' } : x)))).status).toBe(200);
+    expect((await lastOrgRunOf(ID.coord)).stale).toBe(true);
+  });
+
+  it('[RU-T74] RU-68 — 전사본 양식은 누가 눌렀나와 상관없이 총괄 부서의 것 · 쓴 양식이 결과에 남는다', async () => {
+    const { prisma } = await import('@/server/db');
+    // 총괄은 모두 단독단 소속이다. 실하나 소속 운영자가 눌러도 실하나 양식이 아니다
+    await prisma.user.create({ data: { email: OP2, name: 'op2', divisionId: divId.u1, isOperator: true } });
+    expect(await makeOrg(ID.coord)).toBe(200);
+    expect((await lastOrgRunOf(ID.coord)).template).toBe('단독단 양식 v1');
+    expect(await makeOrg(OP2)).toBe(200);
+    expect((await lastOrgRunOf(OP2)).template).toBe('단독단 양식 v1');
+  });
+
+  it('[RU-T75] RU-30 — [제출] 카드의 기한은 그 단위의 것: 본부로 내면 실·팀 → 본부, 바로 총괄로 내면(본부본 포함) 본부 → 총괄', async () => {
+    const { prisma } = await import('@/server/db');
+    const { stageTimes, stageCells } = await import('@/server/rollup/schedule');
+    const { GET } = await import('@/app/api/rollup/report/route');
+    const dueOf = async (who: string, level = 'unit') =>
+      (await (await GET(nx(`/api/rollup/report?level=${level}&isoKey=${isoKey}`, who))).json()).state.dueKo as string;
+    const t = await stageTimes(await prisma.weekSlot.findUniqueOrThrow({ where: { isoKey } }));
+    const cells = stageCells(t.anchor, t);
+    expect(cells.unitDueKo).not.toBe(cells.hqDueKo); // RU-T42가 간격을 60·180으로 두었다
+    expect(await dueOf(ID.u1Lead)).toBe(cells.unitDueKo); // 실하나 → 본부가
+    expect(await dueOf(ID.soloLead)).toBe(cells.hqDueKo); // 단독단 → 바로 총괄 (RU-07)
+    expect(await dueOf(ID.hq2Lead, 'hq')).toBe(cells.hqDueKo); // 본부본 → 총괄
   });
 });

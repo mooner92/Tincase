@@ -71,6 +71,17 @@ export interface MergeFacts {
   hasHead: boolean;
   /** RU-53 — 3단계를 쓰면 보낼 곳(「기획경영본부」·「총괄(기획조정실)」). 안 쓰면 null — 게시판 문구 그대로 */
   submitTo?: string | null;
+  /** RU-53 · RU-30 — 그 단위의 기한 (「15:00」 — 수합 관리 [제출] 카드와 같은 값). 3단계를 안 쓰면 null */
+  submitDue?: string | null;
+}
+
+/**
+ * RU-53 — 담당자 마지막 알림의 할 일 한 줄. 3단계를 쓰면 **언제까지** 어느 버튼인지 — 시각이 없으면 실·팀 담당자는
+ * 자기 기한(실·팀 → 본부)을 화면에서도 알림에서도 본 적이 없다(2026-10-08). 안 쓰면 게시판 문구 그대로
+ */
+export function submitLines(f: Pick<MergeFacts, 'submitTo' | 'submitDue'>): string[] {
+  if (!f.submitTo) return ['Tincase에서 hwp로 받아 취합게시판에 올리고', '웹디스크에 업로드해주세요.'];
+  return [`${f.submitDue ? `${f.submitDue}까지 ` : ''}Tincase 수합 관리에서 [${f.submitTo}에 제출]을 눌러주세요.`];
 }
 
 /** NT-47 — 승인 한 줄 */
@@ -208,9 +219,7 @@ function compose(kind: NoticeKind, who: Person, slotLabel: string, monthly: bool
       ...staleBlock(f.stale, 'Tincase 수합 관리에서 [다시 병합]을 눌러주세요.'),
       ...flagBlock(f.flagged),
       '',
-      ...(f.submitTo
-        ? [`Tincase 수합 관리에서 [${f.submitTo}에 제출]을 눌러주세요.`]
-        : ['Tincase에서 hwp로 받아 취합게시판에 올리고', '웹디스크에 업로드해주세요.']),
+      ...submitLines(f),
     ]
       .filter((l, i, a) => !(l === '' && a[i - 1] === ''))
       .join('\n'),
@@ -292,8 +301,16 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
   const monthly = slotKind(slot) === 'monthly';
   const out: NoticeOutcome[] = [];
   const divisions = await prisma.division.findMany({ where: { isActive: true, notifyEnabled: true } });
-  // RU-53 — 3단계를 쓰면 마지막 알림의 할 일이 「게시판」이 아니라 「Tincase에서 제출」이다
+  // RU-53 — 3단계를 쓰면 마지막 알림의 할 일이 「게시판」이 아니라 「Tincase에서 제출」이다 — 그 단위의 기한과 함께.
+  // 단계 시각은 동적으로 읽는다: schedule → slot-deadline이 이 파일의 상수를 읽어 정적으로 이으면 고리가 된다
   const tree = (await loadOrgSetting()).enabled ? await loadTree() : null;
+  const stages = tree
+    ? await (async () => {
+        const { stageTimes, stageCells } = await import('../rollup/schedule');
+        const t = await stageTimes(slot);
+        return stageCells(t.anchor, t);
+      })()
+    : null;
 
   for (const division of divisions) {
     try {
@@ -364,9 +381,13 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
         flagged,
         stale,
         approval: run ? await approvalOf(run) : null,
-        submitTo: (() => {
+        ...(() => {
           const t = tree ? submitTarget(tree, division.id) : null;
-          return t ? (t.kind === 'hq' ? t.node.node.nameKo : '총괄(기획조정실)') : null;
+          if (!t || !stages) return { submitTo: null, submitDue: null };
+          // 본부로 내면 실·팀 → 본부 기한, 본부 단계 없이 총괄로 내면 본부 → 총괄 기한 (reportState와 같은 규칙)
+          return t.kind === 'hq'
+            ? { submitTo: t.node.node.nameKo, submitDue: stages.unitDueKo }
+            : { submitTo: '총괄(기획조정실)', submitDue: stages.hqDueKo };
         })(),
         hasHead: (await prisma.user.count({ where: { divisionId: division.id, isActive: true, divisionRole: 'head' } })) > 0,
         ok: !!run,

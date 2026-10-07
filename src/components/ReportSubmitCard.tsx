@@ -3,7 +3,7 @@
 //
 // 보내는 것은 그 순간의 사본이다(RU-02). 그래서 「보낸 뒤 병합본이 바뀌었다」를 반드시 보여 준다 —
 // 고쳤는데 위에는 옛 판이 가 있는 상태가 가장 조용하고 가장 나쁜 실수다.
-import { useState } from 'react';
+import { Fragment, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 
 export interface ReportStateView {
@@ -12,6 +12,8 @@ export interface ReportStateView {
   current: { id: string; submittedAtKst: string; submittedBy: string; origin: string } | null;
   hasOutput: boolean;
   changedSinceSubmit: boolean;
+  /** RU-30 — 이 단위가 지킬 기한 (「15:00」). 실·팀 담당자에게는 이 카드가 기한을 보는 유일한 곳이다 */
+  dueKo?: string;
 }
 
 export function ReportSubmitCard({
@@ -19,9 +21,16 @@ export function ReportSubmitCard({
   isoKey,
   primary = true,
   bare = false,
+  headApproval = null,
 }: {
   state: ReportStateView;
   isoKey: string;
+  /**
+   * RU-30 — 부서장이 있는 부서에서 지금 병합본이 아직 승인 전(`pending`)이거나 승인 뒤 바뀌었나(`changed`).
+   * 그러면 같은 줄에 그렇게 쓰고 [제출]은 보조로 물러난다(CP-99) — 급한 담당자가 승인 전에 보내고,
+   * 실장이 고치면 「제출 뒤 바뀜」으로 다시 내야 했다. 부서장이 없는 부서·이미 승인한 판이면 null
+   */
+  headApproval?: 'pending' | 'changed' | null;
   /**
    * CP-99 — 이 화면의 주 버튼인가. 부서장이 승인할 판이 남아 있으면 그 화면의 주 버튼은 [승인]이라
    * 여기는 보조로 물러난다 — 한 화면에 초록 버튼이 둘이면 어느 것을 먼저 누를지 모른다
@@ -58,6 +67,26 @@ export function ReportSubmitCard({
 
   const sent = state.current;
   const needsSubmit = !sent || state.changedSinceSubmit;
+  const approvalWord = headApproval === 'pending' ? '부서장 승인 전' : headApproval === 'changed' ? '부서장 승인 뒤 바뀜' : null;
+  // 설명 한 줄 — 낸 것(시각·누가) · 아직 할 일이 있으면 기한과 부서장 승인 상태 · 안 냈으면 무엇이 가는지
+  const desc: ReactNode[] = [
+    ...(sent ? [`${sent.submittedAtKst} · ${sent.submittedBy}${sent.origin === 'import' ? ' · 지난 자료 적재' : ''}`] : []),
+    ...(needsSubmit && state.dueKo
+      ? [
+          <strong key="due" className="font-semibold text-ink">
+            {state.dueKo}까지{sent ? ' 다시 제출' : ''}
+          </strong>,
+        ]
+      : []),
+    ...(needsSubmit && approvalWord
+      ? [
+          <span key="approval" className="font-semibold text-warning">
+            {approvalWord}
+          </span>,
+        ]
+      : []),
+    ...(!sent ? [state.hasOutput ? `검토가 끝나면 제출하세요. 그 순간의 ${what}이 ${target}에 갑니다.` : `${what}이 생기면 제출할 수 있습니다.`] : []),
+  ];
   return (
     <section className={bare ? 'card-section' : 'card'} aria-labelledby={`report-${state.level}`}>
       <div className="card-head">
@@ -66,11 +95,12 @@ export function ReportSubmitCard({
             {target}에 제출
           </h2>
           <p className="card-desc">
-            {sent
-              ? `${sent.submittedAtKst} · ${sent.submittedBy}${sent.origin === 'import' ? ' · 지난 자료 적재' : ''}`
-              : state.hasOutput
-                ? `검토가 끝나면 제출하세요. 그 순간의 ${what}이 ${target}에 갑니다.`
-                : `${what}이 생기면 제출할 수 있습니다.`}
+            {desc.map((d, i) => (
+              <Fragment key={i}>
+                {i > 0 && ' · '}
+                {d}
+              </Fragment>
+            ))}
           </p>
         </div>
         {sent ? (
@@ -98,7 +128,7 @@ export function ReportSubmitCard({
           <button
             onClick={submit}
             disabled={busy || !state.hasOutput}
-            className={primary ? 'btn-primary' : 'btn-secondary'}
+            className={primary && !approvalWord ? 'btn-primary' : 'btn-secondary'}
           >
             {busy ? '제출 중…' : sent ? '다시 제출' : `${target}에 제출`}
           </button>

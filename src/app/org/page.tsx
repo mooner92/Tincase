@@ -28,6 +28,7 @@ import { rollupSlot } from '@/server/rollup/slot';
 import { stageCells, stageTimes } from '@/server/rollup/schedule';
 import { weekOptions } from '@/server/rollup/view';
 import { currentWeek, formatDeadlineKo } from '@/lib/week';
+import { STAGE_HQ, STAGE_UNIT } from '@/lib/rollup-stages';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,10 +60,11 @@ export default async function OrgPage({ searchParams }: { searchParams: Promise<
   const summary = (
     <span>
       마감 <strong className="text-ink">{deadlineKo}</strong>
+      {/* RU-59 — 두 기한은 어디서나 같은 이름 한 쌍. /hq 머리·일정 카드·알림과 같은 말이다 */}
       {stages && (
         <>
           {' '}
-          · 본부 기한 <strong className="text-ink">{stages.hqDueKo}</strong>
+          · {STAGE_UNIT} {stages.unitDueKo} · {STAGE_HQ} <strong className="text-ink">{stages.hqDueKo}</strong>
         </>
       )}
       {/* RU-52 — 꺼져 있을 때 최종본 열을 보는 사람은 켜는 사람(운영자)뿐이다. 총괄에게는 아직 안 보인다는 것을 잊지 않게 */}
@@ -189,7 +191,7 @@ export default async function OrgPage({ searchParams }: { searchParams: Promise<
 
             {board.ready !== null && (
               <div className="mt-6">
-                <OrgRunCard isoKey={slot.isoKey} ready={board.ready} run={board.run} />
+                <OrgRunCard isoKey={slot.isoKey} ready={board.ready} run={board.run} coverage={board.coverage ?? []} />
               </div>
             )}
           </>
