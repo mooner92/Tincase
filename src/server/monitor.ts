@@ -1,5 +1,7 @@
-// 전사 현황 데이터 — 현황판(/ops/monitor)과 조직도 그래프(/ops/monitor/graph)가 같은 것을 쓴다.
-// 두 화면이 각자 세면 「현황판은 41명, 그래프는 42명」 같은 어긋남이 생긴다.
+// 전사 현황 데이터 — 현황판(/ops/monitor, PG-50)이 쓴다.
+// 예전에는 원형 조직도 그래프(/ops/monitor/graph)도 이것을 함께 썼다 — 두 화면이 각자 세면
+// 「현황판은 41명, 그래프는 42명」 같은 어긋남이 생기기 때문이다. 그래프는 2026-10-07에 걷어 냈다(PG-50e).
+// 감사 문서(OPS-30)는 지난 주차도 받아야 해서 따로 읽지만, 세는 식은 본판과 같다 ([PG-T73]).
 import { prisma } from './db';
 import { ensureCurrentSlot } from './worklog';
 import { earliestDeadline } from './slot-deadline';
@@ -46,12 +48,12 @@ export async function monitorData(now = new Date()) {
       };
     }),
   }));
-  const counted = nodes.filter((n) => n.counted);
+  // 집계 대상만 추린 `counted` 목록은 원형 그래프(layoutOrg(data.counted))만 받았다 — 그래프와 함께 뺐다(PG-50e).
+  // 본판은 `nodes` 전부를 받아 groupByHq 안에서 거른다(최상위 본부를 찾으려면 집계 밖 부서도 보여야 한다)
   const skipped = nodes.filter((n) => !n.counted);
   return {
     slot,
     nodes,
-    counted,
     excludedNote: {
       divisions: skipped.length,
       people: skipped.reduce((n, d) => n + d.people.filter((p) => p.onRoster).length, 0),

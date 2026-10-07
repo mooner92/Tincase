@@ -1,6 +1,11 @@
 // 조직 트리 레이아웃 — 방사형 덴드로그램 (순수 계산, 외부 의존성 없음).
 //
-// 337명을 한 화면에 놓아야 한다. 세로 트리는 세로로 337칸이 필요해 스크롤 없이는 불가능하고,
+// 지금 이 그림을 쓰는 곳은 **감사 문서(OPS-30, `server/report.ts`)** 하나다 — 인쇄해 보관하는 기록이다.
+// 화면에서 같은 그림을 보여 주던 조직도 그래프(/ops/monitor/graph)는 본판(본부별 팀 막대, PG-50)과 겹쳐
+// 2026-10-07에 걷어 냈다(PG-50e). 그래프만 쓰던 필드(사람 평면 목록·반지름 사본·Tincase 사용 부서 수)도
+// 함께 뺐다 — 쓰이지 않는 필드는 언젠가 틀린 채로 남는다.
+//
+// 337명을 한 장에 놓아야 한다. 세로 트리는 세로로 337칸이 필요해 스크롤 없이는 불가능하고,
 // 원 둘레에 놓으면 반지름 420px 기준 한 사람당 약 7.8px가 나와 점으로 표현하기에 충분하다.
 //
 // 계층: 한국환경연구원 → 본부(7) → 실(30) → 사람(337)
@@ -60,15 +65,14 @@ export interface LaidOutParent {
 export interface OrgLayout {
   parents: LaidOutParent[];
   divisions: LaidOutDivision[];
-  people: LaidOutPerson[];
   /**
    * 집계 대상(`counted`)이면서 **Tincase를 쓰는(`isActive`)** 부서만 센다 — 본판(OrgProgress·`groupByHq`)과 같은 식.
-   * 미사용 부서는 취합게시판으로 내므로 여기서는 언제나 「0명 제출」이다. 분모에 넣으면 두 화면의 숫자가 갈라진다
+   * 미사용 부서는 취합게시판으로 내므로 여기서는 언제나 「0명 제출」이다. 분모에 넣으면 본판과 감사 문서의
+   * 숫자가 갈라진다 ([PG-T73])
    */
-  totals: { submitted: number; roster: number; divisions: number; activeDivisions: number };
+  totals: { submitted: number; roster: number; divisions: number };
   /** 집계에서 빠진 부서 — 숨기지 않고 "왜 빠졌는지"를 말할 수 있게 남긴다 */
   excluded: { divisions: number; people: number };
-  radii: { parent: number; division: number; person: number };
 }
 
 /** 각도 → 좌표. 12시 방향에서 시계 방향으로 (사람이 시계를 읽는 방향) */
@@ -99,7 +103,6 @@ export function layoutOrg(divisions: DivisionNode[], gapRatio = 0.35): OrgLayout
   const unit = (Math.PI * 2) / (totalPeople + gaps * gapRatio);
 
   const laidDivisions: LaidOutDivision[] = [];
-  const laidPeople: LaidOutPerson[] = [];
   const laidParents: LaidOutParent[] = [];
 
   let cursor = 0;
@@ -126,7 +129,6 @@ export function layoutOrg(divisions: DivisionNode[], gapRatio = 0.35): OrgLayout
       };
       parentDivs.push(div);
       laidDivisions.push(div);
-      laidPeople.push(...people);
     }
 
     if (parentDivs.length === 0) continue;
@@ -149,18 +151,15 @@ export function layoutOrg(divisions: DivisionNode[], gapRatio = 0.35): OrgLayout
   return {
     parents: laidParents,
     divisions: laidDivisions,
-    people: laidPeople,
     totals: {
       submitted: countedPeople.filter((p) => p.onRoster && p.submitted).length,
       roster: countedPeople.filter((p) => p.onRoster).length,
       divisions: counted.length,
-      activeDivisions: counted.filter((d) => d.isActive).length,
     },
     excluded: {
       divisions: skipped.length,
       people: skipped.reduce((n, d) => n + d.laidOut.filter((p) => p.onRoster).length, 0),
     },
-    radii: { ...RADII },
   };
 }
 

@@ -53,19 +53,25 @@ describe('PG-50 본부별 팀 묶음', () => {
     expect([g[0].submitted, g[0].roster]).toEqual([1, 2]);
   });
 
-  it('[PG-T73] 조직도 그래프의 합계는 본판과 같다 — Tincase 미사용 부서·명단 밖 제출은 세지 않는다', () => {
-    const counted = [
-      ...all.filter((x) => x.counted),
-      // 미사용 부서 — 그래프에는 그리지만(회색) 분모에 넣지 않는다
+  // 예전에는 「조직도 그래프의 합계 = 본판」이었다. 그래프는 걷어 냈고(2026-10-07, PG-50e) 같은 계산(layoutOrg)은
+  // 감사 문서(OPS-30)가 쓴다 — 보관용 기록의 숫자가 화면과 다르면 어느 쪽도 믿을 수 없게 된다.
+  it('[PG-T73] 감사 문서(OPS-30)의 합계는 본판과 같다 — Tincase 미사용 부서·명단 밖 제출·집계 밖 부서는 세지 않는다', () => {
+    // 감사 문서는 집계 밖 부서까지 **전부** 받는다(report 라우트) — 본판(monitorData.nodes)과 같은 입력
+    const nodes = [
+      ...all,
+      // 미사용 부서 — 감사 문서 그림에는 그리지만(회색) 분모에 넣지 않는다
       d('홍보실', ROOT, { isActive: false, people: [p('사', false), p('아', false)] }),
+      // 집계 밖 부서의 제출 — 「제외」로 따로 말하고 합계에는 넣지 않는다
+      d('대기환경연구실', '기후대기전략연구본부', { counted: false, people: [p('자', true)] }),
     ];
-    const g = groupByHq(counted);
+    const g = groupByHq(nodes);
     const teams = g.flatMap((x) => x.teams).filter((t) => t.isActive);
     const board = { submitted: teams.reduce((n, t) => n + t.submitted, 0), roster: teams.reduce((n, t) => n + t.roster, 0) };
-    const graph = layoutOrg(counted).totals;
-    expect([graph.submitted, graph.roster]).toEqual([board.submitted, board.roster]);
+    const report = layoutOrg(nodes);
+    expect([report.totals.submitted, report.totals.roster]).toEqual([board.submitted, board.roster]);
     // 기획조정실의 「라」는 명단 밖인데 냈다 — 「낸 사람」 수에 들어가면 분자가 분모를 넘을 수 있다
-    expect(graph).toMatchObject({ submitted: 3, roster: 5 });
+    expect(report.totals).toMatchObject({ submitted: 3, roster: 5 });
+    expect(report.excluded).toEqual({ divisions: 1, people: 1 });
   });
 
   it('[PG-T71] 팀 숫자는 명단(onRoster) 기준 「7/8」 · 미제출 이름 · Tincase 미사용 팀은 본부 합계에 넣지 않는다', () => {

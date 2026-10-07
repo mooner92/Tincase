@@ -310,7 +310,7 @@ export default async function GuidePage() {
                 <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">05</p>
                 <h3 className="display mt-1 text-lg">전 부서가 무엇을 냈는지 보기</h3>
                 <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
-                  <li>상단 메뉴 <strong className="text-ink">[전사]</strong>의 <strong className="text-ink">[현황]</strong> 탭 — 이번 주 누가 냈는지 본부·팀별로 보입니다</li>
+                  <li>상단 메뉴 <strong className="text-ink">[전사]</strong>의 <strong className="text-ink">[현황]</strong> 탭 — 이번 주 누가 냈는지 본부별·팀별로 보입니다</li>
                   <li>아래 <strong className="text-ink">「부서별」</strong>에서 부서를 골라 [수합 관리] — 제출물을 열어 보고, 지난 주차도 고를 수 있습니다</li>
                   <li>[보관함] — 그 부서의 병합본(hwp)을 받습니다</li>
                   <li>다른 부서 화면은 <strong className="text-ink">보기만</strong> 됩니다. 들어간 기록은 남습니다</li>

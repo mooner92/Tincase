@@ -2,7 +2,8 @@
 //
 // 원형 조직도는 337명을 점으로 찍어 예쁘지만 「어느 팀이 몇 명 남았나」를 읽기 어려웠다(2026-10-07 피드백).
 // 총괄이 실제로 묻는 것은 사람이 아니라 팀이다 — 「기획조정실 7/8」. 그래서 팀을 막대 하나로 그리고,
-// 남은 사람 이름은 펼쳐야 보이게 접어 둔다. 원형 그래프는 따로 연다(새 탭).
+// 남은 사람 이름은 펼쳐야 보이게 접어 둔다. 새 탭으로 열던 원형 그래프는 걷어 냈다(2026-10-07, PG-50e) —
+// 이 판과 같은 숫자를 다른 그림으로 보여 줄 뿐이었다. 원형 그림은 인쇄용 감사 문서(OPS-30)에만 남는다.
 import Link from 'next/link';
 import type { HqGroup, TeamProgress } from '@/lib/org-groups';
 import { NudgeButton } from './NudgeButton';
@@ -69,7 +70,7 @@ export function OrgProgress({
   const expected = teams.filter((t) => t.roster > 0);
   const full = expected.filter((t) => t.submitted === t.roster).length;
   const pct = roster > 0 ? Math.round((sent / roster) * 100) : 0;
-  // 전사 미제출 명단 — 본 다음 동작은 언제나 「알려주기」다. 옮겨 적게 하지 않는다 (조직도 화면과 같은 버튼)
+  // 전사 미제출 명단 — 본 다음 동작은 언제나 「알려주기」다. 옮겨 적게 하지 않는다
   const missingTeams = teams.filter((t) => t.missing.length > 0);
   const allMissing = missingTeams.flatMap((t) => t.missing);
 

@@ -1,7 +1,9 @@
 // `/ops/monitor` — 「전사」 메뉴의 [현황] 탭: 전사 제출 현황. 운영자·총괄 전용 (TACP §3.2 readAll).
 //
 // PG-50 (2026-10-07) — 본판은 **본부별 팀 막대**다. 원형 조직도는 예쁘지만 「어느 팀이 몇 명 남았나」가
-// 안 읽혔다. 원형은 구석의 [조직도 그래프 ↗]로 새 탭에서 연다. 연속 미제출은 뺐다(2026-10-07 — 쓸 일이 없다).
+// 안 읽혔다. 연속 미제출은 뺐다(2026-10-07 — 쓸 일이 없다).
+// 새 탭으로 열던 원형 조직도 그래프(/ops/monitor/graph)도 걷어 냈다(2026-10-07 — 겹치는 기능 정리, PG-50e).
+// 같은 숫자를 다른 그림으로 한 번 더 보여 줄 뿐이었고, 화면이 둘이면 숫자가 갈라질 자리도 둘이 된다.
 //
 // PG-49e — [취합](/org)과 한 메뉴다. 위쪽 탭 막대가 두 화면 사이의 길이고, 감사 로그·CSV 같은 곁가지는
 // 막대 오른쪽에 작게 둔다. WS-19l — 마감과 3단계 기한은 이 탭의 「주차 일정」 카드 **하나**에서 정한다.
@@ -73,10 +75,6 @@ export default async function MonitorPage() {
           </a>
           <a href={`/api/ops/report?isoKey=${slot.isoKey}&format=csv`} className="text-muted underline-offset-2 hover:text-ink hover:underline">
             CSV
-          </a>
-          {/* PG-50 — 원형 조직도는 구석에서 새 탭으로 */}
-          <a href="/ops/monitor/graph" target="_blank" rel="noopener" className="text-muted underline-offset-2 hover:text-ink hover:underline">
-            조직도 그래프 ↗
           </a>
         </OrgTabs>
 

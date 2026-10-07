@@ -204,7 +204,8 @@ export function OpsClient() {
         <div aria-live="polite" className="h-5 text-sm text-ink">
           {msg}
         </div>
-        {/* 모니터로 가는 길 — 없으면 만들어도 아무도 못 간다. 이름은 상단 메뉴·탭과 같게 (PG-49e — 「전사」의 [현황]) */}
+        {/* 모니터로 가는 길 — 없으면 만들어도 아무도 못 간다. 이름은 상단 메뉴·탭과 같게 (PG-49e — 「전사」의 [현황]).
+            「조직도」는 뺐다 — 원형 조직도 그래프는 걷어 냈다(2026-10-07, PG-50e) */}
         <div className="flex shrink-0 gap-2">
           <Link href="/ops/monitor" className="btn-secondary btn-sm">
             전사 · 현황
