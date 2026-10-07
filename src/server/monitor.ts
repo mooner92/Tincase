@@ -3,7 +3,6 @@
 import { prisma } from './db';
 import { ensureCurrentSlot } from './worklog';
 import { earliestDeadline } from './slot-deadline';
-import { missingStreaks } from './streak';
 import { formatDeadlineKo, toKstIso } from '@/lib/week';
 import type { DivisionNode } from '@/lib/orgtree';
 
@@ -57,8 +56,6 @@ export async function monitorData(now = new Date()) {
       divisions: skipped.length,
       people: skipped.reduce((n, d) => n + d.people.filter((p) => p.onRoster).length, 0),
     },
-    // 스냅샷이 못 보여주는 것 — "이번 주 안 냄"과 "3주 연속 안 냄"은 다른 얘기다
-    streaks: await missingStreaks(now),
     // WS-19 — 켜진 부서 중 **가장 이른** 마감 (주차 마감 예외 화면과 같은 식). 첫 부서를 대표로 쓰지 않는다
     deadlineText: formatDeadlineKo(earliestDeadline(slot, divisions.filter((d) => d.isActive))),
     capturedAtKst: toKstIso(now).slice(5, 16).replace('T', ' ') + ' 기준',
