@@ -47,6 +47,21 @@ export interface MergeStateView {
   review: ReviewStateView | null;
   /** 부서장 계정이 있는 부서인가 — 없으면 「승인 전」을 띄우지 않는다 */
   hasHead: boolean;
+  /**
+   * HM-49 — 지금 병합본(그 주차의 최신 성공 실행)을 사람이 고쳤나. 없으면 null.
+   * [다시 병합] 전에 「누가 몇 곳」을 묻는 데 쓴다 — 확인하면 `overwriteEdits: true`로 보낸다 (API-55)
+   */
+  edits: MergeEditsView | null;
+  /** CP-107 — 이 병합본을 만든 뒤 바뀐 설정 (부서 설정 카드 이름). 없으면 빈 배열 */
+  rulesChanged: string[];
+}
+
+/** HM-49 — 고친 기록 요약. 409 `edited`의 `detail.edits`와 같은 모양이다 (API-55) */
+export interface MergeEditsView {
+  places: number;
+  saves: number;
+  by: string[];
+  lastAtKst: string;
 }
 
 export interface ReviewStateView {
@@ -117,16 +132,36 @@ export function MergePanel({
       .finally(() => setBusy(false));
   };
 
-  const run = () => {
+  /*
+   * CP-106 · HM-49 — 사람이 고친 병합본은 **덮기 전에 이 카드 안에서 묻는다.**
+   * 다시 병합은 같은 경로에 새로 쓰므로 고친 내용이 어디에도 남지 않는다. 묻지 않고 덮으면
+   * 부서장 승인(= 고쳐 저장)이 통째로 사라지고, 화면에는 「승인 뒤 바뀜」만 남는다.
+   * 이 화면을 연 뒤에 누가 고쳤으면 서버가 409로 멈추고 같은 요약을 주므로, 그때도 같은 자리에서 묻는다.
+   */
+  const [ask, setAsk] = useState<MergeEditsView | null>(null);
+  const run = (overwriteEdits = false) => {
+    if (!overwriteEdits && state.edits) {
+      setErr(null);
+      setAsk(state.edits);
+      return;
+    }
     setBusy(true);
     setErr(null);
+    setAsk(null);
     fetch('/api/division/merge', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isoKey }),
+      // 확인한 경우에만 붙인다 — 서버는 정확히 true만 확인으로 친다 (API-55)
+      body: JSON.stringify(overwriteEdits ? { isoKey, overwriteEdits: true } : { isoKey }),
     })
       .then(async (r) => {
-        if (!r.ok) setErr(((await r.json()) as { message?: string }).message ?? '병합에 실패했습니다.');
+        const b = (await r.json().catch(() => ({}))) as {
+          error?: string;
+          message?: string;
+          detail?: { edits?: MergeEditsView };
+        };
+        if (r.status === 409 && b.error === 'edited' && b.detail?.edits) setAsk(b.detail.edits);
+        else if (!r.ok) setErr(b.message ?? '병합에 실패했습니다.');
         else router.refresh();
       })
       .catch(() => setErr('네트워크 오류로 병합하지 못했습니다.'))
@@ -161,6 +196,20 @@ export function MergePanel({
               submitted === 0 ? '제출된 파일이 없습니다.' : '마감이 지나면 자동으로 병합됩니다.'
             ) : null}
           </p>
+          {/*
+            CP-107 — 이 병합본을 만든 뒤 병합 설정이 바뀌었다. 규칙 저장은 병합을 다시 돌리지 않는데,
+            그걸 말하지 않으면 「설정이 안 먹는다」가 된다. [다시 병합]해야 한다는 말은 그 버튼을 가진 사람에게만
+          */}
+          {done && state.rulesChanged.length > 0 && (
+            <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
+              <span className="chip chip-warn">규칙 바뀜</span>
+              <span>
+                {state.rulesChanged.join(' · ')}
+                {canRun &&
+                  ` — 이 병합본에는 [다시 병합]해야 적용됩니다${state.edits ? ' (병합본을 고친 내용은 사라집니다)' : ''}`}
+              </span>
+            </p>
+          )}
         </div>
         {done ? (
           <span className="chip chip-ok">
@@ -236,10 +285,44 @@ export function MergePanel({
             </a>
           )}
           {canRun && (
-            <button onClick={run} disabled={busy || submitted === 0} className={done ? 'btn-ghost' : 'btn-secondary'}>
+            <button onClick={() => run()} disabled={busy || submitted === 0 || !!ask} className={done ? 'btn-ghost' : 'btn-secondary'}>
               {busy ? '병합 중…' : done ? '다시 병합' : '지금 병합'}
             </button>
           )}
+        </div>
+      )}
+      {/*
+        CP-106 — 무엇이 사라지는지(누가·몇 곳·언제)를 보여 줘야 고를 수 있다. 브라우저 확인 창엔 한 줄밖에 못 넣는다.
+        누른 [다시 병합] 바로 밑에서 묻는다. 확인은 보조 버튼 — 이 카드의 주 버튼은 그대로 하나다 (CP-99)
+      */}
+      {canRun && ask && (
+        <div role="alert" className="callout callout-warn mt-4">
+          <p className="font-semibold text-ink">다시 병합하면 병합본을 고친 내용이 사라집니다</p>
+          <p className="mt-1 text-body">
+            {ask.by.length > 0 && <>고친 사람 {ask.by.join(', ')} · </>}
+            고친 곳 {ask.places}곳{ask.saves > 1 && ` (저장 ${ask.saves}번)`}
+            {ask.lastAtKst && ` · 마지막 ${ask.lastAtKst}`}
+          </p>
+          {/* 부서장이 고쳐 저장한 그 판이 지금 판이면, 바뀐 곳을 몇 줄 보여 준다 (HM-47이 남긴 것) */}
+          {state.review?.kind === 'edit' && !state.review.changedAfter && state.review.lines.length > 0 && (
+            <ul className="mt-1.5 space-y-0.5 text-[13px] text-body">
+              {state.review.lines.slice(0, 3).map((l, i) => (
+                <li key={i}>· {l}</li>
+              ))}
+              {state.review.lines.length > 3 && <li className="text-muted">외 {state.review.lines.length - 3}곳</li>}
+            </ul>
+          )}
+          <p className="mt-1.5 text-xs text-muted">
+            제출물로 새로 만듭니다.{done && canDownload && ' 고친 판이 필요하면 먼저 [받기]로 받아 두세요.'}
+          </p>
+          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+            <button onClick={() => run(true)} disabled={busy} className="btn-secondary btn-sm">
+              {busy ? '병합 중…' : '고친 내용 버리고 다시 병합'}
+            </button>
+            <button onClick={() => setAsk(null)} disabled={busy} className="btn-ghost">
+              취소
+            </button>
+          </div>
         </div>
       )}
       {approveNow && (
@@ -305,7 +388,10 @@ export function MergePanel({
               <span className="font-medium text-ink">이 병합본에 빠진 사람 {state.missing.length}명</span>
               <span className="ml-1.5">{state.missing.join(', ')}</span>
               <span className="ml-1 text-muted">
-                — {state.finishedAtKst ?? '병합'} 기준입니다. 그 뒤에 낸 사람이 있으면 [다시 병합]을 눌러주세요
+                — {state.finishedAtKst ?? '병합'} 기준입니다.
+                {/* CP-106a — 누르라고 하면서 무엇이 사라지는지 말하지 않으면, 실장 수정을 지우라고 시키는 셈이다 */}
+                {canRun &&
+                  ` 그 뒤에 낸 사람이 있으면 [다시 병합]을 눌러주세요${state.edits ? ' — 병합본을 고친 내용은 사라집니다' : ''}`}
               </span>
             </p>
           )}

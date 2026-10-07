@@ -10,7 +10,7 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
 import { HttpError, requireOperator } from '@/server/authz';
-import { handler, json, rateLimit } from '@/server/http';
+import { handler, json, rateLimit, rejectOversizedBody } from '@/server/http';
 import { audit } from '@/server/audit';
 import { readTable } from '@/lib/xlsx';
 import { planRosterSync, applyRosterSync, toErpPerson, REQUIRED_COLUMNS } from '@/server/roster/sync';
@@ -23,6 +23,7 @@ const MAX_BYTES = 8 * 1024 * 1024;
 export const POST = handler(async (req: NextRequest) => {
   const scope = await requireOperator(req.headers);
   rateLimit(`roster-sync:${scope.user.email}`, 20, 60_000);
+  rejectOversizedBody(req, MAX_BYTES); // ST-04
 
   const form = await req.formData().catch(() => null);
   const file = form?.get('file');

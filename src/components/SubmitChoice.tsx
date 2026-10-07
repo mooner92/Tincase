@@ -6,17 +6,25 @@
 // 스위치는 서버만 안다. 이 컴포넌트는 페이지가 넘긴 `uploadOpen`만 본다.
 import { useState } from 'react';
 import { UploadDropzone } from './UploadDropzone';
-import { WebComposer } from './WebComposer';
+import { WebComposer, type ComposerRow } from './WebComposer';
+
+type Rows = Record<'achievements' | 'plans' | 'notes', ComposerRow[]>;
 
 export function SubmitChoice({
   hasPrevious,
+  current,
   isoKey,
+  weekStartMs,
   guideLines,
   emptyWordsRaw,
   uploadOpen,
 }: {
   hasPrevious: boolean;
+  /** WA-35 — 이번 주에 낸 판. 「다시 작성」이 여기서 시작한다 */
+  current?: { id: string; version: number } | null;
   isoKey: string;
+  /** WA-36a — 이번 주 월요일 00:00 KST (일자 예시) */
+  weekStartMs: number;
   guideLines: string[];
   /** HM-33 — 부서가 정한 「내용 없음」 낱말. 비면 검사하지 않는다 */
   emptyWordsRaw?: string;
@@ -24,16 +32,49 @@ export function SubmitChoice({
   uploadOpen: boolean;
 }) {
   const [mode, setMode] = useState<'upload' | 'web'>(uploadOpen ? 'upload' : 'web');
-  const [composing, setComposing] = useState(false);
+  const [composing, setComposing] = useState<{ initial: Rows | null; failed: boolean } | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  /*
+   * WA-35 — 이번 주에 낸 판이 있으면 그 표로 연다. 날짜 하나 고치려고 일곱 줄을 다시 적게 하면
+   * 그냥 두거나 담당자에게 부탁한다. 표는 열람과 같은 응답(`rowsByTable`, 「공유」 포함)에서 온다 —
+   * 본인 것은 원래 열람할 수 있으므로 새 권한이 생기지 않는다.
+   * 임시본이 있으면 그쪽이 먼저인데(WA-35a), 그래도 받아 둔다 — [지금 낸 판으로 다시 시작]에 쓴다.
+   */
+  const start = async () => {
+    if (!current) {
+      setComposing({ initial: null, failed: false });
+      return;
+    }
+    setLoading(true);
+    try {
+      const r = await fetch(`/api/submissions/${current.id}/preview`);
+      const b = r.ok ? ((await r.json()) as { rowsByTable?: Rows }) : null;
+      setComposing({ initial: b?.rowsByTable ?? null, failed: !b?.rowsByTable });
+    } catch {
+      setComposing({ initial: null, failed: true });
+    } finally {
+      setLoading(false);
+    }
+  };
 
   // PG-12 — 할 일 하나. 아직 안 냈으면 이것이 이 카드의 주 버튼이고, 냈으면 「다시 작성」은 보조 버튼이다(CP-99)
   const composeButton = (
-    <button onClick={() => setComposing(true)} className={hasPrevious ? 'btn-secondary btn-sm' : 'btn-primary'}>
-      {hasPrevious ? '다시 작성 (새 버전)' : '작성하기'}
+    <button onClick={start} disabled={loading} className={hasPrevious ? 'btn-secondary btn-sm' : 'btn-primary'}>
+      {loading ? '불러오는 중…' : hasPrevious ? '다시 작성 (새 버전)' : '작성하기'}
     </button>
   );
   const composer = composing && (
-    <WebComposer isoKey={isoKey} guideLines={guideLines} emptyWordsRaw={emptyWordsRaw} onClose={() => setComposing(false)} />
+    <WebComposer
+      isoKey={isoKey}
+      guideLines={guideLines}
+      emptyWordsRaw={emptyWordsRaw}
+      initial={composing.initial}
+      initialVersion={current?.version}
+      initialFailed={composing.failed}
+      weekStartMs={weekStartMs}
+      onClose={() => setComposing(null)}
+    />
   );
 
   // 업로드가 닫힌 서버 — 카드의 행동 줄에 버튼 하나로 들어간다 (내 제출물 버튼들과 한 줄)

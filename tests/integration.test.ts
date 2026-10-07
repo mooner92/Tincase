@@ -520,6 +520,174 @@ d('health (API-T10)', () => {
 });
 
 /**
+ * AU-33 — 상태를 바꾸는 요청은 **같은 출처**에서만. 격리 스위트와 같은 무게의 게이트다:
+ * 같은 서버 다른 포트의 페이지가 방문자 쿠키로 대신 보내는 요청은, 신원 판정이 아무리 옳아도 막지 못한다.
+ * 양식 파일이 없어도 돈다 — 부서 규칙(PUT /api/division/rule)의 지침 한 줄로 「바뀌었나」를 본다.
+ */
+describe('AU-33 같은 출처 — 다른 포트의 페이지가 대신 보내는 요청 (AU-T84~86)', () => {
+  const rule = () => import('@/app/api/division/rule/route');
+  const put = async (guideText: string, headers: Record<string, string>, body?: string) => {
+    const { PUT } = await rule();
+    return PUT(
+      nx('/api/division/rule', ID.aLead, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json', ...headers },
+        body: body ?? JSON.stringify({ guideText }),
+      }),
+    );
+  };
+  const guide = async () => {
+    const { prisma } = await import('@/server/db');
+    return (await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } })).guideText;
+  };
+  // 운영 11111 · 테스트 서버 11112 — 쿠키는 포트를 보지 않으므로 둘은 「같은 사이트」다 (RU-42)
+  const HOST = { host: 'test.local:11111' };
+
+  it('[AU-T84] ★ 같은 사이트 다른 포트(Sec-Fetch-Site: same-site) → 403 cross_origin, 아무것도 안 바뀐다', async () => {
+    const before = await guide();
+    const res = await put('위조', { ...HOST, origin: 'http://test.local:11112', 'sec-fetch-site': 'same-site' });
+    expect(res.status).toBe(403);
+    expect((await res.json()).error).toBe('cross_origin');
+    expect(await guide()).toBe(before);
+  });
+
+  it('[AU-T84b] 사내망 평문 HTTP — Sec-Fetch-*가 없어도 Origin의 포트가 다르면 403 · text/plain 본문도 · Origin: null도', async () => {
+    const before = await guide();
+    expect((await put('위조', { ...HOST, origin: 'http://test.local:11112' })).status).toBe(403);
+    // 사전 요청(preflight) 없이 닿는 단순 요청 꼴 — req.json()은 text/plain도 읽으므로 막는 곳이 여기뿐이다
+    expect(
+      (await put('', { ...HOST, origin: 'http://test.local:11112', 'content-type': 'text/plain' }, JSON.stringify({ guideText: '위조' }))).status,
+    ).toBe(403);
+    expect((await put('위조', { ...HOST, origin: 'null' })).status).toBe(403);
+    expect((await put('위조', { ...HOST, 'sec-fetch-site': 'cross-site' })).status).toBe(403);
+    expect(await guide()).toBe(before);
+  });
+
+  it('[AU-T85] 같은 출처 → 그대로 처리 (Sec-Fetch-Site: same-origin · Origin = Host)', async () => {
+    expect((await put('같은 출처 1', { ...HOST, origin: 'http://test.local:11111', 'sec-fetch-site': 'same-origin' })).status).toBe(200);
+    expect(await guide()).toBe('같은 출처 1');
+    // 사내망: Sec-Fetch-*가 없고 Origin만 온다 — host가 같으면 통과 (대소문자는 보지 않는다)
+    expect((await put('같은 출처 2', { ...HOST, origin: 'http://TEST.local:11111' })).status).toBe(200);
+    expect(await guide()).toBe('같은 출처 2');
+    // 주소창에 직접 친 것과 같은 요청(none)
+    expect((await put('같은 출처 3', { ...HOST, 'sec-fetch-site': 'none' })).status).toBe(200);
+  });
+
+  it('[AU-T86] 출처 헤더가 하나도 없으면(스크립트·curl) 통과 · GET은 출처를 보지 않는다', async () => {
+    expect((await put('스크립트', {})).status).toBe(200);
+    expect(await guide()).toBe('스크립트');
+    const { GET } = await rule();
+    const res = await GET(nx('/api/division/rule', ID.aLead, { headers: { origin: 'http://test.local:11112', 'sec-fetch-site': 'same-site' } }));
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('ST-04 업로드 크기 — 본문을 읽기 전에 (ST-T39)', () => {
+  it('[ST-T39] Content-Length가 한도(20MB)+여유를 넘으면 읽지 않고 413 too_large · 그 아래는 지금처럼 본문을 본다', async () => {
+    const { POST } = await import('@/app/api/submissions/route');
+    const { prisma } = await import('@/server/db');
+    // 전용 계정 — 업로드 속도 제한(5분 10회)을 다른 테스트와 나눠 쓰지 않게
+    const who = 'a-size@test.kei.re.kr';
+    const da = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
+    await prisma.user.upsert({ where: { email: who }, update: {}, create: { email: who, name: 'a-size', divisionId: da.id } });
+    const big = await POST(
+      nx('/api/submissions', who, { method: 'POST', headers: { 'content-length': String(30 * 1024 * 1024) }, body: 'x' }),
+    );
+    expect(big.status).toBe(413);
+    const body = await big.json();
+    expect(body.error).toBe('too_large');
+    expect(body.message).toContain('20MB');
+    // 한도 안이면 통과해서 본문을 읽는다 — 파일이 없으니 422
+    const small = await POST(nx('/api/submissions', who, { method: 'POST', headers: { 'content-length': '10' }, body: 'x' }));
+    expect(small.status).toBe(422);
+  });
+});
+
+/**
+ * API-T13 · OPS-41 — health는 양식 **파일**까지 본다. 행만 세던 시절에는 파일이 하나뿐인 30개 부서도 `ok`였다.
+ * 부서 이름은 응답에 없다(누구나 부르는 주소). 이 스위트는 만든 양식 행을 지우고 끝난다 — 뒤 테스트는 양식이 없는 상태를 본다.
+ */
+describe('health — 양식 파일 · 경고 (API-T13)', () => {
+  it('[API-T13] 활성 부서의 양식 파일이 없으면 template fail · 503 — 다 있으면 ok · warnings는 늘 배열', async () => {
+    const { prisma } = await import('@/server/db');
+    const { writeFileAtomic } = await import('@/server/storage');
+    const { GET } = await import('@/app/api/health/route');
+    const active = await prisma.division.findMany({ where: { isActive: true } });
+    expect(active.length).toBeGreaterThan(0);
+
+    // 1) 양식이 하나도 없다 — 활성 부서 수만큼 fail
+    let body = await (await GET()).json();
+    expect(body.checks.template).toBe(`fail: ${active.length} active division(s) without template file`);
+    expect(body.ok).toBe(false);
+    expect(Array.isArray(body.warnings)).toBe(true);
+    expect(JSON.stringify(body)).not.toContain('부서');
+
+    // 2) 전부 행 + 파일 → ok
+    const made: string[] = [];
+    for (const d of active) {
+      const rel = `health-check/${d.id}.hwp`;
+      await writeFileAtomic(rel, Buffer.from('hwp'));
+      const t = await prisma.template.create({ data: { divisionId: d.id, filePath: rel, sha256: 'x', version: 900, uploadedBy: 'test' } });
+      made.push(t.id);
+    }
+    try {
+      body = await (await GET()).json();
+      expect(body.checks.template).toBe('ok');
+
+      // 3) 행은 있는데 파일이 없는 부서 하나 (2026-09-10의 그 상태)
+      rmSync(path.join(TMP_STORAGE, `health-check/${active[0].id}.hwp`), { force: true });
+      const res = await GET();
+      body = await res.json();
+      expect(body.checks.template).toBe('fail: 1 active division(s) without template file');
+      expect(res.status).toBe(503);
+      expect(JSON.stringify(body)).not.toContain(active[0].nameKo);
+    } finally {
+      await prisma.template.deleteMany({ where: { id: { in: made } } });
+    }
+  });
+});
+
+/**
+ * PG-45 — 보관함은 주차마다 마지막 성공본 하나. 예전에는 최근 성공 실행 60건을 읽은 뒤 주차로 접어서,
+ * 재병합이 잦은 부서는 옛 주차가 **목록에서 소리 없이** 빠졌다.
+ */
+describe('PG-45 보관함 — 옛 주차가 빠지지 않는다 (PG-T90)', () => {
+  it('[PG-T90] 최근 주차에 성공 실행이 70건 쌓여도 옛 주차가 남고, 주차마다 가장 늦게 시작한 성공본을 고른다', async () => {
+    const { prisma } = await import('@/server/db');
+    const { latestRunPerWeek } = await import('@/server/merge/archive');
+    const div = await prisma.division.create({ data: { slug: 'PG90_Div', nameKo: '보관실', nameEn: 'PG90', isActive: false } });
+    try {
+      const mk = (isoKey: string, opensAt: string, weekOfMonth: number) =>
+        prisma.weekSlot.create({ data: { isoKey, label: `9월 ${weekOfMonth}주차`, year: 2026, month: 9, weekOfMonth, opensAt: new Date(opensAt) } });
+      const old = await mk('PG90-W36', '2026-08-31T00:00:00+09:00', 1);
+      const recent = await mk('PG90-W40', '2026-09-28T00:00:00+09:00', 5);
+      const run = (weekSlotId: string, startedAt: string, status = 'succeeded') =>
+        prisma.mergeRun.create({
+          data: { divisionId: div.id, weekSlotId, status, outputPath: status === 'succeeded' ? 'x.hwp' : null, sourceIds: '[]', ruleSnapshot: '{}', startedAt: new Date(startedAt) },
+        });
+
+      await run(old.id, '2026-09-03T14:01:00+09:00');
+      const oldLatest = await run(old.id, '2026-09-03T15:20:00+09:00'); // 그 주 마지막 재병합
+      await run(old.id, '2026-09-03T16:00:00+09:00', 'failed'); // 실패는 보관함에 없다
+      let last = '';
+      for (let i = 0; i < 70; i++) {
+        const t = new Date(Date.parse('2026-10-01T09:00:00+09:00') + i * 60_000).toISOString();
+        last = (await run(recent.id, t)).id;
+      }
+
+      const rows = await latestRunPerWeek(div.id);
+      expect(rows.map((r) => r.weekSlot.isoKey)).toEqual(['PG90-W40', 'PG90-W36']);
+      expect(rows.map((r) => r.id)).toEqual([last, oldLatest.id]);
+    } finally {
+      // 뒤 시험이 이 부서를 세지 않게 지운다 — 「전사」의 「세지 않는 부서 n곳」(PG-T83)은 비활성 부서도 센다
+      await prisma.mergeRun.deleteMany({ where: { divisionId: div.id } });
+      await prisma.weekSlot.deleteMany({ where: { isoKey: { in: ['PG90-W36', 'PG90-W40'] } } });
+      await prisma.division.delete({ where: { id: div.id } });
+    }
+  });
+});
+
+/**
  * HM-34 — **마감은 이벤트다.** 14:00이 지나면 그때까지 제출된 것으로 최종본을 한 번 만든다.
  *
  * 이 스위트는 2026-08-27 AI홍보전략실에서 실제로 난 사고를 그대로 재현한다:

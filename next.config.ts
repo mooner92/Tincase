@@ -10,6 +10,25 @@ const nextConfig: NextConfig = {
   // **주소를 코드에 적지 않는다** — 공개 저장소다. 필요하면 DEV_ORIGIN으로 준다:
   //   DEV_ORIGIN=<서버-내부-IP> npm run dev
   allowedDevOrigins: ['127.0.0.1', 'localhost', ...(process.env.DEV_ORIGIN ? [process.env.DEV_ORIGIN] : [])],
+  /*
+   * AU-33 — 응답 보안 헤더. 같은 서버 다른 포트의 페이지는 브라우저에게 「같은 사이트」라서,
+   * 이 앱을 iframe에 넣고 버튼 위에 투명한 것을 덮어 누르게 할 수 있다(클릭재킹). 앱은 다른 페이지를
+   * iframe에 넣지도, 넣어지지도 않으므로(2026-10-08 확인) 프레임은 전부 막는다.
+   * CSP는 frame-ancestors 하나만 둔다 — script-src까지 잠그면 Next 인라인 스크립트가 깨진다.
+   */
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        headers: [
+          { key: 'Content-Security-Policy', value: "frame-ancestors 'none'" },
+          { key: 'X-Frame-Options', value: 'DENY' },
+          { key: 'X-Content-Type-Options', value: 'nosniff' },
+          { key: 'Referrer-Policy', value: 'same-origin' },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

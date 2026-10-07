@@ -14,7 +14,8 @@ import { tableGrid, columnWidths } from '@/lib/hwp/model';
 import { composeMergedHwp } from '@/server/merge';
 import { boardTitle } from '@/lib/docname';
 import { slotKind, toKstIso } from '@/lib/week';
-import { alreadyApproved, latestReview, recordReview, requireViewedVersion, worklogRows } from '@/server/merge/review';
+import { alreadyApproved, latestReview, recordReview, requireViewedVersion, titled, worklogRows } from '@/server/merge/review';
+import { withEdit } from '@/server/merge/edits';
 import { cleanCell } from '@/server/worklog-doc';
 import { diffWorklog } from '@/lib/merge-diff';
 
@@ -198,8 +199,10 @@ export const PUT = handler(async (req: NextRequest) => {
     rowEmphasis[key] = kept.map((r) => r.emphasis);
   }
 
-  // HM-47 — 무엇이 바뀌었나는 **덮어쓰기 전에** 읽어 둔다
-  const beforeRows = isReviewer(scope) ? worklogRows(current) : null;
+  // HM-47 — 무엇이 바뀌었나는 **덮어쓰기 전에** 읽어 둔다.
+  // HM-49 — 담당자 저장도 센다: 다시 병합하면 누가 고쳤든 사라지므로, 덮기 전에 물을 근거가 있어야 한다
+  const reviewer = isReviewer(scope);
+  const beforeRows = worklogRows(current);
 
   // HM-46 — 고쳐 저장한 병합본에도 부서명이 맨 위에 있어야 한다 (자동 병합과 같은 경로)
   const composed = composeMergedHwp(
@@ -215,25 +218,38 @@ export const PUT = handler(async (req: NextRequest) => {
     plans: tableRows.plans.length,
     notes: tableRows.notes.length,
   };
+  // 바뀐 곳은 저장한 파일을 다시 읽어 계산한다 — 화면이 보낸 것이 아니라 문서에 실제로 들어간 것
+  const changes = diffWorklog(beforeRows, worklogRows(composed.bytes));
+  const savedAt = new Date();
   await prisma.mergeRun.update({
     where: { id: run.id },
-    data: { rowCounts: JSON.stringify(rowCounts), finishedAt: new Date() },
+    data: {
+      rowCounts: JSON.stringify(rowCounts),
+      finishedAt: savedAt,
+      // HM-49 — 바뀐 곳이 있을 때만 남긴다. 아무것도 안 바꾼 저장으로 [다시 병합]이 멈추면 안 된다
+      ...(changes.length > 0 && {
+        reviewJson: withEdit(run.reviewJson, {
+          by: reviewer ? titled(scope.user) : scope.user.name,
+          role: reviewer ? 'head' : 'lead',
+          at: savedAt.toISOString(),
+          places: changes.length,
+        }),
+      }),
+    },
   });
-  await audit(scope.user.email, 'merge', division.id, `merged:${slot.isoKey}`, { action: 'edit', rowCounts });
+  await audit(scope.user.email, 'merge', division.id, `merged:${slot.isoKey}`, { action: 'edit', rowCounts, places: changes.length });
 
   /*
    * HM-47 — **부서장의 저장은 곧 승인이다.** 계정의 역할로 판정한다 — 담당자의 저장은 승인이 아니다.
-   * 바뀐 곳은 저장한 파일을 다시 읽어 계산한다 — 화면이 보낸 것이 아니라 문서에 실제로 들어간 것.
    */
   const savedSha = sha256(composed.bytes);
   /** `notified` — 담당자 몇 명에게 알림이 나갔나 (0이면 화면이 「알렸습니다」라고 하지 않는다) */
   let approved: { summary: string; notified: number; unchanged?: boolean } | null = null;
-  if (beforeRows) {
+  if (reviewer) {
     if (savedSha === currentSha && (await alreadyApproved(run, savedSha))) {
       // 바뀐 것 없이 다시 저장했고 이 판은 이미 승인했다 — 승인·알림을 또 만들지 않는다
       approved = { summary: (await latestReview(division.id, slot.id))?.summary ?? '', notified: 0, unchanged: true };
     } else {
-      const changes = diffWorklog(beforeRows, worklogRows(composed.bytes));
       const { notified } = await recordReview({ scope, run, slot, kind: 'edit', changes, bytes: composed.bytes });
       approved = { summary: (await latestReview(division.id, slot.id))?.summary ?? '', notified: notified.sent };
     }

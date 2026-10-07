@@ -18,6 +18,8 @@ import { ReportSubmitCard } from '@/components/ReportSubmitCard';
 import { reportState } from '@/server/rollup/report';
 import { rollupEnabled } from '@/server/rollup/schedule';
 import { latestReview } from '@/server/merge/review';
+import { latestEdits } from '@/server/merge/edits';
+import { rulesChangedSince } from '@/server/merge/rule-snapshot';
 import { readStoredFile, sha256 } from '@/server/storage';
 import { notFound } from 'next/navigation';
 
@@ -106,6 +108,10 @@ export async function ManageView({
     flagged: review?.flagged ?? [],
     review: lastRun?.status === 'succeeded' ? await latestReview(division.id, slot.id) : null,
     hasHead: (await prisma.user.count({ where: { divisionId: division.id, isActive: true, divisionRole: 'head' } })) > 0,
+    // HM-49 — 마지막 실행이 실패했어도 덮이는 것은 최신 **성공** 실행의 파일이다. 그래서 따로 찾는다
+    edits: (await latestEdits(division.id, slot.id))?.edits ?? null,
+    // CP-107 — 이 병합본을 만든 뒤 바뀐 설정. 규칙 저장은 병합을 다시 돌리지 않으므로 화면이 말해야 한다
+    rulesChanged: lastRun?.status === 'succeeded' ? rulesChangedSince(lastRun.ruleSnapshot, division) : [],
   };
 
   const deadline = effectiveDeadline(slot, division);
@@ -240,7 +246,13 @@ export async function ManageView({
           {opened && (
             <p className="callout callout-warn mt-4">
               <strong className="font-semibold">마감을 열어 두었습니다</strong> — {openUntilKo}까지 부서원 누구나
-              제출할 수 있습니다. 시각이 지나면 저절로 닫히고, 닫힌 뒤 병합이 한 번 더 돕니다.
+              제출할 수 있습니다. 시각이 지나면 저절로 닫히고,{' '}
+              {/* CP-106a · HM-49 — 고친 병합본은 닫힌 뒤에도 다시 만들지 않는다. 「한 번 더 돈다」만 말하면 늦게 낸 사람이 들어갔다고 믿는다 */}
+              {mergeState.edits
+                ? `병합본을 고친 곳이 있어 닫힌 뒤에도 다시 병합하지 않습니다.${
+                    canMerge ? ' 늦게 낸 것을 넣으려면 [다시 병합] — 고친 내용은 사라집니다.' : ''
+                  }`
+                : '닫힌 뒤 병합이 한 번 더 돕니다.'}
             </p>
           )}
         </section>

@@ -275,9 +275,10 @@ export function FileDrawer({
               onSaved={(newId, v) => {
                 setEditingId(null);
                 setDirty(false);
+                // CP-106a — [다시 병합]을 누르라고 할 때는 무엇이 사라지는지도 말한다 (HM-49)
                 setSavedNote({
                   id: newId,
-                  text: `v${v}로 저장했습니다 — 원래 판은 그대로 있습니다. 병합본에 넣으려면 [다시 병합]을 누르세요.`,
+                  text: `v${v}로 저장했습니다 — 원래 판은 그대로 있습니다. 병합본에 넣으려면 [다시 병합]을 누르세요 (병합본에서 고친 내용이 있으면 사라집니다).`,
                 });
                 onNavigate(newId);
                 router.refresh();

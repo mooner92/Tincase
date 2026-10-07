@@ -23,7 +23,9 @@ import { slotKind } from '@/lib/week';
 import { describeFlagged, type FlaggedRow } from '@/lib/empty-content';
 import { approvalOf } from '../merge/review';
 import { loadOrgSetting, loadTree, submitTarget } from '../rollup/tree';
+import type { MergeEdits } from '../merge/edits';
 import { toKstIso } from '@/lib/week';
+import type { Division, WeekSlot } from '@prisma/client';
 
 /** 스케줄러가 5분 주기이므로 창은 그보다 넉넉해야 반드시 한 번 걸린다 */
 const WINDOW_MINUTES = 12;
@@ -31,8 +33,13 @@ const WINDOW_MINUTES = 12;
 export const REVIEW_MINUTES = 10;
 /** 담당자 최종 제출 안내 */
 export const SUBMIT_MINUTES = 30;
+/**
+ * HM-50 — 대외업무 마감(15:00 = 부서 마감 +60분). 병합이 이보다 늦게 끝나면 안내를 보내지 않는다 —
+ * 대외 마감이 지난 뒤의 「검토해 주세요」는 할 수 있는 일이 없는 소음이다.
+ */
+export const LATE_LIMIT_MINUTES = 60;
 
-export type NoticeKind = 'merge_review' | 'merge_missing' | 'merge_done';
+export type NoticeKind = 'merge_review' | 'merge_missing' | 'merge_done' | 'merge_held';
 
 export interface NoticeOutcome {
   division: string;
@@ -73,6 +80,8 @@ export interface MergeFacts {
   submitTo?: string | null;
   /** RU-53 · RU-30 — 그 단위의 기한 (「15:00」 — 수합 관리 [제출] 카드와 같은 값). 3단계를 안 쓰면 null */
   submitDue?: string | null;
+  /** HM-49 — 자동 재병합을 멈추게 한 사람 수정 (NT-51 `merge_held`에서만) */
+  edits?: MergeEdits | null;
 }
 
 /**
@@ -145,9 +154,17 @@ export function pickJobs(
   return jobs;
 }
 
-/** 창 안에 들어왔는가. `[+n, +n+12분]`을 한 번 지나면 참 */
-function inWindow(passedMinutes: number, at: number): boolean {
-  return passedMinutes >= at && passedMinutes <= at + WINDOW_MINUTES;
+/**
+ * HM-50 — 마감 +`at`분 안내를 지금 보낼 때인가. 순수 함수다 (시험할 수 있게).
+ *
+ * 창은 `max(마감 + at, 병합이 끝난 시각)`에 열려 12분 간다. 예전에는 `[+at, +at+12]`로 못 박혀 있어서,
+ * 부서가 많아 병합이 14:23에 끝나면 검토 요청 창(14:10~14:22)이 이미 지나 있었다 — 그 주에는 한 통도 안 나간다.
+ * `settledMin`은 마감 뒤 마지막 병합 시도가 끝난(또는 병합본이 저장된) 시각 — 마감부터 센 분. 없으면 null.
+ */
+export function noticeDue(passedMin: number, atMin: number, settledMin: number | null): boolean {
+  const start = Math.max(atMin, settledMin ?? atMin);
+  if (start > LATE_LIMIT_MINUTES) return false;
+  return passedMin >= start && passedMin <= start + WINDOW_MINUTES;
 }
 
 function rowsLine(f: MergeFacts): string {
@@ -182,6 +199,21 @@ function compose(kind: NoticeKind, who: Person, slotLabel: string, monthly: bool
       ]
         .filter((l, i, a) => !(l === '' && a[i - 1] === ''))
         .join('\n'),
+    };
+  }
+
+  if (kind === 'merge_held') {
+    // NT-51 · HM-49 — 사실 두 줄(빠진 사람 · 멈춘 이유) → 할 일 → 그 대가. 대가를 빼면 누르고 나서야 안다
+    const who = f.edits?.by.length ? `${f.edits.by.join(', ')}님이` : '누군가';
+    return {
+      subject: `[Tincase] ${label} 병합본에 늦게 낸 ${f.stale}명이 빠져 있어요`,
+      contents: [
+        `${head} 마감 열기가 끝났어요. 병합본을 만든 뒤에 ${f.stale}명이 더 냈는데 지금 병합본에는 빠져 있어요.`,
+        `${who} 병합본을 ${f.edits?.places ?? 0}곳 고쳐서 자동으로 다시 병합하지 않았어요.`,
+        '',
+        '넣으려면 Tincase 수합 관리에서 [다시 병합]을 눌러주세요.',
+        '다시 병합하면 고친 내용은 사라져요.',
+      ].join('\n'),
     };
   }
 
@@ -316,9 +348,28 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
     try {
       const deadline = effectiveDeadline(slot, division);
       const passed = (now.getTime() - deadline.getTime()) / 60_000;
-      // 창 밖이면 아무것도 조회하지 않고 빠져나온다 — 1분마다 도는 루프다 (HM-35)
-      const atReview = inWindow(passed, REVIEW_MINUTES);
-      const atSubmit = inWindow(passed, SUBMIT_MINUTES);
+      // 창 밖이면 아무것도 조회하지 않고 빠져나온다 — 1분마다 도는 루프다 (HM-35).
+      // 창은 병합이 늦게 끝나면 뒤로 밀리지만(HM-50) 대외 마감 + 12분을 넘지는 않는다
+      if (passed < REVIEW_MINUTES || passed > LATE_LIMIT_MINUTES + WINDOW_MINUTES) continue;
+
+      /*
+       * HM-50 — 창은 **병합이 끝난 시각**부터 연다. `finishedAt`은 병합이 끝났거나 병합본이 저장된 시각이다 —
+       * 승인 뒤 병합본이 바뀌어 부서장에게 다시 묻는 것도(pickJobs) 같은 창을 따른다. 대외 마감 전까지만.
+       */
+      const settled = await prisma.mergeRun.findFirst({
+        where: {
+          divisionId: division.id,
+          weekSlotId: slot.id,
+          status: { in: ['succeeded', 'failed'] },
+          startedAt: { gte: deadline },
+          finishedAt: { not: null },
+        },
+        orderBy: { finishedAt: 'desc' },
+        select: { finishedAt: true },
+      });
+      const settledMin = settled?.finishedAt ? (settled.finishedAt.getTime() - deadline.getTime()) / 60_000 : null;
+      const atReview = noticeDue(passed, REVIEW_MINUTES, settledMin);
+      const atSubmit = noticeDue(passed, SUBMIT_MINUTES, settledMin);
       if (!atReview && !atSubmit) continue;
 
       /*
@@ -358,6 +409,22 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
           select: { id: true },
         });
         if (inFlight) continue;
+        /*
+         * HM-50 — 아직 **차례가 오지 않은** 부서도 기다린다. 스케줄러는 부서를 차례로 병합하고 하나 끝날 때마다
+         * 여기를 부른다 — 뒤 부서는 아직 시도조차 안 됐다. 그것을 「병합본이 아직 없어요 — [지금 병합]」으로 보내면
+         * 줄 서 있는 것을 실패라고 부르는 셈이다(13개 부서를 흉내 낸 시험에서 일곱 통이 그렇게 나갔다).
+         * 낸 사람이 있는데 마감 뒤 시도가 없으면 기다린다 — 병합이 끝나면 창이 그 시각부터 열린다.
+         * 낸 사람이 없으면 병합은 영영 돌지 않으므로 지금처럼 바로 알린다.
+         */
+        const attempted = await prisma.mergeRun.count({
+          where: { divisionId: division.id, weekSlotId: slot.id, startedAt: { gte: deadline } },
+        });
+        if (attempted === 0) {
+          const submitted = await prisma.submission.count({
+            where: { divisionId: division.id, weekSlotId: slot.id, isLatest: true },
+          });
+          if (submitted > 0) continue;
+        }
       }
       // HM-33 — 병합이 남긴 것을 그대로 읽는다. 여기서 다시 계산하면 화면과 갈라진다
       let flagged: FlaggedRow[] = [];
@@ -423,4 +490,64 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
     }
   }
   return out;
+}
+
+/**
+ * NT-51 · HM-49 — 사람이 고친 최종본이라 **자동 재병합을 멈췄다**고 담당자에게 한 번 알린다.
+ *
+ * 마감 열기가 닫히면 그 시각이 새 마감 이벤트라 병합이 다시 돈다(DM-20). 그런데 최종본을 부서장·담당자가 고쳤으면
+ * 다시 병합이 그 수정을 통째로 지운다. 그래서 스케줄러는 멈추고, 늦게 낸 사람을 넣을지는 담당자가 고르게 한다 —
+ * 그러려면 「늦게 낸 사람이 빠져 있다」와 「누르면 무엇이 사라진다」를 같이 알아야 한다.
+ *
+ * 닫힘마다 한 번이다: 종류에 닫힌 시각을 붙여 `(부서, 주차, 종류)` 유니크를 피한다 (승인 알림과 같은 방식).
+ * 보내지 않았으면 null — 메신저가 꺼졌거나, 부서 알림이 꺼졌거나, 이미 보냈거나, 받을 사람이 없다.
+ */
+export async function noticeMergeHeld(opts: {
+  division: Division;
+  slot: WeekSlot;
+  /** 이번에 닫힌 시각 (자동 병합 기준 `mergeGate`) */
+  gate: Date;
+  late: number;
+  edits: MergeEdits;
+}): Promise<NoticeOutcome | null> {
+  const { division, slot, gate, late, edits } = opts;
+  if (!messengerStatus().enabled || !division.notifyEnabled) return null;
+  const logKind = `merge_held:${gate.getTime()}`;
+  if (await prisma.notifyLog.findFirst({ where: { divisionId: division.id, weekSlotId: slot.id, kind: logKind } })) return null;
+
+  const people = await recipients(division.id, 'lead');
+  if (people.length === 0) {
+    logger.info({ division: division.nameKo, kind: 'merge_held' }, '[알림] 받을 사람이 없어 건너뜀 (사번·알림설정 확인)');
+    return null;
+  }
+  const facts: MergeFacts = { ok: true, sources: 0, counts: null, flagged: [], stale: late, approval: null, hasHead: false, edits };
+  const url = env.MESSENGER_LINK_BASE ? `${env.MESSENGER_LINK_BASE}/${division.slug}/manage` : undefined;
+  const monthly = slotKind(slot) === 'monthly';
+  const sent: string[] = [];
+  const blocked: string[] = [];
+  for (const p of people) {
+    const r = await sendAlert({ recvIds: [p.employeeNo], ...compose('merge_held', p, slot.label, monthly, facts), url });
+    sent.push(...r.sent);
+    blocked.push(...r.blocked);
+  }
+  if (sent.length > 0) {
+    await prisma.notifyLog.create({
+      data: {
+        divisionId: division.id,
+        weekSlotId: slot.id,
+        kind: logKind,
+        recipients: JSON.stringify(sent),
+        detail: JSON.stringify({ late, places: edits.places, by: edits.by, blocked, targets: people.length }),
+      },
+    });
+  }
+  return {
+    division: division.nameKo,
+    isoKey: slot.isoKey,
+    kind: 'merge_held',
+    status: 'succeeded',
+    targets: people.length,
+    sent: sent.length,
+    blocked: blocked.length,
+  };
 }

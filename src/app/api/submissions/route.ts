@@ -3,7 +3,8 @@ import { NextRequest } from 'next/server';
 import { requireSubmitter, HttpError } from '@/server/authz';
 import { assertHwpUploadOpen } from '@/server/submit-mode';
 import { uploadSubmission } from '@/server/worklog';
-import { handler, json, rateLimit } from '@/server/http';
+import { handler, json, rateLimit, rejectOversizedBody } from '@/server/http';
+import { env } from '@/server/env';
 import { toKstIso } from '@/lib/week';
 
 export const dynamic = 'force-dynamic';
@@ -13,6 +14,7 @@ export const POST = handler(async (req: NextRequest) => {
   // API-54 · WA-31 — 업로드가 닫힌 서버면 파일을 읽기 전에 돌려보낸다. 아무것도 남지 않는다
   assertHwpUploadOpen();
   rateLimit(`upload:${scope.user.email}`, 10, 5 * 60_000); // API-34
+  rejectOversizedBody(req, env.MAX_UPLOAD_BYTES); // ST-04 — formData()가 본문 전체를 올리기 전에
 
   const form = await req.formData().catch(() => null);
   const file = form?.get('file');

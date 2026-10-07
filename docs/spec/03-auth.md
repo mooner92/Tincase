@@ -340,6 +340,32 @@ Cloudflare 경유(HTTPS)일 때만 `secure`를 켠다 — 요청의 프로토콜
 > 사내 LAN 도청 위험은 낮지만 0이 아니다. **의식적으로 수용한 위험**이며,
 > 전 부서 확산 시 사내 인증서 또는 리버스 프록시 TLS를 재검토한다.
 
+### AU-33 — 상태를 바꾸는 요청은 **같은 출처**에서만 ★ (2026-10-08)
+
+쿠키는 포트를 보지 않는다(RU-42). 그래서 같은 서버의 **다른 포트**(테스트 서버 11112를 포함해 이 서버에는 열린 포트가
+스무 개가 넘는다)에 뜬 페이지는 `SameSite=Lax`로도 「같은 사이트」다. 그런 페이지가
+`fetch(':11111/api/submissions/compose', { method: 'POST', credentials: 'include', body })`를 보내면 방문자 이름으로
+업무일지가 제출되고, 운영자가 열었다면 그 권한으로 비밀번호가 초기화된다. `text/plain` 본문도 `req.json()`이 읽으므로
+사전 요청(preflight) 없이 닿는다.
+
+**판정 — `src/server/http.ts handler()` 한 곳.** `GET`·`HEAD`가 아닌 요청에만, 본문을 읽기 전에:
+
+| 요청에 있는 것 | 통과 | 막음 (403 `cross_origin`) |
+|---|---|---|
+| `Sec-Fetch-Site` | `same-origin` · `none` | `same-site` · `cross-site` · 그 밖 |
+| 없고 `Origin`만 | `Origin`의 host가 `Host` 헤더와 같다 | 다르다 · `Origin: null` |
+| 둘 다 없음 | 통과 — 브라우저가 아니다 (스크립트·curl·테스트) | |
+
+- **왜 `Sec-Fetch-Site`가 없을 때가 있나.** 브라우저는 `Sec-Fetch-*`를 신뢰할 수 있는 출처(HTTPS·localhost)에만 보낸다.
+  사내망 `http://<서버-내부-IP>:11111`에는 오지 않는다. 그 대신 `Origin`은 POST마다 온다 — 그래서 둘째 줄이 사내망의 판정이다.
+- **`X-Forwarded-Host`는 보지 않는다.** 앱 어디에서도 믿지 않는 헤더다. Cloudflare 경로는 HTTPS라 `Sec-Fetch-Site`가
+  오므로 첫째 줄에서 끝난다.
+- **화면에서 막지 않는 이유.** 막아야 하는 것은 남의 페이지가 보내는 요청이고, 그 페이지에는 우리 화면이 없다.
+
+**함께 — 응답 보안 헤더 (`next.config.ts`).** 모든 경로에 `Content-Security-Policy: frame-ancestors 'none'` ·
+`X-Frame-Options: DENY`(같은 사이트 iframe으로 버튼을 누르게 하는 클릭재킹) · `X-Content-Type-Options: nosniff` ·
+`Referrer-Policy: same-origin`. 앱은 다른 페이지를 iframe에 넣지 않고 넣어지지도 않는다(2026-10-08 확인).
+
 ### AU-09 — 감사 로그
 
 `upload`, `download`, `download_zip`, `merge` 는 `AuditLog`에 남긴다.
@@ -428,6 +454,7 @@ curl -m 5 http://<서버-내부-IP>:11111/          # 실패해야 정상
 | 토큰 유출 | 터널 토큰은 systemd 유닛에 있음. 파일 권한 확인 필요 → [Q-07](../../OPEN-QUESTIONS.md) |
 | 악성 파일 업로드 | [S-04](04-storage.md) ST-04~07 |
 | 퇴사자 접근 | Access 정책 + `isActive=false` **양쪽** 해제 |
+| 같은 서버 다른 포트의 페이지가 쿠키로 대신 제출 (CSRF) | AU-33 (출처 판정 · 프레임 금지) |
 
 ## 5. 테스트
 
@@ -480,5 +507,8 @@ curl -m 5 http://<서버-내부-IP>:11111/          # 실패해야 정상
 | AU-T20b | operator의 타 부서 해석 → `isOwn=false` + 감사 로그 |
 | AU-T21b | 내 별칭 → 정식 슬러그 redirect · 타 부서 별칭도 정식으로 redirect |
 | AU-T22b | **zip은 요청한 부서의 파일만** 담고, 권한 없으면 404 (헤더/본문 불일치 방지) |
+| AU-T84 | 같은 사이트 다른 포트에서 온 POST(`Sec-Fetch-Site: same-site` · `Origin` 포트 다름) → **403 `cross_origin`**, 아무것도 바뀌지 않는다 (AU-33) |
+| AU-T85 | 같은 출처 POST(`Sec-Fetch-Site: same-origin` · `Origin` = `Host`) → 그대로 처리 |
+| AU-T86 | `Origin`·`Sec-Fetch-Site` 둘 다 없는 POST(스크립트) → 그대로 처리 · GET은 출처를 보지 않는다 |
 
 > AU-T09·T10(위조 방어)과 AU-T12~T17(격리)이 이 스펙의 핵심 회귀 테스트다.
