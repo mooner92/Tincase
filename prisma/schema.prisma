@@ -328,3 +328,26 @@ model NotifyLog {
   @@unique([divisionId, weekSlotId, kind])
   @@index([sentAt])
 }
+
+/**
+ * HM-47 — 부서장(head)의 **검토 완료(승인)**. 고쳐 저장하거나 [고칠 것 없음 · 승인]을 누르면 생긴다.
+ *
+ * 담당자는 실장이 **언제·무엇을** 다듬었는지 알아야 제출할 수 있다 (2026-10-07 요청).
+ * 행을 지우지 않는다 — 한 주에 여러 번 고치면 여러 행이고, 가장 최근 것이 「지금 승인」이다.
+ */
+model MergeReview {
+  id         String   @id @default(cuid())
+  divisionId String
+  weekSlotId String
+  mergeRunId String
+  reviewerId String // User.id
+  /// "edit" — 고쳐 저장하면서 승인 · "approve" — 고칠 것 없이 승인
+  kind       String
+  /// 바뀐 곳 [{bucket, op, before?, after?, fields?}] (JSON). approve면 []
+  changes    String   @default("[]")
+  /// 승인한 판 — 그 뒤 병합본이 바뀌면 「승인 뒤 바뀜」으로 보인다
+  sha256     String
+  createdAt  DateTime @default(now())
+
+  @@index([divisionId, weekSlotId, createdAt])
+}

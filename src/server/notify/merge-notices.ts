@@ -21,6 +21,8 @@ import { sendAlert, messengerStatus } from '../messenger';
 import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
 import { slotKind } from '@/lib/week';
 import { describeFlagged, type FlaggedRow } from '@/lib/empty-content';
+import { approvalOf } from '../merge/review';
+import { toKstIso } from '@/lib/week';
 
 /** 스케줄러가 5분 주기이므로 창은 그보다 넉넉해야 반드시 한 번 걸린다 */
 const WINDOW_MINUTES = 12;
@@ -60,6 +62,19 @@ interface MergeFacts {
    * 손으로 병합한 뒤 누가 늦게 내는 길은 남는다. **그때는 알림이 말해야 한다.**
    */
   stale: number;
+  /**
+   * NT-47 · HM-47 — 이 최종본을 부서장이 승인했나. 담당자의 마지막 알림이 이것을 한 줄로 말한다.
+   * `hasHead`가 거짓이면(부서장 계정이 없는 부서) 아무 줄도 넣지 않는다 — 올 수 없는 승인을 기다리게 하지 않는다
+   */
+  approval: { by: string; at: Date; summary: string } | null;
+  hasHead: boolean;
+}
+
+/** NT-47 — 승인 한 줄 */
+function approvalBlock(f: MergeFacts): string[] {
+  if (f.approval) return ['', `${f.approval.by}님 승인 완료 (${toKstIso(f.approval.at).slice(11, 16)} · ${f.approval.summary})`];
+  if (f.hasHead) return ['', '아직 부서장 승인 전이에요 — 확인한 뒤 제출해주세요.'];
+  return [];
 }
 
 /** 알림에 몇 줄까지 적을 것인가. 팝업이라 길면 안 읽힌다 */
@@ -157,6 +172,7 @@ function compose(kind: NoticeKind, who: Person, slotLabel: string, monthly: bool
       `${head} ${label} 병합본이 준비됐어요.`,
       '',
       rowsLine(f),
+      ...approvalBlock(f),
       ...staleBlock(f.stale, 'Tincase 수합 관리에서 [다시 병합]을 눌러주세요.'),
       ...flagBlock(f.flagged),
       '',
@@ -312,6 +328,8 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
       const facts: MergeFacts = {
         flagged,
         stale,
+        approval: run ? await approvalOf(run) : null,
+        hasHead: (await prisma.user.count({ where: { divisionId: division.id, isActive: true, divisionRole: 'head' } })) > 0,
         ok: !!run,
         sources: used.size,
         counts: run?.rowCounts ? JSON.parse(run.rowCounts) : null,
@@ -321,7 +339,8 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
       const jobs: { kind: NoticeKind; role: 'lead' | 'head'; url?: string }[] = [];
       if (atReview) {
         // 성공 → 부서장에게 검토 / 실패 → 담당자에게 경보. 둘은 배타적이다
-        if (facts.ok) jobs.push({ kind: 'merge_review', role: 'head', url: base ? `${base}/archive` : undefined });
+        // NT-47 — 벌써 승인했으면 「검토 부탁드려요」는 보내지 않는다. 끝낸 일을 다시 시키는 알림은 소음이다
+        if (facts.ok && !facts.approval) jobs.push({ kind: 'merge_review', role: 'head', url: base ? `${base}/archive` : undefined });
         else jobs.push({ kind: 'merge_missing', role: 'lead', url: base ? `${base}/manage` : undefined });
       }
       if (atSubmit) jobs.push({ kind: 'merge_done', role: 'lead', url: base ? `${base}/manage` : undefined });

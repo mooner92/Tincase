@@ -11,6 +11,7 @@ import { CopyMissingButton } from '@/components/CopyMissingButton';
 import { SlotSelector } from '@/components/SlotSelector';
 import { SubmissionTableClient, type MemberRow } from '@/components/SubmissionTableClient';
 import { MergePanel, type MergeStateView } from '@/components/MergePanel';
+import { latestReview } from '@/server/merge/review';
 import { notFound } from 'next/navigation';
 
 interface ReviewPayload {
@@ -29,6 +30,7 @@ export async function ManageView({
   canDownloadMerged,
   canDeleteAny,
   canEditMerged,
+  canApprove = false,
 }: {
   division: Division; // ★ 해석된 부서. scope.division을 쓰면 타 부서 열람 시 어긋난다
   isoKey?: string;
@@ -40,6 +42,8 @@ export async function ManageView({
   canDeleteAny: boolean;
   /** 병합본 수정 — 담당자 + 내 부서 (TACP-15). 총괄은 열람까지다 */
   canEditMerged: boolean;
+  /** HM-47 — 승인 버튼. 내 부서의 head에게만 (TACP-16) */
+  canApprove?: boolean;
 }) {
   const now = new Date();
   await ensureCurrentSlot(now);
@@ -75,6 +79,8 @@ export async function ManageView({
     sourceCount: lastRun?.sourceIds ? (JSON.parse(lastRun.sourceIds) as string[]).length : 0,
     missing: review?.missing ?? [],
     flagged: review?.flagged ?? [],
+    review: lastRun?.status === 'succeeded' ? await latestReview(division.id, slot.id) : null,
+    hasHead: (await prisma.user.count({ where: { divisionId: division.id, isActive: true, divisionRole: 'head' } })) > 0,
   };
 
   const deadline = effectiveDeadline(slot, division);
@@ -250,6 +256,7 @@ export async function ManageView({
           divisionSlug={division.slug}
           canRun={canMerge}
           canEditMerged={canEditMerged}
+          canApprove={canApprove}
           canDownload={canDownloadMerged}
           submitted={collected}
         />
