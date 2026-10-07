@@ -2,11 +2,11 @@
 // 픽스처는 실제 파일 (fixtures/README.md). CI 등 픽스처 없는 환경에선 skip.
 import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
-import { inflateRawSync } from 'node:zlib';
+import { deflateRawSync, inflateRawSync } from 'node:zlib';
 import * as CFB from 'cfb';
 import path from 'node:path';
 import { parseRecords, serializeRecords, paraText, TAG } from './record';
-import { openHwp } from './ole';
+import { HwpFormatError, INFLATE_LIMITS, openHwp } from './ole';
 import { extractTables, tableGrid } from './model';
 import { readWorklog, validateHwpUpload, UploadValidationError } from './reader';
 import { fillTable, packHwp, stripCfbSentinel, locateTables } from './writer';
@@ -359,5 +359,62 @@ describe('문단 선언 개수 정합 (HM-T31)', () => {
       ['1-3', '', '', '', ''],
     ]);
     expect(audit(recs), '채운 뒤').toEqual([]);
+  });
+});
+
+/*
+ * ST-07 — 압축 해제 상한. 픽스처 없이 만든 가짜 hwp로 본다 — 0으로 채운 섹션은 약 1000:1로 줄어서,
+ * 수십 KB짜리 업로드가 수백 MB로 풀린다(2026-10-08 측정: 260KB → 256MiB, 이벤트 루프 2.3초 정지).
+ */
+describe('ST-07 압축 해제 상한 (압축 폭탄)', () => {
+  const MiB = 1024 * 1024;
+  /** FileHeader(압축 플래그) + Section들 + DocInfo만 있는 최소 hwp */
+  function fakeHwp(sectionBytes: number[], docInfoBytes = 16): Buffer {
+    const cf = CFB.utils.cfb_new();
+    const fh = Buffer.alloc(256);
+    fh.write('HWP Document File', 0, 'latin1');
+    fh.writeUInt32LE(0x05010000, 32); // 5.1.0.0
+    fh.writeUInt32LE(0x1, 36); // 압축
+    CFB.utils.cfb_add(cf, '/FileHeader', fh);
+    sectionBytes.forEach((n, i) => CFB.utils.cfb_add(cf, `/BodyText/Section${i}`, deflateRawSync(Buffer.alloc(n))));
+    CFB.utils.cfb_add(cf, '/DocInfo', deflateRawSync(Buffer.alloc(docInfoBytes)));
+    return Buffer.from(CFB.write(cf, { type: 'buffer' }) as Uint8Array);
+  }
+  const reason = (fn: () => unknown) => {
+    try {
+      fn();
+      return 'opened';
+    } catch (e) {
+      return e instanceof HwpFormatError ? `${e.reason}: ${e.message}` : String(e);
+    }
+  };
+
+  it('[ST-T38] 섹션 하나가 상한을 넘게 풀리면 decompress_failed — 끝까지 풀지 않고 멈춘다', () => {
+    const limits = { stream: 1 * MiB, total: 4 * MiB };
+    const bomb = fakeHwp([1 * MiB + 1]);
+    expect(bomb.length).toBeLessThan(64 * 1024); // 작은 업로드가
+    expect(reason(() => openHwp(bomb, limits))).toMatch(/^decompress_failed: Section0이\(가\) 풀면 너무 큽니다/);
+    // 상한 안이면 그대로 열린다 — 정상 파일을 막지 않는다
+    expect(reason(() => openHwp(fakeHwp([1 * MiB]), limits))).toBe('opened');
+  });
+
+  it('[ST-T38] 합계 상한 — 섹션을 여러 개로 나눠 한도를 나눠 쓰는 것도 막는다 (DocInfo까지 센다)', () => {
+    const limits = { stream: 1 * MiB, total: 2 * MiB };
+    expect(reason(() => openHwp(fakeHwp([MiB, MiB, MiB]), limits))).toMatch(/^decompress_failed: Section2/);
+    expect(reason(() => openHwp(fakeHwp([MiB, MiB], 16), limits))).toMatch(/^decompress_failed: DocInfo/);
+    expect(reason(() => openHwp(fakeHwp([MiB, MiB - 16], 16), limits))).toBe('opened');
+  });
+
+  it('[ST-T38] 운영 상한은 스트림 64MiB · 합계 128MiB — 기본값으로 부르면 그 값이 걸린다', () => {
+    expect(INFLATE_LIMITS).toEqual({ stream: 64 * MiB, total: 128 * MiB });
+    const t0 = Date.now();
+    expect(reason(() => openHwp(fakeHwp([64 * MiB + 1])))).toMatch(/^decompress_failed: .*한도 64MB/);
+    // 상한이 없을 때는 이 파일이 끝까지 풀렸다. 지금은 64MiB에서 멈춘다 — 몇 초씩 걸리지 않는다
+    expect(Date.now() - t0).toBeLessThan(15_000);
+  });
+
+  it('[ST-T38] 업로드 검증은 같은 파일을 「읽을 수 없는 파일」로 거절한다 (422 문구)', () => {
+    const bomb = fakeHwp([64 * MiB + 1]);
+    expect(() => validateHwpUpload(bomb)).toThrow(UploadValidationError);
   });
 });

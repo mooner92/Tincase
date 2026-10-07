@@ -12,7 +12,7 @@ import { useRouter } from 'next/navigation';
 import type { SectionProgress } from '@/lib/org-groups';
 import { NudgeButton } from './NudgeButton';
 
-export type FinalSource = 'tincase' | 'upload' | 'waiting_hq' | 'missing';
+export type FinalSource = 'tincase' | 'upload' | 'waiting_hq' | 'not_in_hq' | 'missing';
 
 export interface FinalCell {
   /** 파일 올리기 대상 — OrgSection.id */
@@ -48,12 +48,15 @@ const TONE: Record<FinalSource, string> = {
   tincase: 'chip-ok',
   upload: 'chip-info',
   waiting_hq: 'chip-warn',
+  not_in_hq: 'chip-warn',
   missing: 'chip-muted',
 };
 const WORD: Record<FinalSource, string> = {
   tincase: 'Tincase',
   upload: '올린 파일',
   waiting_hq: '본부 대기',
+  // RU-32 — 실은 냈는데 본부가 낸 판에 없다. 회색 「미제출」이면 낸 실이 안 낸 것처럼 보인다
+  not_in_hq: '본부본에 없음',
   missing: '미제출',
 };
 
@@ -295,7 +298,8 @@ function FinalView({
         {WORD[f.source]}
       </span>
       {label &&
-        (f.source === 'waiting_hq' && hq ? (
+        /* 본부 대기·본부본에 없음 — 고칠 곳은 본부다. 그 본부 취합 화면으로 가는 길을 단다 */
+        ((f.source === 'waiting_hq' || f.source === 'not_in_hq') && hq ? (
           <Link href={hq.href} className="min-w-0 truncate text-xs text-muted underline hover:text-ink" title={`${label} — 본부 취합 보기`}>
             {label}
           </Link>

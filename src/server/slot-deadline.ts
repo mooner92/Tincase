@@ -12,6 +12,7 @@ import { MERGE_DELAY_MINUTES } from './merge/run';
 import { REVIEW_MINUTES, SUBMIT_MINUTES } from './notify/merge-notices';
 import { deadlineFor, formatDeadlineKo, KST, toKstIso, type DeadlinePolicy } from '@/lib/week';
 import { DEPARTMENT_LEAD_MINUTES, parseDeadlineNotice } from '@/lib/deadline-notice';
+import { STAGE_HQ, STAGE_UNIT } from '@/lib/rollup-stages';
 import { TZDate } from '@date-fns/tz';
 import type { WeekSlot } from '@prisma/client';
 
@@ -89,9 +90,10 @@ async function rollupRows(department: Date): Promise<{ label: string; at: Date }
   if (!s.enabled) return [];
   const t = stagesFrom(department, s);
   return [
-    { label: '실·팀 → 위로 제출 기한 · 본부 담당자 알림', at: t.unitDue },
-    { label: '본부 → 총괄 제출 15분 전 알림', at: new Date(t.hqDue.getTime() - HQ_DUE_SOON_MINUTES * 60_000) },
-    { label: '본부 → 총괄 제출 기한 · 총괄 도착 알림', at: t.hqDue },
+    // RU-59 — 화면·알림과 같은 이름 한 쌍
+    { label: `${STAGE_UNIT} 기한 · 본부 담당자 알림`, at: t.unitDue },
+    { label: `${STAGE_HQ} 기한 ${HQ_DUE_SOON_MINUTES}분 전 알림`, at: new Date(t.hqDue.getTime() - HQ_DUE_SOON_MINUTES * 60_000) },
+    { label: `${STAGE_HQ} 기한 · 총괄 도착 알림`, at: t.hqDue },
   ];
 }
 

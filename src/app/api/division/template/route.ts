@@ -2,7 +2,7 @@
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
 import { requireManager, HttpError } from '@/server/authz';
-import { handler, json, rateLimit } from '@/server/http';
+import { handler, json, rateLimit, rejectOversizedBody } from '@/server/http';
 import { audit } from '@/server/audit';
 import { validateHwpUpload, UploadValidationError } from '@/lib/hwp/reader';
 import { sha256, templateRelPath, writeFileAtomic } from '@/server/storage';
@@ -14,6 +14,7 @@ export const POST = handler(async (req: NextRequest) => {
   // TACP §3.1 — 내 부서 양식은 lead·head·coordinator·operator가 등록한다 (TACP-6: 대상은 신원의 부서)
   const scope = await requireManager(req.headers);
   rateLimit(`template:${scope.user.email}`, 5, 60_000);
+  rejectOversizedBody(req, env.MAX_UPLOAD_BYTES); // ST-04
 
   const form = await req.formData().catch(() => null);
   const file = form?.get('file');

@@ -27,6 +27,11 @@ export interface RolledUnit {
   submissionId: string;
   rows: { achievements: number; plans: number; notes: number };
   emphasis: number;
+  /**
+   * RU-19 · RU-63 — 엔진이 **이미 고친 것**(번호 다시 매김·「특이사항 없음」 등). 「확인해 주세요」(warnings)와 나눠 둔다 —
+   * 할 일이 없는 줄이 주황 상자에 들어가면 본부장이 [승인] 앞에서 멈춘다. 2026-10-08 전의 기록에는 없다
+   */
+  fixed?: string[];
 }
 
 interface Input {
@@ -59,7 +64,7 @@ function summarize(input: Input): RolledUnit {
 }
 
 /**
- * RU-19 — 섹션 결과 → 「확인해 주세요」 줄들, 섹션 제목을 앞에 붙여서.
+ * RU-19 — 섹션 결과 → 「확인해 주세요」 줄들, 섹션 제목을 앞에 붙여서. **사람이 볼 것만** — 자동 수정은 단위의 `fixed`로 따로.
  * 사본 맨 위의 부서명 줄을 뺀 것은 알리지 않는다 — 제목을 생성해 단 것이라(RU-61) 매번 뜨면 소음이다.
  * 그 밖에 뺀 것(빨간 안내문, 지난 자료의 문서 제목 등)은 알린다 — 조용히 버리지 않는다(RU-16과 같은 원칙).
  */
@@ -68,7 +73,6 @@ function outcomeLines(o: OrgSectionOutcome, input: Input): string[] {
   const ownTitle = new Set([input.division.nameKo, o.title].map((t) => `제목 「${t.slice(0, 30)}」`));
   const dropped = o.dropped.filter((d) => !ownTitle.has(d));
   return [
-    ...(o.fixed?.length ? [`${o.title}: 자동 수정 — ${o.fixed.join(' · ')}`] : []),
     ...(o.warnings ?? []).map((w) => `${o.title}: ${w}`),
     ...(dropped.length ? [`${o.title}: 뺀 것 — ${dropped.join(', ')}`] : []),
   ];
@@ -141,7 +145,7 @@ export async function runHqRollup(scope: Scope, node: RollupNode, slot: WeekSlot
       data: {
         status: 'succeeded',
         outputPath: rel,
-        unitsJson: JSON.stringify(inputs.map(summarize)),
+        unitsJson: JSON.stringify(inputs.map((input, k) => ({ ...summarize(input), fixed: out.outcomes[k].fixed ?? [] }))),
         warnings: JSON.stringify(warnings),
         finishedAt: new Date(),
       },

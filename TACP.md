@@ -4,7 +4,7 @@
 > 코드·스펙·UI가 이 문서와 어긋나면 **문서가 아니라 코드가 틀린 것**이다.
 > 규칙을 바꾸려면 §10 절차를 따른다. 코드를 먼저 고치는 것은 위반이다.
 
-버전 1.6 · 2026-10-07 · 대상 코드 v1.41.0 (feat/org-rollup)
+버전 1.6.1 · 2026-10-08 · 대상 코드 v1.41.0 (feat/org-rollup)
 관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md) · [ADR-0008](docs/adr/0008-head-principal.md) · [ADR-0012](docs/adr/0012-upward-submission.md)
 
 변경 이력:
@@ -17,6 +17,8 @@
 - v1.6 — **TACP-21 신설: 위로 올린 제출(본부·전사 취합).** 실·팀이 [제출]로 **보낸 사본**은 받는 쪽
   (본부 담당자·본부장, 총괄)이 읽는다. 받는 쪽이 하위 부서의 다른 것(제출물·병합본 원본)을 읽게 되는
   것이 아니다 — 새로 열리는 것은 「보낸 사본」 하나다 (ADR-0012)
+- v1.6.1 — TACP-21 보정 (2026-10-08 점검): 총괄이 올린 **섹션 파일 내려받기**도 판정 함수(`findReadableSectionUpload`)를
+  지나고 `download` 기록이 남는다. 라우트가 직접 조회하고 기록 없이 내주던 것을 바로잡았다(TACP-10·12). 취소한 파일은 404
 - v1.5.2 — **TACP-22 신설: 담당자는 부서원 제출물을 새 판으로 고친다.** 덮어쓰지 않고, 누가 고쳤는지 남긴다 (ADR-0013)
 - v1.5.3 — TACP-22 보정 (2026-10-07 리뷰): **자기 제출물은 첨삭하지 않는다**(마감을 우회하는 길이 된다) ·
   §3.1 operator 첨삭 칸 정정 — 자기 부서의 lead·head 역할이 있을 때만이다(코드와 같게) ·
@@ -193,11 +195,12 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
 - **coordinator·operator는 읽기만이다** (TACP-8): 남의 실·팀을 대신 [제출]하거나, 남의 본부를 대신
   이어 붙이거나 [총괄에 제출]하지 않는다. 대신 내주는 경로를 만들지 않는 이유는 TACP-18과 같다
 - **남게** (TACP-10): 산하 사본을 읽거나 이어 붙이면 `rollup` 감사 기록에 무엇을 읽었는지가 남는다.
-  제출·취소는 `report_submit`·`report_withdraw`
+  제출·취소는 `report_submit`·`report_withdraw`. 본부본·전사본·총괄이 올린 섹션 파일을 받으면 `download`
 - **본부 단계가 없는 본부**: 쓰는 단위가 하나뿐인 본부(연구 본부 등)는 그 단위의 [제출]이 곧 총괄로 간다
   (RU-07). 받는 쪽은 총괄이다 — 권한이 새로 생기는 사람이 없다
 - 게이트: `resolveRollupNode`(내 본부 해석) · `requireHqManager`(본부 쓰기) · `requireOrgRollup`(전사 쓰기) ·
-  `findReadableReport`(사본 읽기 판정). 라우트에서 역할을 비교하지 않는다 (TACP-12)
+  `findReadableReport`(사본 읽기 판정) · `findReadableSectionUpload`(총괄이 올린 섹션 파일 — 전사 취합의 문, 취소한 것 404, 기록).
+  라우트에서 역할을 비교하거나 판정 대상을 직접 조회하지 않는다 (TACP-12)
 
 ### TACP-22 — 담당자는 부서원 제출물을 **새 판으로** 고친다 (v1.5.2 신설)
 
@@ -475,6 +478,7 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | `requireHqManager(headers)` | 내 부서가 **본부 단계가 있는 본부**이고 lead·head (TACP-21) | **404** |
 | `requireOrgRollup(headers)` | coordinator·operator — **전사 이어 붙이기 쓰기** (TACP-21) | **404** |
 | `findReadableReport(scope, id)` | 보낸 사본 **읽기** 판정 — 보낸 부서·받는 본부·readAll (TACP-21) | **404** |
+| `findReadableSectionUpload(scope, id)` | 총괄이 올린 섹션 파일 **내려받기** — 전사 취합의 문(`canOpenOrgDesk`), 취소한 파일 제외, `download` 기록 (TACP-21) | **404** |
 | `requireReviewer(headers)` | head(이면서 lead가 아님) — **병합본 승인 전용** (TACP-16, HM-47) | **404** |
 | `requireRevisableSubmission(scope, id)` | 제출물 **첨삭** 판정 — 내 부서 lead·head, **남의 것**·최신 판만 (TACP-22). 화면의 [고치기]는 같은 식 `canReviseSubmission` | **404** / 409 |
 | `resolveTargetDivision(scope, slug?)` | 대상 부서 해석 (TACP-7) | **404** |
@@ -543,6 +547,7 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | **RU-T32** | **산하가 아닌 단위의 사본 → 404** — 다른 본부의 실 |
 | **RU-T33** | **member는 [제출]·본부 이어 붙이기 404** · **coordinator가 남의 실·팀을 [제출]하면 404** |
 | **RU-T34** | **coordinator가 전사 이어 붙이기 → 허용**, lead·head는 404 |
+| **RU-T70** | **전사 섹션 경로**(파일 올리기·취소·받기, 섹션 저장, 전사본 받기) — member·lead·본부 담당자 404, coordinator 200 + 기록 1건 · 취소한 파일 받기 404 |
 | **HM-T110** | **head가 고쳐 저장 → 승인 기록 + 담당자 알림** · lead의 저장은 승인이 아니다 |
 | **HM-T111** | **[승인] — head만.** lead·member·타 부서 head → 404 |
 | **WA-T40** | **lead·head가 부서원 제출물을 고친다 → 새 판(v+1), 원래 판 보존, 고친 사람 기록** (새로 허용된 것) |

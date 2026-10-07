@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RosterDrawer, type UserRow } from './RosterDrawer';
 import { RosterSync } from './RosterSync';
+import { copyText } from '@/lib/clipboard';
 
 interface DivisionRow {
   id: string;
@@ -49,23 +50,42 @@ const TABS = [
 ] as const;
 
 export function OpsClient() {
-  const [divisions, setDivisions] = useState<DivisionRow[]>([]);
+  /*
+   * PG-64 — `null`은 「아직 모름」이다. 빈 배열로 시작하면 불러오는 동안(그리고 실패하면 계속)
+   * 「0 · 0 · 이 분류에 해당하는 부서가 없습니다」가 떠서, 운영회의 화면에서 데이터가 날아간 것처럼 보였다
+   */
+  const [divisions, setDivisions] = useState<DivisionRow[] | null>(null);
+  const [loadErr, setLoadErr] = useState<string | null>(null);
   const [tab, setTab] = useState<'confirmed' | 'none'>('confirmed');
   const [selected, setSelected] = useState<string | null>(null);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [issued, setIssued] = useState<IssuedPassword[]>([]);
-  const [copied, setCopied] = useState<string | null>(null);
+  const [copied, setCopied] = useState<{ key: string; ok: boolean } | null>(null);
   /** PG-55 — 지금 고치고 있는 부서 한 줄. 나머지 줄은 읽기만 */
   const [editingId, setEditingId] = useState<string | null>(null);
 
   const loadDivisions = useCallback(() => {
     fetch('/api/ops/divisions')
-      .then((r) => r.json())
-      .then((b) => setDivisions(b.divisions ?? []));
+      .then(async (r) => {
+        const b = (await r.json().catch(() => ({}))) as { divisions?: DivisionRow[]; message?: string };
+        if (!r.ok) {
+          // 세션이 끊긴 401도 여기로 온다 — 서버 문구가 무엇을 할지 말해 준다
+          setLoadErr(b.message ?? `부서 목록을 불러오지 못했습니다 (${r.status}).`);
+          return;
+        }
+        setDivisions(b.divisions ?? []);
+        setLoadErr(null);
+      })
+      .catch(() => setLoadErr('네트워크 오류로 부서 목록을 불러오지 못했습니다.'));
   }, []);
   useEffect(loadDivisions, [loadDivisions]);
+  /** PG-64 — 다시 불러오기. 누르는 동안은 「불러오는 중」으로 돌아간다 */
+  const retryDivisions = () => {
+    setLoadErr(null);
+    loadDivisions();
+  };
 
   const loadUsers = useCallback((divisionId: string) => {
     fetch(`/api/ops/roster?division=${divisionId}`)
@@ -171,36 +191,28 @@ export function OpsClient() {
       .finally(() => setBusy(false));
   };
 
+  // CP-109 — 대체 경로는 copyText 한 곳에. 임시 비밀번호는 복사가 안 됐는데 「복사됨」이면 빈 칸을 전달하게 된다
   const copy = async (text: string, key: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-    } catch {
-      const ta = document.createElement('textarea');
-      ta.value = text;
-      ta.style.position = 'fixed';
-      ta.style.opacity = '0';
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      document.body.removeChild(ta);
-    }
-    setCopied(key);
-    setTimeout(() => setCopied(null), 2000);
+    const ok = await copyText(text);
+    setCopied({ key, ok });
+    setTimeout(() => setCopied(null), ok ? 2000 : 4000);
   };
+  const copyLabel = (key: string, idle: string) =>
+    copied?.key === key ? (copied.ok ? '복사됨 ✓' : '복사 실패') : idle;
 
   const counts = useMemo(
     () => ({
-      confirmed: divisions.filter((d) => d.boardStatus === 'confirmed').length,
-      none: divisions.filter((d) => d.boardStatus !== 'confirmed').length,
+      confirmed: (divisions ?? []).filter((d) => d.boardStatus === 'confirmed').length,
+      none: (divisions ?? []).filter((d) => d.boardStatus !== 'confirmed').length,
     }),
     [divisions],
   );
   // 「이력 없음」은 «confirmed가 아닌 전부»다 — 옛 `unclear` 값이 남아 있어도
   // 어느 탭에도 안 보이는 부서가 생기지 않는다
-  const shown = divisions.filter((d) =>
+  const shown = (divisions ?? []).filter((d) =>
     tab === 'confirmed' ? d.boardStatus === 'confirmed' : d.boardStatus !== 'confirmed',
   );
-  const selectedName = divisions.find((d) => d.id === selected)?.nameKo ?? null;
+  const selectedName = divisions?.find((d) => d.id === selected)?.nameKo ?? null;
 
   return (
     <div className="space-y-4 lg:space-y-6">
@@ -235,7 +247,7 @@ export function OpsClient() {
                   {x.password}
                 </code>
                 <button onClick={() => copy(x.password, x.userId)} className="btn-secondary btn-sm">
-                  {copied === x.userId ? '복사됨' : '복사'}
+                  {copyLabel(x.userId, '복사')}
                 </button>
                 <button
                   onClick={() =>
@@ -246,7 +258,7 @@ export function OpsClient() {
                   }
                   className="btn-ghost"
                 >
-                  {copied === `msg-${x.userId}` ? '복사됨' : '안내문 복사'}
+                  {copyLabel(`msg-${x.userId}`, '안내문 복사')}
                 </button>
               </li>
             ))}
@@ -270,11 +282,21 @@ export function OpsClient() {
                 className={`tab-line ${tab === t.key ? 'tab-line-active' : ''}`}
               >
                 {t.label}
-                <span className="chip chip-muted px-2 py-0 text-xs">{counts[t.key]}</span>
+                {/* PG-64 — 숫자는 불러온 뒤에만. 불러오는 중의 0은 「없다」로 읽힌다 */}
+                {divisions && <span className="chip chip-muted px-2 py-0 text-xs">{counts[t.key]}</span>}
               </button>
             ))}
           </div>
           <p className="py-3 text-sm text-muted">{TABS.find((t) => t.key === tab)?.hint}</p>
+          {/* PG-64 — 실패는 실패라고 말하고 다시 부를 길을 둔다. 이미 받은 목록이 있으면 그대로 두고 위에 알린다 */}
+          {loadErr && (
+            <div role="alert" className="callout callout-error mb-4 flex flex-wrap items-center gap-3">
+              <span>{loadErr}</span>
+              <button onClick={retryDivisions} className="btn-secondary btn-sm">
+                다시 불러오기
+              </button>
+            </div>
+          )}
         </div>
 
         <div className="overflow-x-auto">
@@ -301,7 +323,7 @@ export function OpsClient() {
                       <span className={`font-medium ${d.isActive ? 'text-ink' : 'text-muted'}`}>{d.nameKo}</span>
                       {d.boardNote && <p className="mt-0.5 max-w-md text-xs leading-4 text-muted">{d.boardNote}</p>}
                     </td>
-                    <td className="font-mono text-xs whitespace-nowrap text-muted">/{d.shortSlug ?? '—'}</td>
+                    <td className="font-mono text-xs whitespace-nowrap text-muted">{d.shortSlug ? `/${d.shortSlug}` : '—'}</td>
                     <td className="tabular-nums">{d.memberCount}</td>
                     <td>
                       {/*
@@ -399,10 +421,15 @@ export function OpsClient() {
                   </tr>
                 );
               })}
+              {/* PG-64 — 「없습니다」는 불러온 뒤 정말 없을 때만 */}
               {shown.length === 0 && (
                 <tr>
                   <td colSpan={8} className="py-6 text-center text-sm text-muted">
-                    이 분류에 해당하는 부서가 없습니다.
+                    {divisions
+                      ? '이 분류에 해당하는 부서가 없습니다.'
+                      : loadErr
+                        ? '부서 목록을 불러오지 못했습니다.'
+                        : '불러오는 중…'}
                   </td>
                 </tr>
               )}

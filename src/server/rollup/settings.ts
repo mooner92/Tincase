@@ -7,6 +7,7 @@ import { prisma } from '../db';
 import { audit } from '../audit';
 import { HttpError, type Scope } from '../authz';
 import { loadOrgSetting, loadTree, type RollupNode } from './tree';
+import { STAGE_HQ, STAGE_UNIT } from '@/lib/rollup-stages';
 
 export const orderInput = z.object({
   order: z.array(z.string().min(1).max(64)).max(60),
@@ -100,7 +101,7 @@ export async function setOrgSchedule(scope: Scope, input: ScheduleInput) {
   const unit = input.unitDueMinutes ?? before.unitDueMinutes;
   const hq = input.hqDueMinutes ?? before.hqDueMinutes;
   // 본부가 실·팀보다 먼저 마감되면 본부는 이어 붙일 것이 없다
-  if (hq < unit) throw new HttpError(422, 'invalid_schedule', '본부 제출 기한은 실·팀 제출 기한보다 늦어야 합니다.');
+  if (hq < unit) throw new HttpError(422, 'invalid_schedule', `「${STAGE_HQ}」 기한은 「${STAGE_UNIT}」 기한보다 늦어야 합니다.`);
   await prisma.orgRollupSetting.upsert({
     where: { id: 'org' },
     create: { id: 'org', enabled: input.enabled ?? false, unitDueMinutes: unit, hqDueMinutes: hq, updatedBy: scope.user.id },

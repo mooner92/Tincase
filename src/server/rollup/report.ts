@@ -6,6 +6,7 @@ import { audit } from '../audit';
 import { HttpError, notFound, type Scope } from '../authz';
 import { readStoredFile, sanitizeSegment, sha256, writeFileAtomic } from '../storage';
 import { loadTree, submitTarget, type RollupNode } from './tree';
+import { stageCells, stageTimes } from './schedule';
 
 export type ReportLevel = 'unit' | 'hq';
 
@@ -69,6 +70,11 @@ export interface ReportState {
   hasOutput: boolean;
   /** RU-02 — 제출한 뒤 병합본이 바뀌었다. 다시 내야 위에 간다 */
   changedSinceSubmit: boolean;
+  /**
+   * RU-30 — **이 단위의** 기한 (「15:00」, 부서 마감과 다른 날이면 날짜까지). 본부로 내면 실·팀 → 본부 기한,
+   * 본부 단계 없이 총괄로 내거나 본부본이면 본부 → 총괄 기한. 실·팀 담당자는 이 시각을 어디서도 볼 수 없었다
+   */
+  dueKo: string;
 }
 
 /** 수합 관리·본부 화면의 「제출」 카드 상태. 쓰지 않는다 */
@@ -78,12 +84,17 @@ export async function reportState(
   level: ReportLevel,
 ): Promise<ReportState | null> {
   let targetLabel = '총괄';
+  let toOrg = true;
   if (level === 'unit') {
     const target = submitTarget(await loadTree(), divisionId);
     if (!target) return null; // 꺼진 부서 — 보낼 곳이 없다
-    if (target.kind === 'hq') targetLabel = target.node.node.nameKo;
+    if (target.kind === 'hq') {
+      targetLabel = target.node.node.nameKo;
+      toOrg = false;
+    }
   }
-  const [current, out] = await Promise.all([currentReport(divisionId, slot.id, level), latestOutput(level, divisionId, slot.id)]);
+  const [current, out, t] = await Promise.all([currentReport(divisionId, slot.id, level), latestOutput(level, divisionId, slot.id), stageTimes(slot)]);
+  const cells = stageCells(t.anchor, t);
   const changed = current && out ? await outputDiffers(out.outputPath, current.sha256) : false;
   const who = current ? await prisma.user.findUnique({ where: { id: current.submittedBy }, select: { name: true } }) : null;
   return {
@@ -94,6 +105,8 @@ export async function reportState(
       : null,
     hasOutput: !!out,
     changedSinceSubmit: changed,
+    // 받는 곳이 총괄이면(본부본, 또는 본부 단계 없는 단위 — RU-07) 본부 → 총괄 기한이 그 단위의 기한이다
+    dueKo: toOrg ? cells.hqDueKo : cells.unitDueKo,
   };
 }
 

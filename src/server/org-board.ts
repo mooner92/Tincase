@@ -6,7 +6,7 @@
 import type { WeekSlot } from '@prisma/client';
 import { prisma } from './db';
 import { progressNodes } from './monitor';
-import { resolveSections, sectionList, type SectionItem, type SectionSource } from './rollup/sections';
+import { resolveSections, sectionList, uncoveredCopies, type SectionItem, type SectionSource } from './rollup/sections';
 import { loadTree, type OrgTree } from './rollup/tree';
 import { lastOrgRun } from './rollup/orgrun';
 import { kst } from './rollup/view';
@@ -67,6 +67,8 @@ export async function orgBoard(
 
   const all = grouped ? [...grouped.sections, grouped.outside] : null;
   const run = sources ? await lastOrgRun(slot, sources) : null;
+  // RU-64 「누락」 — 지금 상태로 본다(만든 뒤에 섹션을 고치면 바로 사라져야 한다). 취합을 여는 사람에게만
+  const coverage = sources ? await uncoveredCopies(slot, sources, tree!) : null;
   return {
     rows,
     /** 제출 합계 — 섹션과 「섹션 밖」을 더한 것 = 감사 문서의 합계 */
@@ -80,6 +82,8 @@ export async function orgBoard(
     /** 최종본에 들어올 것이 있는 섹션 수 (취합을 여는 사람에게만) */
     ready: sources ? sources.filter((x) => x.kind === 'tincase' || x.kind === 'upload').length : null,
     run: run && { ...run, finishedAtKst: kst(run.finishedAt) },
+    /** 도착했는데 어느 섹션에도 안 들어가는 사본 — 최종본에서 빠진다 (취합을 여는 사람에게만) */
+    coverage,
     /** 섹션 구성 편집기에 넘길 것 (취합을 여는 사람에게만) */
     editor: sources && {
       sections: sections.map((s) => ({ id: s.id, title: s.title, divisionId: s.divisionId })),

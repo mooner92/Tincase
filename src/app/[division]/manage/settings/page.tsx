@@ -7,7 +7,8 @@ import { noticeFor } from '@/components/Notice';
 import { TemplateManager } from '@/components/TemplateManager';
 import { RuleEditor } from '@/components/RuleEditor';
 import { toPlan } from '@/server/merge/rules';
-import { toKstIso } from '@/lib/week';
+import { latestEdits } from '@/server/merge/edits';
+import { currentWeek, toKstIso } from '@/lib/week';
 
 /** 타 부서 설정은 열람만 — 실수로 내 부서를 고치는 사고를 구조적으로 막는다 (AU-16) */
 function ReadOnlyNotice({ what, detail }: { what: string; detail?: string }) {
@@ -35,14 +36,17 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
   // HM-48 — 엔진과 **같은 해석**으로 보여준다. DB에 모르는 값이 있으면 엔진이 기본값으로 돌므로 화면도 그렇게
   const plan = toPlan(division);
 
-  const [template, users, standard] = await Promise.all([
+  const [template, users, standard, thisWeek] = await Promise.all([
     prisma.template.findFirst({ where: { divisionId: division.id, isActive: true } }),
     prisma.user.findMany({
       where: { divisionId: division.id, isActive: true },
       orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
     }),
     prisma.standardTemplate.findFirst({ where: { isActive: true } }),
+    prisma.weekSlot.findUnique({ where: { isoKey: currentWeek(new Date()).isoKey } }),
   ]);
+  // CP-108 — 규칙을 바꿔도 이미 만든 이번 주 병합본은 그대로다. 저장 뒤 그걸 말하려면 있는지·고쳤는지 알아야 한다
+  const merged = isOwn && thisWeek ? await latestEdits(division.id, thisWeek.id) : null;
 
   return (
     <main className="pt-8">
@@ -87,6 +91,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
             initialGuide={division.guideText}
             initialEmptyWords={division.emptyWords}
             initialEmphasisWords={division.emphasisWords}
+            thisWeekMerged={merged ? { edited: !!merged.edits } : null}
           />
         ) : (
           <section className="card" aria-labelledby="merge-settings">

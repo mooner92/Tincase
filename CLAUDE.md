@@ -7,14 +7,16 @@
 사용자에게 보이는 곳(UI·문서·계정 안내문)에는 Tincase를 쓴다.
 로고 자산과 사용 규칙은 [`public/brand/README.md`](public/brand/README.md).
 
-**현재 상태: v1.4.0 — Phase 1·2 완료, 사내망 가동 중** (Cloudflare 대시보드 연결만 대기).
+**현재 상태: v1.39.0 — 운영 = `main`, 사내망 가동 중.** 3단계 취합 · 웹 작성만 받는 제출 · 「전사」 한 화면은
+`feat/org-rollup` 브랜치와 테스트 서버(11112)에만 있다. 동작의 정본은 `docs/spec/`, 바뀐 것은 CHANGELOG.
+`docs/STATUS.md`는 2026-08 기준이라 지금과 다르다.
 먼저 [README.md](README.md) → [docs/spec/00-overview.md](docs/spec/00-overview.md) → [ROADMAP.md](ROADMAP.md) 순으로 읽을 것.
 
 ## 개발 명령
 
 ```bash
 npm run dev          # 로컬 개발 (DEV_IDENTITY 우회 — .env.development)
-npm test             # vitest 134개 (격리 스위트 = 릴리스 게이트)
+npm test             # vitest 501개 (격리 스위트 = 릴리스 게이트)
 npm run test:tz      # 다중 타임존 재실행 (WS-T17/18)
 npm run build        # next build (standalone)
 npm run db:seed      # docs/private/seed.json → DB (멱등)
@@ -39,7 +41,9 @@ npm run db:seed      # docs/private/seed.json → DB (멱등)
 - 설계 결정은 `docs/adr/`에 남긴다. "왜 이렇게 했나"를 코드에서 추측하게 두지 않는다.
 - **측정한 것과 가정한 것을 구분한다.** 실측값은 근거와 함께 `docs/research/`에 둔다.
 
-**Phase 2·3은 사용자의 명시적 지시 전까지 착수하지 않는다.** ([00-overview §9](docs/spec/00-overview.md))
+**3단계 취합(실·팀 → 본부 → 전사)은 사용자의 명시적 지시로 진행 중이다** —
+[12-org-rollup](docs/spec/12-org-rollup.md), `feat/org-rollup` 브랜치·테스트 서버.
+00-overview의 「1단계만 대체」는 이 지시로 바뀌는 중이다. 그 밖의 새 단계는 여전히 지시가 있을 때 착수한다.
 
 ## 공개 저장소 주의
 

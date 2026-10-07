@@ -16,6 +16,7 @@ import { kst, runView, unitRow, weekOptions } from '@/server/rollup/view';
 import { hqApproval, stageLabels } from '@/server/rollup/notices';
 import { HqApprovalCard } from '@/components/HqApprovalCard';
 import { isReviewer } from '@/server/authz';
+import { STAGE_HQ, STAGE_UNIT } from '@/lib/rollup-stages';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,7 +71,8 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
             </h1>
             {/* 머리 밑은 한 줄 — 기한 둘과 진행. 읽기 전용이면 그 사실도 같은 줄에 */}
             <p className="page-sub">
-              실·팀 기한 {stages.unitDueKo} · 총괄 기한 <strong className="font-semibold text-ink">{stages.hqDueKo}</strong>
+              {/* RU-59 — 「전사」 머리글·일정 카드와 같은 이름 한 쌍 */}
+              {STAGE_UNIT} {stages.unitDueKo} · {STAGE_HQ} <strong className="font-semibold text-ink">{stages.hqDueKo}</strong>
               {' · '}산하 {board.units.length}곳 중 <strong className="font-semibold text-ink">{sent}곳 제출</strong>
               {!canWrite && <span> · 읽기 전용</span>}
             </p>

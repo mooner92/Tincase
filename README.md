@@ -5,17 +5,21 @@
 > 한국환경연구원 각 부서의 주간 업무일지를 **이메일 왕복 없이** 부서별 웹 페이지로 수합하고,
 > 부서 담당자가 버튼 하나로 hwp 병합본을 얻는 사내 멀티테넌트 시스템.
 
-**현재 상태: 🚀 v1.4.0 — 사내망 가동 중** (`http://<서버-내부-IP>:11111`)
-Spec Driven Development — 스펙이 먼저, 코드가 나중. 테스트 134개 (격리 게이트 포함) 통과.
+**현재 상태: 🚀 v1.39.0 — 사내망 운영 중** (`http://<서버-내부-IP>:11111`, 운영 = `main`)
+Spec Driven Development — 스펙이 먼저, 코드가 나중. 테스트 501개 (격리 게이트 포함) 통과 (2026-10-08).
 
-> **무엇이 되고 무엇이 안 되는지는 [docs/STATUS.md](docs/STATUS.md)에 코드 대조로 정리되어 있다.**
-> 요약: Phase 1(수합)·Phase 2(자동 병합) 완료 · 전사 2단계 병합과 웹 작성은 미착수.
+> **운영(`main`)**: 부서 수합 · 자동 병합 · 웹 작성 · 담당자 첨삭 · 부서장 승인 · 전사 현황.
+> **진행 중**: 3단계 취합(실·팀 → 본부 → 전사) · 웹 작성만 받는 제출 · 「전사」 한 화면 —
+> `feat/org-rollup` 브랜치와 테스트 서버(11112)에만 있다 ([S-12](docs/spec/12-org-rollup.md)).
+> 동작의 정본은 [docs/spec/](docs/spec/), 바뀐 것은 [CHANGELOG](CHANGELOG.md).
+> [docs/STATUS.md](docs/STATUS.md)는 2026-08 기준이라 지금과 다르다.
 
 ---
 
 ## 시스템의 위치
 
-전사 주간업무는 2단계로 수합된다. **이 시스템은 1단계만 대체한다.**
+전사 주간업무는 2단계로 수합된다. **운영(`main`)은 1단계를 대체한다.**
+본부·전사 단계는 사용자 지시로 테스트 서버에서 만드는 중이다 ([S-12](docs/spec/12-org-rollup.md)).
 
 ```
 [1단계 — 부서 내부]  부서원 작성 → 실무자가 이메일 취합 → 표 수작업 병합   ← 우리가 대체
@@ -32,8 +36,8 @@ Spec Driven Development — 스펙이 먼저, 코드가 나중. 테스트 134개
 | 회신·수집 | 메일 회신을 일일이 수집 | 업로드 → 자동 수집 | ✅ |
 | 확인 | 파일을 받아 하나씩 열어봄 | 화면 드로어에서 바로 열람 | ✅ |
 | 병합 | 표를 손으로 복사·붙여넣기 | **마감 시각에 자동** | ✅ |
-| 작성 | 한글에서 작성 후 업로드 | 웹에서 직접 작성 | ⛔ Phase 2 이후 |
-| 제출·보관 | 담당자 수작업 | **그대로 유지** (비목표) | — |
+| 작성 | 한글에서 작성 후 업로드 | 웹에서 직접 작성 ([S-10](docs/spec/10-web-authoring.md)) | ✅ |
+| 제출·보관 | 담당자 수작업 | 운영은 그대로 · 본부·전사 취합은 [S-12](docs/spec/12-org-rollup.md) | 🟡 테스트 서버 |
 
 ## 핵심 설계
 
@@ -43,8 +47,8 @@ Spec Driven Development — 스펙이 먼저, 코드가 나중. 테스트 134개
   coordinator(전사 총괄, 전 부서 읽기) / operator(최종 관리자 — 테넌시·인원 전권 + 전체 열람)
 - **문서는 부서가, 인원은 운영자가** — 양식·규칙·병합은 담당자, 배치·역할·명단은 운영자(P7)
 - **절대 규칙(HM-ABS)** — 표 규격 보존·내용 무손실은 어떤 부서 규칙으로도 못 바꾼다
-- **마감 예외 없음** *(확정)* — 놓치면 다음 주차. 대리 업로드 경로 자체가 없다
-- **hwp only** *(확정)* — 양식을 웹에서 배포하므로 형식 통제 가능
+- **대리 제출 없음** — 놓치면 다음 주차. 예외는 연휴 주차 마감(WS-18)과 담당자의 마감 잠시 열기(TACP-18)뿐
+- **hwp only** — `.hwpx`는 받지 않는다. 업로드 자체도 웹 작성으로 옮기는 중 (ADR-0014, `feat/org-rollup`)
 - **저장은 `/data`** — 루트 디스크 98% 실측. DB·파일 전부 `/data/worklog`, 백업은 NFS
 
 ## 실측으로 확인된 것 (추측 아님)
@@ -76,7 +80,8 @@ Spec Driven Development — 스펙이 먼저, 코드가 나중. 테스트 134개
 | | [07 components](docs/spec/07-components.md) | 컴포넌트 스펙 |
 | | [08 hwp-merge-engine](docs/spec/08-hwp-merge-engine.md) | 병합 엔진 + 규칙 *(Phase 2)* |
 | | [09 deployment-ops](docs/spec/09-deployment-ops.md) | 배포 · 백업 · 디스크 보호 |
-| ★ | [docs/STATUS.md](docs/STATUS.md) | **구현/미구현 현황 (코드 대조)** |
+| | [12 org-rollup](docs/spec/12-org-rollup.md) | 본부·전사 3단계 취합 *(진행 중)* |
+| | [docs/STATUS.md](docs/STATUS.md) | 구현 현황 — **2026-08 기준, 낡음** |
 | ★ | [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md) | 미결 사항 |
 | | [CHANGELOG.md](CHANGELOG.md) | 릴리스 이력 |
 | | [docs/DEPLOY.md](docs/DEPLOY.md) | 배포·운영 절차 |
@@ -131,10 +136,7 @@ tincase/
 
 ## 지금 필요한 것
 
-- 🔴 **Q-01** — `fixtures/verify-write-test.hwp` 한글에서 열어보기 *(30초. Phase 2·웹 작성의 게이트)*
-- 🟡 **비밀번호 개인별 전달** — 13명 발급 완료, 미전달
-- 🟡 **전사 표준 양식 등록** — 취합게시판 원본을 `/ops`로
-- 🟡 **Cloudflare 외부 접속** — 운영자용. 대시보드 작업 ([DEPLOY](docs/DEPLOY.md) §3)
-- 월 8/17 오픈: 안내문 초안은 [DEPLOY](docs/DEPLOY.md) §8 · 첫 주는 이메일 병행
+- 🟡 **3단계 취합 시연** — 11/2(월) 운영회의 목표, 테스트 서버에서 진행 ([S-12](docs/spec/12-org-rollup.md))
+- 🟡 **다음 배포 전 운영 작업** — 백업 크론·fstab 줄 반영([DEPLOY](docs/DEPLOY.md) §7), 빌드 전 디스크 정리(§2b)
 
-전체: [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md)
+미결 목록: [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md) *(2026-08 이후 갱신 안 됨)*

@@ -72,20 +72,37 @@ export async function register() {
   // 멈춰 있는 동안 1분마다 같은 줄을 찍지 않는다 — 한 시간에 한 번이면 «살아서 멈춰 있다»가 보인다
   let pauseLoggedAt = 0;
 
+  // 알림이 실패해도 병합은 돌아야 한다 — 본업이 남의 사정에 멈추지 않게 따로 감싼다
+  const reminders = async () => {
+    try {
+      const sent = await runDueReminders();
+      for (const r of sent) {
+        const when = { deadline_1d: '마감 하루 전', deadline_day: '마감 당일 아침', deadline_1h: '마감 1시간 전', deadline_10m: '마감 10분 전' }[r.kind];
+        console.log(`[알림] ${when} — ${r.division} ${r.isoKey}: ${r.sent}/${r.targets}명 발송`);
+      }
+    } catch (e) {
+      console.error('[알림] 마감 전 알림 오류', e);
+    }
+  };
+  // 여기도 따로 감싼다: 알림이 실패해도 병합은 이미 끝났고, 그게 본업이다
+  const notices = async () => {
+    try {
+      for (const r of await runDueMergeNotices()) {
+        console.log(
+          `[알림] ${r.kind} — ${r.division} ${r.isoKey}(${r.status}): ${r.sent}/${r.targets}명` +
+            (r.blocked ? ` · 허용목록 밖 ${r.blocked}명` : ''),
+        );
+      }
+    } catch (e) {
+      console.error('[알림] 병합 안내 오류', e);
+    }
+  };
+
   const tick = async () => {
     if (running) return;
     running = true;
     try {
-      // 알림이 실패해도 병합은 돌아야 한다 — 본업이 남의 사정에 멈추지 않게 따로 감싼다
-      try {
-        const sent = await runDueReminders();
-        for (const r of sent) {
-          const when = { deadline_1d: '마감 하루 전', deadline_day: '마감 당일 아침', deadline_1h: '마감 1시간 전', deadline_10m: '마감 10분 전' }[r.kind];
-          console.log(`[알림] ${when} — ${r.division} ${r.isoKey}: ${r.sent}/${r.targets}명 발송`);
-        }
-      } catch (e) {
-        console.error('[알림] 마감 전 알림 오류', e);
-      }
+      await reminders();
 
       /*
        * RU-54~57 — 3단계 알림. 꺼져 있으면(RU-52) 아무것도 하지 않는다.
@@ -114,21 +131,21 @@ export async function register() {
         return; // finally에서 running이 풀린다
       }
 
-      const { ran } = await runDueMerges();
+      /*
+       * HM-50 — 부서 하나를 병합할 때마다 알림을 다시 본다. 예전에는 모든 부서 병합이 끝난 뒤에 한 번 봤다 —
+       * 13개 부서가 부서당 100초씩 걸리면 마지막이 14:23에 끝나고, 그때는 모든 부서의 검토 요청 창이 지나 있다.
+       * 같은 이유로 다른 마감을 쓰는 부서의 「10분 전」(창 3분)도 이 사이에 다시 본다.
+       */
+      const { ran } = await runDueMerges(new Date(), {
+        afterEach: async () => {
+          await reminders();
+          await notices();
+        },
+      });
       if (ran > 0) console.log(`[merge] 자동 병합 ${ran}건 실행`);
 
-      // 병합 **뒤에** 돈다 — 같은 주기에서 방금 끝난 병합을 바로 알릴 수 있다.
-      // 여기도 따로 감싼다: 알림이 실패해도 병합은 이미 끝났고, 그게 본업이다
-      try {
-        for (const r of await runDueMergeNotices()) {
-          console.log(
-            `[알림] ${r.kind} — ${r.division} ${r.isoKey}(${r.status}): ${r.sent}/${r.targets}명` +
-              (r.blocked ? ` · 허용목록 밖 ${r.blocked}명` : ''),
-          );
-        }
-      } catch (e) {
-        console.error('[알림] 병합 안내 오류', e);
-      }
+      // 병합이 없던 주기에도 돈다 — +30분 안내처럼 병합과 무관하게 창이 오는 것이 있다
+      await notices();
     } catch (e) {
       // 스케줄러는 절대 죽지 않는다 — 다음 주기에 다시 시도한다
       console.error('[merge] 스케줄러 오류', e);
