@@ -230,7 +230,11 @@ export default async function GuidePage() {
               <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
                 <li>[수합 관리]에서 이름을 눌러 제출물을 엽니다</li>
                 <li>오른쪽 위 <strong className="text-ink">[고치기]</strong> → 표를 고치고 <strong className="text-ink">[고쳐서 저장]</strong></li>
-                <li>병합본에 넣으려면 <strong className="text-ink">[다시 병합]</strong>을 누릅니다</li>
+                {/* CP-106a — 다시 병합은 병합본에서 고친 것을 지운다 (HM-49). 누르면 화면이 먼저 묻는다 */}
+                <li>
+                  병합본에 넣으려면 <strong className="text-ink">[다시 병합]</strong>을 누릅니다 — 병합본에서 직접
+                  고친 내용은 사라집니다 (누르면 먼저 묻습니다)
+                </li>
               </ol>
               <ul className="mt-4 space-y-1 text-sm text-muted">
                 <li>· 덮어쓰지 않습니다 — 그 사람의 <strong className="text-body">새 판</strong>이 생기고 원래 판은 그대로 남습니다</li>
@@ -244,7 +248,8 @@ export default async function GuidePage() {
                 <h3 className="display mt-1 text-lg">병합본 검토하고 승인하기</h3>
                 <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
                   <li>「병합본 검토 부탁드려요」 알림을 받으면 [보관함]이나 [수합 관리]에서 병합본을 엽니다</li>
-                  <li>고칠 곳이 있으면 고쳐서 <strong className="text-ink">[수정 저장]</strong> — <strong className="text-ink">그 저장이 곧 승인</strong>입니다</li>
+                  {/* CP-110 — 병합본 화면의 승인 띠와 같은 말 */}
+                  <li>고칠 곳이 있으면 칸을 눌러 바로 고치고 <strong className="text-ink">[수정 저장]</strong> — <strong className="text-ink">그 저장이 곧 승인</strong>입니다</li>
                   <li>고칠 것이 없으면 <strong className="text-ink">[고칠 것 없음 · 승인]</strong></li>
                 </ol>
                 <p className="mt-3 text-sm text-muted">

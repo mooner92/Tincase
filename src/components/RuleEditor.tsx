@@ -75,6 +75,20 @@ export interface RuleEditorProps {
   initialGuide: string;
   initialEmptyWords: string;
   initialEmphasisWords: string;
+  /**
+   * CP-108 — 이번 주 병합본이 이미 있나(그리고 사람이 고쳤나). 없으면 null.
+   * 규칙 저장은 병합을 다시 돌리지 않으므로, 이미 있는 병합본에는 [다시 병합]해야 들어간다
+   */
+  thisWeekMerged?: { edited: boolean } | null;
+}
+
+/**
+ * CP-108 — 저장 뒤 한 줄. 「저장되었습니다」만 말하면 이번 주 병합본이 그대로인 것을 「설정이 안 먹는다」로 읽는다.
+ * [다시 병합]을 권할 때는 그게 병합본을 고친 것을 지운다는 것도 같이 말한다 (HM-49)
+ */
+export function savedNote(docChanged: boolean, merged: { edited: boolean } | null | undefined): string {
+  if (!docChanged || !merged) return '저장되었습니다.';
+  return `저장되었습니다. 이번 주 병합본에는 [다시 병합]해야 적용됩니다${merged.edited ? ' — 병합본을 고친 내용은 사라집니다.' : '.'}`;
 }
 
 export function RuleEditor(props: RuleEditorProps) {
@@ -114,7 +128,21 @@ export function RuleEditor(props: RuleEditorProps) {
     return () => window.removeEventListener('beforeunload', h);
   }, [dirty]);
 
+  /*
+   * CP-108 — 문서를 바꾸는 설정을 바꿨나. 작성 안내·확인할 낱말은 병합본 글자를 바꾸지 않는다.
+   * 「날짜 없는 줄」은 일자 순일 때만 문서에 닿는다 (수합 관리의 「규칙 바뀜」과 같은 판단, CP-107)
+   */
+  const docChanged =
+    categories !== props.initialCategories ||
+    dedupe !== props.initialDedupe ||
+    dropNotes !== props.initialDropNotes ||
+    sort !== props.initialSort ||
+    (sort === 'date' && undated !== props.initialUndated) ||
+    rule !== props.initialRule ||
+    emphasisWords !== props.initialEmphasisWords;
+
   const save = () => {
+    const note = savedNote(docChanged, props.thisWeekMerged);
     setSaving(true);
     setMsg(null);
     fetch('/api/division/rule', {
@@ -134,7 +162,7 @@ export function RuleEditor(props: RuleEditorProps) {
     })
       .then(async (r) => {
         const body = await r.json();
-        setMsg(r.ok ? { ok: true, text: '저장되었습니다.' } : { ok: false, text: body.message ?? '저장 실패' });
+        setMsg(r.ok ? { ok: true, text: note } : { ok: false, text: body.message ?? '저장 실패' });
         if (r.ok) router.refresh();
       })
       .catch(() => setMsg({ ok: false, text: '네트워크 오류로 저장하지 못했습니다.' }))

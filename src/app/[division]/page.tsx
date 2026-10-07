@@ -181,7 +181,9 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
               )}
               <SubmitChoice
                 hasPrevious={!!mySubmission}
+                current={mySubmission && { id: mySubmission.id, version: mySubmission.version }}
                 isoKey={slot.isoKey}
+                weekStartMs={slot.opensAt.getTime()}
                 guideLines={guideLines}
                 emptyWordsRaw={view.division.emptyWords}
               />

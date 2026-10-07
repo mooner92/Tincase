@@ -417,7 +417,12 @@ export function MergedDrawer({
                 </span>
               </>
             ) : (
-              <span className="text-muted">아직 승인 전 — 고쳐서 [수정 저장]하면 그 저장이 승인이 되고, 담당자에게 알림이 갑니다</span>
+              <span className="text-muted">
+                {/* CP-110 — 「고쳐서」만으로는 어디를 어떻게 고치는지 모른다. 이 화면에서 바로 된다는 것을 먼저 말한다 */}
+                {canEdit
+                  ? '아직 승인 전 — 칸을 눌러 바로 고치고 [수정 저장]하면 그 저장이 곧 승인이고, 담당자에게 알림이 갑니다'
+                  : '아직 승인 전'}
+              </span>
             )}
             {data.canApprove && (!data.review || data.review.changedAfter) && (
               <button onClick={approve} disabled={busy || dirty} className="btn-secondary btn-sm ml-auto">
@@ -533,7 +538,12 @@ export function MergedDrawer({
                                       담당자가 «제출본이 어떻게 보이는지»를 확인할 길이 없다.
                                       실제 색(#0000ff)을 그대로 쓴다 — 비슷한 파랑이 아니라.
                                     */
-                                    className={`block w-full resize-none overflow-hidden rounded border border-transparent bg-transparent px-2 py-1.5 text-sm leading-snug hover:border-hairline focus:border-ink focus:bg-canvas focus:outline-none ${
+                                    /*
+                                      CP-110 — 테두리를 **늘** 그린다. 예전엔 마우스를 올려야 보여서, 처음 여는 실장에게는
+                                      읽기 전용 표였다 — 고칠 수 있는 줄 몰라 hwp로 받아 한글에서 고쳤다(승인 기록이 안 남는다).
+                                      옅은 선이면 표로 읽히면서도 「여기를 누르면 적힌다」가 보인다
+                                    */
+                                    className={`block w-full resize-none overflow-hidden rounded border border-hairline bg-canvas px-2 py-1.5 text-sm leading-snug hover:border-border-strong focus:border-ink focus:outline-none ${
                                       ci === 1 && t.emphasis?.[ri] ? 'font-medium text-[#0000ff]' : 'text-ink'
                                     }`}
                                   />

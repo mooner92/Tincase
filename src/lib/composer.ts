@@ -1,0 +1,57 @@
+// WA-35 · WA-36 — 웹 작성 화면의 순수 판단. 화면 밖에서 시험할 수 있게 여기 둔다.
+
+type Bucket = 'achievements' | 'plans' | 'notes';
+const BUCKETS: Bucket[] = ['achievements', 'plans', 'notes'];
+export type Buckets<R> = Record<Bucket, R[]>;
+
+/** 어디서 시작했나 — 화면 맨 위 한 줄이 이것을 말한다 */
+export type ComposerFrom = 'draft' | 'submission' | 'blank';
+
+const hasContent = <R extends { content: string }>(d: Partial<Buckets<R>> | null | undefined) =>
+  !!d && BUCKETS.some((b) => d[b]?.some((r) => typeof r?.content === 'string' && r.content.trim() !== ''));
+
+/** 브라우저 임시본. 모양이 틀리면(깨졌거나 옛 형식) 없는 것으로 친다 — 조용히 버린다 */
+function parseDraft<R extends { content: string }>(raw: string | null): Buckets<R> | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as Partial<Buckets<R>> | null;
+    if (!v || typeof v !== 'object' || !BUCKETS.every((b) => Array.isArray(v[b]))) return null;
+    return v as Buckets<R>;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * WA-35 — [웹에서 작성]을 어디서 시작하나.
+ *
+ *   1. 같은 주차의 **저장 안 한 임시본**(내용이 한 줄이라도 있는 것) — 적던 것을 지우지 않는다
+ *   2. **지금 낸 판** — 한 줄 고치려고 일곱 줄을 다시 적게 하지 않는다. 표마다 이어 적을 빈 줄을 붙인다
+ *   3. 빈 표
+ *
+ * 내용 없는 임시본은 임시본이 아니다. 예전 화면은 열기만 해도 빈 표를 임시본으로 써 두었는데,
+ * 그걸 1번으로 치면 「다시 작성」이 또 빈 표로 열린다.
+ */
+export function composerStart<R extends { content: string }>(
+  draftRaw: string | null,
+  submitted: Partial<Buckets<R>> | null | undefined,
+  blank: () => R,
+): { data: Buckets<R>; from: ComposerFrom } {
+  const draft = parseDraft<R>(draftRaw);
+  if (draft && hasContent(draft)) return { data: draft, from: 'draft' };
+  if (submitted && hasContent(submitted)) {
+    const pick = (b: Bucket) => [...(submitted[b] ?? []).map((r) => ({ ...r })), blank()];
+    return { data: { achievements: pick('achievements'), plans: pick('plans'), notes: pick('notes') }, from: 'submission' };
+  }
+  return { data: { achievements: [blank(), blank(), blank()], plans: [blank(), blank()], notes: [blank()] }, from: 'blank' };
+}
+
+/**
+ * WA-36a — 일자 칸 예시 「M/D」: 그 주(월요일 00:00 KST = `weekStartMs`) 화요일, `weeksAhead`주 뒤.
+ * 고정 예시 '8/20'은 10월엔 낡은 날짜라 「이렇게 적는다」가 아니라 「틀린 날짜」로 읽힌다.
+ * KST는 서머타임이 없어 +9시간이면 UTC 필드가 곧 한국 날짜다 — 실행 TZ와 상관없다.
+ */
+export function dateHint(weekStartMs: number, weeksAhead = 0): string {
+  const d = new Date(weekStartMs + (1 + 7 * weeksAhead) * 86_400_000 + 9 * 3_600_000);
+  return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+}

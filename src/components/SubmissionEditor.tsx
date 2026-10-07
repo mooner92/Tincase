@@ -176,7 +176,8 @@ export function SubmissionEditor({
         <button onClick={onCancel} disabled={busy} className="btn-secondary btn-sm">
           취소
         </button>
-        <span className="text-xs text-muted">병합본에는 [다시 병합]을 눌러야 들어갑니다</span>
+        {/* CP-106a — 다시 병합은 병합본에서 고친 것을 지운다. 누르라고 하면서 그걸 숨기지 않는다 */}
+        <span className="text-xs text-muted">병합본에는 [다시 병합]을 눌러야 들어갑니다 — 병합본에서 고친 내용은 사라집니다</span>
       </div>
     </div>
   );

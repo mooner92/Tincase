@@ -10,6 +10,7 @@ import { flagWordOf, parseFlagWords } from '@/lib/empty-content';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { parseClipboardTable } from '@/lib/paste-table';
+import { composerStart, dateHint, type ComposerFrom } from '@/lib/composer';
 import { PreviousWeekPanel, type PrevRow } from './PreviousWeekPanel';
 
 export interface ComposerRow {
@@ -39,41 +40,48 @@ const SECTIONS: { key: Bucket; no: number; title: string; hint: string }[] = [
 const blank = (): ComposerRow => ({ content: '', date: '', place: '', attendee: '', emphasis: false });
 const draftKey = (isoKey: string) => `tincase.compose.${isoKey}`;
 
+/** 브라우저 임시본 읽기 — 사생활 보호 모드 등에서 저장소가 던지면 없는 것으로 친다 */
+function readDraft(isoKey: string): string | null {
+  try {
+    return typeof window === 'undefined' ? null : window.localStorage.getItem(draftKey(isoKey));
+  } catch {
+    return null;
+  }
+}
+
 export function WebComposer({
   isoKey,
   guideLines,
   initial,
+  initialVersion,
+  initialFailed = false,
+  weekStartMs,
   onClose,
   emptyWordsRaw = '',
 }: {
   isoKey: string;
   guideLines: string[];
+  /** WA-35 — 이번 주에 낸 판의 표 (「공유」 포함). 없으면 null */
   initial?: Record<Bucket, ComposerRow[]> | null;
+  /** WA-35 — 그 판의 버전 (「지금 낸 v2에서 시작합니다」) */
+  initialVersion?: number;
+  /** WA-35c — 낸 판이 있는데 못 불러왔다. 빈 표로 열되 그렇다고 말한다 */
+  initialFailed?: boolean;
+  /** WA-36a — 이번 주 월요일 00:00 KST. 일자 예시를 여기서 만든다 */
+  weekStartMs: number;
   onClose: () => void;
   /** HM-33 — 부서가 정한 「내용 없음」 낱말 (`Division.emptyWords`). 비면 검사하지 않는다 */
   emptyWordsRaw?: string;
 }) {
   const emptyWords = useMemo(() => parseFlagWords(emptyWordsRaw), [emptyWordsRaw]);
-  const [data, setData] = useState<Record<Bucket, ComposerRow[]>>(() => {
-    if (initial?.achievements?.length || initial?.plans?.length || initial?.notes?.length) {
-      return {
-        achievements: initial.achievements?.length ? initial.achievements : [blank()],
-        plans: initial.plans?.length ? initial.plans : [blank()],
-        notes: initial.notes?.length ? initial.notes : [blank()],
-      };
-    }
-    if (typeof window !== 'undefined') {
-      const saved = window.localStorage.getItem(draftKey(isoKey));
-      if (saved) {
-        try {
-          return JSON.parse(saved) as Record<Bucket, ComposerRow[]>;
-        } catch {
-          /* 깨진 임시본은 조용히 버린다 */
-        }
-      }
-    }
-    return { achievements: [blank(), blank(), blank()], plans: [blank(), blank()], notes: [blank()] };
-  });
+  /*
+   * WA-35 — 시작점: 저장 안 한 임시본 > 지금 낸 판 > 빈 표 (composerStart).
+   * `start`를 따로 들고 있는 것은 WA-35b 때문이다 — 사람이 아무것도 안 바꿨으면 임시본을 쓰지 않는다.
+   * 연 것만으로 쓰면 빈 표·옛 판이 임시본이 되어, 다음에 열 때 지금 낸 판을 가린다.
+   */
+  const [start, setStart] = useState(() => composerStart(readDraft(isoKey), initial, blank));
+  const [data, setData] = useState<Record<Bucket, ComposerRow[]>>(start.data);
+  const from: ComposerFrom = start.from;
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [pasted, setPasted] = useState<string | null>(null);
@@ -83,10 +91,35 @@ export function WebComposer({
   // 임시 보관은 **제출 전까지만**. 제출 후에도 남아 있으면 다음에 열었을 때
   // 낸 건지 안 낸 건지 헷갈린다 (지연 저장이 뒤늦게 되살리는 것도 막는다)
   useEffect(() => {
-    if (done) return;
-    const t = setTimeout(() => localStorage.setItem(draftKey(isoKey), JSON.stringify(data)), 800);
+    if (done || data === start.data) return; // WA-35b — 손대기 전에는 쓰지 않는다
+    const t = setTimeout(() => {
+      try {
+        localStorage.setItem(draftKey(isoKey), JSON.stringify(data));
+      } catch {
+        /* 저장소를 못 쓰면 임시 보관만 못 할 뿐이다 */
+      }
+    }, 800);
     return () => clearTimeout(t);
-  }, [data, isoKey, done]);
+  }, [data, isoKey, done, start]);
+
+  /** WA-35a — 임시본을 버리고 지금 낸 판에서 다시. 적던 것이 사라지므로 묻는다 */
+  const restartFromSubmitted = () => {
+    if (!initial || !confirm(`작성하던 임시본을 지우고 지금 낸 v${initialVersion}에서 다시 시작할까요?`)) return;
+    try {
+      localStorage.removeItem(draftKey(isoKey));
+    } catch {
+      /* 지우지 못해도 아래에서 다시 시작한다 — 손대지 않으면 다시 쓰지 않는다 */
+    }
+    const next = composerStart(null, initial, blank);
+    setStart(next);
+    setData(next.data);
+  };
+
+  // WA-36a — 일자 예시는 이번 주 날짜에서. 계획 표는 다음 주 일이다
+  const hints = useMemo(
+    () => ({ achievements: dateHint(weekStartMs), plans: dateHint(weekStartMs, 1), notes: dateHint(weekStartMs) }),
+    [weekStartMs],
+  );
 
   const filled = useMemo(
     () =>
@@ -182,9 +215,13 @@ export function WebComposer({
           return;
         }
         setDone(true); // 지연 저장이 다시 쓰지 못하게 먼저 막는다
-        localStorage.removeItem(draftKey(isoKey));
-        setData({ achievements: [blank(), blank(), blank()], plans: [blank(), blank()], notes: [blank()] });
-        setMsg({ ok: true, text: `제출되었습니다 (v${body.version}). 다시 열면 빈 화면으로 시작합니다.` });
+        try {
+          localStorage.removeItem(draftKey(isoKey));
+        } catch {
+          /* 저장소를 못 쓰면 지울 것도 없다 */
+        }
+        // WA-35c — 표는 그대로 둔다. 다시 열면 방금 낸 판에서 시작하므로 「빈 화면」이라고 하지 않는다
+        setMsg({ ok: true, text: `제출되었습니다 (v${body.version}).` });
         router.refresh();
         setTimeout(onClose, 900);
       })
@@ -248,6 +285,26 @@ export function WebComposer({
 
         {/* 본문 */}
         <div className="flex-1 overflow-y-auto px-7 py-5">
+          {/* WA-35 — 어디서 시작했는지 한 줄. 빈 표가 아니면 왜 채워져 있는지, 빈 표면 왜 빈지 말한다 */}
+          {from === 'submission' && initialVersion !== undefined && (
+            <p className="mb-4 text-sm text-body">
+              <span className="font-semibold text-ink">지금 낸 v{initialVersion}에서 시작합니다</span>
+              <span className="ml-1.5 text-muted">· 고쳐서 제출하면 v{initialVersion + 1}로 저장됩니다</span>
+            </p>
+          )}
+          {from === 'draft' && (
+            <p className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-body">
+              <span className="font-semibold text-ink">저장하지 않은 임시본에서 이어 씁니다</span>
+              {initial && initialVersion !== undefined && (
+                <button onClick={restartFromSubmitted} className="text-xs text-muted underline hover:text-ink">
+                  지금 낸 v{initialVersion}로 다시 시작
+                </button>
+              )}
+            </p>
+          )}
+          {from === 'blank' && initialFailed && (
+            <p className="mb-4 text-sm text-warning">지금 낸 판을 불러오지 못해 빈 표로 시작합니다.</p>
+          )}
           {/*
             WA-13 — 지난번 낸 내용. **본문 맨 위**다.
 
@@ -286,6 +343,11 @@ export function WebComposer({
                   <span className="w-[74px] shrink-0">일자</span>
                   <span className="w-28 shrink-0">장소</span>
                   <span className="w-28 shrink-0">참석자</span>
+                  {/* WA-36 — 이름 없는 칸의 버튼은 뜻을 짐작하게 된다. 파란 점은 문서에 나가는 그 색이다 */}
+                  <span className="w-10 shrink-0 text-center whitespace-nowrap">
+                    <span aria-hidden className="mr-0.5 inline-block size-1.5 rounded-full bg-[#0000ff] align-middle" />
+                    공유
+                  </span>
                   <span className="w-5 shrink-0" />
                 </div>
 
@@ -332,7 +394,7 @@ export function WebComposer({
                       <input
                         value={row.date}
                         onChange={(e) => set(s.key, i, 'date', e.target.value)}
-                        placeholder={i === 0 ? '8/20' : ''}
+                        placeholder={i === 0 ? hints[s.key] : ''}
                         className={`${cell} w-[74px] shrink-0`}
                       />
                       <input
@@ -358,7 +420,7 @@ export function WebComposer({
                         aria-pressed={row.emphasis === true}
                         aria-label={`${i + 1}번째 줄 공유 표시`}
                         title="전체 공유·전달이 필요한 주요 사항 — 병합본에 파란색으로 나갑니다"
-                        className={`shrink-0 rounded border px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap transition-colors ${
+                        className={`w-10 shrink-0 rounded border px-1 py-0.5 text-center text-[11px] font-semibold whitespace-nowrap transition-colors ${
                           row.emphasis
                             ? 'border-[#0000ff] bg-[#0000ff] text-white'
                             : 'border-hairline bg-canvas text-muted-soft hover:border-ink hover:text-ink'
@@ -392,6 +454,10 @@ export function WebComposer({
           ))}
 
           <p className="pb-2 text-xs leading-6 text-muted-soft">
+            {/* WA-36 — 「공유」의 뜻. 툴팁은 터치·좁은 화면에서 안 뜬다 */}
+            <span className="font-medium text-[#0000ff]">공유</span> — 전 직원에게 전할 주요 사항에 누릅니다. 병합본에
+            파란색으로 나갑니다
+            <br />
             일자는 특정 날짜가 있는 업무만 적습니다 (상시 업무는 비워 두세요) ·
             빈 줄은 저장되지 않습니다 · 구분 번호는 제출할 때 다시 매겨집니다
           </p>
