@@ -3,7 +3,7 @@
 //
 // 표 모양은 웹 작성(WebComposer)과 같다 — 구분은 시스템이 다시 매기므로 번호 표시만 둔다(ABS-5).
 // 원래 판은 그대로 남는다는 것을 저장 버튼 바로 옆에 적는다 — 「내가 남의 글을 지우나」 하는 망설임을 없앤다.
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 
 type Bucket = 'achievements' | 'plans' | 'notes';
 export interface EditRow {
@@ -21,6 +21,18 @@ const SECTIONS: { key: Bucket; no: number; title: string }[] = [
 ];
 const blank = (): EditRow => ({ content: '', date: '', place: '', attendee: '', emphasis: false });
 
+/**
+ * 칸 높이를 내용에 맞춘다 — MergedDrawer와 같은 방식 (`field-sizing`은 사내 PC 브라우저를 장담할 수 없다).
+ * 한 칸에 두 줄을 적는 것은 정상이다(HM-39). `<input>`은 값의 줄바꿈을 **조용히 지운다** —
+ * 그래서 고치지도 않은 칸의 줄바꿈이 저장하는 순간 사라졌다 (2026-10-07 리뷰). 그래서 textarea다.
+ */
+const fit = (el: HTMLTextAreaElement | null) => {
+  if (!el) return;
+  el.style.height = 'auto';
+  const border = el.offsetHeight - el.clientHeight;
+  el.style.height = `${el.scrollHeight + border}px`;
+};
+
 export function SubmissionEditor({
   submissionId,
   ownerName,
@@ -28,6 +40,7 @@ export function SubmissionEditor({
   initial,
   onSaved,
   onCancel,
+  onDirtyChange,
 }: {
   submissionId: string;
   ownerName: string;
@@ -35,6 +48,8 @@ export function SubmissionEditor({
   initial: Record<Bucket, EditRow[]>;
   onSaved: (newId: string, newVersion: number) => void;
   onCancel: () => void;
+  /** 저장하지 않은 수정이 생겼다 — 드로어가 닫기 전에 묻는다 */
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const [data, setData] = useState<Record<Bucket, EditRow[]>>(() => ({
     achievements: initial.achievements.length ? initial.achievements.map((r) => ({ ...r })) : [blank()],
@@ -43,15 +58,32 @@ export function SubmissionEditor({
   }));
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  /*
+   * 줄을 지우면 아래 줄의 값이 위 칸(같은 textarea)으로 올라온다 — 칸 높이는 그대로라서
+   * 여러 줄 값이 한 줄 높이 칸에 들어가면 `overflow-hidden`에 가려 안 보인다. 값이 바뀔 때마다 다시 맞춘다
+   * (MergedDrawer와 같은 방식)
+   */
+  const rootRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    rootRef.current?.querySelectorAll('textarea').forEach((el) => fit(el as HTMLTextAreaElement));
+  }, [data]);
 
-  const set = (b: Bucket, i: number, f: keyof EditRow, v: string | boolean) =>
+  const touch = () => onDirtyChange?.(true);
+  const set = (b: Bucket, i: number, f: keyof EditRow, v: string | boolean) => {
     setData((d) => ({ ...d, [b]: d[b].map((r, k) => (k === i ? { ...r, [f]: v } : r)) }));
-  const add = (b: Bucket) => setData((d) => ({ ...d, [b]: [...d[b], blank()] }));
-  const remove = (b: Bucket, i: number) =>
+    touch();
+  };
+  const add = (b: Bucket) => {
+    setData((d) => ({ ...d, [b]: [...d[b], blank()] }));
+    touch();
+  };
+  const remove = (b: Bucket, i: number) => {
     setData((d) => {
       const rows = d[b].filter((_, k) => k !== i);
       return { ...d, [b]: rows.length ? rows : [blank()] };
     });
+    touch();
+  };
 
   const save = async () => {
     setBusy(true);
@@ -64,7 +96,10 @@ export function SubmissionEditor({
       });
       const b = (await r.json().catch(() => ({}))) as { message?: string; id?: string; version?: number };
       if (!r.ok || !b.id) setErr(b.message ?? '저장하지 못했습니다.');
-      else onSaved(b.id, b.version ?? version + 1);
+      else {
+        onDirtyChange?.(false);
+        onSaved(b.id, b.version ?? version + 1);
+      }
     } catch {
       setErr('네트워크 오류로 저장하지 못했습니다.');
     } finally {
@@ -73,10 +108,24 @@ export function SubmissionEditor({
   };
 
   const cell =
-    'h-8 rounded-md border border-border-strong bg-canvas px-2 text-[13px] text-ink focus:border-ink focus:ring-1 focus:ring-ink focus:outline-none';
+    'block resize-none overflow-hidden rounded-md border border-border-strong bg-canvas px-2 py-1.5 text-[13px] leading-snug text-ink focus:border-ink focus:ring-1 focus:ring-ink focus:outline-none';
+  /** 칸 하나 — 줄바꿈을 지키는 textarea (HM-39) */
+  const field = (b: Bucket, i: number, f: 'content' | 'date' | 'place' | 'attendee', label: string, extra: string) => (
+    <textarea
+      aria-label={label}
+      rows={1}
+      ref={fit}
+      value={data[b][i][f]}
+      onChange={(e) => {
+        fit(e.target);
+        set(b, i, f, e.target.value);
+      }}
+      className={`${cell} ${extra}`}
+    />
+  );
 
   return (
-    <div className="space-y-5">
+    <div ref={rootRef} className="space-y-5">
       <p className="rounded-lg bg-brand-soft px-3 py-2 text-xs text-body-strong">
         <strong>{ownerName}</strong>님의 업무일지를 고칩니다. 저장하면 <strong>새 판(v{version + 1})</strong>이 생기고,
         지금 판(v{version})은 그대로 남습니다. 판 목록에 「고친 사람」이 함께 표시됩니다.
@@ -97,18 +146,18 @@ export function SubmissionEditor({
               <span className="w-5 shrink-0" />
             </div>
             {data[s.key].map((r, i) => (
-              <div key={i} className="flex items-center gap-1.5 border-b border-hairline-soft px-2 py-1 last:border-0">
-                <span className="w-8 shrink-0 text-center text-xs tabular-nums text-muted">
+              <div key={i} className="flex items-start gap-1.5 border-b border-hairline-soft px-2 py-1 last:border-0">
+                <span className="w-8 shrink-0 pt-1.5 text-center text-xs tabular-nums text-muted">
                   {s.no}-{i + 1}
                 </span>
-                <input aria-label={`${s.title} ${i + 1} 내용`} value={r.content} onChange={(e) => set(s.key, i, 'content', e.target.value)} className={`${cell} min-w-0 flex-1 ${r.emphasis ? 'text-[#1d4ed8]' : ''}`} />
-                <input aria-label="일자" value={r.date} onChange={(e) => set(s.key, i, 'date', e.target.value)} className={`${cell} w-16 shrink-0`} />
-                <input aria-label="장소" value={r.place} onChange={(e) => set(s.key, i, 'place', e.target.value)} className={`${cell} w-20 shrink-0`} />
-                <input aria-label="참석자" value={r.attendee} onChange={(e) => set(s.key, i, 'attendee', e.target.value)} className={`${cell} w-20 shrink-0`} />
-                <span className="flex w-9 shrink-0 justify-center">
+                {field(s.key, i, 'content', `${s.title} ${i + 1} 내용`, `min-w-0 flex-1 ${r.emphasis ? 'text-[#1d4ed8]' : ''}`)}
+                {field(s.key, i, 'date', '일자', 'w-16 shrink-0')}
+                {field(s.key, i, 'place', '장소', 'w-20 shrink-0')}
+                {field(s.key, i, 'attendee', '참석자', 'w-20 shrink-0')}
+                <span className="flex w-9 shrink-0 justify-center pt-2">
                   <input type="checkbox" aria-label="공유(파란색)" checked={!!r.emphasis} onChange={(e) => set(s.key, i, 'emphasis', e.target.checked)} />
                 </span>
-                <button onClick={() => remove(s.key, i)} aria-label="이 줄 지우기" className="w-5 shrink-0 text-muted-soft hover:text-error">
+                <button onClick={() => remove(s.key, i)} aria-label="이 줄 지우기" className="w-5 shrink-0 pt-1.5 text-muted-soft hover:text-error">
                   ×
                 </button>
               </div>

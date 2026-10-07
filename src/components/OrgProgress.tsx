@@ -5,6 +5,7 @@
 // 남은 사람 이름은 펼쳐야 보이게 접어 둔다. 원형 그래프는 따로 연다(새 탭).
 import Link from 'next/link';
 import type { HqGroup, TeamProgress } from '@/lib/org-groups';
+import { NudgeButton } from './NudgeButton';
 
 function Bar({ value, max }: { value: number; max: number }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0;
@@ -64,8 +65,13 @@ export function OrgProgress({
   const teams = groups.flatMap((g) => g.teams).filter((t) => t.isActive);
   const roster = teams.reduce((n, t) => n + t.roster, 0);
   const sent = teams.reduce((n, t) => n + t.submitted, 0);
-  const full = teams.filter((t) => t.roster > 0 && t.submitted === t.roster).length;
+  // 「다 낸 팀 n / m곳」의 m은 **낼 사람이 있는 팀**만 — 명단 0명인 팀은 다 낼 수도 못 낼 수도 없다
+  const expected = teams.filter((t) => t.roster > 0);
+  const full = expected.filter((t) => t.submitted === t.roster).length;
   const pct = roster > 0 ? Math.round((sent / roster) * 100) : 0;
+  // 전사 미제출 명단 — 본 다음 동작은 언제나 「알려주기」다. 옮겨 적게 하지 않는다 (조직도 화면과 같은 버튼)
+  const missingTeams = teams.filter((t) => t.missing.length > 0);
+  const allMissing = missingTeams.flatMap((t) => t.missing);
 
   return (
     <div className="space-y-5">
@@ -81,7 +87,7 @@ export function OrgProgress({
         <div className="text-sm text-body">
           <p>
             다 낸 팀 <strong className="text-ink">{full}</strong>
-            <span className="text-muted"> / {teams.length}곳</span>
+            <span className="text-muted"> / {expected.length}곳</span>
           </p>
           <p className="text-muted">
             마감 {deadlineText} · {capturedAtKst}
@@ -93,6 +99,29 @@ export function OrgProgress({
           </p>
         )}
       </section>
+
+      {allMissing.length > 0 && (
+        <section className="card px-5 py-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-body">
+              <span className="font-semibold text-ink">{allMissing.length}명</span>이 아직 내지 않았습니다 · 마감{' '}
+              {deadlineText}
+            </p>
+            <NudgeButton names={allMissing} deadlineText={deadlineText} weekLabel={weekLabel} />
+          </div>
+          <details className="mt-2 text-sm">
+            <summary className="cursor-pointer text-xs text-muted hover:text-ink">팀별 미제출 명단</summary>
+            <ul className="mt-2 space-y-1.5">
+              {missingTeams.map((t) => (
+                <li key={t.id} className="flex flex-wrap gap-x-3 gap-y-1">
+                  <span className="min-w-36 font-medium text-ink">{t.name}</span>
+                  <span className="text-body">{t.missing.join(', ')}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
+        </section>
+      )}
 
       {/* 세로로 쌓는 단 — 팀 수가 다른 본부 카드가 서로 높이를 맞추느라 빈칸을 만들지 않게 */}
       <div className="gap-4 md:columns-2 xl:columns-3">

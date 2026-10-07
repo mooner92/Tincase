@@ -27,15 +27,34 @@ export interface DocInput {
   notes?: DocRowInput[];
 }
 
-/** 사람이 넣은 글자를 다듬는다 — 제어 문자는 hwp 레코드를 깨뜨린다 */
-function clean(v: unknown): string {
-  return String(v ?? '')
+/**
+ * 사람이 넣은 글자를 다듬는다 — 제어 문자는 hwp 레코드를 깨뜨린다.
+ *
+ * **줄바꿈은 남긴다.** 한 칸에 두 줄을 적는 것은 정상이고(HM-39), 문서에 넣을 수 있는 글자는
+ * writer의 `sanitizeCellText`가 마지막에 한 번 더 거른다(HM-42). 예전에는 여기서 `\n`까지 지워서
+ * 담당자가 아무것도 안 고친 칸의 줄바꿈이 저장하는 순간 사라졌다 (2026-10-07 리뷰).
+ *
+ * **길면 자르지 않고 거절한다.** 조용히 자르면 뒷부분이 사라진 것을 저장한 사람도 모른다.
+ */
+export function cleanCell(v: unknown, where = ''): string {
+  const out = String(v ?? '')
+    .replace(/\r\n?/g, '\n')
     .split('')
-    .filter((ch) => ch.charCodeAt(0) >= 32 || ch === '\t')
+    .filter((ch) => ch.charCodeAt(0) >= 32 || ch === '\t' || ch === '\n')
     .join('')
-    .trim()
-    .slice(0, MAX_CELL);
+    .trim();
+  if (out.length > MAX_CELL) {
+    throw new HttpError(
+      422,
+      'cell_too_long',
+      `한 칸에 ${MAX_CELL}자까지 넣을 수 있습니다${where ? ` (${where}: ${out.length}자)` : ` (${out.length}자)`}. 나눠 적어 주세요.`,
+    );
+  }
+  return out;
 }
+
+/** 422 안내에 쓰는 표 이름 — `prefix`(1·2·3)가 자리다 */
+const TABLE_NAME = ['', '실적', '계획', '특이사항'];
 
 /**
  * HM-37 — 표 하나를 셀 격자 + **행별 강조**로. 둘을 같이 만드는 이유는 빈 줄을 버릴 때
@@ -43,10 +62,13 @@ function clean(v: unknown): string {
  */
 function toRows(list: DocRowInput[] | undefined, prefix: number): { cells: string[][]; emphasis: boolean[] } {
   const kept = (list ?? [])
-    .map((r) => ({
-      cells: [clean(r.content), clean(r.date), clean(r.place), clean(r.attendee)],
-      emphasis: r.emphasis === true,
-    }))
+    .map((r, i) => {
+      const at = `${TABLE_NAME[prefix] ?? ''} ${i + 1}번째 줄`;
+      return {
+        cells: [cleanCell(r.content, at), cleanCell(r.date, at), cleanCell(r.place, at), cleanCell(r.attendee, at)],
+        emphasis: r.emphasis === true,
+      };
+    })
     .filter((r) => r.cells.some(Boolean)); // 전부 빈 줄은 버린다
   if (kept.length > MAX_ROWS) {
     throw new HttpError(422, 'too_many_rows', `한 표에 ${MAX_ROWS}행까지만 넣을 수 있습니다.`);

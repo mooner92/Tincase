@@ -1,7 +1,8 @@
 // 전사 현황 데이터 — 현황판(/ops/monitor)과 조직도 그래프(/ops/monitor/graph)가 같은 것을 쓴다.
 // 두 화면이 각자 세면 「현황판은 41명, 그래프는 42명」 같은 어긋남이 생긴다.
 import { prisma } from './db';
-import { ensureCurrentSlot, effectiveDeadline } from './worklog';
+import { ensureCurrentSlot } from './worklog';
+import { earliestDeadline } from './slot-deadline';
 import { missingStreaks } from './streak';
 import { formatDeadlineKo, toKstIso } from '@/lib/week';
 import type { DivisionNode } from '@/lib/orgtree';
@@ -48,7 +49,6 @@ export async function monitorData(now = new Date()) {
   }));
   const counted = nodes.filter((n) => n.counted);
   const skipped = nodes.filter((n) => !n.counted);
-  const active = divisions.find((d) => d.isActive) ?? divisions[0];
   return {
     slot,
     nodes,
@@ -59,7 +59,8 @@ export async function monitorData(now = new Date()) {
     },
     // 스냅샷이 못 보여주는 것 — "이번 주 안 냄"과 "3주 연속 안 냄"은 다른 얘기다
     streaks: await missingStreaks(now),
-    deadlineText: active ? formatDeadlineKo(effectiveDeadline(slot, active)) : '',
+    // WS-19 — 켜진 부서 중 **가장 이른** 마감 (주차 마감 예외 화면과 같은 식). 첫 부서를 대표로 쓰지 않는다
+    deadlineText: formatDeadlineKo(earliestDeadline(slot, divisions.filter((d) => d.isActive))),
     capturedAtKst: toKstIso(now).slice(5, 16).replace('T', ' ') + ' 기준',
   };
 }

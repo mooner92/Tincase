@@ -79,7 +79,9 @@ export function diffTable(bucket: BucketKey, before: readonly DiffRow[], after: 
     if (j < 0) continue;
     usedA.add(i);
     usedB.add(j);
-    out.push({ bucket, op: 'move', before: before[i].content, after: after[j].content });
+    // 옮기면서 곁칸·공유 표시도 바꿨을 수 있다 — 「옮김」만 적으면 그 고침이 기록에서 사라진다
+    const f = sideFields(before[i], after[j]);
+    out.push({ bucket, op: 'move', before: before[i].content, after: after[j].content, ...(f.length ? { fields: f } : {}) });
   }
 
   // 3) 남은 줄 — 맞은 줄 사이의 같은 틈 안에서 차례로 「고침(글)」, 남는 것은 뺌·더함
@@ -139,7 +141,7 @@ export function describeChange(c: RowChange): string {
   const t = TABLE[c.bucket];
   if (c.op === 'add') return `${t} 더함 「${clip(c.after ?? '')}」`;
   if (c.op === 'remove') return `${t} 뺌 「${clip(c.before ?? '')}」`;
-  if (c.op === 'move') return `${t} 옮김 「${clip(c.before ?? '')}」`;
+  if (c.op === 'move') return `${t} 옮김 「${clip(c.before ?? '')}」${c.fields?.length ? ` · ${c.fields.join('·')} 고침` : ''}`;
   if (c.before === c.after) return `${t} 「${clip(c.before ?? '')}」 ${c.fields?.join('·') ?? ''} 고침`;
   return `${t} 「${clip(c.before ?? '')}」 → 「${clip(c.after ?? '')}」`;
 }

@@ -31,6 +31,19 @@ describe('HM-47 바뀐 곳 계산', () => {
     expect(describeChange(c[0])).toBe('실적 「포럼 참석」 일자·공유 고침');
   });
 
+  it('[HM-T115] 옮기면서 일자·공유도 바꿨으면 「옮김」에 그 칸이 붙는다 — 옮김만 적으면 고침이 사라진다', () => {
+    const before = [r('가'), r('나'), r('다', { date: '10/8' })];
+    const after = [r('다', { date: '10/9', emphasis: true }), r('가'), r('나')];
+    const c = diffTable('achievements', before, after);
+    const move = c.find((x) => x.op === 'move');
+    expect(move).toEqual({ bucket: 'achievements', op: 'move', before: '다', after: '다', fields: ['일자', '공유'] });
+    expect(describeChange(move!)).toBe('실적 옮김 「다」 · 일자·공유 고침');
+    // 자리만 옮긴 것은 그대로 「옮김」 한마디
+    const plain = diffTable('achievements', [r('가'), r('나')], [r('나'), r('가')]).find((x) => x.op === 'move')!;
+    expect(plain.fields).toBeUndefined();
+    expect(describeChange(plain)).toBe('실적 옮김 「가」');
+  });
+
   it('[HM-T109] 아무것도 안 바뀌었으면 「고친 곳 없음」 · 띄어쓰기만 다른 것은 같은 글', () => {
     const t = { achievements: [r('가  나')], plans: [r('다')], notes: [] };
     const u = { achievements: [r('가 나')], plans: [r('다')], notes: [] };

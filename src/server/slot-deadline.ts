@@ -57,9 +57,17 @@ async function policies(): Promise<DeadlinePolicy[]> {
   return ds.length ? ds : [FALLBACK];
 }
 
-function earliest(slot: Pick<WeekSlot, 'opensAt' | 'deadlineDowOverride' | 'deadlineTimeOverride'>, ps: DeadlinePolicy[]): Date {
-  return ps.map((p) => deadlineFor(slot, p)).reduce((a, b) => (a < b ? a : b));
+/**
+ * 그 주차의 **가장 이른** 부서 마감. 켜진 부서가 없으면 평소 마감(FALLBACK).
+ * 전사 현황의 「마감 ○○」도 이걸 쓴다 — 첫 부서의 마감을 대표값으로 쓰면 그 부서만 늦을 때 전사가 늦게 보인다.
+ */
+export function earliestDeadline(
+  slot: Pick<WeekSlot, 'opensAt' | 'deadlineDowOverride' | 'deadlineTimeOverride'>,
+  ps: readonly DeadlinePolicy[],
+): Date {
+  return (ps.length ? ps : [FALLBACK]).map((p) => deadlineFor(slot, p)).reduce((a, b) => (a < b ? a : b));
 }
+const earliest = earliestDeadline;
 
 const hhmm = (d: Date) => toKstIso(d).slice(11, 16);
 const ko = (d: Date) => formatDeadlineKo(d);

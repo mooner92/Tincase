@@ -184,9 +184,13 @@ export async function findAccessibleSubmission(scope: Scope, submissionId: strin
   if (!sub) throw notFound();
 
   const own = sub.userId === scope.user.id;
-  const sameDivisionLead = scope.isLead && sub.divisionId === scope.division.id;
+  /*
+   * TACP-16 · §3.1 「남의 제출물 내용」 — lead·head 둘 다 read다. `isLead`로 적혀 있어서
+   * 부서장이 [고치기]는 받는데(첨삭 게이트는 isManager) 정작 열면 404가 났다 (2026-10-07 리뷰).
+   */
+  const sameDivisionManager = scope.isManager && sub.divisionId === scope.division.id;
 
-  if (own || sameDivisionLead) return sub;
+  if (own || sameDivisionManager) return sub;
 
   if (scope.readAll) {
     // AU-15/16 — 타 부서 열람은 감사 로그에 남긴다
@@ -240,13 +244,28 @@ export async function requireDeletableSubmission(scope: Scope, submissionId: str
 /**
  * TACP-22 — 제출물 **첨삭** 판정. 읽기(`findAccessibleSubmission`)·삭제(`requireDeletableSubmission`)와 별개다.
  *
- *   내 부서의 lead·head   → 허용 (최신 판만 — 옛 판은 409)
+ *   내 부서의 lead·head, **남의** 제출물   → 허용 (최신 판만 — 옛 판은 409)
+ *   자기 제출물                          → 404. 첨삭은 마감을 보지 않으므로, 열어 두면 담당자만
+ *                                          마감 뒤에 자기 것을 고치는 길이 된다 — 본인은 마감 전 재제출이다
  *   그 외(member·coordinator·타 부서·operator의 타 부서)  → 404
  *
+ * operator는 따로 열지 않는다 — 자기 부서의 lead·head 역할이 있을 때만 고친다 (§3.1).
  * 마감은 보지 않는다 — 마감 뒤에 맞추는 것이 이 권한의 목적이다 (ADR-0013).
  */
 export function canReviseSubmissions(scope: Pick<Scope, 'isManager'>): boolean {
   return scope.isManager;
+}
+
+/**
+ * TACP-22 — **이 제출물을** 고칠 수 있나 (판 무관). 게이트와 열람 화면의 [고치기]가 같은 식을 쓴다 —
+ * 둘이 따로 적히면 「버튼은 있는데 저장은 404」가 생긴다 (TACP-9·12).
+ */
+export function canReviseSubmission(
+  scope: Pick<Scope, 'isManager' | 'user' | 'division'>,
+  sub: { userId: string; divisionId: string },
+): boolean {
+  // TACP-6 — 쓰기는 신원의 부서에만. readAll은 읽기만이다 (TACP-8)
+  return canReviseSubmissions(scope) && sub.divisionId === scope.division.id && sub.userId !== scope.user.id;
 }
 
 export async function requireRevisableSubmission(scope: Scope, submissionId: string) {
@@ -255,8 +274,7 @@ export async function requireRevisableSubmission(scope: Scope, submissionId: str
     include: { user: true, weekSlot: true, division: true },
   });
   if (!sub) throw notFound();
-  // TACP-6 — 쓰기는 신원의 부서에만. readAll은 읽기만이다 (TACP-8)
-  if (!canReviseSubmissions(scope) || sub.divisionId !== scope.division.id) throw notFound();
+  if (!canReviseSubmission(scope, sub)) throw notFound();
   if (!sub.isLatest) {
     throw new HttpError(409, 'not_latest', '가장 최근 판만 고칠 수 있습니다. 최신 판을 열어 고쳐 주세요.');
   }

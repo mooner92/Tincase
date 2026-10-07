@@ -22,6 +22,9 @@ export interface MergeGroupView {
 }
 
 export interface MergeStateView {
+  /** HM-47 — 이 화면이 보여 주는 판 (실행 id + 파일 sha256). [승인]이 그대로 돌려보낸다 */
+  runId: string | null;
+  sha256: string | null;
   status: 'none' | 'succeeded' | 'failed' | 'running';
   finishedAtKst: string | null;
   trigger: 'auto' | 'manual' | null;
@@ -79,17 +82,32 @@ export function MergePanel({
   const router = useRouter();
 
   const [openReview, setOpenReview] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
   const approve = () => {
     setBusy(true);
     setErr(null);
+    setNote(null);
     fetch('/api/division/merged/approve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ isoKey }),
+      // HM-47 — 이 화면이 보여 준 판에만 승인한다. 그 사이 바뀌었으면 서버가 409로 다시 열라고 한다
+      body: JSON.stringify({ isoKey, runId: state.runId, sha256: state.sha256 }),
     })
       .then(async (r) => {
-        if (!r.ok) setErr(((await r.json()) as { message?: string }).message ?? '승인하지 못했습니다.');
-        else router.refresh();
+        const b = (await r.json().catch(() => ({}))) as { message?: string; notified?: number; unchanged?: boolean };
+        if (!r.ok) {
+          setErr(b.message ?? '승인하지 못했습니다.');
+          return;
+        }
+        // 알림이 실제로 나갔을 때만 「알렸습니다」라고 말한다
+        setNote(
+          b.unchanged
+            ? '이미 승인한 판입니다'
+            : (b.notified ?? 0) > 0
+              ? '승인 완료 — 담당자에게 알렸습니다'
+              : '승인 기록됨 — 알림은 보내지 않았어요',
+        );
+        router.refresh();
       })
       .catch(() => setErr('네트워크 오류로 승인하지 못했습니다.'))
       .finally(() => setBusy(false));
@@ -214,6 +232,7 @@ export function MergePanel({
       )}
 
       {err && <p className="mt-3 text-sm text-error">{err}</p>}
+      {note && !err && <p className="mt-3 text-sm text-success">{note}</p>}
 
       <MergedDrawer
         open={openContent}

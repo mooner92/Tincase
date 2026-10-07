@@ -61,7 +61,10 @@ export interface OrgLayout {
   parents: LaidOutParent[];
   divisions: LaidOutDivision[];
   people: LaidOutPerson[];
-  /** 집계 대상 부서만 센다 */
+  /**
+   * 집계 대상(`counted`)이면서 **Tincase를 쓰는(`isActive`)** 부서만 센다 — 본판(OrgProgress·`groupByHq`)과 같은 식.
+   * 미사용 부서는 취합게시판으로 내므로 여기서는 언제나 「0명 제출」이다. 분모에 넣으면 두 화면의 숫자가 갈라진다
+   */
   totals: { submitted: number; roster: number; divisions: number; activeDivisions: number };
   /** 집계에서 빠진 부서 — 숨기지 않고 "왜 빠졌는지"를 말할 수 있게 남긴다 */
   excluded: { divisions: number; people: number };
@@ -116,7 +119,8 @@ export function layoutOrg(divisions: DivisionNode[], gapRatio = 0.35): OrgLayout
         ...d,
         angle,
         ...polar(angle, RADII.division),
-        submitted: people.filter((p) => p.submitted).length,
+        // 명단 안에서 낸 사람 — 본판(teamOf)과 같은 식. 명단 밖 제출이 「다 냈다」로 보이게 하지 않는다 (DM-17)
+        submitted: people.filter((p) => p.onRoster && p.submitted).length,
         roster: people.filter((p) => p.onRoster).length,
         laidOut: people,
       };
@@ -138,7 +142,8 @@ export function layoutOrg(divisions: DivisionNode[], gapRatio = 0.35): OrgLayout
   }
 
   const counted = laidDivisions.filter((d) => d.counted);
-  const countedPeople = counted.flatMap((d) => d.laidOut);
+  // 미사용 부서는 그리되(회색) 세지 않는다
+  const countedPeople = counted.filter((d) => d.isActive).flatMap((d) => d.laidOut);
   const skipped = laidDivisions.filter((d) => !d.counted);
 
   return {
@@ -146,7 +151,7 @@ export function layoutOrg(divisions: DivisionNode[], gapRatio = 0.35): OrgLayout
     divisions: laidDivisions,
     people: laidPeople,
     totals: {
-      submitted: countedPeople.filter((p) => p.submitted).length,
+      submitted: countedPeople.filter((p) => p.onRoster && p.submitted).length,
       roster: countedPeople.filter((p) => p.onRoster).length,
       divisions: counted.length,
       activeDivisions: counted.filter((d) => d.isActive).length,

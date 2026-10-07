@@ -26,13 +26,18 @@ export function resolveInRoot(rel: string): string {
   return abs;
 }
 
-/** ST-02 — 제출 파일 상대경로 */
+/**
+ * ST-02 — 제출 파일 상대경로.
+ * `tag`는 **DB보다 먼저 쓰는** 경로(담당자 첨삭)에 붙는 고유 꼬리다 — 같은 v+1 자리를 다른 요청이
+ * 동시에 노려도 서로의 파일을 덮거나 지우지 않게 한다 (`reviseSubmission`)
+ */
 export function submissionRelPath(
   divisionSlug: string,
   year: number,
   weekLabel: string,
   userName: string,
   version: number,
+  tag?: string,
 ): string {
   return path.join(
     'divisions',
@@ -40,7 +45,7 @@ export function submissionRelPath(
     'submissions',
     String(year),
     sanitizeSegment(weekLabel.replace(/ /g, '_')),
-    `${sanitizeSegment(userName)}_v${version}.hwp`,
+    `${sanitizeSegment(userName)}_v${version}${tag ? `_${sanitizeSegment(tag)}` : ''}.hwp`,
   );
 }
 

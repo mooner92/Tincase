@@ -11,7 +11,16 @@ export interface DrawerMember {
 }
 
 interface PreviewData {
-  submission: { id: string; version: number; uploadedAt: string; userName: string; userId: string; editedBy?: string | null };
+  submission: {
+    id: string;
+    version: number;
+    uploadedAt: string;
+    userName: string;
+    userId: string;
+    editedBy?: string | null;
+    /** TACP-22 — 고친 시각 (KST ISO). `uploadedAt`은 부서원이 낸 시각 그대로다 */
+    editedAt?: string | null;
+  };
   tables: { title: string; columns: string[]; rows: string[][] }[];
   warnings: string[];
   /** WA-20 — 이 사람이 이 판을 고칠 수 있나 (내 부서 lead·head, 최신 판) */
@@ -26,7 +35,11 @@ interface VersionRow {
   byteSize: number;
   /** TACP-22 — 담당자가 고친 판이면 고친 사람 */
   editedBy?: string | null;
+  editedAt?: string | null;
 }
+
+/** TACP-22 — 「○○ 고침 · 14:30」. 제출 시각과 고친 시각을 섞지 않는다 */
+const editedLabel = (by: string, at?: string | null) => `${by} 고침${at ? ` · ${at.slice(11, 16)}` : ''}`;
 
 export function FileDrawer({
   openId,
@@ -45,7 +58,14 @@ export function FileDrawer({
   // WA-20 — 고치는 중인 판의 id. 다른 판·다른 사람으로 옮기면 저절로 풀린다
   const [editingId, setEditingId] = useState<string | null>(null);
   const editing = !!openId && editingId === openId;
-  const [savedNote, setSavedNote] = useState<string | null>(null);
+  // 저장하지 않은 수정이 있나 — 고치는 중일 때만 뜻이 있다
+  const [dirty, setDirty] = useState(false);
+  const unsaved = editing && dirty;
+  /*
+   * 저장 안내는 **저장한 판에 붙인다.** 문자열만 두면 드로어를 닫고 다른 사람을 열어도
+   * 「v3로 저장했습니다」가 그 사람 위에 남는다 (2026-10-07 리뷰)
+   */
+  const [savedNote, setSavedNote] = useState<{ id: string; text: string } | null>(null);
   const router = useRouter();
   const panelRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
@@ -81,6 +101,17 @@ export function FileDrawer({
     };
   }, [openId]);
 
+  /**
+   * 닫기 — 배경·×·Esc가 모두 여기로. 고치던 내용이 있으면 먼저 묻는다(MergedDrawer와 같은 방식).
+   * 닫으면 고치기 상태도 푼다 — 같은 판을 다시 열었을 때 편집기가 빈손으로 뜨지 않게.
+   */
+  const requestClose = useCallback(() => {
+    if (unsaved && !confirm('저장하지 않은 수정이 있습니다. 닫을까요?')) return;
+    setEditingId(null);
+    setDirty(false);
+    onClose();
+  }, [unsaved, onClose]);
+
   // ←→ 제출자 이동 (CP-74) — 미제출자 건너뜀
   const navigate = useCallback(
     (dir: 1 | -1) => {
@@ -101,14 +132,10 @@ export function FileDrawer({
   useEffect(() => {
     if (!openId) return;
     const onKey = (e: KeyboardEvent) => {
-      // 고치는 중에는 화살표가 글자 사이를 오가야 한다 — 사람 이동·닫기로 쓰지 않는다
-      if (editing) return;
-      if (e.key === 'Escape') onClose();
-      else if (e.key === 'ArrowRight') navigate(1);
-      else if (e.key === 'ArrowLeft') navigate(-1);
-      else if (e.key === 'Tab' && panelRef.current) {
+      if (e.key === 'Tab' && panelRef.current) {
+        // 포커스 트랩은 고치는 중에도 건다 — 편집 칸을 Tab으로 돌다 드로어 밖(뒤 화면)으로 새면 안 된다
         const focusables = panelRef.current.querySelectorAll<HTMLElement>(
-          'button, a[href], select, [tabindex]:not([tabindex="-1"])',
+          'button:not([disabled]), a[href], select, input, textarea, [tabindex]:not([tabindex="-1"])',
         );
         if (focusables.length === 0) return;
         const first = focusables[0];
@@ -120,18 +147,24 @@ export function FileDrawer({
           e.preventDefault();
           first.focus();
         }
+        return;
       }
+      // 고치는 중에는 화살표가 글자 사이를 오가야 한다 — 사람 이동·닫기로 쓰지 않는다
+      if (editing) return;
+      if (e.key === 'Escape') requestClose();
+      else if (e.key === 'ArrowRight') navigate(1);
+      else if (e.key === 'ArrowLeft') navigate(-1);
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [openId, onClose, navigate, editing]);
+  }, [openId, requestClose, navigate, editing]);
 
   if (!openId) return null;
 
   return (
     <div className="fixed inset-0 z-40 h-screen">
       {/* 배경 클릭 → 닫기 */}
-      <div className="absolute inset-0 bg-ink/30" onClick={onClose} aria-hidden />
+      <div className="absolute inset-0 bg-ink/30" onClick={requestClose} aria-hidden />
       <div
         ref={panelRef}
         role="dialog"
@@ -148,14 +181,15 @@ export function FileDrawer({
                   {data.submission.userName}{' '}
                   <span className="font-normal text-muted">
                     · v{data.submission.version} · {data.submission.uploadedAt.slice(5, 16).replace('T', ' ')}
-                    {data.submission.editedBy && ` · ${data.submission.editedBy} 고침`}
+                    {data.submission.editedBy && ` · ${editedLabel(data.submission.editedBy, data.submission.editedAt)}`}
                   </span>
                 </>
               ) : (
                 '불러오는 중…'
               )}
             </h2>
-            {versions.length > 1 && data && (
+            {/* 고치는 중에는 판을 바꾸지 않는다 — 바꾸는 순간 고치던 내용이 사라진다 */}
+            {versions.length > 1 && data && !editing && (
               <select
                 aria-label="버전 선택"
                 value={data.submission.id}
@@ -166,7 +200,7 @@ export function FileDrawer({
                   <option key={v.id} value={v.id}>
                     v{v.version}
                     {v.isLatest ? ' (현재본)' : ''} · {v.uploadedAt.slice(5, 16).replace('T', ' ')}
-                    {v.editedBy ? ` · ${v.editedBy} 고침` : ''}
+                    {v.editedBy ? ` · ${editedLabel(v.editedBy, v.editedAt)}` : ''}
                   </option>
                 ))}
               </select>
@@ -175,7 +209,7 @@ export function FileDrawer({
           <div className="flex items-center gap-2">
             {/* ←→ 는 **제출자 사이** 이동이다. 혼자 볼 때는 갈 곳이 없으므로 숨긴다 —
                 눌러도 아무 일이 없는 버튼은 고장으로 읽힌다 */}
-            {members.length > 1 && (
+            {members.length > 1 && !editing && (
               <>
                 <button
                   onClick={() => navigate(-1)}
@@ -197,6 +231,7 @@ export function FileDrawer({
               <button
                 onClick={() => {
                   setSavedNote(null);
+                  setDirty(false);
                   setEditingId(data.submission.id);
                 }}
                 className="rounded border border-ink px-2.5 py-1 text-xs font-semibold text-ink hover:bg-surface-soft"
@@ -213,7 +248,7 @@ export function FileDrawer({
               </a>
             )}
             <button
-              onClick={onClose}
+              onClick={requestClose}
               className="rounded px-2 py-1 text-lg leading-none text-muted-soft hover:text-body"
               aria-label="닫기"
             >
@@ -238,8 +273,8 @@ export function FileDrawer({
               <p className="mt-1 text-xs text-error">원본 다운로드로 내용을 확인해 주세요.</p>
             </div>
           )}
-          {savedNote && !editing && (
-            <p className="mb-4 rounded-lg bg-brand-soft px-3 py-2 text-sm text-ink">{savedNote}</p>
+          {savedNote && savedNote.id === openId && !editing && (
+            <p className="mb-4 rounded-lg bg-brand-soft px-3 py-2 text-sm text-ink">{savedNote.text}</p>
           )}
           {data && !loading && editing && data.rowsByTable && (
             <SubmissionEditor
@@ -247,10 +282,18 @@ export function FileDrawer({
               ownerName={data.submission.userName}
               version={data.submission.version}
               initial={data.rowsByTable}
-              onCancel={() => setEditingId(null)}
+              onCancel={() => {
+                setEditingId(null);
+                setDirty(false);
+              }}
+              onDirtyChange={setDirty}
               onSaved={(newId, v) => {
                 setEditingId(null);
-                setSavedNote(`v${v}로 저장했습니다 — 원래 판은 그대로 있습니다. 병합본에 넣으려면 [다시 병합]을 누르세요.`);
+                setDirty(false);
+                setSavedNote({
+                  id: newId,
+                  text: `v${v}로 저장했습니다 — 원래 판은 그대로 있습니다. 병합본에 넣으려면 [다시 병합]을 누르세요.`,
+                });
                 onNavigate(newId);
                 router.refresh();
               }}

@@ -157,4 +157,119 @@ d('TACP-22 담당자 첨삭', () => {
       [1, null],
     ]);
   });
+
+  it('[WA-T43] ★ lead·head가 **자기** 제출물을 첨삭하면 404 — 마감을 비켜 가는 길이 된다 · [고치기]도 없다', async () => {
+    const { prisma } = await import('@/server/db');
+    const { readStoredFile } = await import('@/server/storage');
+    const lead = await prisma.user.findFirstOrThrow({ where: { email: ID.lead } });
+    const v1 = await prisma.submission.findUniqueOrThrow({ where: { id: firstId } });
+    const own = await prisma.submission.create({
+      data: { ...v1, id: undefined, userId: lead.id, version: 1, isLatest: true, sha256: 'own', editedById: null, editedAt: null },
+    });
+    expect((await readStoredFile(own.filePath)).length).toBeGreaterThan(0);
+    expect((await revise(ID.lead, own.id)).status).toBe(404);
+    expect(await prisma.submission.count({ where: { userId: lead.id } })).toBe(1);
+
+    const { GET } = await import('@/app/api/submissions/[id]/preview/route');
+    const asSelf = await (await GET(nx(`/api/submissions/${own.id}/preview`, ID.lead), { params: Promise.resolve({ id: own.id }) })).json();
+    expect(asSelf.canRevise).toBe(false);
+    // 부서장에게는 남의 것이다 — 고칠 수 있다
+    expect((await revise(ID.head, own.id, '실장이 담당자 것을 다듬음')).status).toBe(200);
+  });
+
+  it('[WA-T44] ★ head는 부서원 제출물을 **연다** (§3.1 남의 제출물 내용 head=read) — [고치기]도 있다', async () => {
+    const { prisma } = await import('@/server/db');
+    const owner = await prisma.user.findFirstOrThrow({ where: { email: ID.owner } });
+    const latest = await prisma.submission.findFirstOrThrow({ where: { userId: owner.id, isLatest: true } });
+    const { GET } = await import('@/app/api/submissions/[id]/preview/route');
+    const res = await GET(nx(`/api/submissions/${latest.id}/preview`, ID.head), { params: Promise.resolve({ id: latest.id }) });
+    expect(res.status).toBe(200);
+    expect((await res.json()).canRevise).toBe(true);
+    const versions = await import('@/app/api/submissions/[id]/versions/route');
+    expect((await versions.GET(nx(`/api/submissions/${latest.id}/versions`, ID.head), { params: Promise.resolve({ id: latest.id }) })).status).toBe(200);
+    // 같은 부서 member는 여전히 404 (ST-15)
+    expect((await GET(nx(`/api/submissions/${latest.id}/preview`, ID.member), { params: Promise.resolve({ id: latest.id }) })).status).toBe(404);
+  });
+
+  it('[WA-T45] 고친 판의 제출 시각은 **그 사람이 낸 시각** 그대로 — 고친 시각은 editedAt으로 따로', async () => {
+    const { prisma } = await import('@/server/db');
+    const owner = await prisma.user.findFirstOrThrow({ where: { email: ID.owner } });
+    const all = await prisma.submission.findMany({ where: { userId: owner.id }, orderBy: { version: 'asc' } });
+    expect(all.length).toBeGreaterThanOrEqual(3);
+    for (const v of all.slice(1)) {
+      expect(v.uploadedAt.getTime()).toBe(all[0].uploadedAt.getTime());
+      expect(v.editedAt).not.toBeNull();
+    }
+    expect(all[0].editedAt).toBeNull();
+
+    const latest = all[all.length - 1];
+    const versions = await import('@/app/api/submissions/[id]/versions/route');
+    const v = await (await versions.GET(nx(`/api/submissions/${latest.id}/versions`, ID.owner), { params: Promise.resolve({ id: latest.id }) })).json();
+    expect(v.versions[0].editedAt).toMatch(/T\d{2}:\d{2}/);
+    expect(v.versions.at(-1).editedAt).toBeNull();
+    const { GET } = await import('@/app/api/submissions/[id]/preview/route');
+    const p = await (await GET(nx(`/api/submissions/${latest.id}/preview`, ID.owner), { params: Promise.resolve({ id: latest.id }) })).json();
+    expect(p.submission.editedAt).toBe(v.versions[0].editedAt);
+  });
+
+  it('[WA-T46] 한 칸의 줄바꿈은 고쳐 저장해도 남는다 · 500자를 넘으면 자르지 않고 422', async () => {
+    const { prisma } = await import('@/server/db');
+    const owner = await prisma.user.findFirstOrThrow({ where: { email: ID.owner } });
+    const latest = await prisma.submission.findFirstOrThrow({ where: { userId: owner.id, isLatest: true } });
+    const res = await revise(ID.lead, latest.id, '첫 줄\n둘째 줄');
+    expect(res.status).toBe(200);
+    const { id } = await res.json();
+    const saved = await prisma.submission.findUniqueOrThrow({ where: { id } });
+    const { readStoredFile } = await import('@/server/storage');
+    const { readWorklog } = await import('@/lib/hwp/reader');
+    expect(readWorklog(await readStoredFile(saved.filePath)).worklog.achievements[0].content).toBe('첫 줄\n둘째 줄');
+
+    const long = await revise(ID.lead, id, '가'.repeat(501));
+    expect(long.status).toBe(422);
+    expect((await long.json()).message).toContain('501자');
+    expect(await prisma.submission.count({ where: { userId: owner.id } })).toBe(saved.version);
+  });
+
+  it('[WA-T47] ★ 파일을 못 쓰면 새 판도 없다 — 그 사람의 최신 판이 「파일 없는 판」이 되지 않는다', async () => {
+    const { prisma } = await import('@/server/db');
+    const { writeFileAtomic, resolveInRoot } = await import('@/server/storage');
+    const { composeMergedHwp } = await import('@/server/merge');
+    const { ensureCurrentSlot, reviseSubmission } = await import('@/server/worklog');
+    const { writeFileSync, rmSync: rm, readdirSync } = await import('node:fs');
+    const slot = await ensureCurrentSlot();
+    const tpl = readFileSync(path.join(FIX, 'master-template.hwp'));
+    const div = await prisma.division.create({ data: { slug: 'Rv_C', nameKo: '막힌실', nameEn: 'Rv_C', isActive: true } });
+    await writeFileAtomic('divisions/Rv_C/template/active.hwp', tpl);
+    await prisma.template.create({ data: { divisionId: div.id, filePath: 'divisions/Rv_C/template/active.hwp', sha256: 'x', version: 1, uploadedBy: 'seed' } });
+    const leadC = await prisma.user.create({ data: { email: 'v-lead-c@test.kei.re.kr', name: 'v-lead-c', divisionId: div.id, divisionRole: 'lead' } });
+    const memberC = await prisma.user.create({ data: { email: 'v-member-c@test.kei.re.kr', name: 'v-member-c', divisionId: div.id } });
+    const bytes = composeMergedHwp(tpl, { achievements: [['1-1', '원래', '', '', '']], plans: [], notes: [] }).bytes;
+    await writeFileAtomic('divisions/Rv_C/orig/member_v1.hwp', bytes);
+    const v1 = await prisma.submission.create({
+      data: { divisionId: div.id, userId: memberC.id, weekSlotId: slot.id, version: 1, isLatest: true, filePath: 'divisions/Rv_C/orig/member_v1.hwp', originalName: 'm.hwp', byteSize: bytes.length, sha256: 'c1' },
+    });
+
+    // 제출물 폴더 자리에 파일을 둬서 쓰기를 막는다
+    writeFileSync(resolveInRoot('divisions/Rv_C/submissions'), 'block');
+    const blocked = await revise('v-lead-c@test.kei.re.kr', v1.id);
+    expect(blocked.status).toBe(500);
+    expect(await prisma.submission.count({ where: { userId: memberC.id } })).toBe(1);
+    expect((await prisma.submission.findUniqueOrThrow({ where: { id: v1.id } })).isLatest).toBe(true);
+
+    rm(resolveInRoot('divisions/Rv_C/submissions'));
+    const ok = await revise('v-lead-c@test.kei.re.kr', v1.id);
+    expect(ok.status).toBe(200);
+
+    // 게이트 뒤에 그 사이 새 판이 생겼다(옛 판 객체로 부름) → 409, 먼저 쓴 파일도 남기지 않는다
+    const dir = path.dirname(resolveInRoot((await prisma.submission.findFirstOrThrow({ where: { userId: memberC.id, isLatest: true } })).filePath));
+    const files = readdirSync(dir).length;
+    const stale = await prisma.submission.findUniqueOrThrow({ where: { id: v1.id }, include: { user: true, weekSlot: true, division: true } });
+    const editor = { id: leadC.id, email: leadC.email, name: leadC.name };
+    await expect(reviseSubmission({ editor, target: stale, bytes, fileName: 'x.hwp' })).rejects.toMatchObject({ status: 409 });
+    expect(readdirSync(dir).length).toBe(files);
+    // 그 사람의 판이 하나도 없으면(지워졌으면) 새로 만들지 않는다 — 고칠 「낸 것」이 없다 (TACP-18)
+    const ghost = { ...stale, userId: leadC.id, user: leadC };
+    await expect(reviseSubmission({ editor, target: ghost, bytes, fileName: 'x.hwp' })).rejects.toMatchObject({ status: 409 });
+    expect(await prisma.submission.count({ where: { userId: leadC.id } })).toBe(0);
+  });
 });

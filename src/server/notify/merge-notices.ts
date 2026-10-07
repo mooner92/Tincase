@@ -47,7 +47,7 @@ interface Person {
   name: string;
   employeeNo: string;
 }
-interface MergeFacts {
+export interface MergeFacts {
   ok: boolean;
   sources: number;
   counts: { achievements: number; plans: number; notes: number } | null;
@@ -66,12 +66,16 @@ interface MergeFacts {
    * NT-47 · HM-47 — 이 최종본을 부서장이 승인했나. 담당자의 마지막 알림이 이것을 한 줄로 말한다.
    * `hasHead`가 거짓이면(부서장 계정이 없는 부서) 아무 줄도 넣지 않는다 — 올 수 없는 승인을 기다리게 하지 않는다
    */
-  approval: { by: string; at: Date; summary: string } | null;
+  approval: { by: string; at: Date; summary: string; changedAfter: boolean } | null;
   hasHead: boolean;
 }
 
 /** NT-47 — 승인 한 줄 */
 function approvalBlock(f: MergeFacts): string[] {
+  // 승인한 뒤 병합본이 바뀌었으면 「승인 완료」라고 말하지 않는다 — 화면의 「승인 뒤 바뀜」과 같은 말을 한다
+  if (f.approval?.changedAfter) {
+    return ['', `${f.approval.by}님이 승인한 뒤 병합본이 바뀌었어요 — 다시 확인을 받아주세요.`];
+  }
   if (f.approval) return ['', `${f.approval.by}님 승인 완료 (${toKstIso(f.approval.at).slice(11, 16)} · ${f.approval.summary})`];
   if (f.hasHead) return ['', '아직 부서장 승인 전이에요 — 확인한 뒤 제출해주세요.'];
   return [];
@@ -100,6 +104,31 @@ function flagBlock(flagged: FlaggedRow[]): string[] {
 function staleBlock(stale: number, action: string): string[] {
   if (stale === 0) return [];
   return ['', `병합한 뒤에 ${stale}명이 더 냈어요 — 이 병합본에는 빠져 있어요.`, action];
+}
+
+/**
+ * NT-40·47 — 이 창에서 무엇을 누구에게 보내나. 순수 함수다 (시험할 수 있게).
+ *
+ *   +10  성공 → 부서장에게 검토 요청 (이미 승인했고 그 뒤 안 바뀌었으면 생략)
+ *        실패 → 담당자에게 경보
+ *   +30  담당자에게 최종 안내 (성공·실패 모두)
+ *
+ * ★ 성공·실패를 한 조건으로 묶지 않는다 — 「성공 + 이미 승인」이 실패 쪽으로 떨어져
+ * 담당자에게 「병합본이 없어요」가 갔던 결함이 그것이었다 (2026-10-07 리뷰).
+ */
+export function pickJobs(
+  atReview: boolean,
+  atSubmit: boolean,
+  facts: Pick<MergeFacts, 'ok' | 'approval'>,
+): { kind: NoticeKind; role: 'lead' | 'head' }[] {
+  const jobs: { kind: NoticeKind; role: 'lead' | 'head' }[] = [];
+  if (atReview) {
+    if (facts.ok) {
+      if (!facts.approval || facts.approval.changedAfter) jobs.push({ kind: 'merge_review', role: 'head' });
+    } else jobs.push({ kind: 'merge_missing', role: 'lead' });
+  }
+  if (atSubmit) jobs.push({ kind: 'merge_done', role: 'lead' });
+  return jobs;
 }
 
 /** 창 안에 들어왔는가. `[+n, +n+12분]`을 한 번 지나면 참 */
@@ -336,14 +365,10 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
       };
       const base = env.MESSENGER_LINK_BASE ? `${env.MESSENGER_LINK_BASE}/${division.slug}` : undefined;
 
-      const jobs: { kind: NoticeKind; role: 'lead' | 'head'; url?: string }[] = [];
-      if (atReview) {
-        // 성공 → 부서장에게 검토 / 실패 → 담당자에게 경보. 둘은 배타적이다
-        // NT-47 — 벌써 승인했으면 「검토 부탁드려요」는 보내지 않는다. 끝낸 일을 다시 시키는 알림은 소음이다
-        if (facts.ok && !facts.approval) jobs.push({ kind: 'merge_review', role: 'head', url: base ? `${base}/archive` : undefined });
-        else jobs.push({ kind: 'merge_missing', role: 'lead', url: base ? `${base}/manage` : undefined });
-      }
-      if (atSubmit) jobs.push({ kind: 'merge_done', role: 'lead', url: base ? `${base}/manage` : undefined });
+      const jobs = pickJobs(atReview, atSubmit, facts).map((j) => ({
+        ...j,
+        url: base ? `${base}/${j.kind === 'merge_review' ? 'archive' : 'manage'}` : undefined,
+      }));
 
       for (const j of jobs) {
         if (await alreadySent(division.id, slot.id, j.kind)) continue;

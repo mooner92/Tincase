@@ -112,3 +112,16 @@ describe('WS-18 예외 주간의 전체 일정', () => {
     expect(kst(new Date(마감.getTime() + MERGE_DELAY_MINUTES * 60_000))).toBe('9/23(수) 14:01');
   });
 });
+
+describe('WS-19 전사 현황의 마감 — 가장 이른 부서 마감', () => {
+  it('[WS-T73] 첫 부서가 아니라 **가장 이른** 마감을 쓴다 · 켜진 부서가 없으면 평소 마감(목 14:00)', async () => {
+    const { earliestDeadline } = await import('@/server/slot-deadline');
+    const 늦은부서 = { deadlineDow: 4, deadlineTime: '16:00' };
+    const 이른부서 = { deadlineDow: 3, deadlineTime: '17:00' };
+    // 조직도 순서상 늦은 부서가 먼저 와도 수요일이 마감이다 — 첫 부서를 대표로 쓰면 목요일로 보였다
+    expect(kst(earliestDeadline(이번주 as never, [늦은부서, 이른부서]))).toBe('9/23(수) 17:00');
+    expect(kst(earliestDeadline(이번주 as never, []))).toBe('9/24(목) 14:00');
+    // 주차 예외가 있으면 그것이 모든 부서에 걸린다
+    expect(kst(earliestDeadline({ ...이번주, ...추석예외 } as never, [늦은부서]))).toBe('9/23(수) 14:00');
+  });
+});

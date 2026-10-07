@@ -540,12 +540,14 @@ d('head Principal (TACP-16·17)', () => {
   it('[AU-T30] head가 자기 부서 병합본을 수정한다 — 새로 허용된 것', async () => {
     const { POST } = await import('@/app/api/division/merge/route');
     await POST(nx('/api/division/merge', ID.lead, { method: 'POST' }));
-    const { PUT } = await import('@/app/api/division/merged/content/route');
+    const { PUT, GET } = await import('@/app/api/division/merged/content/route');
+    // HM-47 — 저장은 **본 판**에만. 화면이 GET으로 받은 판을 그대로 돌려보낸다
+    const { runId, sha256 } = await (await GET(nx('/api/division/merged/content', ID.head))).json();
     const res = await PUT(
       nx('/api/division/merged/content', ID.head, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tables: [{ key: 'achievements', rows: [['1-1', 'head가 고침', '', '', '']] }] }),
+        body: JSON.stringify({ runId, sha256, tables: [{ key: 'achievements', rows: [['1-1', 'head가 고침', '', '', '']] }] }),
       }),
     );
     expect(res.status).toBe(200);

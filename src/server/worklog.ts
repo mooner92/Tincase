@@ -11,6 +11,7 @@ import { openingOf } from './deadline';
 import { isSubmissionLocked } from '@/lib/deadline';
 import { resolveInRoot, sha256, submissionRelPath, writeFileAtomic } from './storage';
 import { unlink } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 
 /** WS-11 — 크론 없이 지연 생성. upsert라 동시 요청 안전 */
 export async function ensureCurrentSlot(now = new Date()): Promise<WeekSlot> {
@@ -155,13 +156,19 @@ export async function uploadSubmission(input: UploadInput, now = new Date()): Pr
  * 업로드와 같은 트랜잭션 규칙(DM-05: 버전 부여·isLatest 전환을 한 번에)을 쓰되,
  * 주인은 **그 부서원**, 주차는 **고친 제출물의 주차**다(지난 주차를 고칠 수도 있다).
  * 마감은 보지 않는다 — 게이트(`requireRevisableSubmission`)가 이미 판정했다.
+ *
+ * **파일을 먼저 쓰고 DB를 커밋한다** (업로드 ST-10과 반대 순서). 커밋 뒤에 쓰기가 실패하면
+ * 그 사람의 **최신 판이 파일 없는 판**이 된다 — 원래 판은 isLatest를 잃었고, 받기·병합이 500으로 터진다.
+ * 업로드는 본인이 곧 다시 올리지만, 첨삭은 남의 판을 내려 버린다. 남아도 되는 쪽은
+ * 「참조 없는 파일」이지 「파일 없는 레코드」가 아니다 (`deleteSubmission`과 같은 원칙).
+ * 경로에 고유 꼬리를 붙여 동시 요청이 서로의 파일을 덮거나 지우지 않게 한다.
  */
 export async function reviseSubmission(input: {
   editor: Pick<User, 'id' | 'email' | 'name'>;
   target: Submission & { user: User; weekSlot: WeekSlot; division: Division };
   bytes: Buffer;
   fileName: string;
-}): Promise<Submission> {
+}, now = new Date()): Promise<Submission> {
   const { editor, target, bytes } = input;
   try {
     validateHwpUpload(bytes);
@@ -170,43 +177,61 @@ export async function reviseSubmission(input: {
     throw e;
   }
   const hash = sha256(bytes);
-  const { created, rel } = await prisma.$transaction(async (tx) => {
-    const last = await tx.submission.findFirst({
-      where: { userId: target.userId, weekSlotId: target.weekSlotId },
-      orderBy: { version: 'desc' },
-    });
-    // 게이트를 지난 뒤 그 사람이 새로 냈다면 — 우리가 고친 것이 그 사람의 새 판을 덮으면 안 된다
-    if (last && last.id !== target.id) {
-      throw new HttpError(409, 'not_latest', '그 사이 새 판이 올라왔습니다. 다시 열어 최신 판을 고쳐 주세요.');
-    }
-    await tx.submission.updateMany({
-      where: { userId: target.userId, weekSlotId: target.weekSlotId, isLatest: true },
-      data: { isLatest: false },
-    });
-    const version = (last?.version ?? 0) + 1;
-    const path = submissionRelPath(target.division.slug, target.weekSlot.year, target.weekSlot.label, target.user.name, version);
-    const sub = await tx.submission.create({
-      data: {
-        divisionId: target.divisionId, // DM-12 — 그 제출물의 부서 그대로
-        userId: target.userId, // 주인은 그 부서원이다
-        weekSlotId: target.weekSlotId,
-        version,
-        isLatest: true,
-        filePath: path,
-        originalName: input.fileName,
-        byteSize: bytes.length,
-        sha256: hash,
-        origin: 'lead_edit',
-        editedById: editor.id, // 누가 손댔나
-      },
-    });
-    return { created: sub, rel: path };
-  });
+  // 게이트가 최신 판임을 확인했다 → 새 판은 target.version + 1. 트랜잭션 안에서 다시 확인한다
+  const version = target.version + 1;
+  const rel = submissionRelPath(
+    target.division.slug,
+    target.weekSlot.year,
+    target.weekSlot.label,
+    target.user.name,
+    version,
+    `e${randomUUID().slice(0, 8)}`,
+  );
   try {
     await writeFileAtomic(rel, bytes);
   } catch (e) {
-    logger.error({ err: String(e), submissionId: created.id, relPath: rel }, 'CRITICAL: file write failed after DB commit');
+    logger.error({ err: String(e), target: target.id, relPath: rel }, 'revise: file write failed before DB commit');
     throw new HttpError(500, 'internal', '파일 저장에 실패했습니다. 다시 시도해 주세요.');
+  }
+
+  let created: Submission;
+  try {
+    created = await prisma.$transaction(async (tx) => {
+      const last = await tx.submission.findFirst({
+        where: { userId: target.userId, weekSlotId: target.weekSlotId },
+        orderBy: { version: 'desc' },
+      });
+      // 게이트를 지난 뒤 그 사람이 새로 냈거나(다른 판) 지웠다면(없음) — 우리가 고친 것이 그 사이의 일을 덮으면 안 된다
+      if (!last || last.id !== target.id) {
+        throw new HttpError(409, 'not_latest', '그 사이 새 판이 올라왔습니다. 다시 열어 최신 판을 고쳐 주세요.');
+      }
+      await tx.submission.updateMany({
+        where: { userId: target.userId, weekSlotId: target.weekSlotId, isLatest: true },
+        data: { isLatest: false },
+      });
+      return tx.submission.create({
+        data: {
+          divisionId: target.divisionId, // DM-12 — 그 제출물의 부서 그대로
+          userId: target.userId, // 주인은 그 부서원이다
+          weekSlotId: target.weekSlotId,
+          version,
+          isLatest: true,
+          filePath: rel,
+          originalName: input.fileName,
+          byteSize: bytes.length,
+          sha256: hash,
+          origin: 'lead_edit',
+          // 「언제 냈나」는 그 사람이 낸 시각 그대로 — 고친 시각이 제출 시각으로 보이면 늦게 낸 사람이 된다
+          uploadedAt: target.uploadedAt,
+          editedById: editor.id, // 누가 손댔나
+          editedAt: now, // 언제 손댔나
+        },
+      });
+    });
+  } catch (e) {
+    // 커밋되지 않았다 — 먼저 쓴 파일은 아무도 가리키지 않는다. 지운다 (실패해도 고아 파일일 뿐이다)
+    await unlink(resolveInRoot(rel)).catch(() => undefined);
+    throw e;
   }
   await audit(editor.email, 'submission_revise', target.divisionId, `submission:${created.id}`, {
     owner: target.user.name,
@@ -255,7 +280,11 @@ export async function divisionStatus(divisionId: string, slotId: string): Promis
    * 사번 → 사용자로 되짚는다.
    */
   const notified = new Map<string, string>();
-  const logs = await prisma.notifyLog.findMany({ where: { divisionId, weekSlotId: slotId } });
+  // NT-31 — 「알림 받음」은 **마감 재촉 알림**만 센다. 승인 알림(NT-46)·병합 안내·3단계 알림까지 세면
+  // 그것을 받은 담당자가 「재촉받은 사람」으로 보인다 (2026-10-07 리뷰)
+  const logs = await prisma.notifyLog.findMany({
+    where: { divisionId, weekSlotId: slotId, kind: { in: ['deadline_1d', 'deadline_day', 'deadline_1h', 'deadline_10m'] } },
+  });
   if (logs.length > 0) {
     const byEmpNo = new Map(users.filter((u) => u.employeeNo).map((u) => [u.employeeNo!, u.id]));
     for (const log of logs) {
