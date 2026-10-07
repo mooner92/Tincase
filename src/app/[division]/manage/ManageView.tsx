@@ -163,7 +163,7 @@ export async function ManageView({
 
       <div className="mt-6 space-y-4 lg:space-y-6">
         {/* StatusSummary (CP-44~47) — 흰 카드 하나: 숫자 · 막대 · 마감 칩 · 미제출 복사 */}
-        <section className="card" aria-labelledby="status-summary">
+        <section data-guide="status-card" className="card" aria-labelledby="status-summary">
           <div className="card-head">
             <div>
               <h2 id="status-summary" className="card-title">

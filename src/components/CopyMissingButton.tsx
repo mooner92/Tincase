@@ -26,7 +26,7 @@ export function CopyMissingButton({ names }: { names: string[] }) {
   };
 
   return (
-    <button onClick={copy} className="btn-secondary btn-sm">
+    <button data-guide="copy-missing" onClick={copy} className="btn-secondary btn-sm">
       {copied ? '복사됨' : `미제출 ${names.length}명 이름 복사`}
     </button>
   );

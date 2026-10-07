@@ -127,7 +127,8 @@ export function OrderList({
   };
 
   return (
-    <section className="card" aria-labelledby="order-list">
+    // CP-104 — 이 부품은 본부 취합(/hq)만 쓴다
+    <section data-guide="hq-units" className="card" aria-labelledby="order-list">
       <div className="card-head">
         <div className="min-w-0">
           <h2 id="order-list" className="card-title">
@@ -285,42 +286,44 @@ export function RunCard({
   );
 
   return (
-    <section className="card" aria-labelledby="run-card">
-      <div className="card-head">
-        <div className="min-w-0">
-          <h2 id="run-card" className="card-title">
-            {resultWord}
-          </h2>
-          <p className="card-desc">
-            {ok && total ? (
-              <>
-                {run!.units.length}개 단위 → 실적 {total.a} · 계획 {total.p}
-                {total.n > 0 && ` · 특이 ${total.n}`}
-                {total.e > 0 && <span className="text-emphasis"> · 공유 {total.e}</span>}
-              </>
-            ) : run?.status === 'failed' ? (
-              <span className="text-error">{run.errorText}</span>
-            ) : ready > 0 ? (
-              `${title} — 제출된 ${ready}개를 순서대로 이어 붙입니다.`
+    <section data-guide="hq-run" className="card" aria-labelledby="run-card">
+      {/* 사용 안내의 카메라 자리 — 제목·상태·[이어 붙이기] 줄까지 (CP-104). 감싸기만 한다 */}
+      <div data-guide="hq-run-head">
+        <div className="card-head">
+          <div className="min-w-0">
+            <h2 id="run-card" className="card-title">
+              {resultWord}
+            </h2>
+            <p className="card-desc">
+              {ok && total ? (
+                <>
+                  {run!.units.length}개 단위 → 실적 {total.a} · 계획 {total.p}
+                  {total.n > 0 && ` · 특이 ${total.n}`}
+                  {total.e > 0 && <span className="text-emphasis"> · 공유 {total.e}</span>}
+                </>
+              ) : run?.status === 'failed' ? (
+                <span className="text-error">{run.errorText}</span>
+              ) : ready > 0 ? (
+                `${title} — 제출된 ${ready}개를 순서대로 이어 붙입니다.`
+              ) : (
+                `${title} — 아직 제출된 것이 없습니다.`
+              )}
+            </p>
+          </div>
+          {ok ? (
+            run!.stale ? (
+              <span className="chip chip-warn">제출이 바뀜</span>
             ) : (
-              `${title} — 아직 제출된 것이 없습니다.`
-            )}
-          </p>
-        </div>
-        {ok ? (
-          run!.stale ? (
-            <span className="chip chip-warn">제출이 바뀜</span>
+              <span className="chip chip-ok">
+                <span aria-hidden className="dot" />
+                준비됨{run!.finishedAtKst && ` ${run!.finishedAtKst}`}
+              </span>
+            )
+          ) : run?.status === 'failed' ? (
+            <span className="chip chip-error">실패</span>
           ) : (
-            <span className="chip chip-ok">
-              <span aria-hidden className="dot" />
-              준비됨{run!.finishedAtKst && ` ${run!.finishedAtKst}`}
-            </span>
-          )
-        ) : run?.status === 'failed' ? (
-          <span className="chip chip-error">실패</span>
-        ) : (
-          <span className="chip chip-muted">아직 안 붙임</span>
-        )}
+            <span className="chip chip-muted">아직 안 붙임</span>
+          )}
       </div>
 
       {ok && run!.stale && (
@@ -332,7 +335,7 @@ export function RunCard({
       {(ok || canWrite) && (
         <div className="mt-5 flex flex-wrap items-center gap-2">
           {canWrite && (
-            <button onClick={go} disabled={busy || ready === 0} className={runIsNext ? 'btn-primary' : 'btn-ghost'}>
+            <button data-guide="hq-run-button" onClick={go} disabled={busy || ready === 0} className={runIsNext ? 'btn-primary' : 'btn-ghost'}>
               {busy ? '이어 붙이는 중…' : ok ? '다시 이어 붙이기' : '이어 붙이기'}
             </button>
           )}
@@ -343,6 +346,7 @@ export function RunCard({
           )}
         </div>
       )}
+      </div>
 
       {ok && run!.units.length > 0 && (
         <ol className="mt-4 grid gap-x-8 text-sm sm:grid-cols-2">

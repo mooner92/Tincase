@@ -51,7 +51,7 @@ export function OrgRunCard({ run, isoKey, ready }: { run: OrgRunCardView | null;
 
   // 2026-10-07 — 초록 칠한 카드 안에 흰 칩 상자가 들어 있던 것을 흰 카드 한 장으로 (CP-97)
   return (
-    <section className="card" aria-labelledby="org-run">
+    <section data-guide="org-run" className="card" aria-labelledby="org-run">
       <div className="card-head">
         <div className="min-w-0">
           <h2 id="org-run" className="card-title">
@@ -94,11 +94,11 @@ export function OrgRunCard({ run, isoKey, ready }: { run: OrgRunCardView | null;
       )}
 
       <div className="mt-5 flex flex-wrap items-center gap-2">
-        <button onClick={go} disabled={busy || ready === 0} className={runIsNext ? 'btn-primary' : 'btn-ghost'}>
+        <button data-guide="org-run-button" onClick={go} disabled={busy || ready === 0} className={runIsNext ? 'btn-primary' : 'btn-ghost'}>
           {busy ? '만드는 중…' : ok ? '다시 만들기' : '전사 취합본 만들기'}
         </button>
         {ok && (
-          <a href={`/api/rollup/run/${run!.id}`} className="btn-secondary">
+          <a data-guide="org-download" href={`/api/rollup/run/${run!.id}`} className="btn-secondary">
             전사본 받기
           </a>
         )}

@@ -1,0 +1,479 @@
+{
+  "version": "20261007T1805",
+  "week": "10월 1주차",
+  "viewport": {
+    "width": 1600,
+    "height": 900
+  },
+  "scale": 2,
+  "shots": {
+    "member-login": {
+      "file": "member-login.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 600,
+        "y": 167.2,
+        "w": 400,
+        "h": 475.6
+      },
+      "frame": {
+        "x": 600,
+        "y": 167.2,
+        "w": 400,
+        "h": 475.6
+      },
+      "anchor": "login-form"
+    },
+    "member-week": {
+      "file": "member-week.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 285,
+        "y": 283,
+        "w": 92,
+        "h": 44
+      },
+      "frame": {
+        "x": 260,
+        "y": 186,
+        "w": 620,
+        "h": 166
+      },
+      "anchor": "compose-open"
+    },
+    "member-compose": {
+      "file": "member-compose.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 605,
+        "y": 446,
+        "w": 967,
+        "h": 183
+      },
+      "frame": {
+        "x": 605,
+        "y": 446,
+        "w": 967,
+        "h": 183
+      },
+      "anchor": "compose-table"
+    },
+    "member-previous": {
+      "file": "member-previous.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 1374,
+        "y": 152,
+        "w": 183,
+        "h": 36
+      },
+      "frame": {
+        "x": 605,
+        "y": 141,
+        "w": 967,
+        "h": 281
+      },
+      "anchor": "previous-to-achievements"
+    },
+    "member-submit": {
+      "file": "member-submit.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 1506,
+        "y": 844,
+        "w": 66,
+        "h": 44
+      },
+      "frame": {
+        "x": 900,
+        "y": 831,
+        "w": 700,
+        "h": 69
+      },
+      "anchor": "compose-submit"
+    },
+    "member-done": {
+      "file": "member-done.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 285,
+        "y": 283,
+        "w": 570,
+        "h": 36
+      },
+      "frame": {
+        "x": 260,
+        "y": 186,
+        "w": 620,
+        "h": 158
+      },
+      "anchor": "my-actions"
+    },
+    "member-history": {
+      "file": "member-history.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 260,
+        "y": 186,
+        "w": 1080,
+        "h": 126.5
+      },
+      "frame": {
+        "x": 260,
+        "y": 186,
+        "w": 1080,
+        "h": 126.5
+      },
+      "anchor": "history-table"
+    },
+    "lead-status": {
+      "file": "lead-status.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 260,
+        "y": 157,
+        "w": 1080,
+        "h": 198.2
+      },
+      "frame": {
+        "x": 260,
+        "y": 157,
+        "w": 1080,
+        "h": 198.2
+      },
+      "anchor": "status-card"
+    },
+    "lead-nudge": {
+      "file": "lead-nudge.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 285,
+        "y": 294.2,
+        "w": 144,
+        "h": 36
+      },
+      "frame": {
+        "x": 260,
+        "y": 157,
+        "w": 700,
+        "h": 198.2
+      },
+      "anchor": "copy-missing"
+    },
+    "lead-merge": {
+      "file": "lead-merge.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 260,
+        "y": 255.2,
+        "w": 1080,
+        "h": 299
+      },
+      "frame": {
+        "x": 260,
+        "y": 255.2,
+        "w": 1080,
+        "h": 299
+      },
+      "anchor": "merge-card"
+    },
+    "lead-merged": {
+      "file": "lead-merged.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 705,
+        "y": 160,
+        "w": 895,
+        "h": 240
+      },
+      "frame": {
+        "x": 704,
+        "y": 0,
+        "w": 896,
+        "h": 420
+      },
+      "anchor": "merged-body"
+    },
+    "lead-rules": {
+      "file": "lead-rules.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 285,
+        "y": 301.6,
+        "w": 1030,
+        "h": 283
+      },
+      "frame": {
+        "x": 260,
+        "y": 204.6,
+        "w": 1080,
+        "h": 400
+      },
+      "anchor": "merge-order"
+    },
+    "head-open": {
+      "file": "head-open.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 441,
+        "y": 391.2,
+        "w": 97,
+        "h": 44
+      },
+      "frame": {
+        "x": 285,
+        "y": 347.2,
+        "w": 700,
+        "h": 116
+      },
+      "anchor": "merged-open"
+    },
+    "head-approve": {
+      "file": "head-approve.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 285,
+        "y": 391.2,
+        "w": 148,
+        "h": 44
+      },
+      "frame": {
+        "x": 285,
+        "y": 347.2,
+        "w": 700,
+        "h": 116
+      },
+      "anchor": "merged-approve"
+    },
+    "head-save": {
+      "file": "head-save.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 1497,
+        "y": 89,
+        "w": 79,
+        "h": 36
+      },
+      "frame": {
+        "x": 900,
+        "y": 77,
+        "w": 700,
+        "h": 83
+      },
+      "anchor": "merged-save"
+    },
+    "head-report": {
+      "file": "head-report.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 285,
+        "y": 419.2,
+        "w": 160,
+        "h": 44
+      },
+      "frame": {
+        "x": 260,
+        "y": 322.2,
+        "w": 700,
+        "h": 166
+      },
+      "anchor": "report-unit-submit"
+    },
+    "hq-status": {
+      "file": "hq-status.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 260,
+        "y": 186,
+        "w": 1080,
+        "h": 257
+      },
+      "frame": {
+        "x": 260,
+        "y": 186,
+        "w": 1080,
+        "h": 257
+      },
+      "anchor": "hq-units"
+    },
+    "hq-run": {
+      "file": "hq-run.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 285,
+        "y": 419,
+        "w": 108,
+        "h": 44
+      },
+      "frame": {
+        "x": 285,
+        "y": 347,
+        "w": 700,
+        "h": 116
+      },
+      "anchor": "hq-run-button"
+    },
+    "hq-approve": {
+      "file": "hq-approve.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 1202,
+        "y": 397,
+        "w": 113,
+        "h": 36
+      },
+      "frame": {
+        "x": 543,
+        "y": 376,
+        "w": 772,
+        "h": 57
+      },
+      "anchor": "hq-approve"
+    },
+    "hq-submit": {
+      "file": "hq-submit.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 285,
+        "y": 429,
+        "w": 183,
+        "h": 44
+      },
+      "frame": {
+        "x": 285,
+        "y": 336,
+        "w": 700,
+        "h": 137
+      },
+      "anchor": "report-hq-submit"
+    },
+    "org-board": {
+      "file": "org-board.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 260,
+        "y": 190,
+        "w": 1080,
+        "h": 430
+      },
+      "frame": {
+        "x": 260,
+        "y": 190,
+        "w": 1080,
+        "h": 430
+      },
+      "anchor": "org-board"
+    },
+    "org-final": {
+      "file": "org-final.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 1259,
+        "y": 286.1,
+        "w": 56,
+        "h": 32
+      },
+      "frame": {
+        "x": 880,
+        "y": 240,
+        "w": 460,
+        "h": 330
+      },
+      "anchor": "org-upload"
+    },
+    "org-run": {
+      "file": "org-run.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 285,
+        "y": 419.1,
+        "w": 150,
+        "h": 44
+      },
+      "frame": {
+        "x": 260,
+        "y": 322.1,
+        "w": 700,
+        "h": 166
+      },
+      "anchor": "org-run-button"
+    },
+    "org-download": {
+      "file": "org-download.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 380,
+        "y": 388.1,
+        "w": 110,
+        "h": 44
+      },
+      "frame": {
+        "x": 260,
+        "y": 291.1,
+        "w": 700,
+        "h": 227
+      },
+      "anchor": "org-download"
+    },
+    "org-schedule": {
+      "file": "org-schedule.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 285,
+        "y": 330,
+        "w": 1030,
+        "h": 118
+      },
+      "frame": {
+        "x": 285,
+        "y": 308,
+        "w": 1030,
+        "h": 194.6
+      },
+      "anchor": "deadline-paste"
+    },
+    "org-preview": {
+      "file": "org-preview.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 301,
+        "y": 562.6,
+        "w": 91,
+        "h": 36
+      },
+      "frame": {
+        "x": 285,
+        "y": 198.6,
+        "w": 1030,
+        "h": 412
+      },
+      "anchor": "deadline-apply"
+    }
+  }
+}

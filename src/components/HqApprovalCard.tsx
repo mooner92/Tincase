@@ -33,7 +33,7 @@ export function HqApprovalCard({
   const done = approval && !approval.changedAfter;
   // 본부본 카드(RunCard)의 한 구역이다 — 승인은 따로 카드를 세울 만큼 긴 일이 아니다 (CP-97)
   return (
-    <div className="card-section flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
+    <div data-guide="hq-approval" className="card-section flex flex-wrap items-center gap-x-3 gap-y-2 text-sm">
       <span className="font-semibold text-ink">본부장 승인</span>
       {approval ? (
         <>
@@ -47,7 +47,7 @@ export function HqApprovalCard({
         <span className="text-muted">아직 — 본부본을 받아 검토한 뒤 본부장이 [승인]을 누르면 담당자에게 알림이 갑니다</span>
       )}
       {canApprove && !done && (
-        <button onClick={approve} disabled={busy} className="btn-primary btn-sm sm:ml-auto">
+        <button data-guide="hq-approve" onClick={approve} disabled={busy} className="btn-primary btn-sm sm:ml-auto">
           {busy ? '승인 중…' : '검토 완료 · 승인'}
         </button>
       )}

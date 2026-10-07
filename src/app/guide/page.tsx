@@ -1,159 +1,27 @@
-// `/guide` — 사용 안내 (로그인한 사람 누구나, PG-40).
+// `/guide` — 사용 안내, 혼자 보기 (PG-61). 로그인한 사람 누구나.
 //
-// 화면은 애니메이션으로 보여준다. 글로 "제출 버튼을 누르고…"라고 쓰면
-// 읽는 사람이 자기 화면과 대조해야 하는데, 움직이는 화면은 대조가 필요 없다.
+// 2026-10-08 — 빠르게 녹화한 GIF를 걷고 **한 장씩 넘기는 단계**로 바꿨다(PG-57). 움직이는 그림은 보는 사람이
+// 속도를 정할 수 없어 「너무 빨라서 읽기 어렵다」였다. 같은 단계 목록을 11/2 운영회의에서는 발표 모드
+// (`/guide/present`)로 넘기고, 그 뒤에는 각자 여기서 넘겨 본다.
 //
-// 자료는 **데모 DB로 녹화한 것**이라 사람 이름·업무 내용이 전부 가공이다
-// (scripts/seed-demo.ts). 실제 화면을 찍어 두면 저장소가 public이라 개인정보가 남는다.
+// 그림은 전부 가짜 데이터로 찍은 것이다(`scripts/guide-capture.cjs` — PG-62). 저장소가 public이고,
+// 실제 화면에는 동료의 이름과 업무가 그대로 나온다.
+//
+// 무엇을 그릴지(이 사람이 쓰는 장)는 `guideCaps` 하나가 정한다(TACP-9·12). 예전에는 이 페이지가
+// 역할 플래그를 직접 보고 절을 걸렀다 — 같은 판정이 화면마다 따로 적히면 갈라진다.
+import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import { requirePageScope } from '@/server/page-scope';
-import { canScheduleDeadlines, rollupNav } from '@/server/authz';
+import { guideCaps, rollupNav } from '@/server/authz';
 import { hwpUploadOpen } from '@/server/submit-mode';
 import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
+import { GuideSelf } from '@/components/GuideSelf';
 import { monthlyMondayOf, toKstIso } from '@/lib/week';
 
 export const dynamic = 'force-dynamic';
-
-interface Clip {
-  id: string;
-  /** 업로드가 열린 서버의 번호. 화면에는 `no()`로 다시 매겨 나간다 */
-  step: number;
-  title: string;
-  lead: string;
-  points: string[];
-  /** WA-32 — hwp 업로드 단계. 업로드가 닫힌 서버에서는 빠진다 */
-  uploadOnly?: true;
-  /**
-   * 녹화에 업로드 화면(탭·드롭존·양식 받기)이 찍혀 있다. 업로드가 닫힌 서버에서는
-   * 지금 화면과 다른 그림이 되므로 다시 녹화하기 전까지(scripts/guide-record.cjs) 글만 보여준다
-   */
-  recordedWithUpload?: true;
-}
-
-const SUBMIT: Clip[] = [
-  {
-    id: 'submit',
-    step: 1,
-    uploadOnly: true,
-    title: '빈 양식 받아서 올리기',
-    lead: '한글로 작성하던 방식 그대로입니다. 메일 대신 이 화면에 올리는 것만 다릅니다.',
-    points: [
-      '[양식 다운로드] — 파일명에 이번 주차가 자동으로 들어갑니다',
-      '작성한 hwp 파일을 점선 안에 끌어다 놓으면 제출됩니다',
-      '같은 주에 다시 올리면 새 버전으로 저장됩니다 — 이전 것을 지울 필요가 없습니다',
-    ],
-  },
-  {
-    id: 'compose',
-    step: 2,
-    recordedWithUpload: true,
-    title: '웹에서 바로 작성하기',
-    lead: '한글을 열지 않고 화면에서 바로 씁니다. 한글 표를 복사해 붙여넣는 것도 됩니다.',
-    points: [
-      '[작성하기] → 실적 · 계획 · 특이사항을 칸에 채웁니다',
-      '한글에서 표를 복사(Ctrl+C)해 첫 칸에 붙여넣으면(Ctrl+V) 여러 줄이 한 번에 들어갑니다',
-      '작성 중인 내용은 자동으로 저장됩니다 — 새로고침해도 남아 있습니다',
-    ],
-  },
-  {
-    id: 'cancel',
-    step: 3,
-    recordedWithUpload: true,
-    title: '잘못 낸 것 취소하기',
-    lead: '다른 주차 것을 냈거나 실수로 제출했다면 되돌릴 수 있습니다.',
-    points: [
-      '[제출 취소] — 그 주에 낸 것이 모두 지워지고 미제출 상태가 됩니다',
-      '되돌릴 수 없습니다. 취소하면 다시 내야 합니다',
-      '마감(목요일 14:00) 후에는 취소할 수 없습니다 — 담당자에게 말씀해 주세요',
-    ],
-  },
-];
-
-const LEADS: Clip[] = [
-  {
-    id: 'merge',
-    step: 4,
-    title: '수합하고 병합하기',
-    lead: '부서담당자 화면입니다. 누가 냈는지 보고, 모인 문서를 하나로 합칩니다.',
-    points: [
-      '표에서 누가 냈는지 · 언제 냈는지 한눈에 보입니다',
-      '[열기] — 파일을 받지 않고 내용을 화면에서 바로 확인합니다',
-      '[지금 병합] — 중복을 정리해 하나의 hwp로 합칩니다 (수십 초)',
-      '완성된 병합본을 내려받아 그대로 제출하면 끝입니다',
-    ],
-  },
-];
-
-/**
- * 시연이 **지금 화면과 같은가.** 2026-10-07 화면 개편(CP-97~100) 전에 녹화한 것이라 초록 칠한 요약 띠·
- * 드롭존·탭처럼 지금 없는 화면이 찍혀 있다. 이 페이지의 전제가 「움직이는 화면은 대조가 필요 없다」인데,
- * 지금과 다른 그림은 대조를 **더** 시킨다 — 그래서 다시 녹화하기 전까지(scripts/guide-record.cjs) 글만 보여준다.
- * 다시 녹화하면 true로 돌린다.
- */
-const CLIPS_MATCH_SCREEN = false as boolean;
-
-function ClipCard({ c, step, media: wanted }: { c: Clip; step: string; media: boolean }) {
-  const media = wanted && CLIPS_MATCH_SCREEN;
-  return (
-    <section className="card card-flush">
-      <div className="px-5 pt-6 pb-5 sm:px-7">
-        <p className="text-sm font-semibold text-brand">STEP {step}</p>
-        <h3 className="card-title mt-0.5">{c.title}</h3>
-        <p className="mt-1.5 text-[15px] text-body">{c.lead}</p>
-      </div>
-
-      {/*
-        시연 화면은 흰 바탕이고 안내 페이지도 흰 바탕이라, 그냥 얹으면
-        **어디까지가 화면이고 어디부터가 페이지인지** 구별되지 않는다.
-        그래서 브라우저 창 모양의 틀에 넣는다 — 테두리·상단 바·그림자 세 가지가
-        "이건 화면 속 화면"이라고 말해 준다.
-      */}
-      {media && (
-        <div className="bg-surface-strong px-4 py-5 sm:px-7 sm:py-6">
-          <figure className="overflow-hidden rounded-xl border border-border-strong bg-canvas shadow-[0_10px_28px_rgba(10,10,10,0.13)]">
-            <div className="flex items-center gap-1.5 border-b border-hairline bg-surface-soft px-3.5 py-2.5">
-              <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-border-strong" />
-              <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-border-strong" />
-              <span aria-hidden className="h-2.5 w-2.5 rounded-full bg-border-strong" />
-              <span className="ml-2 truncate text-[12px] text-muted">{c.title}</span>
-            </div>
-            {/* WebP는 GIF와 같은 그림인데 용량이 1/6이다. 웹에서는 이쪽을 쓴다 */}
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={`/guide/${c.id}.webp`}
-              alt={`${c.title} 화면 시연`}
-              className="block w-full"
-              loading="lazy"
-            />
-          </figure>
-        </div>
-      )}
-
-      {/* 그림이 빠지면 머리글의 아래 여백(pb-5)이 곧 간격이다 — 위 여백을 겹쳐 주지 않는다 */}
-      <div className={media ? 'px-5 pt-5 pb-6 sm:px-7' : 'px-5 pb-6 sm:px-7'}>
-        <ul className="space-y-2">
-          {c.points.map((p) => (
-            <li key={p} className="flex gap-2.5 text-[15px] text-body">
-              <span aria-hidden className="mt-[7px] h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />
-              <span>{p}</span>
-            </li>
-          ))}
-        </ul>
-        {media && (
-          <a
-            href={`/guide/${c.id}.gif`}
-            download
-            className="mt-4 inline-flex items-center gap-1.5 text-sm text-muted underline-offset-2 hover:text-ink hover:underline"
-          >
-            GIF로 받기 <span aria-hidden>↓</span>
-            <span className="text-muted-soft">— 한글 문서·메일에 붙여넣을 때</span>
-          </a>
-        )}
-      </div>
-    </section>
-  );
-}
+export const metadata = { title: '사용 안내' };
 
 /**
  * 월간 주 예시를 **오늘 날짜에서 만든다** (WS-16).
@@ -194,241 +62,116 @@ function monthlyExamples(now: Date): { month: string; range: string; note: strin
   return out;
 }
 
-export default async function GuidePage() {
-  // AU-22 — 표준 진입점. 미인증·초기 비밀번호 미변경은 여기서 내보낸다.
-  // 이 페이지만 `getPageScope()`를 직접 써서 비밀번호 강제 변경이 빠져 있었다 (v1.23.1에서 고침)
+export default async function GuidePage({ searchParams }: { searchParams: Promise<{ mode?: string }> }) {
+  // AU-22 — 표준 진입점. 미인증·초기 비밀번호 미변경은 여기서 내보낸다
   const ps = await requirePageScope();
   if (!ps.ok) return noticeFor(ps.code, ps.message);
   const { scope } = ps;
+  // PG-59 — `?mode=present`도 발표 모드로 (회의 공지에 적기 쉬운 주소)
+  if ((await searchParams).mode === 'present') redirect('/guide/present');
+
+  const [caps, rnav] = await Promise.all([guideCaps(scope), rollupNav(scope)]);
+  const has = new Set(caps);
   const examples = monthlyExamples(new Date());
-
-  // RU-31·32 — 취합 메뉴와 매뉴얼은 할 수 있는 사람에게만 (TACP-9)
-  const rnav = await rollupNav(scope);
-
-  // WA-32 — 업로드가 닫힌 서버에서는 업로드 단계를 빼고, 번호를 남은 단계로 다시 매긴다
-  // (「STEP 02」로 시작하는 안내는 하나를 빠뜨린 것처럼 읽힌다)
+  // WA-32 — 안내의 단계는 웹 작성만이다. 업로드가 아직 열린 서버(운영 1단계, ADR-0014)에서는 그 길이 있다는 것만 한 줄로
   const uploadOpen = hwpUploadOpen();
-  const submitClips = SUBMIT.filter((c) => uploadOpen || !c.uploadOnly);
-  const shift = SUBMIT.length - submitClips.length;
-  const no = (step: number) => String(step - shift).padStart(2, '0');
+
+  // 단계 밖의 쓸모 있는 것 — 예전 안내의 글 매뉴얼에서 단계로 옮기지 않은 것만 남긴다. 역할 것은 그 역할에게만 (TACP-9)
+  const faq: [string, string][] = [
+    [
+      '주간과 월간은 어떻게 구분되나요?',
+      `그 달의 마지막 날이 들어 있는 주가 마지막 주이고, 그 주에는 월간 업무일지를 냅니다. ${examples
+        .map((e) => `${e.month}은 ${e.range} — ${e.note}`)
+        .join('. ')}. 월간 주에는 제출 화면 위쪽에 초록색 [월간] 표시가 뜹니다.`,
+    ],
+    ['월간에는 뭘 더 써야 하나요?', '한 주가 아니라 한 달치를 정리합니다. 양식과 마감(목요일 14:00)은 주간과 같고, 분량이 늘어납니다. 병합본 파일 이름도 "월간업무"로 나옵니다.'],
+    ['알림은 언제 오나요?', '아직 내지 않은 분에게만 갑니다 — 마감 전날 11:45, 마감 당일 09:00, 마감 1시간 전, 마감 10분 전. 이미 냈으면 오지 않습니다. 사내 메신저 알림함으로 옵니다.'],
+    ['연휴 때 마감이 바뀌면요?', '그 주만 마감이 당겨지고, 제출 화면의 마감 표시가 빨갛게 바뀌며 이유가 함께 나옵니다. 알림도 바뀐 마감에 맞춰 나갑니다. 다음 주에는 평소대로 돌아갑니다.'],
+    ['마감을 놓치면 어떻게 되나요?', '마감 후에는 제출도 취소도 되지 않습니다. 담당자에게 말씀해 주세요 — 담당자가 마감을 잠시 열어 둘 수 있습니다.'],
+    ['다른 사람이 낸 내용을 볼 수 있나요?', '부서원끼리는 누가 언제 냈는지만 봅니다. 업무일지 내용은 부서담당자부터 볼 수 있고, 마감 뒤 만들어진 부서 병합본은 [보관함]에서 모두 봅니다.'],
+    ...(has.has('manager')
+      ? ([
+          [
+            '부서원 업무일지를 직접 고칠 수 있나요?',
+            '[수합 관리]에서 이름을 눌러 열고 오른쪽 위 [고치기] → 표를 고쳐 [고쳐서 저장]. 덮어쓰지 않고 그 사람의 새 판이 생기며, 판 목록과 본인의 [내 이력]에 「○○ 고침」이 남습니다. 병합본에 넣으려면 [다시 병합]을 누릅니다.',
+          ],
+        ] as [string, string][])
+      : []),
+    ...(has.has('schedule')
+      ? ([
+          [
+            '연휴 마감을 바꿀 때 알아 둘 것은요?',
+            '공지의 시각은 대외 마감이고, 부서 마감은 자동으로 한 시간 앞으로 잡힙니다(대외 15:00 → 부서 14:00). 요일이 날짜와 맞지 않으면 적용하지 않습니다. 이미 지난 알림은 다시 나가지 않고, 이미 지난 마감은 옮길 수 없습니다 — 잘못 넣었으면 마감 전에 [평소대로 되돌리기]. 붙여넣기가 안 되면 [직접 입력]에서 대외 마감을 고르면 됩니다.',
+          ],
+        ] as [string, string][])
+      : []),
+    ...(has.has('hq')
+      ? ([['본부본을 본부에서 고칠 수 있나요?', '고치지 않습니다 — 실·팀 안의 내용은 그 실·팀의 것입니다. 고칠 곳은 그 실·팀이 고쳐 다시 내고, 본부에서 다시 이어 붙입니다.']] as [string, string][])
+      : []),
+    ['비밀번호를 잊었습니다', '로그인 화면의 [비밀번호를 잊으셨나요?]를 누르면 메신저로 재설정 링크가 옵니다. 처음 받은 비밀번호는 첫 로그인 때 반드시 바꾸게 되어 있습니다.'],
+    ['화면 속 이름은 누구인가요?', '전부 지어낸 인물입니다. 안내 그림은 실제 데이터가 아닌 예시 데이터로 찍었습니다.'],
+  ];
 
   return (
     <div className="flex min-h-screen flex-col">
-      <AppHeader
-        slug={scope.division.slug}
-        divisionName={scope.division.nameKo}
-        userName={scope.user.name}
-        isLead={scope.isManager || scope.readAll}
-        isOperator={scope.user.isOperator}
-        readAll={scope.readAll}
-        {...rnav}
-        viaCloudflare={scope.source === 'cloudflare'}
-        notifyEnabled={ps.scope.user.notifyEnabled}
-      />
+      <div className="print:hidden">
+        <AppHeader
+          slug={scope.division.slug}
+          divisionName={scope.division.nameKo}
+          userName={scope.user.name}
+          isLead={scope.isManager || scope.readAll}
+          isOperator={scope.user.isOperator}
+          readAll={scope.readAll}
+          {...rnav}
+          viaCloudflare={scope.source === 'cloudflare'}
+          notifyEnabled={scope.user.notifyEnabled}
+        />
+      </div>
 
-      <main className="mx-auto w-full max-w-[1120px] flex-1 px-5 pt-8 pb-8">
-        <h1 className="page-title">주간 업무일지, 이렇게 냅니다</h1>
-        <p className="page-sub">
-          메일로 주고받던 것을 화면에서 처리합니다. 작성하는 내용과 양식은 그대로이고,
-          {uploadOpen ? (
-            <strong className="font-semibold text-ink"> 내는 곳만 바뀝니다.</strong>
-          ) : (
-            <strong className="font-semibold text-ink"> 화면에서 바로 적어 냅니다.</strong>
-          )}
-        </p>
-
-        <div className="mt-6 flex flex-wrap gap-2">
-          <span className="badge-pill">마감 매주 목요일 14:00</span>
-          {uploadOpen && <span className="badge-pill">한글(.hwp) · 최대 20MB</span>}
-          <span className="badge-pill">다시 내면 새 버전</span>
-          <span className="badge-pill border-transparent bg-success-soft text-success">그 달 마지막 주는 월간</span>
-        </div>
-
-        <h2 className="mt-12 mb-1 text-[17px] font-semibold text-ink">제출하는 분</h2>
-        <p className="mb-4 text-sm text-muted">
-          {uploadOpen ? '셋 중 편한 방법을 쓰시면 됩니다.' : '한글을 열지 않고 화면에서 바로 적어 냅니다.'}
-        </p>
-        <div className="space-y-4 lg:space-y-6">
-          {submitClips.map((c) => (
-            <ClipCard key={c.id} c={c} step={no(c.step)} media={uploadOpen || !c.recordedWithUpload} />
-          ))}
-        </div>
-
-        <h2 className="mt-14 mb-1 text-[17px] font-semibold text-ink">부서담당자</h2>
-        <p className="mb-4 text-sm text-muted">부서원 것을 모아 하나로 합치는 화면입니다.</p>
-        <div className="space-y-4 lg:space-y-6">
-          {LEADS.map((c) => (
-            <ClipCard key={c.id} c={c} step={no(c.step)} media={uploadOpen || !c.recordedWithUpload} />
-          ))}
-        </div>
-
-        {/* RU-30 — 실·팀 담당자의 마지막 단계. 위로 보내는 것까지가 담당자의 일이다 */}
-        {scope.isManager && (
-          <section className="card mt-6">
-            <p className="text-sm font-medium text-muted">{no(4)}+</p>
-            <h3 className="card-title mt-0.5">검토가 끝나면 위로 제출하기</h3>
-            <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
-              <li>[수합 관리]의 <strong className="text-ink">「○○본부에 제출」</strong> 카드 (병합본 카드 바로 아래) — 본부 밖 부서나 혼자 쓰는 본부는 「총괄에 제출」입니다</li>
-              <li>누르는 순간의 병합본이 <strong className="text-ink">사본으로</strong> 갑니다. 그 뒤에 고치면 카드에 「바뀜」이 뜨고, [다시 제출]해야 바뀐 것이 갑니다</li>
-              <li>잘못 냈으면 [제출 취소] — 받는 쪽 화면에서 「미제출」로 보입니다</li>
-            </ol>
-          </section>
-        )}
-
-        {/* RU-31 — 본부 담당자·본부장 매뉴얼 */}
-        {rnav.hqDesk && (
-          <>
-            <h2 className="mt-14 mb-1 text-[17px] font-semibold text-ink">본부 담당자</h2>
-            <p className="mb-4 text-sm text-muted">산하 실·팀이 낸 것을 순서대로 이어 붙여, 본부장 검토 뒤 총괄에 냅니다.</p>
-            <section className="card">
-              <p className="text-sm font-medium text-muted">{no(7)}</p>
-              <h3 className="card-title mt-0.5">본부 취합</h3>
-              <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
-                <li>상단 메뉴 <strong className="text-ink">[본부 취합]</strong> — 산하 실·팀마다 「제출됨 · 시각 · 누가」 또는 「미제출」이 보입니다</li>
-                <li>[순서 바꾸기]를 눌러 <strong className="text-ink">이어 붙이는 순서</strong>를 ▲▼로 정하고 [순서 저장] — 다음 주에도 그 순서입니다. 메모는 본부장·총괄이 읽는 설명입니다</li>
-                <li>[이어 붙이기] — 낸 실·팀만 순서대로 한 문서가 됩니다. [본부본 받기]로 열어 본부장 검토를 받으세요</li>
-                <li>검토가 끝나면 같은 「본부본」 카드의 <strong className="text-ink">[총괄에 제출]</strong></li>
-              </ol>
-              <ul className="mt-4 space-y-1 text-sm text-muted">
-                <li>· 실·팀 <strong className="text-body">안의 내용·순서는 바꾸지 않습니다</strong>. 고칠 곳은 그 실·팀이 고쳐 다시 내고, 여기서 다시 이어 붙입니다</li>
-                <li>· 이어 붙인 뒤 실·팀이 다시 내거나 취소하면 「바뀜」이 뜹니다 — 다시 이어 붙이세요</li>
-                <li>· 본부가 보는 것은 실·팀이 <strong className="text-body">보낸 것</strong>뿐입니다. 부서원 개인 제출물은 그 실·팀의 몫입니다</li>
-              </ul>
-            </section>
-          </>
-        )}
-
-        {/* WA-20 · HM-47 — 담당자 첨삭과 부서장 승인. 할 수 있는 사람에게만 (TACP-9) */}
-        {scope.isManager && (
-          <div className="mt-6 space-y-4 lg:space-y-6">
-            <section className="card">
-              <p className="text-sm font-medium text-muted">고치기</p>
-              <h3 className="card-title mt-0.5">부서원 업무일지를 직접 고치기 (첨삭)</h3>
-              <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
-                <li>[수합 관리]에서 이름을 눌러 제출물을 엽니다</li>
-                <li>오른쪽 위 <strong className="text-ink">[고치기]</strong> → 표를 고치고 <strong className="text-ink">[고쳐서 저장]</strong></li>
-                <li>병합본에 넣으려면 <strong className="text-ink">[다시 병합]</strong>을 누릅니다</li>
-              </ol>
-              <ul className="mt-4 space-y-1 text-sm text-muted">
-                <li>· 덮어쓰지 않습니다 — 그 사람의 <strong className="text-body">새 판</strong>이 생기고 원래 판은 그대로 남습니다</li>
-                <li>· 판 목록과 본인의 [내 이력]에 「○○ 고침」이 표시됩니다</li>
-                <li>· 마감이 지나도 고칠 수 있습니다. 가장 최근 판만 고칠 수 있습니다</li>
-              </ul>
-            </section>
-            {scope.isHead && (
-              <section className="card">
-                <p className="text-sm font-medium text-muted">부서장</p>
-                <h3 className="card-title mt-0.5">병합본 검토하고 승인하기</h3>
-                <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
-                  <li>「병합본 검토 부탁드려요」 알림을 받으면 [보관함]이나 [수합 관리]에서 병합본을 엽니다</li>
-                  <li>고칠 곳이 있으면 고쳐서 <strong className="text-ink">[수정 저장]</strong> — <strong className="text-ink">그 저장이 곧 승인</strong>입니다</li>
-                  <li>고칠 것이 없으면 <strong className="text-ink">[고칠 것 없음 · 승인]</strong></li>
-                </ol>
-                <p className="mt-3 text-sm text-muted">
-                  승인하는 순간 담당자에게 「승인 완료 · 바뀐 곳」 알림이 갑니다 — 담당자가 언제·무엇이 바뀌었는지 바로 압니다.
-                </p>
-              </section>
-            )}
-          </div>
-        )}
-
-        {/*
-          WS-19 · TACP-20 — 총괄담당 매뉴얼. 이 일을 할 수 있는 사람에게만 보인다 (TACP-9).
-          글로 적는다 — 이 절은 쓰는 사람이 한두 명이고, 연휴에만 꺼내 보는 절차라
-          「무엇을 붙여넣고 무엇을 확인하나」가 정확히 적혀 있는 편이 낫다.
-        */}
-        {canScheduleDeadlines(scope.user) && (
-          <>
-            <h2 className="mt-14 mb-1 text-[17px] font-semibold text-ink">총괄담당</h2>
-            <p className="mb-4 text-sm text-muted">
-              전 부서의 업무일지를 보고, 연휴로 바뀐 마감을 전 부서에 한꺼번에 적용합니다.
+      <main className="mx-auto w-full max-w-[1120px] flex-1 px-5 pt-8 pb-8 print:max-w-none print:p-0">
+        <div className="page-head print:hidden">
+          <div className="min-w-0">
+            <h1 className="page-title">사용 안내</h1>
+            <p className="page-sub">
+              한 주의 흐름대로 한 장씩 넘겨 보세요. <strong className="font-semibold text-ink">내 역할의 장</strong>이 맨 앞에 있습니다.
             </p>
-            <div className="space-y-4 lg:space-y-6">
-              <section className="card">
-                <p className="text-sm font-medium text-muted">{no(5)}</p>
-                <h3 className="card-title mt-0.5">전 부서가 무엇을 냈는지 보기</h3>
-                <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
-                  <li>상단 메뉴 <strong className="text-ink">[전사]</strong> — 최종본 섹션 순서대로 한 줄씩, 섹션마다 몇 명이 냈는지 보입니다. 지난 주차는 맨 위에서 고릅니다</li>
-                  <li>막대를 누르면 아직 안 낸 사람과 팀이 펼쳐집니다 — <strong className="text-ink">[안내문 복사]</strong>로 바로 알릴 수 있습니다</li>
-                  <li>팀 이름을 누르면 그 부서의 [수합 관리] — 제출물을 열어 봅니다. [보관함]에서는 병합본(hwp)을 받습니다</li>
-                  <li>다른 부서 화면은 <strong className="text-ink">보기만</strong> 됩니다. 들어간 기록은 남습니다</li>
-                </ol>
-              </section>
+          </div>
+          {/* PG-59 — 발표는 새 탭에서: 이 화면(목차)을 띄워 둔 채 발표 화면을 프로젝터로 보낸다 */}
+          {/* 휴대폰에서 발표할 일은 없다 — 640px 이상에서만 */}
+          <Link href="/guide/present" target="_blank" className="btn-ghost hidden sm:inline-flex">
+            발표 모드로 보기 <span aria-hidden>↗</span>
+          </Link>
+        </div>
 
-              <section className="card">
-                <p className="text-sm font-medium text-muted">{no(6)}</p>
-                <h3 className="card-title mt-0.5">연휴로 마감이 바뀌었을 때</h3>
-                <p className="mt-2 text-[15px] text-body">
-                  취합게시판(NAMS)에 올린 작성 요청 본문을 <strong className="text-ink">그대로 붙여넣으면</strong>{' '}
-                  날짜·시각·이유를 읽어 그 주 전 부서의 마감을 바꿉니다.
-                </p>
-                <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
-                  <li>[전사] 맨 위 마감 줄의 <strong className="text-ink">[일정 바꾸기]</strong> → 「주차 일정」 → [마감 바꾸기]</li>
-                  <li>
-                    [공지 붙여넣기]에 요청 본문을 통째로 붙여넣습니다. 이런 문장을 읽습니다 —{' '}
-                    <span className="text-muted">「제출 기한은 10월 07(수) 오후 3시입니다」</span>
-                  </li>
-                  <li>
-                    [미리보기] — 어느 주차의 마감이 언제로 바뀌는지, 알림·병합이 몇 시에 나가는지 확인합니다.{' '}
-                    <strong className="text-ink">이 단계에서는 아직 아무것도 바뀌지 않습니다</strong>
-                  </li>
-                  <li>[이대로 적용] — 부서원 화면의 마감이 빨갛게 바뀌고 이유가 한 줄 붙습니다</li>
-                </ol>
-                <ul className="mt-4 space-y-1 text-sm text-muted">
-                  <li>· 공지의 시각은 <strong className="text-body">대외 마감</strong>입니다. 부서 마감은 자동으로 <strong className="text-body">한 시간 앞</strong>으로 잡힙니다 (대외 15:00 → 부서 14:00)</li>
-                  <li>· 요일이 날짜와 맞지 않으면 적용하지 않습니다 — 공지를 먼저 확인해 주세요</li>
-                  <li>· 그 주에만 걸립니다. <strong className="text-body">다음 주는 손대지 않아도 평소대로</strong> 돌아갑니다</li>
-                  <li>· 이미 지난 알림은 다시 나가지 않습니다. 대신 마감 당일 09:00 알림이 나갑니다</li>
-                  <li>· 이미 지난 마감은 옮길 수 없습니다. 잘못 넣었으면 마감 전에 [평소대로 되돌리기]</li>
-                  <li>· 붙여넣기가 안 되면 [직접 입력]에서 대외 마감 날짜·시각을 고르면 됩니다</li>
-                  {rnav.orgDesk && (
-                    <li>· 3단계 취합을 쓰면 실·팀·본부 제출 기한도 <strong className="text-body">같은 간격으로 따라 옮겨집니다</strong> — 「주차 일정」의 주차 줄에 바로 보입니다</li>
-                  )}
-                </ul>
-              </section>
+        <div className="mt-5 flex flex-wrap gap-2 print:hidden">
+          <span className="badge-pill">마감 매주 목요일 14:00</span>
+          <span className="badge-pill">다시 내면 새 버전</span>
+          {/* 규칙이지 상태가 아니다 — 초록(상태 색)을 쓰지 않는다 (CP-100) */}
+          <span className="badge-pill">그 달 마지막 주는 월간</span>
+        </div>
 
-              {rnav.orgDesk && (
-                <section className="card">
-                  <p className="text-sm font-medium text-muted">{no(8)}</p>
-                  <h3 className="card-title mt-0.5">전사 취합 — 한 번에 최종본 만들기</h3>
-                  <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
-                    <li>같은 <strong className="text-ink">[전사]</strong> 화면의 <strong className="text-ink">「최종본에」</strong> 열 — 섹션마다 무엇이 들어갈지(Tincase로 낸 것 · 올린 파일 · 본부 대기 · 미제출) 보입니다</li>
-                    <li>아직 취합게시판으로 받는 섹션은 받은 hwp를 그 줄의 [올리기]로 넣습니다</li>
-                    <li>맨 아래 [전사 취합본 만들기] — 들어온 섹션이 정한 순서대로 한 문서가 됩니다. [전사본 받기]로 받아 한글에서 확인하고 NAMS에 올립니다</li>
-                    <li>늦게 들어온 섹션이 있으면 [다시 만들기] — 「섹션이 바뀌었습니다」 안내가 알려 줍니다</li>
-                  </ol>
-                  <ul className="mt-4 space-y-1 text-sm text-muted">
-                    <li>· 섹션 순서·제목·채우는 부서는 오른쪽 위 [섹션 구성 편집]에서 바꿉니다 — 한 번 정하면 매주 그대로입니다</li>
-                    <li>· 남의 부서를 대신 내지는 않습니다 — 안 온 섹션은 「미제출」로 자리만 남습니다</li>
-                    <li>· 실·팀·본부 제출 기한은 [일정 바꾸기]를 펼친 카드의 <strong className="text-body">「3단계 취합」</strong>에서 「부서 마감 몇 시간 뒤」로 정합니다</li>
-                  </ul>
-                </section>
-              )}
-            </div>
-          </>
+        <GuideSelf caps={caps} />
+
+        {uploadOpen && (
+          <p className="callout callout-muted mt-6 print:hidden">
+            이 서버에서는 아직 한글 파일을 올려 내는 길도 열려 있습니다 — 「이번 주 업무일지」 카드의 [파일 올리기] 탭.
+            안내는 웹에서 적는 방법만 보여 줍니다.
+          </p>
         )}
 
-        <h2 className="mt-14 mb-4 text-[17px] font-semibold text-ink">자주 묻는 것</h2>
-        <div className="card card-flush divide-y divide-hairline-soft">
-          {[
-            ['주간과 월간은 어떻게 구분되나요?', `그 달의 마지막 날이 들어 있는 주가 마지막 주이고, 그 주에는 월간 업무일지를 냅니다. ${examples.map((e) => `${e.month}은 ${e.range} — ${e.note}`).join('. ')}. 월간 주에는 제출 화면 위쪽에 초록색 [월간] 표시가 뜹니다.`],
-            ['월간에는 뭘 더 써야 하나요?', '한 주가 아니라 한 달치를 정리합니다. 양식과 마감(목요일 14:00)은 주간과 같고, 분량이 늘어납니다. 병합본 파일 이름도 "월간업무"로 나옵니다.'],
-            ['알림은 언제 오나요?', '아직 내지 않은 분에게만 갑니다 — 마감 전날 11:45, 마감 당일 09:00, 마감 1시간 전, 마감 10분 전. 이미 냈으면 오지 않습니다. 사내 메신저 알림함으로 옵니다.'],
-            ['연휴 때 마감이 바뀌면요?', '그 주만 마감이 당겨지고, 제출 화면의 마감 표시가 빨갛게 바뀌며 이유가 함께 나옵니다. 알림도 바뀐 마감에 맞춰 나갑니다. 다음 주에는 평소대로 돌아갑니다.'],
-            ['마감을 놓치면 어떻게 되나요?', '마감 후에는 제출도 취소도 되지 않습니다. 담당자에게 말씀해 주세요 — 예외는 시스템이 아니라 사람이 판단할 일입니다.'],
-            ['같은 주에 두 번 내도 되나요?', '됩니다. 다시 내면 새 버전으로 저장되고 마지막 것이 병합에 들어갑니다. 이전 버전도 남아 있어 필요하면 다시 받을 수 있습니다.'],
-            ['다른 사람이 낸 내용을 볼 수 있나요?', '부서원끼리는 누가 언제 냈는지만 봅니다. 파일 내용은 부서담당자부터 볼 수 있습니다.'],
-            ['비밀번호를 잊었습니다', 'AI홍보전략실 운영자에게 요청하시면 새로 발급해 드립니다. 처음 받은 비밀번호는 첫 로그인 때 반드시 바꾸게 되어 있습니다.'],
-            ['화면 속 이름은 누구인가요?', '전부 가공 인물입니다. 안내 자료를 만들려고 별도의 예시 부서를 만들어 녹화했습니다.'],
-          ].map(([q, a]) => (
-            <div key={q} className="px-5 py-5 sm:px-6">
-              <p className="font-semibold text-ink">{q}</p>
-              <p className="mt-1 text-[15px] text-body">{a}</p>
-            </div>
+        <h2 className="mt-12 mb-4 text-[17px] font-semibold text-ink print:hidden">자주 묻는 것</h2>
+        <div className="card card-flush divide-y divide-hairline-soft print:hidden">
+          {faq.map(([q, a]) => (
+            <details key={q} className="disclosure group px-5 py-4 sm:px-6">
+              <summary className="text-[15px]">{q}</summary>
+              <p className="mt-2 text-[15px] leading-6 text-body">{a}</p>
+            </details>
           ))}
         </div>
       </main>
-      <AppFooter />
+      <div className="print:hidden">
+        <AppFooter />
+      </div>
     </div>
   );
 }

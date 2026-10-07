@@ -7,6 +7,7 @@ import { audit } from './audit';
 import { openingOf } from './deadline';
 import { isSubmissionLocked } from '@/lib/deadline';
 import { hqNodeOf, loadOrgSetting, loadTree, type RollupNode } from './rollup/tree';
+import type { GuideCap } from '@/lib/guide/deck';
 
 export class HttpError extends Error {
   constructor(
@@ -526,4 +527,29 @@ export async function findReadableRollup(scope: Scope, runId: string) {
 /** 메뉴에 그릴 취합 화면 — 헤더를 그리는 서버 쪽에서 한 번에 (TACP-9) */
 export async function rollupNav(scope: Scope): Promise<{ hqDesk: boolean; orgDesk: boolean }> {
   return { hqDesk: await hasHqDesk(scope), orgDesk: await canOpenOrgDesk(scope) };
+}
+
+/**
+ * PG-61 — 사용 안내(혼자 보기)에서 **이 사람에게 펼칠 단계**. 단계마다 「쓰는 사람」(`GuideCap`)이 붙어 있고,
+ * 여기서 이 사람이 무엇을 갖는지 정한다 (TACP-9 — 할 수 없는 일의 안내를 늘어놓지 않는다 · TACP-12 — 판정은 여기 하나).
+ *
+ * 예전 `/guide`는 페이지 안에서 `scope.isManager`·`scope.isHead`를 직접 보고 절을 거르고 있었다 — 같은 판정이
+ * 화면마다 따로 적히면 갈라진다. 이제 각 칸은 그 행동의 **게이트를 그대로 부른다**: 안내에서 보이는 단계와
+ * 실제로 열리는 화면이 같은 식에서 나온다.
+ *
+ * 발표 모드(/guide/present)는 이것을 쓰지 않는다 — 강당에서 회사 전체에 흐름 전체를 보여 주는 것이다(PG-59).
+ */
+export async function guideCaps(scope: Scope): Promise<GuideCap[]> {
+  const [nav, org, rollup] = await Promise.all([rollupNav(scope), orgPageView(scope), rollupOn()]);
+  const caps: [GuideCap, boolean][] = [
+    ['all', true],
+    ['manager', scope.isManager], // 수합 관리·부서 설정의 문 (TACP-16)
+    ['head', isReviewer(scope)], // 병합본 승인 (HM-47)
+    ['report', canSendReport(scope) && rollup], // 위로 제출 — assertReportSender와 같은 식 (RU-52)
+    ['hq', nav.hqDesk],
+    ['org', org.open],
+    ['orgDesk', org.desk],
+    ['schedule', org.schedule],
+  ];
+  return caps.filter(([, on]) => on).map(([c]) => c);
 }

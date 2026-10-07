@@ -11,7 +11,14 @@ export function ScheduleFold({ summary, children }: { summary: ReactNode; childr
     <>
       <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-[15px] text-muted">
         {summary}
-        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} aria-controls="schedule" className="btn-secondary btn-sm">
+        <button
+          type="button"
+          data-guide="schedule-open"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          aria-controls="schedule"
+          className="btn-secondary btn-sm"
+        >
           {open ? '일정 접기' : '일정 바꾸기'}
         </button>
       </div>

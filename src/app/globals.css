@@ -44,6 +44,15 @@
   --color-brand-tint: #7fb98c; /* 어두운 배경 위에서만 */
   --color-brand-soft: #eef4ef; /* 아주 옅은 배경 */
 
+  /*
+   * CP-105 — 발표 무대(프로젝터). 바탕이 검정인 이유: 프로젝터의 검정과 화면 가장자리가 섞여
+   * 레터박스가 「띠」로 보이지 않는다. 회색 바닥·흰 카드(CP-97)의 예외는 이 무대 하나다.
+   */
+  --color-stage: #000000;
+  --color-stage-soft: #161816; /* 무대 안의 면 — 글자 슬라이드의 상자, 발표자 창의 칸 */
+  --color-stage-line: #2e322e; /* 무대 안 구분선 */
+  --color-stage-muted: #a9aea9; /* 보조 글자 — stage 위 9.4:1 · stage-soft 위 7.9:1 */
+
   /* 상태 — 「-soft」 위에 같은 이름의 글자를 얹는다. 비율은 그 조합으로 쟀다 */
   --color-success: #0a7d2c;
   --color-success-soft: #e7f3ea; /* success 글자 4.62:1 */
@@ -71,6 +80,12 @@ body {
   font-family: var(--font-sans);
   line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  /*
+   * 한국어는 낱말 중간에서 줄을 바꾸지 않는다 — 기본값(normal)은 글자마다 끊어 「있습니/다」·「담/당자」가 됐다
+   * (사용 안내의 휴대폰 목록·목차, 강당에 비친 일정 표). 칸보다 긴 낱말(긴 파일 이름 등)만 overflow-wrap이 끊는다.
+   */
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 @layer components {
@@ -246,5 +261,115 @@ body {
   }
   .table-head {
     @apply text-left text-xs font-medium text-muted;
+  }
+
+  /*
+   * CP-101 — 사용 안내 무대. 카메라는 그림을 얹은 판(.guide-layer)을 옮기고 키운다.
+   * 600ms ease-out — 「어디로 가는지」를 눈이 따라갈 만큼만. 줄이기를 원하는 사람에게는 움직이지 않는다.
+   * 판은 그림 밖을 잘라 낸다 — 어둡게 하는 그림자가 그림 아래 빈 곳(BOTTOM_SLACK)까지 칠하지 않게.
+   *
+   * 겹쳐 바뀌는 시간: 같은 화면 320ms(카메라와 함께 흐른다) · 다른 화면 200ms(오래 겹치면 두 화면이 한 장에 보인다) ·
+   * 여러 장을 건너뛸 때(목차·번호 이동)는 겹치지 않고 바로 바꾼다 — 건너뛰는 동안의 화면은 볼 이유가 없다.
+   */
+  .guide-layer {
+    position: absolute;
+    left: 0;
+    top: 0;
+    overflow: hidden;
+    transform-origin: 0 0;
+    transition:
+      transform 600ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 320ms ease-out;
+  }
+  .guide-layer[data-swap='screen'] {
+    transition:
+      transform 600ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 200ms ease-out;
+  }
+  .guide-layer[data-swap='cut'] {
+    transition: none;
+  }
+  /*
+   * 스포트라이트는 두 겹이다 (2026-10-08 검토):
+   *   .guide-frame  카메라가 담는 곳 **밖**만 어둡게 — 누를 버튼의 앞뒤(표·안내 문구)는 밝게 남긴다.
+   *                 예전에는 버튼 하나만 밝고 나머지가 다 어두워, 「지난번에 낸 것」 목록처럼 버튼이 무엇을 할지 알려 주는
+   *                 곳까지 회색이 됐다. 발표 0.62 · 혼자 보기·인쇄 0.45 (--frame-dim)
+   *   .guide-spot   누를 곳의 테두리만 — 흰(canvas) 3px 틈 + 초록(brand-tint) 5px. 어두운 화면에서도 밝은 화면에서도 보인다
+   * 판과 같이 움직이므로 굵기는 배율(--cam-scale)로 나눠 화면에서 늘 같게 둔다.
+   */
+  .guide-frame {
+    position: absolute;
+    pointer-events: none;
+    border-radius: calc(12px / var(--cam-scale, 1));
+    box-shadow: 0 0 0 calc(4000px / var(--cam-scale, 1)) rgb(0 0 0 / var(--frame-dim, 0.45));
+  }
+  /*
+   * 테두리는 카메라가 **도착한 뒤에** 나타난다 — 260ms에 걸쳐 1.06배에서 제자리로(420ms 기다린 뒤).
+   * 움직이는 동안 테두리가 같이 미끄러지면 눈이 테두리를 쫓느라 화면을 못 본다. 떠나는 판의 테두리는 120ms에 사라진다.
+   */
+  .guide-spot {
+    position: absolute;
+    pointer-events: none;
+    border-radius: calc(12px / var(--cam-scale, 1));
+    box-shadow:
+      0 0 0 calc(3px / var(--cam-scale, 1)) var(--color-canvas),
+      0 0 0 calc(8px / var(--cam-scale, 1)) var(--color-brand-tint);
+    opacity: 0;
+    transform: scale(1.06);
+    transition:
+      opacity 120ms ease-out,
+      transform 120ms ease-out;
+  }
+  .guide-spot[data-on='true'] {
+    opacity: 1;
+    transform: none;
+    transition:
+      opacity 260ms ease-out 420ms,
+      transform 260ms ease-out 420ms;
+  }
+  .guide-layer[data-swap='cut'] .guide-spot,
+  .guide-static .guide-spot {
+    transition: none;
+  }
+  /* 그림 아래 끝 — 카메라가 그림 밑을 비울 때(BOTTOM_SLACK) 무대 바탕으로 흐려 잘린 끝이 보이지 않게 */
+  .guide-fade-bottom {
+    position: absolute;
+    left: 0;
+    right: 0;
+    pointer-events: none;
+    background: linear-gradient(to bottom, transparent, var(--guide-ground, var(--color-stage)));
+  }
+  /* 제목 글자 — 그림과 함께 200ms에 바뀐다 */
+  .guide-caption-in {
+    animation: guide-caption-in 200ms ease-out;
+  }
+  @keyframes guide-caption-in {
+    from {
+      opacity: 0;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .guide-layer,
+    .guide-spot,
+    .guide-spot[data-on='true'] {
+      transition: none;
+    }
+    .guide-caption-in {
+      animation: none;
+    }
+  }
+}
+
+/*
+ * PG-61 — 사용 안내를 인쇄하면 한 단계가 한 쪽 (배포물 PDF). 화면용 머리·목차·버튼은 빠진다.
+ * 그림은 줄이지 않는다 — 인쇄물에서 버튼 글자가 읽혀야 한다.
+ */
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 12mm;
+  }
+  body {
+    background: var(--color-canvas);
   }
 }

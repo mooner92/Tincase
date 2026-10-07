@@ -128,7 +128,7 @@ export function PreviousWeekPanel({
 
       본문 맨 위면 둘 다 풀린다: 열자마자 제일 먼저 보이고, 쓰기 시작하면 스크롤로 비켜난다.
     */
-    <div className="mb-6">
+    <div data-guide="previous-panel" className="mb-6">
       <div className="overflow-hidden rounded-lg border border-hairline">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-2.5">
           <button
@@ -160,6 +160,7 @@ export function PreviousWeekPanel({
           */}
           {rows && rows.plans.length > 0 && (
             <button
+              data-guide="previous-to-achievements"
               onClick={() => {
                 onCopyPlansToAchievements(rows.plans);
                 say(`계획 ${rows.plans.length}줄을 실적에 넣었습니다`);

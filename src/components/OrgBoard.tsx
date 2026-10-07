@@ -126,7 +126,7 @@ export function OrgBoard({
   };
 
   return (
-    <section className="card card-flush">
+    <section data-guide="org-board" className="card card-flush">
       {head && <div className="px-5 pt-5 pb-4 sm:px-6">{head}</div>}
       {/* RU-60 — 게시판으로 받은 섹션 파일. 제출 경로(웹 작성)와 다른 일이다 — 총괄이 받은 것을 최종본 자리에 넣는다 */}
       {columns.final && (
@@ -325,7 +325,7 @@ function FinalView({
           </>
         )}
         {f.source !== 'tincase' && (
-          <button onClick={onUpload} disabled={!!busy} className="btn-ghost h-8 px-2.5" title="취합게시판으로 받은 그 섹션의 hwp를 올립니다">
+          <button data-guide="org-upload" onClick={onUpload} disabled={!!busy} className="btn-ghost h-8 px-2.5" title="취합게시판으로 받은 그 섹션의 hwp를 올립니다">
             {busy === `up:${f.sectionId}` ? '올리는 중…' : f.source === 'upload' ? '다시 올리기' : '올리기'}
           </button>
         )}

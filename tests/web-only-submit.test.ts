@@ -229,14 +229,11 @@ describe('WA-30·32 스위치는 한 곳에서 읽고, 화면은 그 판정으�
     expect(choice.indexOf('{uploadOpen && (')).toBeLessThan(choice.indexOf('파일 올리기'));
     expect(choice).toMatch(/uploadOpen && mode === 'upload' \? \(\s*<UploadDropzone/);
 
-    // 안내의 업로드 단계는 닫힌 서버에서 빠진다
+    // 안내(PG-57)는 웹 작성만 보여 준다 — 업로드 단계가 없다. 업로드가 아직 열린 서버에서만 그 길이 있다는 한 줄
     const guide = src('src/app/guide/page.tsx');
     expect(guide).toContain('hwpUploadOpen()');
-    expect(guide).toMatch(/id: 'submit',\s*step: 1,\s*uploadOnly: true,/);
-    // 업로드 화면이 찍힌 시연은 닫힌 서버에서 그림을 빼고 글만 (다시 녹화하기 전까지)
-    expect(guide).toMatch(/id: 'compose',\s*step: 2,\s*recordedWithUpload: true,/);
-    expect(guide).toMatch(/id: 'cancel',\s*step: 3,\s*recordedWithUpload: true,/);
-    expect(guide.match(/media=\{uploadOpen \|\| !c\.recordedWithUpload\}/g)).toHaveLength(2);
+    expect(guide).toMatch(/\{uploadOpen && \(\s*<p className="callout/);
+    expect(src('src/lib/guide/deck.ts')).not.toMatch(/파일 올리기|드롭존|양식 다운로드/);
   });
 });
 

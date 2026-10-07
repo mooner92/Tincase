@@ -11,7 +11,8 @@ export default async function LoginPage() {
 
   return (
     <main className="mx-auto flex min-h-screen max-w-md flex-col justify-center px-6">
-      <div className="card px-6 py-8 sm:px-8 sm:py-9">
+      {/* CP-104 — 사용 안내가 가리키는 자리 */}
+      <div data-guide="login-form" className="card px-6 py-8 sm:px-8 sm:py-9">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/brand/tincase-stacked.svg" alt="Tincase" className="mx-auto h-[84px] w-auto" />
         <h1 className="sr-only">Tincase 로그인</h1>

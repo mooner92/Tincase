@@ -168,12 +168,14 @@ export function RuleEditor(props: RuleEditorProps) {
         />
       </section>
 
-      <section className="card" aria-labelledby="merge-settings">
+      <section data-guide="merge-settings" className="card" aria-labelledby="merge-settings">
         <h2 id="merge-settings" className="card-title">
           병합 설정
         </h2>
         <p className="card-desc">마감 후 자동 병합이 어떻게 돌지 정합니다.</p>
 
+        {/* CP-104 — 사용 안내가 가리키는 두 설정(분류·정렬). 감싸는 것은 화면에 아무 영향이 없다 */}
+        <div data-guide="merge-order">
         <Field first title="분류 순서" hint="병합본을 이 순서로 묶습니다">
           <input
             value={categories}
@@ -238,6 +240,8 @@ export function RuleEditor(props: RuleEditorProps) {
             )}
           </div>
         </Field>
+
+        </div>
 
         <Field title="병합 동작" hint="자동으로 할 일">
           <div className="space-y-2">

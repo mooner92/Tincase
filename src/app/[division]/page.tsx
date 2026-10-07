@@ -127,7 +127,7 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
 
       <div className="mt-6 grid grid-cols-1 items-start gap-4 lg:grid-cols-12 lg:gap-6">
         {isOwn && (
-          <section className="card lg:col-span-7" aria-labelledby="this-week">
+          <section data-guide="week-card" className="card lg:col-span-7" aria-labelledby="this-week">
             <div className="card-head">
               <div className="min-w-0">
                 <h2 id="this-week" className="card-title">
@@ -184,7 +184,7 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
               PG-08 — 잠기면 작성 버튼은 DOM에서 빠진다. 업로드가 열린 서버(PG-11)는 탭·드롭존이 이 줄 아래로 내려간다
             */}
             {(canCompose || mySubmission) && (
-              <div className="mt-5 flex flex-wrap items-center gap-2">
+              <div data-guide="my-actions" className="mt-5 flex flex-wrap items-center gap-2">
                 {canCompose && (
                   <SubmitChoice
                     hasPrevious={!!mySubmission}

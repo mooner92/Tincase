@@ -136,7 +136,7 @@ export function WeekSchedule({
           </p>
         </div>
         {canSchedule && !editing && (
-          <button onClick={() => setEditing(true)} className="btn-secondary btn-sm">
+          <button data-guide="deadline-edit" onClick={() => setEditing(true)} className="btn-secondary btn-sm">
             마감 바꾸기
           </button>
         )}
@@ -195,58 +195,63 @@ export function WeekSchedule({
             </button>
           </div>
 
-          {how === 'paste' ? (
-            <div className="mt-3">
-              <p className="mb-1.5 text-xs text-muted">
-                취합게시판(NAMS)의 작성 요청 본문을 <strong className="text-ink">그대로</strong> 붙여넣으세요.
-                「제출 기한은 …」 문장에서 날짜·시각·이유를 읽습니다.
-              </p>
-              <textarea
-                value={notice}
-                onChange={(e) => setNotice(e.target.value)}
-                rows={5}
-                placeholder={EXAMPLE}
-                className="w-full rounded-lg border border-border-strong px-3 py-2 text-sm"
-              />
-            </div>
-          ) : (
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
-              <label className="text-muted" htmlFor="external-at">
-                대외 마감
-              </label>
-              <input
-                id="external-at"
-                type="datetime-local"
-                value={external}
-                onChange={(e) => setExternal(e.target.value)}
-                className="rounded-lg border border-border-strong px-3 py-1.5"
-              />
-              <span className="text-xs text-muted">부서 마감은 한 시간 앞으로 잡습니다</span>
-            </div>
-          )}
+          {/* 사용 안내의 카메라 자리 — 붙여넣을 칸과 [미리보기]까지 (CP-104). 감싸기만 한다 */}
+          <div data-guide="deadline-paste-box">
+            {how === 'paste' ? (
+              <div className="mt-3">
+                <p className="mb-1.5 text-xs text-muted">
+                  취합게시판(NAMS)의 작성 요청 본문을 <strong className="text-ink">그대로</strong> 붙여넣으세요.
+                  「제출 기한은 …」 문장에서 날짜·시각·이유를 읽습니다.
+                </p>
+                <textarea
+                  data-guide="deadline-paste"
+                  value={notice}
+                  onChange={(e) => setNotice(e.target.value)}
+                  rows={5}
+                  placeholder={EXAMPLE}
+                  className="w-full rounded-lg border border-border-strong px-3 py-2 text-sm"
+                />
+              </div>
+            ) : (
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                <label className="text-muted" htmlFor="external-at">
+                  대외 마감
+                </label>
+                <input
+                  id="external-at"
+                  type="datetime-local"
+                  value={external}
+                  onChange={(e) => setExternal(e.target.value)}
+                  className="rounded-lg border border-border-strong px-3 py-1.5"
+                />
+                <span className="text-xs text-muted">부서 마감은 한 시간 앞으로 잡습니다</span>
+              </div>
+            )}
 
-          <div className="mt-3 flex gap-2">
-            <button
-              onClick={() => post('preview')}
-              disabled={busy || (how === 'paste' ? !notice.trim() : !external)}
-              className="btn-primary btn-sm"
-            >
-              {busy ? '확인 중…' : '미리보기'}
-            </button>
-            <button
-              onClick={() => {
-                setEditing(false);
-                setPlan(null);
-                setErr(null);
-              }}
-              className="btn-secondary btn-sm"
-            >
-              닫기
-            </button>
+            <div className="mt-3 flex gap-2">
+              <button
+                data-guide="deadline-preview"
+                onClick={() => post('preview')}
+                disabled={busy || (how === 'paste' ? !notice.trim() : !external)}
+                className="btn-primary btn-sm"
+              >
+                {busy ? '확인 중…' : '미리보기'}
+              </button>
+              <button
+                onClick={() => {
+                  setEditing(false);
+                  setPlan(null);
+                  setErr(null);
+                }}
+                className="btn-secondary btn-sm"
+              >
+                닫기
+              </button>
+          </div>
           </div>
 
           {plan && (
-            <div className="callout callout-muted mt-4">
+            <div data-guide="deadline-plan" className="callout callout-muted mt-4">
               <p className="text-ink">
                 <span className="font-semibold">{plan.weekLabel}</span> 부서 마감{' '}
                 {plan.beforeKo !== plan.departmentKo && (
@@ -264,7 +269,8 @@ export function WeekSchedule({
                 <tbody>
                   {plan.schedule.map((r) => (
                     <tr key={r.label + r.atKo} className={r.passed ? 'text-muted-soft' : 'text-body'}>
-                      <td className="w-40 py-0.5">{r.label}</td>
+                      {/* 이름 칸은 넓은 화면에서 한 줄 — 「부서장 검토 요청 (승인 전일 때만)」이 「때/만)」으로 끊겨 강당에 비쳤다 */}
+                      <td className="w-40 py-0.5 pr-4 sm:whitespace-nowrap">{r.label}</td>
                       <td className="py-0.5 tabular-nums">{r.atKo}</td>
                       <td className="py-0.5">{r.passed ? '이미 지남 — 나가지 않음' : ''}</td>
                     </tr>
@@ -284,7 +290,7 @@ export function WeekSchedule({
               {plan.blocked ? (
                 <p className="callout callout-error mt-2 py-2 text-xs">{plan.blocked}</p>
               ) : (
-                <button onClick={() => post('apply')} disabled={busy} className="btn-primary btn-sm mt-3">
+                <button data-guide="deadline-apply" onClick={() => post('apply')} disabled={busy} className="btn-primary btn-sm mt-3">
                   {busy ? '적용 중…' : '이대로 적용'}
                 </button>
               )}

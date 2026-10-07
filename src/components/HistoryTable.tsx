@@ -86,7 +86,7 @@ export function HistoryTable({
         ))}
       </ul>
 
-      <div className="card card-flush mt-6 hidden overflow-x-auto sm:block">
+      <div data-guide="history-table" className="card card-flush mt-6 hidden overflow-x-auto sm:block">
         <table className="table whitespace-nowrap">
           <thead>
             <tr>

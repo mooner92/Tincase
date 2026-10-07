@@ -28,7 +28,7 @@ export function SubmitChoice({
 
   // PG-12 — 할 일 하나. 아직 안 냈으면 이것이 이 카드의 주 버튼이고, 냈으면 「다시 작성」은 보조 버튼이다(CP-99)
   const composeButton = (
-    <button onClick={() => setComposing(true)} className={hasPrevious ? 'btn-secondary btn-sm' : 'btn-primary'}>
+    <button data-guide="compose-open" onClick={() => setComposing(true)} className={hasPrevious ? 'btn-secondary btn-sm' : 'btn-primary'}>
       {hasPrevious ? '다시 작성 (새 버전)' : '작성하기'}
     </button>
   );

@@ -261,7 +261,8 @@ export function WebComposer({
             onCopyPlansToAchievements={(rows) => appendRows('achievements', rows)}
           />
           {SECTIONS.map((s) => (
-            <section key={s.key} className="mb-6">
+            // CP-104 — 사용 안내는 첫 표(실적)를 가리킨다
+            <section key={s.key} data-guide={s.key === 'achievements' ? 'compose-table' : undefined} className="mb-6">
               <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
                 <h3 className="text-[15px] font-semibold text-ink">
                   {s.no}. {s.title}
@@ -410,7 +411,7 @@ export function WebComposer({
         </div>
 
         {/* 바닥 — 이 화면의 주 버튼은 [제출] 하나다 */}
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-hairline bg-canvas px-4 py-3 sm:px-7">
+        <div data-guide="compose-footer" className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-hairline bg-canvas px-4 py-3 sm:px-7">
           <span aria-live="polite" className={`text-sm font-medium ${msg?.ok ? 'text-success' : 'text-error'}`}>
             {msg?.text}
           </span>
@@ -424,7 +425,7 @@ export function WebComposer({
               실적 {filled.achievements} · 계획 {filled.plans}
               {filled.notes > 0 && ` · 특이 ${filled.notes}`}
             </span>
-            <button onClick={submit} disabled={busy || total === 0} className="btn-primary">
+            <button data-guide="compose-submit" onClick={submit} disabled={busy || total === 0} className="btn-primary">
               {busy ? '제출 중…' : '제출'}
             </button>
           </div>

@@ -59,7 +59,11 @@ export function ReportSubmitCard({
   const sent = state.current;
   const needsSubmit = !sent || state.changedSinceSubmit;
   return (
-    <section className={bare ? 'card-section' : 'card'} aria-labelledby={`report-${state.level}`}>
+    <section
+      data-guide={state.level === 'hq' ? 'report-hq' : 'report-unit'}
+      className={bare ? 'card-section' : 'card'}
+      aria-labelledby={`report-${state.level}`}
+    >
       <div className="card-head">
         <div className="min-w-0">
           <h2 id={`report-${state.level}`} className={bare ? 'text-[15px] font-semibold text-ink' : 'card-title'}>
@@ -96,6 +100,7 @@ export function ReportSubmitCard({
       <div className="mt-5 flex flex-wrap items-center gap-2">
         {needsSubmit && (
           <button
+            data-guide={state.level === 'hq' ? 'report-hq-submit' : 'report-unit-submit'}
             onClick={submit}
             disabled={busy || !state.hasOutput}
             className={primary ? 'btn-primary' : 'btn-secondary'}

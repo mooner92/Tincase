@@ -142,7 +142,7 @@ export function MergePanel({
   const warnings = noModel ? state.warnings.filter((w) => !w.includes(MODEL_NOT_CONFIGURED)) : state.warnings;
 
   return (
-    <section className="card" aria-labelledby="merge-panel">
+    <section data-guide="merge-card" className="card" aria-labelledby="merge-panel">
       <div className="card-head">
         <div className="min-w-0">
           <h2 id="merge-panel" className="card-title">
@@ -176,75 +176,78 @@ export function MergePanel({
         )}
       </div>
 
-      {/* HM-47 — 부서장 승인. 한 줄로: 상태 · 누가 · 언제. 담당자가 「언제·무엇을」 고쳤는지 여기서 본다 */}
-      {done && (state.review || state.hasHead) && (
-        <div className="mt-3 text-sm">
-          {state.review ? (
-            <>
-              <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className={`chip ${state.review.changedAfter ? 'chip-warn' : 'chip-ok'}`}>
-                  {state.review.changedAfter ? '승인 뒤 바뀜' : '승인 완료'}
-                </span>
-                <span className="text-ink">{state.review.by}</span>
-                <span className="text-muted">
-                  {state.review.atKst} · {state.review.kind === 'approve' ? '고친 곳 없이 승인' : state.review.summary}
-                </span>
-                {state.review.lines.length > 0 && (
-                  <button onClick={() => setOpenReview((v) => !v)} className="text-muted underline underline-offset-2 hover:text-ink">
-                    {openReview ? '접기' : '바뀐 곳 보기'}
-                  </button>
-                )}
-              </p>
-              {state.review.changedAfter && (
-                <p className="mt-1 text-muted">
-                  승인한 뒤 병합본이 다시 만들어졌거나 고쳐졌습니다 — 지금 판은 승인한 판과 다릅니다.
+      {/* PG-58 · CP-104 — 사용 안내가 「승인 상태 + 할 일」 두 줄만 카메라에 담는 자리. 감싸기만 하고 모양은 바꾸지 않는다 */}
+      <div data-guide="merge-review">
+        {/* HM-47 — 부서장 승인. 한 줄로: 상태 · 누가 · 언제. 담당자가 「언제·무엇을」 고쳤는지 여기서 본다 */}
+        {done && (state.review || state.hasHead) && (
+          <div className="mt-3 text-sm">
+            {state.review ? (
+              <>
+                <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                  <span className={`chip ${state.review.changedAfter ? 'chip-warn' : 'chip-ok'}`}>
+                    {state.review.changedAfter ? '승인 뒤 바뀜' : '승인 완료'}
+                  </span>
+                  <span className="text-ink">{state.review.by}</span>
+                  <span className="text-muted">
+                    {state.review.atKst} · {state.review.kind === 'approve' ? '고친 곳 없이 승인' : state.review.summary}
+                  </span>
+                  {state.review.lines.length > 0 && (
+                    <button onClick={() => setOpenReview((v) => !v)} className="text-muted underline underline-offset-2 hover:text-ink">
+                      {openReview ? '접기' : '바뀐 곳 보기'}
+                    </button>
+                  )}
                 </p>
-              )}
-              {openReview && (
-                <ul className="mt-2 space-y-0.5 text-[13px] text-body">
-                  {state.review.lines.map((l, i) => (
-                    <li key={i}>· {l}</li>
-                  ))}
-                </ul>
-              )}
-            </>
-          ) : (
-            <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="chip chip-muted">부서장 승인 전</span>
-              <span className="text-muted">부서장이 고쳐 저장하거나 [승인]을 누르면 담당자에게 알림이 갑니다</span>
-            </p>
-          )}
-        </div>
-      )}
+                {state.review.changedAfter && (
+                  <p className="mt-1 text-muted">
+                    승인한 뒤 병합본이 다시 만들어졌거나 고쳐졌습니다 — 지금 판은 승인한 판과 다릅니다.
+                  </p>
+                )}
+                {openReview && (
+                  <ul className="mt-2 space-y-0.5 text-[13px] text-body">
+                    {state.review.lines.map((l, i) => (
+                      <li key={i}>· {l}</li>
+                    ))}
+                  </ul>
+                )}
+              </>
+            ) : (
+              <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
+                <span className="chip chip-muted">부서장 승인 전</span>
+                <span className="text-muted">부서장이 고쳐 저장하거나 [승인]을 누르면 담당자에게 알림이 갑니다</span>
+              </p>
+            )}
+          </div>
+        )}
 
-      {/* 행동 한 줄 — 주 버튼은 하나: 보통은 [내용 보기], 부서장이 승인할 판이 있으면 [승인] */}
-      {((done && canDownload) || canRun || approveNow) && (
-        <div className="mt-5 flex flex-wrap items-center gap-2">
-          {approveNow && (
-            <button onClick={approve} disabled={busy} className="btn-primary">
-              고칠 것 없음 · 승인
-            </button>
-          )}
-          {done && canDownload && (
-            <button onClick={() => setOpenContent(true)} className={approveNow ? 'btn-secondary' : 'btn-primary'}>
-              내용 보기
-            </button>
-          )}
-          {done && canDownload && (
-            <a href={href} className="btn-secondary">
-              받기
-            </a>
-          )}
-          {canRun && (
-            <button onClick={run} disabled={busy || submitted === 0} className={done ? 'btn-ghost' : 'btn-secondary'}>
-              {busy ? '병합 중…' : done ? '다시 병합' : '지금 병합'}
-            </button>
-          )}
-        </div>
-      )}
-      {approveNow && (
-        <p className="mt-2 text-sm text-muted">고칠 곳이 있으면 [내용 보기]에서 고쳐 저장하세요 — 저장이 곧 승인입니다.</p>
-      )}
+        {/* 행동 한 줄 — 주 버튼은 하나: 보통은 [내용 보기], 부서장이 승인할 판이 있으면 [승인] */}
+        {((done && canDownload) || canRun || approveNow) && (
+          <div className="mt-5 flex flex-wrap items-center gap-2">
+            {approveNow && (
+              <button data-guide="merged-approve" onClick={approve} disabled={busy} className="btn-primary">
+                고칠 것 없음 · 승인
+              </button>
+            )}
+            {done && canDownload && (
+              <button data-guide="merged-open" onClick={() => setOpenContent(true)} className={approveNow ? 'btn-secondary' : 'btn-primary'}>
+                내용 보기
+              </button>
+            )}
+            {done && canDownload && (
+              <a href={href} className="btn-secondary">
+                받기
+              </a>
+            )}
+            {canRun && (
+              <button data-guide="merge-run" onClick={run} disabled={busy || submitted === 0} className={done ? 'btn-ghost' : 'btn-secondary'}>
+                {busy ? '병합 중…' : done ? '다시 병합' : '지금 병합'}
+              </button>
+            )}
+          </div>
+        )}
+        {approveNow && (
+          <p className="mt-2 text-sm text-muted">고칠 곳이 있으면 [내용 보기]에서 고쳐 저장하세요 — 저장이 곧 승인입니다.</p>
+        )}
+      </div>
 
       {err && <p className="callout callout-error mt-4">{err}</p>}
       {note && !err && <p className="mt-3 text-sm font-medium text-success">{note}</p>}

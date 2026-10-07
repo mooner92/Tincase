@@ -331,6 +331,7 @@ export function MergedDrawer({
         role="dialog"
         aria-modal="true"
         aria-label="병합본 보기"
+        data-guide="merged-drawer"
         className="absolute inset-y-0 right-0 flex h-full w-full max-w-4xl flex-col border-l border-hairline bg-canvas shadow-[0_8px_32px_rgba(0,0,0,0.12)]"
       >
         <header className="flex items-start justify-between gap-3 border-b border-hairline px-4 py-4 sm:px-6">
@@ -352,7 +353,7 @@ export function MergedDrawer({
           2026-10-07 — 버튼 넷이 모양 셋(테두리·초록·옅은 테두리·회색)이었다. 이 드로어의 주 버튼은 [수정 저장] 하나,
           나머지는 보조·글자 버튼이다 (CP-99). 설명 글은 버튼 줄에 끼우지 않고 그 밑 한 줄로
         */}
-        <div className="border-b border-hairline px-4 py-3 sm:px-6">
+        <div data-guide="merged-head" className="border-b border-hairline px-4 py-3 sm:px-6">
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={async () => {
@@ -398,7 +399,7 @@ export function MergedDrawer({
           </span>
           {/* 주 버튼은 고친 것이 있을 때만 나타난다 — 늘 회색으로 누워 있으면 좁은 화면에서 한 줄을 차지한다 */}
           {canEdit && (dirty || busy) && (
-            <button onClick={save} disabled={!dirty || busy} className="btn-primary btn-sm">
+            <button data-guide="merged-save" onClick={save} disabled={!dirty || busy} className="btn-primary btn-sm">
               {busy ? '저장 중…' : '수정 저장'}
             </button>
           )}
@@ -430,7 +431,7 @@ export function MergedDrawer({
           </div>
         )}
 
-        <div ref={bodyRef} className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+        <div ref={bodyRef} data-guide="merged-body" className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
           {err && <p className="callout callout-error mb-4">{err}</p>}
           {!data && !err && <p className="text-sm text-muted">불러오는 중…</p>}
 
