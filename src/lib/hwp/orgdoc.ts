@@ -1,8 +1,10 @@
-// RU-60~63 — **전사 취합본 조립.** 13섹션을 정해진 순서로, 섹션마다 원래 꼴 그대로(RU-62).
+// RU-60~63 · RU-10 — **섹션 조립 엔진.** 전사 취합본(13섹션)과 본부 이어 붙이기가 같이 쓰는 **하나뿐인** 조립기다.
+// 섹션을 정해진 순서로, 섹션마다 원래 꼴 그대로(RU-62).
 //
-// 지금까지의 이어 붙이기(rollup.ts)는 실형 5열 표만 다시 그렸다. 실제 최종본에는 본부·센터형(6열 「실·과제·항목」),
-// 환경평가형(평가 실적 표), 임원실 꼴이 섞여 있어(분석 §3·4) 다시 그리면 망가진다. 그래서 여기서는
+// 처음의 이어 붙이기(옛 rollup.ts의 composeRollupHwp)는 실형 5열 표만 다시 그렸다. 실제 최종본에는 본부·센터형
+// (6열 「실·과제·항목」), 환경평가형(평가 실적 표), 임원실 꼴이 섞여 있어(분석 §3·4) 다시 그리면 망가진다. 그래서
 // 섹션 블록을 **레코드째 복제**하고 서식 번호만 대상 문서에 맞게 옮겨 적는다(docmerge.ts).
+// 본부 단계도 2026-10-07부터 이 엔진을 쓴다(중복 제거) — 엔진이 둘이면 본부장이 본 꼴과 최종본의 꼴이 갈라진다.
 //
 // 섹션 하나 = [제목 문단(생성, 새 쪽)] + [원본의 본문 — 원본 제목·빨간 안내문은 뺀다]
 // 제목은 제출자가 쓰지 않는다(RU-61) — AI홍보전략실 제목이 매주 빠지던 것(분석 §6.2)이 구조적으로 없어진다.
@@ -195,8 +197,16 @@ function fixLastFlags(recs: HwpRecord[]) {
   });
 }
 
+export interface ComposeOrgOptions {
+  /**
+   * RU-18 — 둘째 섹션부터 새 쪽에서 시작한다(제목 문단 머리의 쪽 나누기). 기본 켬.
+   * 전사 최종본은 언제나 켠다(분석 §3.1). 본부 단계는 본부 설정(`rollupPageBreak`)을 따른다.
+   */
+  pageBreak?: boolean;
+}
+
 /**
- * RU-60~62 — 양식(최종본 꼴) + 섹션들 → 전사 취합본.
+ * RU-60~62 · RU-10 — 양식(최종본 꼴) + 섹션들 → 취합본 (전사 취합본·본부본 모두).
  *
  * 양식의 첫 문단(구역 정의를 든 제목 문단)을 첫 섹션 제목으로 쓰고, 둘째부터는 그 문단을 **컨트롤을 걷어** 복제한다 —
  * 섹션 제목 모양(분석 §3.2 「(상단) 본부,센터,실명」)이 모든 섹션에 같다.
@@ -204,7 +214,9 @@ function fixLastFlags(recs: HwpRecord[]) {
 export function composeOrgDocument(
   templateBytes: Buffer,
   sections: readonly OrgSectionInput[],
+  opts: ComposeOrgOptions = {},
 ): { bytes: Buffer; outcomes: OrgSectionOutcome[]; warnings: string[] } {
+  const pageBreak = opts.pageBreak ?? true;
   if (sections.length === 0) throw new DocMergeError('섹션이 없습니다');
   const t = openHwp(templateBytes);
   const tRecs = parseRecords(t.sections[0]);
@@ -223,7 +235,7 @@ export function composeOrgDocument(
   sections.forEach((s, i) => {
     const head = i === 0 ? clone(titleFirst) : clone(titleProto);
     setParagraphText(head, { start: 0, end: head.length }, s.title);
-    if (i > 0) head[0].data[BREAK_TYPE] = head[0].data[BREAK_TYPE] | PAGE_BREAK; // 섹션마다 새 쪽 (분석 §3.1)
+    if (i > 0 && pageBreak) head[0].data[BREAK_TYPE] = head[0].data[BREAK_TYPE] | PAGE_BREAK; // 섹션마다 새 쪽 (분석 §3.1 · RU-18)
     const before = out.length;
     out.push(...head);
     if (!s.source) {

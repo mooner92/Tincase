@@ -1,6 +1,7 @@
 // RU-60~65 — 전사 취합본 만들기 (총괄 「딸깍」). 섹션 출처를 정하고(sections.ts) 실제 최종본 꼴로 조립한다(orgdoc.ts).
 //
-// 본부 단계의 이어 붙이기(rollup.ts)와 달리 섹션을 **원래 꼴 그대로** 옮긴다 — 본부·센터형 6열 표가 섞여 있기 때문이다.
+// 섹션을 **원래 꼴 그대로** 옮긴다 — 본부·센터형 6열 표가 섞여 있기 때문이다. 본부 이어 붙이기(run.ts)도 같은 엔진이다(RU-10,
+// 2026-10-07 중복 제거) — 그래서 본부장이 검토한 본부본의 섹션과 여기서 만드는 최종본의 섹션이 같은 꼴이다.
 import path from 'node:path';
 import type { RollupRun, WeekSlot } from '@prisma/client';
 import { prisma } from '../db';

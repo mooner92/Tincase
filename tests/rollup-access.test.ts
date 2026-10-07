@@ -345,6 +345,33 @@ d('TACP-21 위로 올린 제출', () => {
     expect(readWorklog(bytes).worklog.achievements[0].content).toBe('실하나 둘째 판');
   });
 
+  it('[RU-T28] RU-10·61 — 본부 이어 붙이기도 전사와 같은 섹션 제목을 단다 (섹션이 없는 부서는 부서 이름 — RU-T25·26)', async () => {
+    // RU-T34가 섹션을 만들었다: 본부가(실하나)·본부가(실둘). 본부가의 순서는 RU-T26에서 실둘 → 실하나
+    const hq = await import('@/app/api/rollup/hq/route');
+    expect((await hq.POST(nx('/api/rollup/hq', ID.hqLead, jsonInit('POST', { isoKey })))).status).toBe(200);
+    const b = await (await hq.GET(nx(`/api/rollup/hq?isoKey=${isoKey}`, ID.hqLead))).json();
+    expect(b.board.lastRun.status).toBe('succeeded');
+    expect(b.board.lastRun.units.map((u: { name: string }) => u.name)).toEqual(['본부가(실둘)', '본부가(실하나)']);
+    // 화면의 행 수는 보낸 사본에서 센다 — 정규화가 넣는 「특이사항 없음」은 세지 않는다
+    expect(b.board.lastRun.units.map((u: { rows: unknown; emphasis: number }) => [u.rows, u.emphasis])).toEqual([
+      [{ achievements: 1, plans: 1, notes: 0 }, 1],
+      [{ achievements: 1, plans: 1, notes: 0 }, 1],
+    ]);
+    // 문서 안의 제목도 같다 — 원본 맨 위 부서명 줄(「실둘」)은 빠지고 생성한 제목이 단위명이 된다
+    const { prisma } = await import('@/server/db');
+    const run = await prisma.rollupRun.findFirstOrThrow({ where: { level: 'hq' }, orderBy: { startedAt: 'desc' } });
+    const { readStoredFile } = await import('@/server/storage');
+    const { readUnits } = await import('@/lib/hwp/rollup');
+    const units = readUnits(await readStoredFile(run.outputPath!), 'x').units;
+    expect(units.map((u) => u.name)).toEqual(['본부가(실둘)', '본부가(실하나)']);
+    // 섹션 결과(자동 수정 등)는 제목을 앞에 단 경고로 남는다. 생성한 제목으로 바꾼 부서명 줄은 소음이라 알리지 않는다
+    const warnings: string[] = JSON.parse(run.warnings ?? '[]');
+    expect(warnings.some((w) => w.startsWith('본부가(실둘): 자동 수정'))).toBe(true);
+    expect(warnings.join(' ')).not.toContain('제목 「실둘」');
+    // 섹션 설정을 읽기만 한다 — 본부 실행이 총괄의 섹션 목록을 만들거나 바꾸지 않는다
+    expect(await prisma.orgSection.count()).toBe(4);
+  });
+
   it('[RU-T27] 제출 취소 — 내 부서 것만. 취소하면 위의 결과가 「바뀜」', async () => {
     const { prisma } = await import('@/server/db');
     const r = await prisma.reportSubmission.findFirstOrThrow({ where: { divisionId: divId.u2, withdrawnAt: null } });

@@ -1,35 +1,25 @@
-// RU-10~15 — 본부·전사 단계의 **이어 붙이기** (병합 엔진 L5).
+// RU-12·16 — 병합본을 **단위 블록으로 읽기** (표 제목 낱말 · 단위 이름 · 1·2·3 표의 행).
 //
-// 실·팀 병합본 여러 개를 한 문서로 잇는다. 단위 **안의** 내용(행 순서·구분 번호·파란 「공유」)은
-// 손대지 않고, 단위의 **순서**만 정한다 (RU-11).
+// 이 파일에는 원래 본부·전사 이어 붙이기 엔진(composeRollupHwp — 양식의 「제목 + 1·2·3 표」를 단위 수만큼 복제해
+// 5열 표를 **다시 그리는** 방식)이 있었다. 본부·센터형 6열 표·환경평가형이 섞인 최종본을 다시 그리면 망가져서
+// 전사 취합이 섹션을 원래 꼴 그대로 옮기는 엔진(orgdoc.ts — RU-62)으로 갔고, 2026-10-07 본부 단계도 그쪽으로
+// 합쳤다(중복 제거). 조립기는 이제 orgdoc.ts 하나다.
 //
-// 파일을 바이트째 잇지 않는다(RU-12). 문서마다 서식 표(DocInfo)가 달라서, 남의 문서 본문을
-// 그대로 붙이면 서식 번호가 엉뚱한 서식을 가리킨다. 대신 각 문서를 **단위 블록으로 읽고**,
-// 양식 한 벌의 「제목 + 1·2·3 표」를 단위 수만큼 **복제해서** 채운다 — HM-03 「합성하지 말고
-// 복제하라」를 문서 단위로 넓힌 것이다. 서식·글꼴·테두리는 전부 양식이 들고 있다.
+// 남은 것은 **읽기**다 — 조립하지 않고 내용을 셀 때 쓴다:
+//   · readUnits   본부 결과 화면의 행·「공유」 수(run.ts), 지난 자료 적재(scripts/import-reports.ts), 테스트의 「넣은 것 = 다시 읽은 것」
+//   · titleBucket 표 제목 알아보기 — 섹션 본문 고르기(orgdoc.ts)·정규화(normalize.ts)가 같은 판정을 쓴다
 import { openHwp } from './ole';
-import { parseRecords, serializeRecords, TAG, type HwpRecord } from './record';
+import { parseRecords } from './record';
 import { extractTables, tableGrid, type HwpTable } from './model';
 import { cellValue, rowEmphasis } from './reader';
-import { BLUE, charShapeColors, ensureColorShape } from './charshape';
-import {
-  fillTable,
-  HwpWriteError,
-  ownControls,
-  ownText,
-  packHwp,
-  plainShapeIdOf,
-  prependTitleParagraph,
-  setParagraphText,
-  topParagraphs,
-  type Block,
-} from './writer';
+import { charShapeColors } from './charshape';
+import { ownControls, ownText, topParagraphs } from './writer';
 
 export type Bucket = 'achievements' | 'plans' | 'notes';
 export const BUCKETS: readonly Bucket[] = ['achievements', 'plans', 'notes'];
 
 export interface UnitRow {
-  /** 구분 열 그대로 («1-3»). RU-11 — 다시 매기지 않는다 */
+  /** 구분 열 그대로 («1-3») — 읽을 때 다시 매기지 않는다 */
   no: string;
   content: string;
   date: string;
@@ -168,217 +158,4 @@ export function readUnits(buf: Buffer, fallbackName: string): UnitsRead {
   dropPending();
 
   return { units: units.map(({ name, tables }) => ({ name, tables })), warnings };
-}
-
-export interface ComposeRollupOptions {
-  /** 둘째 단위부터 새 쪽에서 시작한다 (문단 머리의 쪽 나누기) */
-  pageBreak?: boolean;
-}
-
-export class RollupUnsupported extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'RollupUnsupported';
-  }
-}
-
-/** PARA_HEADER 11바이트째 — 나누기 종류. 0x04 = 쪽 나누기 (HWP 5.0 표 60) */
-const BREAK_TYPE = 11;
-const PAGE_BREAK = 0x04;
-/** 표 CTRL_HEADER의 개체 공통 속성 안 인스턴스 ID 자리 (ctrlId 4 + 속성·좌표·크기·z 24 + 여백 8) */
-const TBL_INSTANCE_ID = 36;
-
-const clone = (rs: readonly HwpRecord[]): HwpRecord[] => rs.map((r) => ({ ...r, data: Buffer.from(r.data) }));
-
-function ctrlName(data: Buffer): string {
-  return data.length < 4 ? '' : Buffer.from([data[3], data[2], data[1], data[0]]).toString('latin1');
-}
-
-/**
- * RU-10 — 양식 + 단위 블록들 → 이어 붙인 hwp.
- *
- * 양식의 꼴(전 부서 양식이 같다, 2026-10-07 실측):
- *
- *   P0  [secd][cold]「기획조정실」     ← 첫 문단. 구역 정의 컨트롤이 붙어 있다
- *   P1  「1. 주요 업무실적」
- *   P2  [표]   P3 (빈 줄)   P4 「2. 주요 업무계획」   P5 [표]   P6 (빈 줄)   P7 「3. 기타 특이사항」   P8 [표]
- *
- * 만드는 꼴:
- *
- *   P0           「단위1」 (컨트롤 그대로·글자만)
- *   P1..끝 복제  단위1의 표 셋
- *   머리 복제    「단위2」 (P1을 복제해 글자만 — P0과 같은 문단·글자 모양이다)
- *   P1..끝 복제  단위2의 표 셋
- *   …
- *
- * 첫 문단이 「1. 주요 업무실적」인 양식(부서명이 없는 옛 꼴)은 먼저 HM-46으로 부서명 자리를 만든다.
- */
-export function composeRollupHwp(
-  templateBytes: Buffer,
-  units: readonly UnitBlock[],
-  opts: ComposeRollupOptions = {},
-): { bytes: Buffer; warnings: string[] } {
-  if (units.length === 0) throw new RollupUnsupported('이어 붙일 단위가 없습니다.');
-  const warnings: string[] = [];
-  const file = openHwp(templateBytes);
-  let recs = parseRecords(file.sections[0]);
-
-  let blocks = topParagraphs(recs);
-  if (blocks.length < 2) throw new RollupUnsupported('양식에 문단이 너무 적습니다.');
-  if (ownControls(recs, blocks[0]).includes('tbl ')) {
-    throw new RollupUnsupported('양식의 첫 문단에 표가 붙어 있어 단위 이름을 둘 자리가 없습니다.');
-  }
-  if (titleBucket(ownText(recs, blocks[0]))) {
-    // 부서명 줄이 없는 양식 — 첫 문단을 이름 자리로 비워 내고 제목을 아래로 내린다
-    if (prependTitleParagraph(recs, units[0].name) === 'unsupported') {
-      throw new RollupUnsupported('양식 첫 부분의 구조가 달라 단위 이름을 둘 자리를 만들지 못했습니다.');
-    }
-    blocks = topParagraphs(recs);
-  }
-
-  const first = blocks[0];
-  const head = recs.slice(first.start, first.end);
-  const body = recs.slice(blocks[1].start);
-  const tablesPerUnit = locateTableCount(body);
-  if (tablesPerUnit === 0) throw new RollupUnsupported('양식에 표가 없습니다.');
-
-  // 단위 머리 문단의 원형 — 첫 문단과 문단 모양이 같은 「컨트롤 없는 글 문단」 (HM-46과 같은 선택)
-  const shape = recs[first.start].data.readUInt16LE(8);
-  const plain = blocks.slice(1).filter((b) => ownControls(recs, b).length === 0 && ownText(recs, b).trim() !== '');
-  const protoBlock: Block | undefined = plain.find((b) => recs[b.start].data.readUInt16LE(8) === shape) ?? plain[0];
-  if (!protoBlock && units.length > 1) throw new RollupUnsupported('단위 이름 줄로 복제할 문단을 양식에서 찾지 못했습니다.');
-  const proto = protoBlock ? recs.slice(protoBlock.start, protoBlock.end) : [];
-
-  // ── 조립 — 전부 복제다. 새 레코드를 지어내지 않는다 ──
-  const out: HwpRecord[] = clone(head);
-  setParagraphText(out, { start: 0, end: out.length }, units[0].name);
-  out.push(...clone(body));
-  for (let k = 1; k < units.length; k++) {
-    const h = clone(proto);
-    setParagraphText(h, { start: 0, end: h.length }, units[k].name);
-    if (opts.pageBreak) {
-      const d = Buffer.from(h[0].data);
-      d[BREAK_TYPE] = d[BREAK_TYPE] | PAGE_BREAK;
-      h[0] = { ...h[0], data: d };
-    }
-    out.push(...h, ...clone(body));
-  }
-  recs = out;
-  markLastParagraph(recs);
-  renumberTableInstances(recs, tablesPerUnit);
-
-  // ── 강조 서식 — 필요할 때만 DocInfo를 건드린다 (HM-37) ──
-  const wantEmphasis = units.some((u) => BUCKETS.some((b) => u.tables[b].some((r) => r.emphasis)));
-  let docInfoOut: Buffer | undefined;
-  let blue: number | null = null;
-  if (wantEmphasis) {
-    const di = parseRecords(file.docInfo);
-    const p = plainShapeIdOf(recs, 0);
-    blue = p === null ? null : ensureColorShape(di, p, BLUE);
-    if (blue === null) warnings.push('파란 「공유」 서식을 만들지 못해 강조 없이 이어 붙였습니다.');
-    else docInfoOut = serializeRecords(di);
-  }
-
-  // ── 채우기 — 단위 k의 b번 표 = 전체에서 k×(표 수)+b번째 표 ──
-  units.forEach((u, k) => {
-    BUCKETS.forEach((bucket, b) => {
-      const rows = u.tables[bucket];
-      if (b >= tablesPerUnit) {
-        if (rows.length) warnings.push(`${u.name}: 양식에 ${b + 1}번 표가 없어 ${rows.length}행을 넣지 못했습니다.`);
-        return;
-      }
-      fillTable(
-        recs,
-        k * tablesPerUnit + b,
-        rows.map((r, i) => [r.no || `${b + 1}-${i + 1}`, r.content, r.date, r.place, r.attendee]),
-        { emphasis: rows.map((r) => r.emphasis), emphasisShapeId: blue },
-      );
-    });
-  });
-
-  const bytes = packHwp(templateBytes, [serializeRecords(recs)], docInfoOut);
-
-  // ── RU-14 자체 점검 — 다시 읽어 단위·행·강조가 넣은 그대로인지 ──
-  const problem = verifyRollup(bytes, units, tablesPerUnit);
-  if (problem) throw new HwpWriteError(`이어 붙인 결과 검증 실패 — ${problem}`);
-  return { bytes, warnings };
-}
-
-/** PARA_HEADER 글자 수의 최상위 비트 — 「문단 목록의 마지막 문단」 표시 */
-const LAST_IN_LIST = 0x80000000;
-
-/**
- * 본문 문단 중 **마지막 하나에만** 「목록의 끝」 표시를 둔다.
- *
- * 양식의 마지막 문단(3번 표 뒤)은 이 비트를 들고 있다 — 전 부서 양식·실제 취합본 모두 본문 문단 중
- * 마지막 하나에만 켜져 있다(2026-10-07 실측, 운영 양식 31개). 양식 몸통을 단위 수만큼 복제하면 그 문단이
- * 따라 복제되어 **문서 한가운데**에 「여기서 끝」이 생긴다. 한글이 그 뒤를 어떻게 읽을지 우리가 모른다 —
- * 그래서 조립이 끝난 뒤 모두 끄고 마지막 것만 켠다. 표 안(더 깊은 레벨)의 문단은 셀마다 목록이 따로라 건드리지 않는다.
- */
-function markLastParagraph(recs: HwpRecord[]): void {
-  let last = -1;
-  for (let i = 0; i < recs.length; i++) {
-    if (recs[i].tag !== TAG.PARA_HEADER || recs[i].level !== 0) continue;
-    last = i;
-    const v = recs[i].data.readUInt32LE(0);
-    if (v & LAST_IN_LIST) {
-      const d = Buffer.from(recs[i].data);
-      d.writeUInt32LE((v & ~LAST_IN_LIST) >>> 0, 0);
-      recs[i] = { ...recs[i], data: d };
-    }
-  }
-  if (last < 0) return;
-  const d = Buffer.from(recs[last].data);
-  d.writeUInt32LE((d.readUInt32LE(0) | LAST_IN_LIST) >>> 0, 0);
-  recs[last] = { ...recs[last], data: d };
-}
-
-function locateTableCount(recs: readonly HwpRecord[]): number {
-  return recs.filter((r) => r.tag === TAG.CTRL_HEADER && ctrlName(r.data) === 'tbl ').length;
-}
-
-/**
- * 복제한 표에 새 인스턴스 ID를 준다. 한글은 표마다 이 값을 따로 들고 있고, 같은 문서에서
- * 한글이 표를 복사해 붙일 때도 새 값을 준다 — 같은 값이 여럿이면 무엇이 깨질지 우리가 모른다.
- * 첫 단위의 표는 양식 그대로 둔다. 값은 결정적이다(같은 입력 → 같은 파일).
- */
-function renumberTableInstances(recs: HwpRecord[], perUnit: number): void {
-  const idx = recs
-    .map((r, i) => (r.tag === TAG.CTRL_HEADER && ctrlName(r.data) === 'tbl ' && r.data.length >= TBL_INSTANCE_ID + 4 ? i : -1))
-    .filter((i) => i >= 0);
-  const base = Math.max(0, ...idx.slice(0, perUnit).map((i) => recs[i].data.readUInt32LE(TBL_INSTANCE_ID)));
-  if (base === 0) return; // 양식이 값을 쓰지 않는다 — 우리도 만들지 않는다
-  idx.slice(perUnit).forEach((i, n) => {
-    const d = Buffer.from(recs[i].data);
-    d.writeUInt32LE((base + n + 1) >>> 0, TBL_INSTANCE_ID);
-    recs[i] = { ...recs[i], data: d };
-  });
-}
-
-/** RU-14 — 넣은 것과 다시 읽은 것이 같은가. 다르면 사람이 읽을 수 있는 한 문장 */
-export function verifyRollup(bytes: Buffer, units: readonly UnitBlock[], tablesPerUnit = 3): string | null {
-  let back: UnitsRead;
-  try {
-    back = readUnits(bytes, units[0]?.name ?? '');
-  } catch (e) {
-    return `결과를 다시 읽을 수 없습니다 (${(e as Error).message})`;
-  }
-  if (back.units.length !== units.length) return `단위 수가 다릅니다 (${units.length} → ${back.units.length})`;
-  for (const [k, u] of units.entries()) {
-    const got = back.units[k];
-    if (got.name !== u.name.replace(/\s+/g, ' ').trim()) return `${k + 1}번째 단위 이름이 「${u.name}」 → 「${got.name}」로 바뀌었습니다`;
-    for (const [b, bucket] of BUCKETS.entries()) {
-      if (b >= tablesPerUnit) continue;
-      const want = u.tables[bucket];
-      const have = got.tables[bucket];
-      if (have.length !== want.length) return `${u.name} ${b + 1}번 표 행 수가 다릅니다 (${want.length} → ${have.length})`;
-      for (const [i, r] of want.entries()) {
-        const h = have[i];
-        if (h.content !== r.content) return `${u.name} ${b + 1}번 표 ${i + 1}행 내용이 그대로 들어가지 않았습니다`;
-        if (h.emphasis !== r.emphasis) return `${u.name} ${b + 1}번 표 ${i + 1}행의 「공유」 표시가 달라졌습니다`;
-        if (r.no && h.no !== r.no) return `${u.name} ${b + 1}번 표 ${i + 1}행 구분 번호가 달라졌습니다`;
-      }
-    }
-  }
-  return null;
 }
