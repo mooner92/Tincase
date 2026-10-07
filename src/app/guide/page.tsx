@@ -177,6 +177,9 @@ export default async function GuidePage() {
   const { scope } = ps;
   const examples = monthlyExamples(new Date());
 
+  // RU-31·32 — 취합 메뉴와 매뉴얼은 할 수 있는 사람에게만 (TACP-9)
+  const rnav = await rollupNav(scope);
+
   return (
     <div className="flex min-h-screen flex-col">
       <AppHeader
@@ -186,7 +189,7 @@ export default async function GuidePage() {
         isLead={scope.isManager || scope.readAll}
         isOperator={scope.user.isOperator}
         readAll={scope.readAll}
-        {...(await rollupNav(scope))}
+        {...rnav}
         viaCloudflare={scope.source === 'cloudflare'}
         notifyEnabled={ps.scope.user.notifyEnabled}
       />
@@ -221,6 +224,42 @@ export default async function GuidePage() {
             <ClipCard key={c.id} c={c} />
           ))}
         </div>
+
+        {/* RU-30 — 실·팀 담당자의 마지막 단계. 위로 보내는 것까지가 담당자의 일이다 */}
+        {scope.isManager && (
+          <section className="card mt-8 px-7 py-6">
+            <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">04+</p>
+            <h3 className="display mt-1 text-lg">검토가 끝나면 위로 제출하기</h3>
+            <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
+              <li>[수합 관리] 맨 아래 <strong className="text-ink">「○○본부에 제출」</strong> 카드 — 본부 밖 부서나 혼자 쓰는 본부는 「총괄에 제출」입니다</li>
+              <li>누르는 순간의 병합본이 <strong className="text-ink">사본으로</strong> 갑니다. 그 뒤에 고치면 카드에 「바뀜」이 뜨고, [다시 제출]해야 바뀐 것이 갑니다</li>
+              <li>잘못 냈으면 [제출 취소] — 받는 쪽 화면에서 「미제출」로 보입니다</li>
+            </ol>
+          </section>
+        )}
+
+        {/* RU-31 — 본부 담당자·본부장 매뉴얼 */}
+        {rnav.hqDesk && (
+          <>
+            <h2 className="display mt-14 mb-1 text-[22px]">본부 담당자</h2>
+            <p className="mb-5 text-sm text-muted">산하 실·팀이 낸 것을 순서대로 이어 붙여, 본부장 검토 뒤 총괄에 냅니다.</p>
+            <section className="card px-7 py-6">
+              <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">07</p>
+              <h3 className="display mt-1 text-lg">본부 취합</h3>
+              <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
+                <li>상단 메뉴 <strong className="text-ink">[본부 취합]</strong> — 산하 실·팀마다 「제출됨 · 시각 · 누가」 또는 「미제출」이 보입니다</li>
+                <li><strong className="text-ink">이어 붙이는 순서</strong>를 ▲▼로 정하고 [순서 저장] — 다음 주에도 그 순서입니다. 메모는 본부장·총괄이 읽는 설명입니다</li>
+                <li>[이어 붙이기] — 낸 실·팀만 순서대로 한 문서가 됩니다. [본부본 받기]로 열어 본부장 검토를 받으세요</li>
+                <li>검토가 끝나면 맨 아래 <strong className="text-ink">[총괄에 제출]</strong></li>
+              </ol>
+              <ul className="mt-4 space-y-1 text-sm text-muted">
+                <li>· 실·팀 <strong className="text-body">안의 내용·순서는 바꾸지 않습니다</strong>. 고칠 곳은 그 실·팀이 고쳐 다시 내고, 여기서 다시 이어 붙입니다</li>
+                <li>· 이어 붙인 뒤 실·팀이 다시 내거나 취소하면 「바뀜」이 뜹니다 — 다시 이어 붙이세요</li>
+                <li>· 본부가 보는 것은 실·팀이 <strong className="text-body">보낸 것</strong>뿐입니다. 부서원 개인 제출물은 그 실·팀의 몫입니다</li>
+              </ul>
+            </section>
+          </>
+        )}
 
         {/*
           WS-19 · TACP-20 — 총괄담당 매뉴얼. 이 일을 할 수 있는 사람에게만 보인다 (TACP-9).
@@ -273,6 +312,24 @@ export default async function GuidePage() {
                   <li>· 붙여넣기가 안 되면 [직접 입력]에서 대외 마감 날짜·시각을 고르면 됩니다</li>
                 </ul>
               </section>
+
+              {rnav.orgDesk && (
+                <section className="card px-7 py-6">
+                  <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">08</p>
+                  <h3 className="display mt-1 text-lg">전사 취합 — 한 번에 최종본 만들기</h3>
+                  <ol className="mt-3 list-decimal space-y-1.5 pl-5 text-[15px] text-body">
+                    <li>상단 메뉴 <strong className="text-ink">[전사 취합]</strong> — 본부·부서마다 도착했는지, 본부 안에서는 실·팀이 어디까지 왔는지 보입니다</li>
+                    <li>본부 순서를 ▲▼로 정하고 [순서 저장] (한 번 정하면 매주 그대로)</li>
+                    <li>[이어 붙이기] — 도착한 것만 순서대로 한 문서가 됩니다. [전사본 받기]로 받아 한글에서 다듬어 NAMS에 올립니다</li>
+                    <li>늦게 도착한 곳이 있으면 [다시 이어 붙이기] — 「바뀜」 표시가 알려 줍니다</li>
+                  </ol>
+                  <ul className="mt-4 space-y-1 text-sm text-muted">
+                    <li>· <strong className="text-body">[큰 화면]</strong> — 회의실 화면에 띄우는 진행판입니다. 30초마다 저절로 새로 고칩니다</li>
+                    <li>· 「Tincase 밖에서 내는 곳」은 아직 취합게시판으로 받는 부서입니다. 전사본에 직접 넣어 주세요</li>
+                    <li>· 남의 부서를 대신 내지는 않습니다 — 안 온 곳은 「도착 전」으로 남습니다</li>
+                  </ul>
+                </section>
+              )}
             </div>
           </>
         )}
