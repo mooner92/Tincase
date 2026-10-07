@@ -19,7 +19,12 @@ services:
       TINCASE_ENV: test                       # RU-43 — 화면 맨 위 「테스트 서버」 띠
       DATABASE_URL: file:/data/db/worklog.db
       STORAGE_ROOT: /data
-      CF_ACCESS_TEAM: test-none               # 필수값이라 채우지만 쓰지 않는다 (사내 비밀번호 로그인만)
+      # Cloudflare 경로는 **통과할 수 없게** 막는다 — 사내 비밀번호 로그인만 남는다.
+      # 운영에서 AUD가 필수인 이유(AU-02)는 「비면 검증이 무력화되기 때문」이다. 여기는 반대로
+      # 어떤 Cloudflare 앱에도 없는 무작위 값을 넣어, 그 값과 맞는 토큰을 만들 길을 없앤다.
+      # (비밀이 아니다 — 맞는 토큰이 존재할 수 없다는 것이 이 값의 역할이다)
+      CF_ACCESS_TEAM: tincase-test-disabled
+      CF_ACCESS_AUD: "3cdf50b28c6381d2564643173f971de6487daa825dfaaacd458aa0691f2a3c0a"
       SESSION_COOKIE_NAME: repman_test_session  # RU-42 — 운영 로그인과 섞이지 않게
       MESSENGER_URL: ""                       # RU-41 — 알림 끔
       MESSENGER_ALLOWLIST: ""
