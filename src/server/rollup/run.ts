@@ -11,7 +11,7 @@ import { readStoredFile, sanitizeSegment, writeFileAtomic } from '../storage';
 import { logger } from '../logger';
 import { composeRollupHwp, readUnits, BUCKETS, type UnitBlock } from '@/lib/hwp/rollup';
 import { currentReport, outputDiffers } from './report';
-import { loadOrgSetting, loadTree, type RollupNode, type TreeDivision } from './tree';
+import { type RollupNode, type TreeDivision } from './tree';
 
 /** 결과 화면이 쓰는 단위별 요약 (RollupRun.unitsJson) */
 export interface RolledUnit {
@@ -149,39 +149,6 @@ export async function runHqRollup(scope: Scope, node: RollupNode, slot: WeekSlot
   });
 }
 
-/** 전사 입력 한 칸 — 본부 단계가 있으면 본부의 [총괄에 제출], 없으면 그 단위의 [제출] (RU-07) */
-async function orgInputOf(n: RollupNode, slot: WeekSlot): Promise<Input | null> {
-  if (n.hasHqStep) {
-    const report = await currentReport(n.node.id, slot.id, 'hq');
-    return report ? { division: n.node, report } : null;
-  }
-  const only = n.contributors[0];
-  const report = await currentReport(only.id, slot.id, 'unit');
-  return report ? { division: only, report } : null;
-}
-
-/** RU-32 — 전사 이어 붙이기 (총괄 「딸깍」) */
-export async function runOrgRollup(scope: Scope, slot: WeekSlot): Promise<RollupRun> {
-  const [tree, setting] = await Promise.all([loadTree(), loadOrgSetting()]);
-  const inputs: Input[] = [];
-  for (const n of tree.nodes) {
-    const i = await orgInputOf(n, slot);
-    if (i) inputs.push(i);
-  }
-  if (inputs.length === 0) throw new HttpError(409, 'nothing_submitted', '아직 총괄에 제출된 본부·단위가 없습니다.');
-  return execute({
-    scope,
-    level: 'org',
-    divisionId: null,
-    slot,
-    inputs,
-    // 전사본의 양식은 총괄 자신의 부서 양식이다 — 신원의 부서 (TACP-6과 같은 원리)
-    template: await templateFor(scope.division.id, inputs.map((i) => i.division.id)),
-    pageBreak: setting.pageBreak,
-    outRel: (id) => rollupRel(['org', 'rollup'], slot, id),
-  });
-}
-
 // ── 현황판 ────────────────────────────────────────────────
 
 export interface ReportCell {
@@ -291,56 +258,6 @@ export async function hqBoard(node: RollupNode, slot: WeekSlot): Promise<HqBoard
     hqReport: cell(hq, names),
     // RU-02 — 실행 id가 아니라 내용으로. 다시 이어 붙여 같은 파일이 나오면 「바뀜」이 아니다 (outputDiffers)
     hqReportOutdated: !!hq && !!lastOk?.outputPath && (await outputDiffers(lastOk.outputPath, hq.sha256)),
-  };
-}
-
-export interface OrgNodeStatus {
-  node: { id: string; slug: string; nameKo: string };
-  hasHqStep: boolean;
-  units: UnitStatus[];
-  /** 본부 단계가 있으면 본부의 [총괄에 제출] */
-  hqReport: ReportCell | null;
-  /** 전사가 실제로 쓰는 것이 있나 (본부 제출 또는 단독 단위의 제출) */
-  ready: boolean;
-}
-
-export interface OrgBoard {
-  nodes: OrgNodeStatus[];
-  offline: { id: string; nameKo: string }[];
-  lastRun: RunCell | null;
-  note: string;
-  pageBreak: boolean;
-}
-
-/** RU-32·33 — 전사 화면·큰 화면 */
-export async function orgBoard(slot: WeekSlot): Promise<OrgBoard> {
-  const [tree, setting] = await Promise.all([loadTree(), loadOrgSetting()]);
-  const nodes: OrgNodeStatus[] = [];
-  const current: string[] = [];
-  for (const n of tree.nodes) {
-    const units = await unitStatuses(n.contributors, slot);
-    const hq = n.hasHqStep ? await currentReport(n.node.id, slot.id, 'hq') : null;
-    const names = await namesOf(hq ? [hq.submittedBy] : []);
-    const used = n.hasHqStep ? hq?.id : units[0]?.report?.id;
-    if (used) current.push(used);
-    nodes.push({
-      node: { id: n.node.id, slug: n.node.slug, nameKo: n.node.nameKo },
-      hasHqStep: n.hasHqStep,
-      units,
-      hqReport: cell(hq, names),
-      ready: !!used,
-    });
-  }
-  const lastRun = await prisma.rollupRun.findFirst({
-    where: { level: 'org', weekSlotId: slot.id },
-    orderBy: { startedAt: 'desc' },
-  });
-  return {
-    nodes,
-    offline: tree.offline.map((d) => ({ id: d.id, nameKo: d.nameKo })),
-    lastRun: runCell(lastRun, current),
-    note: setting.note,
-    pageBreak: setting.pageBreak,
   };
 }
 

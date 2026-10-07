@@ -377,7 +377,7 @@ d('RU-50~58 단계 일정 · 스위치 · 본부장 승인', () => {
     }
   });
 
-  it('[RU-T45] ★ 전사 취합의 문은 하나(canOpenOrgDesk) — 꺼져 있으면 총괄에게도 닫힌다. /org·/org/board 페이지도 같은 게이트', async () => {
+  it('[RU-T45] ★ 전사 취합의 문은 하나(canOpenOrgDesk) — 꺼져 있으면 총괄에게도 닫힌다. /org 페이지도 같은 게이트', async () => {
     const { prisma } = await import('@/server/db');
     const { canOpenOrgDesk, requireScope } = await import('@/server/authz');
     const opEmail = 'op@test.kei.re.kr';
@@ -393,7 +393,7 @@ d('RU-50~58 단계 일정 · 스위치 · 본부장 승인', () => {
       await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { enabled: true } });
     }
     // 페이지가 canRunOrgRollup만 보면 스위치를 건너뛴다 — 판정을 복사하지 않고 게이트를 부른다 (TACP-12)
-    for (const f of ['src/app/org/page.tsx', 'src/app/org/board/page.tsx']) {
+    for (const f of ['src/app/org/page.tsx']) {
       const src = readFileSync(path.resolve(__dirname, '..', f), 'utf8');
       expect(src, f).toContain('canOpenOrgDesk(');
       expect(src, f).not.toMatch(/canRunOrgRollup\(/);

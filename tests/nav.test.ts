@@ -72,6 +72,6 @@ describe('RU-31·32 취합 메뉴 (TACP-21)', () => {
     expect(l.indexOf('전사 현황')).toBeLessThan(l.indexOf('전사 취합'));
     expect(labels({ isLead: true })).not.toContain('전사 취합');
     const nav = buildNav({ ...base, readAll: true, orgDesk: true });
-    expect(nav.filter((i) => isNavActive(i.href, '/org/board', nav, 'psd')).map((i) => i.label)).toEqual(['전사 취합']);
+    expect(nav.filter((i) => isNavActive(i.href, '/org', nav, 'psd')).map((i) => i.label)).toEqual(['전사 취합']);
   });
 });

@@ -324,7 +324,6 @@ export default async function GuidePage() {
                     <li>늦게 도착한 곳이 있으면 [다시 이어 붙이기] — 「바뀜」 표시가 알려 줍니다</li>
                   </ol>
                   <ul className="mt-4 space-y-1 text-sm text-muted">
-                    <li>· <strong className="text-body">[큰 화면]</strong> — 회의실 화면에 띄우는 진행판입니다. 30초마다 저절로 새로 고칩니다</li>
                     <li>· 「Tincase 밖에서 내는 곳」은 아직 취합게시판으로 받는 부서입니다. 전사본에 직접 넣어 주세요</li>
                     <li>· 남의 부서를 대신 내지는 않습니다 — 안 온 곳은 「도착 전」으로 남습니다</li>
                   </ul>

@@ -403,7 +403,7 @@ export function canRunOrgRollup(user: Pick<User, 'isOperator' | 'isCoordinator'>
 }
 
 /**
- * TACP-21 · RU-52 — 전사 취합 **화면·API의 문**. `/org`·`/org/board`·`/api/rollup/org/*`·메뉴가 이 하나를 본다.
+ * TACP-21 · RU-52 — 전사 취합 **화면·API의 문**. `/org`·`/api/rollup/org/*`·메뉴가 이 하나를 본다.
  * 페이지가 `canRunOrgRollup`만 보고 스위치를 빠뜨리면, 꺼 둔 3단계가 총괄에게 그대로 열린다 — 판정을 복사하지 않는다 (TACP-12).
  */
 export async function canOpenOrgDesk(scope: Scope): Promise<boolean> {

@@ -67,9 +67,6 @@ export default async function OrgPage({ searchParams }: { searchParams: Promise<
             </p>
           </div>
           <div className="flex items-center gap-2">
-            <Link href={`/org/board${query}`} className="tab-pill">
-              큰 화면
-            </Link>
             <WeekPicker weeks={weeks} selected={slot.isoKey} baseHref="/org" />
           </div>
         </div>
