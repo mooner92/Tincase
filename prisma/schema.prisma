@@ -457,3 +457,37 @@ model MergeReview {
 
   @@index([divisionId, weekSlotId, createdAt])
 }
+
+/**
+ * RU-60 — **전사 취합본의 섹션.** 실제 최종본은 13섹션·고정 순서다(2026-10-07 분석). 순서·제목·채우는 부서를 여기서 정한다.
+ * 기획경영본부처럼 블록이 없는 본부는 섹션이 아니다 — 산하 실이 각자 섹션이다.
+ */
+model OrgSection {
+  id         String  @id @default(cuid())
+  sortOrder  Int
+  /// 생성할 제목 (RU-61) — 「기획경영본부(기획조정실)」. 제출자는 제목을 쓰지 않는다
+  title      String
+  /// 이 섹션을 채우는 Tincase 부서. 없거나 꺼져 있으면 총괄이 받은 파일을 올린다
+  divisionId String?
+  /// 양식 종류 — exec(임원실)·global·unit(실형)·hq(본부·센터형)·eval(환경평가형). 검증 규칙이 쓴다
+  kind       String  @default("unit")
+  isActive   Boolean @default(true)
+
+  @@index([sortOrder])
+}
+
+/** RU-60 — 총괄이 올린 섹션 원본 (취합게시판으로 받은 파일). 가장 최근의 취소 안 된 것을 쓴다 */
+model OrgSectionUpload {
+  id          String    @id @default(cuid())
+  sectionId   String
+  weekSlotId  String
+  filePath    String
+  originalName String
+  sha256      String
+  byteSize    Int
+  uploadedBy  String
+  uploadedAt  DateTime  @default(now())
+  withdrawnAt DateTime?
+
+  @@index([sectionId, weekSlotId, uploadedAt])
+}
