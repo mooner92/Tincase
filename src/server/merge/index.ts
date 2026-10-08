@@ -13,6 +13,8 @@ import { fillTable, packHwp, plainShapeIdOf, prependTitleParagraph } from '@/lib
 import { BLUE, ensureColorShape } from '@/lib/hwp/charshape';
 import { toPlan, orderPeople } from './rules';
 import { groupDuplicates, MergeRow, GroupingResult } from './model';
+import { startMergeBudget, type MergeBudget } from './budget';
+import type { FallbackKind } from './gate';
 import { classifyRows, sortByCategory, OTHER } from './classify';
 import { findFlaggedRows, parseFlagWords, type FlaggedRow } from '@/lib/empty-content';
 import { DEFAULT_EMPHASIS_WORDS, stripEmphasisMarker } from '@/lib/emphasis-marker';
@@ -51,7 +53,18 @@ export interface MergeOutcome {
   /** HM-26 — 검토 화면이 "볼 곳"으로 쓰는 정보 */
   mergedGroups: MergedGroup[];
   warnings: string[];
-  model: { used: boolean; reason: string | null; elapsedMs: number; name: string };
+  model: {
+    used: boolean;
+    reason: string | null;
+    elapsedMs: number;
+    name: string;
+    /**
+     * HM-57 — **표마다** 모델을 썼는지와 못 쓴 이유. 위의 `used`·`reason`은 가장 오래 걸린 한 표의 것이라,
+     * 실적은 묶었는데 계획은 시간 초과로 못 묶은 것이 보이지 않는다. 검토 요청 알림·병합 점검(2단계)이 이것을 읽는다.
+     * 옛 실행·흉내 낸 결과에는 없다
+     */
+    tables?: ModelTableUse[];
+  };
   /** 분류 정렬 결과 — 안 썼으면 null */
   categories: { used: boolean; reason: string | null; order: string[] } | null;
   sourceIds: string[];
@@ -77,6 +90,33 @@ export interface MergeOutcome {
 /** 표 3종 각각을 이 구조로 다룬다 */
 type Bucket = 'achievements' | 'plans' | 'notes';
 const BUCKETS: Bucket[] = ['achievements', 'plans', 'notes'];
+const BUCKET_NAME: Record<Bucket, string> = { achievements: '실적', plans: '계획', notes: '특이' };
+
+/** HM-57 — 표 하나(또는 분류 한 번)에서 모델을 썼나. `kind`가 시간 초과·연결 실패·5xx·예산이면 다시 하면 될 수 있는 폴백이다 */
+export interface ModelTableUse {
+  table: Bucket | 'categories';
+  used: boolean;
+  reason: string | null;
+  kind: FallbackKind | null;
+  attempts: number;
+  elapsedMs: number;
+  waitedMs: number;
+}
+
+function tableUse(
+  table: ModelTableUse['table'],
+  r: { usedModel: boolean; fallbackReason: string | null; elapsedMs: number; fallbackKind?: FallbackKind | null; attempts?: number; waitedMs?: number },
+): ModelTableUse {
+  return {
+    table,
+    used: r.usedModel,
+    reason: r.fallbackReason,
+    kind: r.usedModel ? null : (r.fallbackKind ?? 'skipped'),
+    attempts: r.attempts ?? 0,
+    elapsedMs: r.elapsedMs,
+    waitedMs: r.waitedMs ?? 0,
+  };
+}
 
 interface Tagged extends MergeRow {
   bucket: Bucket;
@@ -182,7 +222,13 @@ export function mergedRelPath(divisionSlug: string, year: number, weekLabel: str
  * 병합 실행. 예외를 던지는 경우는 **양식이 없거나 제출이 0건일 때뿐**이다 —
  * 그 외에는 무슨 일이 있어도 결과물을 만들어 낸다.
  */
-export async function runMerge(divisionId: string, weekSlotId: string): Promise<MergeOutcome> {
+export async function runMerge(
+  divisionId: string,
+  weekSlotId: string,
+  /** HM-57 — 실행 예산. 안 주면 여기서 시작한다(`MERGE_JOB_BUDGET_MS`) — 시계는 지금부터 간다 */
+  opts: { budget?: MergeBudget } = {},
+): Promise<MergeOutcome> {
+  const budget = opts.budget ?? startMergeBudget();
   const [division, slot] = await Promise.all([
     prisma.division.findUniqueOrThrow({ where: { id: divisionId } }),
     prisma.weekSlot.findUniqueOrThrow({ where: { id: weekSlotId } }),
@@ -256,6 +302,7 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
   const grouped: Record<Bucket, MergedGroup[]> = { achievements: [], plans: [], notes: [] };
   // 첫 표(행이 하나라도 있는 표)의 결과가 곧 이 자리를 채운다 — 행이 0이면 위에서 이미 멈췄다
   let model: GroupingResult = { groups: [], usedModel: false, fallbackReason: null, elapsedMs: 0, rejected: [] };
+  const modelTables: ModelTableUse[] = [];
 
   for (const bucket of BUCKETS) {
     const mine = rows.filter((r) => r.bucket === bucket);
@@ -263,7 +310,12 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
 
     // HM-51 — 중복 묶기는 늘 켠다. 부서 지침(`mergeRuleText`)은 모델에 보내지 않는다 — 쓰는 부서가 없었고,
     // 지침이 있으면 같은 제출이 부서마다 다르게 묶인다
-    const result = await groupDuplicates(mine);
+    // HM-52 · HM-57 — 모델 문을 지나서, 실행 예산 안에서 부른다
+    const result = await groupDuplicates(mine, '', {
+      budget,
+      label: `${division.nameKo} · ${BUCKET_NAME[bucket]} 중복 묶기`,
+    });
+    modelTables.push(tableUse(bucket, result));
 
     // 가장 정보가 많은 실행 결과를 대표로 남긴다 (실적 표가 보통 제일 크다)
     if (result.elapsedMs >= model.elapsedMs) model = result;
@@ -314,7 +366,8 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
         probes.push({ id: i * 10 + BUCKETS.indexOf(bucket), who: g.authors[0] ?? '', content: g.row.content, date: '', place: '', attendee: '' });
       });
     }
-    const cls = await classifyRows(probes, plan.categories);
+    const cls = await classifyRows(probes, plan.categories, '', { budget, label: `${division.nameKo} · 분류` });
+    modelTables.push(tableUse('categories', cls));
     categoryInfo = { used: cls.usedModel, reason: cls.fallbackReason, order: [...plan.categories] };
     if (cls.usedModel) {
       for (const bucket of BUCKETS) {
@@ -397,6 +450,7 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
       reason: model.fallbackReason,
       elapsedMs: model.elapsedMs,
       name: model.usedModel ? (process.env.MERGE_MODEL ?? '') : '',
+      tables: modelTables,
     },
     categories: categoryInfo,
     sourceIds: usedIds,

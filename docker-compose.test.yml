@@ -1,16 +1,18 @@
 # RU-40~43 — **테스트 서버 (11112).** 운영(docker-compose.yml)과 완전히 분리한다.
 #
-#   sudo docker compose -f docker-compose.test.yml -p repman-test up -d --build
+#   bash scripts/deploy.sh test      (sudo 없이 — 아래 compose를 sudo로 부르고, 끝나면 빌드 찌꺼기를 치운다: OPS-43)
+#   = sudo docker compose -f docker-compose.test.yml -p repman-test build && … up -d
 #
 # RU-45 — **시연 모드.** 운영회의 강당 화면도 이 컨테이너(11112) 하나로 띄운다 — 포트·인스턴스를 더 두지 않는다
 # (2026-10-08, 사용자 요청: 「11113은 쓰지마. 11112에서만」). 평소 데이터(/data/worklog-test)는 운영 사본이라 실명이 있어
 # 프로젝터에 띄울 수 없다. 그래서 **스위치 하나**(TINCASE_TEST_MODE)로 같은 컨테이너를 가짜 사람만 있는 저장소에 붙인다:
 #
-#   sudo TINCASE_TEST_MODE=demo docker compose -f docker-compose.test.yml -p repman-test up -d   ← 시연 데이터로 전환 (굽지 않는다)
-#   sudo docker compose -f docker-compose.test.yml -p repman-test up -d                         ← 되돌리기 (변수 없이)
-#   sudo bash scripts/demo-snapshot.sh status                                                    ← 지금 어느 쪽인지
+#   TINCASE_TEST_MODE=demo bash scripts/deploy.sh test --no-build   ← 시연 데이터로 전환 (굽지 않는다)
+#   TINCASE_TEST_MODE=test bash scripts/deploy.sh test --no-build   ← 되돌리기 (시연으로 떠 있으면 변수 없이는 멈춘다 — OPS-43h)
+#   sudo bash scripts/demo-snapshot.sh status                       ← 지금 어느 쪽인지
 #
-# 변수는 sudo **뒤에** 둔다 — 앞에 두면 sudo가 지워 테스트 데이터(실명)로 뜬다. 절차·주의: docs/DEMO.md
+# 스크립트는 sudo 없이 부른다 — 변수를 받아 sudo **뒤에** 붙여 넘긴다. 손으로 compose를 부르면 변수를 sudo 앞에 둔 순간
+# sudo가 지워 테스트 데이터(실명)로 뜬다(RU-45). 절차·주의: docs/DEMO.md
 # 왜 변수가 하나인가: 저장소·띠·쿠키를 따로 고르게 하면 「실명 DB 위에 '모두 지어낸 것' 띠」가 가능해진다. 셋이 같은 값을 따른다.
 # 분리하는 것 — 컨테이너·이미지 태그·DB·저장소·세션 쿠키 이름.
 # 끄는 것     — 메신저(실제 사람에게 알림이 가면 안 된다)·자동 병합 스케줄러·Cloudflare·hwp 업로드 제출(ADR-0014).
@@ -47,6 +49,9 @@ services:
       SUBMIT_HWP_UPLOAD: "off"
       MERGE_MODEL: hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M
       MERGE_MODEL_URL: http://host.docker.internal:11437
+      # HM-52 · HM-57 — 모델 호출 한 번의 제한. 모델 문을 통과한 **뒤부터** 잰다(줄에서 기다린 시간은 빼고).
+      # 코드 기본값과 같지만 적어 둔다 — 기본값에 기대면 「지금 몇 초인가」를 코드에서 찾아야 한다
+      MERGE_MODEL_TIMEOUT_MS: "60000"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

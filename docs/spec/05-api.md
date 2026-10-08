@@ -36,6 +36,7 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 | `upload_closed` | 410 | hwp 올리기가 닫힘 — 「전사」 섹션 [올리기](RU-60a)만 낸다. 부서원 업로드 라우트(API-54)는 2026-10-08에 없어졌다(WA-39) |
 | `no_submissions` | 409 | 대상 0건 |
 | `edited` | 409 | 사람이 고친 병합본 — 확인 없이 다시 병합하지 않는다 (API-55 · HM-49) |
+| `merging` | 409 | 같은 부서·주차 병합이 이미 돌고 있다 — 「이미 병합 중입니다」 (API-31 · HM-58) |
 | `too_large` | 413 | 본문이 너무 큼 — 읽기 전에 `Content-Length`로 거른다 (ST-04) |
 | `invalid_file` | 422 | 파일 검증 실패 (reason: ST-09) |
 | `invalid_rule` | 422 | 병합 규칙 검증 실패 (Phase 2) |
@@ -279,7 +280,7 @@ lead에게는 이 엔드포인트가 존재하지 않는다(404).
 | ID | 요구사항 |
 |---|---|
 | API-30 | Phase 1: 501. 버튼 비활성 + `준비 중 (Phase 2)` |
-| API-31 | 부서·슬롯당 동시 실행 1개 · 원본 불변 (HM-20) · `ruleSnapshot` 저장 (DM-13) |
+| API-31 | 부서·슬롯당 동시 실행 1개 · 원본 불변 (HM-20) · `ruleSnapshot` 저장 (DM-13). **2026-10-08 — 실제로 막는다 (HM-58):** 멈추지 않은 running(기본 10분 안, HM-55)이 있거나 같은 프로세스에서 시작 중이면 409 `merging` 「이미 병합 중입니다」 · `detail: { runId, startedAt }`. `edited`(API-55)보다 먼저 본다. 시작하지 않으므로 기록·감사 로그가 없다 |
 | API-55 | 그 주차의 최신 병합본을 **사람이 고쳤으면** 409 `edited` — 본문에 `overwriteEdits: true`가 있을 때만 다시 병합한다 (HM-49). 감사 로그에 덮은 곳 수 |
 
 ```jsonc
@@ -383,6 +384,7 @@ v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노�
 | API-T12 | 양식 교체: 깨진 파일 → 422, active 유지 (ST-T17와 연동) |
 | API-T13 | health — 활성 부서의 양식 파일이 없으면 `checks.template` fail · 503, 응답에 부서명 없음 · `warnings` 배열은 늘 있다 |
 | API-T14 | 병합 재실행 — 고친 병합본이면 409 `edited` + `detail.edits`, `overwriteEdits: true`면 실행 (API-55, HM-T136) |
+| API-T18 | 병합 실행 중이면 409 `merging` 「이미 병합 중입니다」(기록 없음) · 10분 넘은 running은 막지 않음 · 같은 순간 두 요청은 하나만 실행 (API-31, HM-T157) |
 | API-T15 | 제출물 열람 — 빈 번호 줄은 `rows`에 없고 머리행은 남는다 · `rowsByTable`은 그대로 (API-57) |
 | API-T16 | 병합본 보기 — member는 `review`가 `null`(승인자 이름이 응답에 없다)·`canApprove` 거짓, lead는 `review`를 받는다 · 「위로」 상태의 `sent.by`는 member에게 `null`, lead에게는 이름 (API-58) |
 | API-T17 | 규칙 PUT — `categories`만 저장 · 옛 키(`ruleText`·`guideText`·`emptyWords`·`sort` …)는 열을 바꾸지 않는다 · `categories`가 없거나 500B 초과면 422 · member 404 · 쓰기는 신원의 부서 (API-59, `tests/sprint2.test.ts`) |

@@ -30,23 +30,25 @@
 ### 전환 · 되돌리기
 
 ```bash
-cd ~/repman-c                                   # 이 스위치가 든 체크아웃에서 (옛 compose 파일은 변수를 모른다 — 조용히 평소 데이터로 뜬다)
+cd ~/repman-c                                   # 이 스위치와 scripts/deploy.sh가 든 체크아웃에서 (옛 compose 파일은 변수를 모른다 — 조용히 평소 데이터로 뜬다)
 
-# 시연 데이터로 전환 — 굽지 않는다(같은 repman:test 이미지로 컨테이너만 새로 만든다)
-sudo TINCASE_TEST_MODE=demo docker compose -f docker-compose.test.yml -p repman-test up -d
+# 시연 데이터로 전환 — 굽지 않는다(같은 repman:test 이미지로 컨테이너만 새로 만든다). sudo 없이 — 스크립트가 안에서 부른다
+TINCASE_TEST_MODE=demo bash scripts/deploy.sh test --no-build
 
-# 되돌리기 — 같은 명령을 변수 없이
-sudo docker compose -f docker-compose.test.yml -p repman-test up -d
+# 되돌리기 — test를 적는다. 시연으로 떠 있는데 변수 없이 부르면 스크립트가 멈춘다 (OPS-43h)
+TINCASE_TEST_MODE=test bash scripts/deploy.sh test --no-build
 
 # 지금 어느 쪽인가 — 전환·되돌리기 뒤에 **꼭** 본다
 sudo bash scripts/demo-snapshot.sh status       # 「11112: 시연 데이터 — /data/worklog-demo (가짜 사람만) · running」
 ```
 
-- **변수는 `sudo` 뒤에.** `TINCASE_TEST_MODE=demo sudo docker …`처럼 앞에 두면 sudo가 변수를 지워 **오류 없이 평소 데이터(실명)로 뜬다.**
-  그래서 강당 화면에 띄우기 전에는 언제나 `status`가 「시연 데이터」인지, 화면 맨 위 띠가 「시연 —」인지 본다.
-- **시연 모드에서 멈췄다 켤 때는 `stop` / `start`.** 컨테이너를 새로 만들지 않아 모드가 그대로다. `up -d`를 변수 없이 치면 평소 데이터로 돌아간다.
+- **전환은 `scripts/deploy.sh`로, `sudo` 없이** (OPS-43h). 스크립트가 변수를 받아 sudo **뒤에** 붙여 넘긴다. 손으로 compose를 부르며
+  `TINCASE_TEST_MODE=demo sudo docker …`처럼 변수를 앞에 두면 sudo가 지워 **오류 없이 평소 데이터(실명)로 뜬다** — 그 함정을 스크립트가 대신 피한다.
+  그래도 강당 화면에 띄우기 전에는 언제나 `status`가 「시연 데이터」인지, 화면 맨 위 띠가 「시연 —」인지 본다.
+- **시연 모드에서 멈췄다 켤 때는 `stop` / `start`.** 컨테이너를 새로 만들지 않아 모드가 그대로다(이 둘은 compose 그대로 — 새 이미지가 생기지 않는다).
+  손으로 `up -d`를 변수 없이 치면 평소 데이터로 돌아간다.
 - **시연 모드인 동안 테스트 서버의 평소 데이터는 쉰다.** 테스트 서버를 쓰는 사람에게 시연 모드 시간(D-3 리허설, D-0 07:00~회의 끝)을 미리 알리고,
-  그동안 테스트 서버를 다시 배포(`up -d --build`)하지 않는다 — 변수 없이 다시 만들면 회의 중에 실명 데이터로 바뀐다.
+  그동안 테스트 서버를 다시 배포하지 않는다. 시연으로 떠 있는 동안 변수 없는 `deploy.sh test`는 멈추지만, `TINCASE_TEST_MODE=test`를 붙이면 회의 중에 실명 데이터로 바뀐다.
 - 세션 쿠키 이름이 모드마다 달라(`repman_test_session` · `repman_demo_session`) 모드를 오가도 서로의 로그인을 지우지 않는다 —
   강당 PC의 역할별 로그인이 리허설부터 회의 날까지 산다. 다만 **강당 PC 프로필로는 시연 모드일 때만 11112를 연다**(평소 모드면 실명 데이터의 로그인 화면이다).
 
@@ -108,9 +110,8 @@ sudo bash scripts/demo-snapshot.sh status       # 「11112: 시연 데이터 —
 ```bash
 df -h /                                         # 6G 미만이면 굽지 않는다
 cd ~/repman-c                                   # 시연 브랜치(feat/guide-deck) 체크아웃
-sudo docker compose -f docker-compose.test.yml -p repman-test up -d --build    # 변수 없이 — 평소 데이터로 다시 뜬다
-sudo docker builder prune -f                    # 빌드 캐시 정리
-sudo TINCASE_TEST_MODE=demo docker compose -f docker-compose.test.yml -p repman-test up -d   # 필요하면 그다음 전환
+bash scripts/deploy.sh test                     # 변수 없이 — 평소 데이터로 다시 뜬다. 끝나면 우리 빌드 찌꺼기만 치운다(OPS-43)
+TINCASE_TEST_MODE=demo bash scripts/deploy.sh test --no-build   # 필요하면 그다음 전환
 ```
 
 시연 브랜치는 `feat/org-rollup`을 포함하므로 테스트 서버가 이 이미지로 떠도 기능은 같거나 많다. 테스트 서버를 쓰는 사람에게 알린다.
@@ -144,7 +145,7 @@ npx tsx scripts/demo-seed.ts --stage=ready      # 이번 주(W44). 끝에 비밀
 
 # 3) 권한 → 시연 모드로 전환 → 확인
 sudo bash scripts/demo-snapshot.sh perms        # 10001:mhchoi · g+rwX · setgid
-sudo TINCASE_TEST_MODE=demo docker compose -f docker-compose.test.yml -p repman-test up -d
+TINCASE_TEST_MODE=demo bash scripts/deploy.sh test --no-build
 sudo bash scripts/demo-snapshot.sh status       # 「시연 데이터 — /data/worklog-demo」
 curl -s 127.0.0.1:11112/api/health              # "ok":true
 sudo docker logs repman-test --tail 5           # [boot] 4/4 서버 시작 (Division 14개)
@@ -156,7 +157,7 @@ sqlite3 /data/worklog-demo/db/worklog.db "SELECT COUNT(*) FROM User WHERE email 
 확인이 끝나면 **되돌린다**(테스트 서버를 쓰는 사람이 있다):
 
 ```bash
-sudo docker compose -f docker-compose.test.yml -p repman-test up -d
+TINCASE_TEST_MODE=test bash scripts/deploy.sh test --no-build
 sudo bash scripts/demo-snapshot.sh status       # 「테스트 데이터 — /data/worklog-test」
 ```
 
@@ -175,7 +176,7 @@ sudo bash scripts/demo-snapshot.sh perms        # 컨테이너가 만든 디렉�
 export DATABASE_URL=file:/data/worklog-demo/db/worklog.db STORAGE_ROOT=/data/worklog-demo CF_ACCESS_TEAM=tincase-demo-disabled
 npx tsx scripts/demo-seed.ts --stage=hq --keep-open --until=<리허설 시작 10분 전, 예: 13:50>
 sudo bash scripts/demo-snapshot.sh perms        # 시드한 파일을 컨테이너가 읽게
-sudo TINCASE_TEST_MODE=demo docker compose -f docker-compose.test.yml -p repman-test up -d    # 시연 모드 — 리허설 끝까지
+TINCASE_TEST_MODE=demo bash scripts/deploy.sh test --no-build    # 시연 모드 — 리허설 끝까지
 sudo bash scripts/demo-snapshot.sh status       # 「시연 데이터」
 ```
 
@@ -202,7 +203,7 @@ sudo docker compose -f docker-compose.test.yml -p repman-test start   # start �
 
 스냅숏은 프로필 로그인 **뒤에** 뜬다 — 앞에 뜬 것으로 되돌리면 그 뒤 로그인(세션)이 사라진다.
 
-리허설이 끝나면 되돌린다: `sudo docker compose -f docker-compose.test.yml -p repman-test up -d` → `status`가 「테스트 데이터」.
+리허설이 끝나면 되돌린다: `TINCASE_TEST_MODE=test bash scripts/deploy.sh test --no-build` → `status`가 「테스트 데이터」.
 
 ## D-0 (11/2 월) 07:00 — 다시 시드 · 모델 데우기 · 스냅숏
 
@@ -215,7 +216,7 @@ sudo bash scripts/demo-snapshot.sh perms
 export DATABASE_URL=file:/data/worklog-demo/db/worklog.db STORAGE_ROOT=/data/worklog-demo CF_ACCESS_TEAM=tincase-demo-disabled
 npx tsx scripts/demo-seed.ts --stage=hq --week=2026-W45 --until=09:40   # 회의 시작 20분 전쯤 (회의가 10:00일 때)
 sudo bash scripts/demo-snapshot.sh perms
-sudo TINCASE_TEST_MODE=demo docker compose -f docker-compose.test.yml -p repman-test up -d    # 시연 모드 — 회의 끝까지
+TINCASE_TEST_MODE=demo bash scripts/deploy.sh test --no-build    # 시연 모드 — 회의 끝까지
 sudo bash scripts/demo-snapshot.sh status       # 「시연 데이터」 — 아니면 여기서 멈춘다
 curl -s 127.0.0.1:11112/api/health
 
@@ -267,7 +268,7 @@ sudo bash scripts/demo-snapshot.sh save d0-0700
 
 ```bash
 cd ~/repman-c
-sudo docker compose -f docker-compose.test.yml -p repman-test up -d      # 변수 없이 — 평소 데이터로
+TINCASE_TEST_MODE=test bash scripts/deploy.sh test --no-build      # test를 적어 — 평소 데이터로
 sudo bash scripts/demo-snapshot.sh status       # 「테스트 데이터 — /data/worklog-test」
 curl -s 127.0.0.1:11437/api/generate -d '{"model":"hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M","keep_alive":0}' >/dev/null   # 모델 내리기
 sudo rm -rf /data/worklog-demo                  # 가짜 데이터뿐이다 — 다시 쓸 일이 없으면

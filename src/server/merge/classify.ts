@@ -6,6 +6,8 @@
 
 import { env } from '../env';
 import type { MergeRow } from './dedupe';
+import { callModel, type FallbackKind } from './gate';
+import type { MergeBudget } from './budget';
 import { OTHER } from './order';
 import { MODEL_NOT_CONFIGURED } from '@/lib/merge-rows';
 
@@ -17,13 +19,24 @@ export interface ClassifyResult {
   usedModel: boolean;
   fallbackReason: string | null;
   elapsedMs: number;
+  /** HM-57 — 못 쓴 이유의 종류 (썼으면 null) · 보낸 횟수 · 모델 문 앞에서 기다린 시간 (model.ts와 같다) */
+  fallbackKind?: FallbackKind | null;
+  attempts?: number;
+  waitedMs?: number;
 }
 
-const empty = (reason: string, elapsedMs = 0): ClassifyResult => ({
+const empty = (
+  reason: string,
+  elapsedMs = 0,
+  kind: FallbackKind = 'skipped',
+  call: { attempts: number; waitedMs: number } = { attempts: 0, waitedMs: 0 },
+): ClassifyResult => ({
   assigned: new Map(),
   usedModel: false,
   fallbackReason: reason,
   elapsedMs,
+  fallbackKind: kind,
+  ...call,
 });
 
 /** id → 분류 이름. 분류 이름은 부서가 정한 목록 + 기타로 제한된다 (enum) */
@@ -72,7 +85,8 @@ export async function classifyRows(
   rows: readonly MergeRow[],
   categories: readonly string[],
   guidance = '',
-  signal?: AbortSignal,
+  // HM-52 · HM-57 — 모델 문을 지나서 부르고, 실행 예산이 다 되면 부르지 않는다 (model.ts와 같은 길)
+  opts: { budget?: MergeBudget | null; label?: string } = {},
 ): Promise<ClassifyResult> {
   if (categories.length === 0) return empty('분류가 설정되지 않았습니다');
   if (!env.MERGE_MODEL) return empty(MODEL_NOT_CONFIGURED);
@@ -82,40 +96,29 @@ export async function classifyRows(
   }
 
   const started = Date.now();
-  const timer = AbortSignal.timeout(env.MERGE_MODEL_TIMEOUT_MS);
-  const abort = signal ? AbortSignal.any([signal, timer]) : timer;
-
-  let text: string;
-  try {
-    const res = await fetch(`${env.MERGE_MODEL_URL}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: abort,
-      body: JSON.stringify({
-        model: env.MERGE_MODEL,
-        system: SYSTEM,
-        prompt: buildPrompt(rows, categories, guidance),
-        stream: false,
-        format: assignSchema(rows, categories), // 분류 이름까지 enum으로 강제
-        options: { temperature: 0, num_ctx: 8192 },
-      }),
-    });
-    if (!res.ok) return empty(`모델 응답 오류 (HTTP ${res.status})`, Date.now() - started);
-    text = ((await res.json()) as { response?: string }).response ?? '';
-  } catch (e) {
-    const why = e instanceof Error && e.name === 'TimeoutError' ? '시간 초과' : '연결 실패';
-    return empty(`모델 호출 ${why}`, Date.now() - started);
-  }
+  const reply = await callModel({
+    label: opts.label ?? '분류',
+    budget: opts.budget,
+    body: {
+      system: SYSTEM,
+      prompt: buildPrompt(rows, categories, guidance),
+      format: assignSchema(rows, categories), // 분류 이름까지 enum으로 강제
+      options: { temperature: 0, num_ctx: 8192 },
+    },
+  });
+  const call = { attempts: reply.attempts, waitedMs: reply.waitedMs };
+  if (!reply.ok) return empty(reply.reason, Date.now() - started, reply.kind, call);
+  const text = reply.text;
 
   let raw: Record<string, unknown>;
   try {
     const parsed = JSON.parse(text) as { assign?: Record<string, unknown> };
     if (!parsed.assign || typeof parsed.assign !== 'object') {
-      return empty('assign 객체가 없습니다', Date.now() - started);
+      return empty('assign 객체가 없습니다', Date.now() - started, 'invalid', call);
     }
     raw = parsed.assign;
   } catch {
-    return empty('모델이 JSON을 내지 않았습니다', Date.now() - started);
+    return empty('모델이 JSON을 내지 않았습니다', Date.now() - started, 'invalid', call);
   }
 
   // 모르는 분류·없는 id는 **조용히 버린다**. 여기서 전체를 폐기하지 않는 이유:
@@ -130,6 +133,6 @@ export async function classifyRows(
     assigned.set(id, valid.has(name) ? name : OTHER);
   }
 
-  return { assigned, usedModel: true, fallbackReason: null, elapsedMs: Date.now() - started };
+  return { assigned, usedModel: true, fallbackReason: null, elapsedMs: Date.now() - started, fallbackKind: null, ...call };
 }
 
