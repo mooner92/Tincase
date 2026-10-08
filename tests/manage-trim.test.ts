@@ -49,6 +49,14 @@ describe('[CP-T102] 받기는 하나씩 — 지운 것이 다시 생기지 않�
     expect(drawer).toMatch(/const showAuthors = data\?\.canSeeAuthors === true;/);
   });
 
+  it('[CP-T111] 작성자 칸이 줄을 바꾼다 — 여러 사람이 낸 줄이 내용 칸을 짜부라뜨리지 않는다 (2026-10-09 v2 전환 점검)', () => {
+    const drawer = code('src/components/MergedDrawer.tsx');
+    const cell = drawer.match(/\{showAuthors && \(\s*<td className="([^"]+)"/);
+    expect(cell, '작성자 칸(td)을 찾지 못함').not.toBeNull();
+    expect(cell![1]).not.toContain('whitespace-nowrap');
+    expect(cell![1]).toContain('break-keep');
+  });
+
   it('수합 관리 화면이 「규칙 바뀜」을 계산하지 않는다 (R4)', () => {
     expect(code('src/app/[division]/manage/ManageView.tsx')).not.toContain('rulesChanged');
     expect(code('src/components/MergePanel.tsx')).not.toContain('규칙 바뀜');

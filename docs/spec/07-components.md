@@ -527,6 +527,7 @@ interface FileDrawerProps {
 | CP-T103 | RuleEditor | 첫 그림은 분류 순서 칸·칩·[저장]뿐 — 작성 안내·정렬·병합 동작·고급 설정·확인할 낱말·공유 표시 낱말·병합 지침이 없다 · 저장 본문은 `{ categories }` (CP-118) |
 | CP-T104 | 칸 높이 맞추기 | `fitTextareas` — 모든 칸에 `auto`를 먼저 쓰고, 높이를 모두 읽은 뒤, 높이를 쓴다(읽기와 쓰기가 섞이지 않는다) · 테두리 두께를 더한다 · `MergedDrawer`·`SubmissionEditor`는 컴포넌트 안에서 높이 맞춤 함수를 만들지 않고 `fit-textarea`를 쓴다 (CP-119, `tests/fit-textarea.test.ts`) |
 | CP-T110 | 병합 카드의 줄 | 작업이 대기면 「줄 3번째 · 약 2분」, 병합 중이면 「병합 중…」 — 둘 다 버튼이 눌리지 않는다 · 병합본이 없을 때 칩 「대기 중」/「병합 중」 · 작업이 없으면 예전 그대로 · 고친 판을 지킨 실패(`held`)는 「준비됨」 + 그 한 줄 (CP-130, `tests/merge-panel.test.ts`) |
+| CP-T111 | 병합본 드로어 작성자 칸 | 작성자 칸(`td`)이 `whitespace-nowrap`이 아니고 `break-keep`이다 — 여러 사람이 낸 줄을 묶은 행이 내용 칸을 짜부라뜨리지 않는다(2026-10-09 v2 전환 점검: 열 명이면 1440px에서 내용 칸 약 60px) (`tests/manage-trim.test.ts`) |
 
 ---
 

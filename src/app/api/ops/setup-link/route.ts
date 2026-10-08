@@ -9,7 +9,7 @@ import { HttpError, requireOperator } from '@/server/authz';
 import { handler, json, rateLimit } from '@/server/http';
 import { audit } from '@/server/audit';
 import { sendAlert, messengerStatus } from '@/server/messenger';
-import { issueSetupToken, SETUP_TOKEN_DAYS } from '@/server/setup-token';
+import { issueSetupToken, setupLinkMessage } from '@/server/setup-token';
 import { env } from '@/server/env';
 
 export const dynamic = 'force-dynamic';
@@ -60,19 +60,11 @@ export const POST = handler(async (req: NextRequest) => {
      * 문구에 **비밀번호는 없다.** 링크뿐이다.
      * 「누가 보냈는지」와 「언제까지인지」를 넣는 이유: 낯선 링크를 받으면 사람은
      * 누르지 않는다. 그게 옳은 반응이라 링크가 무엇인지 먼저 말해 준다.
+     * 링크는 `URL` 필드에도 실린다 — 본문의 주소는 메신저에서 눌리지 않는다(setupLinkMessage).
      */
     const r = await sendAlert({
       recvIds: [u.employeeNo],
-      subject: '[Tincase] 비밀번호를 설정해 주세요',
-      contents: [
-        `${u.name}님, Tincase 비밀번호를 직접 정해 주세요.`,
-        '',
-        '아래 주소를 눌러 새 비밀번호를 입력하면 됩니다.',
-        url,
-        '',
-        `${SETUP_TOKEN_DAYS}일 안에 설정해 주세요. 한 번 쓰면 이 링크는 사라집니다.`,
-        '설정한 뒤에는 이 쪽지를 지워 주세요.',
-      ].join('\n'),
+      ...setupLinkMessage(u.name, url),
       kind: 'setup_link', // NT-56
     });
 

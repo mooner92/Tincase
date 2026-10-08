@@ -515,5 +515,6 @@ curl -m 5 http://<서버-내부-IP>:11111/          # 실패해야 정상
 | AU-T86 | `Origin`·`Sec-Fetch-Site` 둘 다 없는 POST(스크립트) → 그대로 처리 · GET은 출처를 보지 않는다 |
 | AU-T88 | 타 부서 열람 중이면 머리에 「열람」 칩 + `내 부서로` — 칩에 좁은 화면에서 숨기는 클래스가 없다 · 내 부서면 둘 다 없다 · 본문 띠 부품이 없다 (AU-17c, `tests/app-header.test.ts`) |
 | AU-T89 | member는 병합 규칙을 읽지 못한다 — 부서 설정 페이지 404 · 규칙 라우트에 GET이 없다 · 저장 404 (TACP §3.1 v1.6.4 — 작성 안내가 없어져 member read가 사라진 칸, 새로 금지된 것. `tests/integration.test.ts`) |
+| AU-T90 | 설정 링크 쪽지(운영자 `setup_link` · 본인 `forgot`)는 주소를 **`URL` 필드에도** 싣는다 — 본문의 주소는 메신저에서 눌리지 않는다(messenger.md §7 실측). 본문 주소는 남긴다(복사할 길) · 두 라우트가 같은 꼴(`setupLinkMessage`·`forgotMessage`)을 쓴다 (`tests/setup-link.test.ts`) |
 
 > AU-T09·T10(위조 방어)과 AU-T12~T17(격리)이 이 스펙의 핵심 회귀 테스트다.

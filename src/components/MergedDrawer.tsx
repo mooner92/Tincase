@@ -585,7 +585,12 @@ export function MergedDrawer({
                               </td>
                             ))}
                             {showAuthors && (
-                              <td className="px-3 py-1.5 align-top text-xs whitespace-nowrap">
+                              /*
+                                작성자 칸은 **줄을 바꾼다** (2026-10-09 v2 전환 점검). 예전엔 whitespace-nowrap이라 여러 사람이 낸 줄을 묶은 행
+                                (「가 + 나 + … 열 명」)이 한 줄로 늘어나 1440px 화면에서 내용 칸을 60px 남짓으로 짜부라뜨렸다. 이름 사이 공백에서만
+                                바꾸고(break-keep) 이름 안에서는 끊지 않는다 — 머리의 15% 폭을 따른다
+                              */
+                              <td className="px-3 py-1.5 align-top text-xs break-keep">
                                 {(t.authors?.[ri] ?? []).length === 0 ? (
                                   // 담당자가 새로 써 넣었거나 대조하지 못한 행 — 모르는 걸 아는 척하지 않는다
                                   <span className="text-muted-soft">—</span>

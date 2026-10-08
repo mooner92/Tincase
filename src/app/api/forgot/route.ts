@@ -14,7 +14,7 @@ import { prisma } from '@/server/db';
 import { handler, json, rateLimit } from '@/server/http';
 import { HttpError } from '@/server/authz';
 import { sendAlert, messengerStatus } from '@/server/messenger';
-import { issueSetupToken, SETUP_TOKEN_DAYS } from '@/server/setup-token';
+import { issueSetupToken, forgotMessage } from '@/server/setup-token';
 import { audit } from '@/server/audit';
 import { env } from '@/server/env';
 import { logger } from '@/server/logger';
@@ -52,18 +52,10 @@ export const POST = handler(async (req: NextRequest) => {
   const { token } = await issueSetupToken(user.id, `self:${email}`);
   const 처음 = !user.passwordHash;
 
+  // 링크는 `URL` 필드에도 실린다 — 본문의 주소는 메신저에서 눌리지 않는다(forgotMessage)
   await sendAlert({
     recvIds: [user.employeeNo],
-    subject: `[Tincase] 비밀번호 ${처음 ? '설정' : '재설정'} 링크입니다`,
-    contents: [
-      `${user.name}님, 비밀번호를 ${처음 ? '설정' : '새로 정'}해 주세요.`,
-      '',
-      `${env.MESSENGER_LINK_BASE}/setup/${token}`,
-      '',
-      `${SETUP_TOKEN_DAYS}일 안에 눌러 주세요. 한 번 쓰면 이 링크는 사라집니다.`,
-      // 본인이 요청하지 않았는데 왔다면 알아야 한다 — 링크는 아직 아무것도 바꾸지 않았다
-      '요청하지 않으셨다면 이 쪽지를 지워 주세요. 지금 비밀번호는 그대로입니다.',
-    ].join('\n'),
+    ...forgotMessage(user.name, `${env.MESSENGER_LINK_BASE}/setup/${token}`, 처음),
     kind: 'forgot', // NT-56 — 가짜 수신함이 종류를 안다 (NotifyLog에는 남지 않는 알림)
   });
 

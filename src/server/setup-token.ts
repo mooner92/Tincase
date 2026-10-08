@@ -109,6 +109,46 @@ export async function consumeSetupToken(
   return r.count === 1;
 }
 
+/**
+ * AU-30 · AU-32 — 설정 링크 쪽지. 운영자가 보내는 것(`setup_link`)과 본인이 요청한 것(`forgot`)이 같은 꼴을 쓴다.
+ *
+ * **링크를 `URL` 필드에도 싣는다** (2026-10-09 v2 전환 점검). 메신저 본문의 주소는 눌리지 않는다(messenger.md §7 — 2026-08-26 실측).
+ * 본문에만 두면 처음 쓰는 사람(10/12 전환 날 약 100명)이 주소를 손으로 옮겨야 한다. `URL` 필드는 제목에 걸려 알림·제목을 누르면 열린다 —
+ * 다른 알림이 다 쓰는 길이다. 본문의 주소는 그대로 둔다: 알림이 브라우저를 못 여는 PC에서 복사해 붙일 길이다.
+ */
+export function setupLinkMessage(name: string, url: string) {
+  return {
+    subject: '[Tincase] 비밀번호를 설정해 주세요',
+    contents: [
+      `${name}님, Tincase 비밀번호를 직접 정해 주세요.`,
+      '',
+      '제목을 누르면 설정 화면이 열립니다(안 열리면 아래 주소를 복사해 브라우저 주소창에 붙여 넣으세요).',
+      url,
+      '',
+      `${SETUP_TOKEN_DAYS}일 안에 설정해 주세요. 한 번 쓰면 이 링크는 사라집니다.`,
+      '설정한 뒤에는 이 쪽지를 지워 주세요.',
+    ].join('\n'),
+    url,
+  };
+}
+
+/** AU-32 — 본인이 「비밀번호를 잊으셨나요?」로 요청한 링크. `first`면 아직 비밀번호가 없는 사람 */
+export function forgotMessage(name: string, url: string, first: boolean) {
+  return {
+    subject: `[Tincase] 비밀번호 ${first ? '설정' : '재설정'} 링크입니다`,
+    contents: [
+      `${name}님, 비밀번호를 ${first ? '설정' : '새로 정'}해 주세요.`,
+      '',
+      url,
+      '',
+      `${SETUP_TOKEN_DAYS}일 안에 눌러 주세요. 한 번 쓰면 이 링크는 사라집니다.`,
+      // 본인이 요청하지 않았는데 왔다면 알아야 한다 — 링크는 아직 아무것도 바꾸지 않았다
+      '요청하지 않으셨다면 이 쪽지를 지워 주세요. 지금 비밀번호는 그대로입니다.',
+    ].join('\n'),
+    url,
+  };
+}
+
 /** 두 토큰이 같은가 — 길이가 같을 때만 상수 시간 비교 (테스트·유틸용) */
 export function sameToken(a: string, b: string): boolean {
   const x = Buffer.from(a);

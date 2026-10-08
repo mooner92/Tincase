@@ -7,7 +7,7 @@
 // DB: prisma/test-setup.db — 이 파일 전용 (다른 스위트와 섞이지 않게).
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { execSync } from 'node:child_process';
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 
 const root = path.resolve(__dirname, '..');
@@ -275,5 +275,38 @@ describe('AU-32 비밀번호 재설정 요청', () => {
 
   it('[AU-T83] 메일 주소가 비면 거절한다 — 빈 요청까지 조용히 받아 줄 이유는 없다', async () => {
     expect((await post('')).status).toBe(422);
+  });
+});
+
+/**
+ * AU-30 · AU-32 (2026-10-09 v2 전환 점검) — 메신저 본문의 주소는 눌리지 않는다(messenger.md §7 실측). 10/12에 처음 쓰는 사람
+ * 약 100명이 이 쪽지로 들어온다 — 주소가 `URL` 필드(제목에 걸린다)에도 있어야 누르면 열린다.
+ */
+describe('[AU-T90] 설정 링크 쪽지 — 주소가 `URL` 필드에도 실린다', () => {
+  const url = 'http://tincase.test/setup/abcdefghijklmnop';
+
+  it('운영자가 보낸 것 · 본인이 요청한 것(처음 · 다시) 모두 url = 본문의 주소', async () => {
+    const { setupLinkMessage, forgotMessage, SETUP_TOKEN_DAYS } = await import('@/server/setup-token');
+    for (const m of [setupLinkMessage('새사람', url), forgotMessage('새사람', url, true), forgotMessage('새사람', url, false)]) {
+      expect(m.url).toBe(url);
+      expect(m.contents.split('\n')).toContain(url); // 본문의 주소는 남는다 — 알림이 브라우저를 못 여는 PC에서 복사할 길
+      expect(m.contents).toContain(`${SETUP_TOKEN_DAYS}일 안에`);
+    }
+    expect(setupLinkMessage('새사람', url).subject).toBe('[Tincase] 비밀번호를 설정해 주세요');
+    expect(setupLinkMessage('새사람', url).contents).toContain('제목을 누르면 설정 화면이 열립니다');
+    expect(forgotMessage('새사람', url, true).subject).toBe('[Tincase] 비밀번호 설정 링크입니다');
+    expect(forgotMessage('새사람', url, false).subject).toBe('[Tincase] 비밀번호 재설정 링크입니다');
+    expect(forgotMessage('새사람', url, false).contents.split('\n')[0]).toBe('새사람님, 비밀번호를 새로 정해 주세요.');
+  });
+
+  it('두 라우트가 이 꼴을 그대로 쓴다 — 라우트에서 본문을 따로 적으면 url이 다시 빠진다', () => {
+    for (const [f, fn] of [
+      ['src/app/api/ops/setup-link/route.ts', 'setupLinkMessage('],
+      ['src/app/api/forgot/route.ts', 'forgotMessage('],
+    ]) {
+      const src = readFileSync(path.join(root, f), 'utf8');
+      expect(src, f).toContain(`...${fn}`);
+      expect(src, f).not.toMatch(/subject:/);
+    }
   });
 });
