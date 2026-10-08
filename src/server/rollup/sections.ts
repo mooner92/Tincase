@@ -5,7 +5,7 @@
 //            들어간 그 실의 사본을 쓴다 — 본부장이 검토한 것과 같은 것이 최종본에 들어간다
 //   upload   총괄이 올린 파일 — 아직 Tincase를 안 쓰는 섹션(취합게시판으로 받은 것)
 //   missing  아무것도 없다 → 제목 + 「미제출」 (분석 Q3 기본값)
-// 화면에는 둘이 더 있다(조립에는 미제출과 같다): waiting_hq(본부장 승인 대기 — 본부본이 아직 총괄에 안 옴) ·
+// 화면에는 둘이 더 있다(조립에는 미제출과 같다): waiting_hq(본부장 승인 대기 — 그 실은 본부에 올렸는데 본부본이 아직 총괄에 안 옴) ·
 // not_in_hq(본부장 재승인 대기 — 실은 올렸는데 본부장이 승인해 보낸 판에 그 실이 없다). RU-83 (2026-10-08)
 import path from 'node:path';
 import type { OrgSection, ReportSubmission, WeekSlot } from '@prisma/client';
@@ -270,8 +270,18 @@ export async function resolveSections(slot: WeekSlot, tree?: OrgTree, opts: { cr
         }
         if (!upload) {
           if (!hq) {
-            // 칩이 「본부장 승인 대기」라고 말한다 — 옆 글자는 기다리는 곳(그 본부 취합 화면으로 가는 길)
-            out.push({ section, kind: 'waiting_hq', offline: false, label: `${node.node.nameKo} 본부본 승인 전` });
+            // 칩이 「본부장 승인 대기」라고 말한다 — 옆 글자는 기다리는 곳(그 본부 취합 화면으로 가는 길).
+            // 단 이 섹션의 실·팀이 아직 본부에 아무것도 올리지 않았으면 기다리는 곳은 본부장이 아니라 그 실·팀(부서장 승인)이다 —
+            // 「본부장 승인 대기」로 두면 총괄이 엉뚱한 사람(본부장)을 찾는다. 본부본이 온 뒤의 판정(아래 not_in_hq/미제출)과 같게
+            // 「미제출」로 둔다 (RU-83, 2026-10-08 머지 검증). 본부 자신의 섹션은 그 섹션이 가져갈 단위(위 `mine`과 같은 범위) 중
+            // 하나라도 올렸으면 「본부장 승인 대기」다
+            const senders = node.contributors.filter((c) => c.id === section.divisionId || (own && !claimed.has(c.id)));
+            const sentAny = (await Promise.all(senders.map((c) => currentReport(c.id, slot.id, 'unit')))).some(Boolean);
+            out.push(
+              sentAny
+                ? { section, kind: 'waiting_hq', offline: false, label: `${node.node.nameKo} 본부본 승인 전` }
+                : { section, kind: 'missing', offline: false, label: '미제출' },
+            );
             continue;
           }
           // 본부본은 왔는데 이 부서가 없다. 이 부서가 본부에 올렸다면 본부장이 다시 승인하면 된다(이어 붙이기는 이미 자동이다) —

@@ -378,6 +378,11 @@ describe('RU-70~73 · HM-47 실·팀 — 부서장 승인이 곧 위로 가는 �
     expect(board.state).toBe('Q1');
     // 본부장 승인 전에는 총괄에 아무것도 가지 않는다 — 실하나 섹션은 「본부장 승인 대기」
     expect(await orgRuns()).toHaveLength(0);
+    // [RU-T144] RU-83 — 「본부장 승인 대기」는 그 실이 본부에 올렸을 때만. 실둘은 아직 아무것도 올리지 않아 기다리는 곳이
+    // 본부장이 아니라 실둘이다 — 「미제출」(2026-10-08 머지 검증: 「전사」가 실장 승인 전인 실까지 본부장을 가리켰다)
+    const { resolveSections } = await import('@/server/rollup/sections');
+    const kind = new Map((await resolveSections(await slot())).map((s) => [s.section.title, s.kind]));
+    expect([kind.get('본부가(실하나)'), kind.get('본부가(실둘)')]).toEqual(['waiting_hq', 'missing']);
   });
 
   it('[RU-T91] 부서장 고쳐 저장 → 저장한 바이트가 사본. 그 뒤 병합본 파일이 덮여도 사본 바이트는 그대로', async () => {

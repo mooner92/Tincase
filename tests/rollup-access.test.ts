@@ -342,7 +342,7 @@ d('TACP-21 위로 올린 제출', () => {
     expect(b.board.current.units.map((u: { name: string }) => u.name)).toEqual(['실둘', '실하나']);
   });
 
-  it('[RU-T34] ★ 전사본 — 저절로 · [다시 시도]는 총괄만(본부 담당자 404). 섹션마다: 본부장이 승인해 보낸 판의 실 사본 / 단독 단위의 사본 / 본부장 승인 대기', async () => {
+  it('[RU-T34] ★ 전사본 — 저절로 · [다시 시도]는 총괄만(본부 담당자 404). 섹션마다: 본부장이 승인해 보낸 판의 실 사본 / 단독 단위의 사본 / 본부에도 안 올린 실은 미제출', async () => {
     // RU-55 — 본부장 승인 = 총괄로 제출 (본 판에)
     expect((await hqApproveAs(ID.hqHead, 'hq')).status).toBe(200);
     // 본부 밖 단위 — 부서장 없는 단위의 최종본이 곧 총괄로
@@ -367,7 +367,9 @@ d('TACP-21 위로 올린 제출', () => {
     expect(board.sections.map((x: { title: string; source: string }) => [x.title, x.source])).toEqual([
       ['본부가(실하나)', 'tincase'],
       ['본부가(실둘)', 'tincase'],
-      ['본부나(실셋)', 'waiting_hq'], // 본부나는 아직 총괄에 온 판이 없다 — 실이 올려도 본부를 거친다
+      // 본부나는 아직 총괄에 온 판이 없다 — 그런데 실셋은 본부에도 아직 아무것도 올리지 않았다. 기다리는 곳은 본부장이 아니라
+      // 실셋이라 「미제출」이다(RU-83 — 2026-10-08 머지 검증). 올린 실의 「본부장 승인 대기」는 rollup-auto RU-T144
+      ['본부나(실셋)', 'missing'],
       ['단독단', 'tincase'],
     ]);
     expect(board.lastRun.sections.map((x: { title: string; status: string }) => [x.title, x.status])).toEqual([
