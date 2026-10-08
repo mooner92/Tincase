@@ -65,9 +65,11 @@ export function AppHeader({
   // PG-49d — 역할별 메뉴는 buildNav 하나가 정한다
   const items = buildNav({ slug, foreign, isLead, isOperator, readAll, hqDesk, orgDesk });
   const isActive = (href: string) => isNavActive(href, pathname, items, slug);
+  // PG-71 — 부서원의 메뉴는 「사용 안내」 하나다. 하나뿐이면 좁은 화면에서도 아랫줄을 만들지 않고 로고 줄에 둔다
+  const single = items.length === 1;
   // 타 부서 열람 중이면 메뉴를 한 줄에 올리는 폭을 md → lg로 늦춘다. 열람 칩과 [내 부서로]가 로고 줄에 늘 있어야 하는데
   // (ADR-0017), 768~1023px에서는 메뉴 여섯 개와 함께 들어가지 않아 칩이 0px로 눌렸다 (2026-10-08 실측)
-  const navTop = foreign ? 'hidden lg:flex' : 'hidden md:flex';
+  const navTop = single ? 'ml-auto flex' : foreign ? 'hidden lg:flex' : 'hidden md:flex';
   const navBelow = foreign ? 'lg:hidden' : 'md:hidden';
 
   const logout = () => {
@@ -128,12 +130,11 @@ export function AppHeader({
         </div>
 
         {/* 좁은 화면 — 메뉴를 아랫줄에 펼친다. 스크롤 없이 전부 보인다 */}
-        <nav
-          className={`-mx-1 flex flex-wrap items-center gap-1 pb-2.5 ${navBelow}`}
-          aria-label="주요 메뉴"
-        >
-          <Nav />
-        </nav>
+        {!single && (
+          <nav className={`-mx-1 flex flex-wrap items-center gap-1 pb-2.5 ${navBelow}`} aria-label="주요 메뉴">
+            <Nav />
+          </nav>
+        )}
       </div>
     </header>
   );
@@ -165,21 +166,13 @@ export function AppHeader({
       <>
           {items.map((it) => {
             const active = isActive(it.href);
-            // 안내는 업무 메뉴가 아니다. 옅은 초록으로 눈에 띄게 하되,
-            // 선택됐을 때도 초록을 유지한다 — 잉크색으로 바뀌면 다른 탭에 섞여 버린다
-            const tone = it.hint
-              ? active
-                ? 'bg-brand text-white hover:bg-brand hover:text-white'
-                : 'bg-brand-soft text-brand hover:bg-brand-soft hover:text-brand-active'
-              : active
-                ? 'tab-pill-active'
-                : '';
+            // R18 (2026-10-08) — 「사용 안내」의 초록 강조를 걷었다. 업무 메뉴와 같은 모양이고 맨 끝에 있다
             return (
               <Link
                 key={it.href}
                 href={it.href}
                 aria-current={active ? 'page' : undefined}
-                className={`tab-pill whitespace-nowrap ${tone} ${it.hint ? 'ml-2 font-semibold' : ''}`}
+                className={`tab-pill whitespace-nowrap ${active ? 'tab-pill-active' : ''}`}
               >
                 {it.label}
               </Link>

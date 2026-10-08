@@ -19,7 +19,7 @@ v2: 드로어·규칙 에디터·양식/명단 관리 추가 — [ADR-0005](../a
 **클라이언트 컴포넌트는 최소화한다.** 클라이언트는 아래 9개뿐이다.
 
 ```
-UploadDropzone · DeadlineCountdown · SlotSelector · CopyMissingButton
+ThisWeekCard · PastWeeks · SlotSelector · CopyMissingButton   (2026-10-08 — UploadDropzone · DeadlineCountdown 폐지)
 VersionHistoryPopover · FileDrawer · RuleEditor · TemplateManager · RosterEditor(/ops)
 ```
 
@@ -59,9 +59,50 @@ VersionHistoryPopover · FileDrawer · RuleEditor · TemplateManager · RosterEd
 
 ---
 
-## 3. 업로드 화면 컴포넌트
+## 3. 부서원 홈 컴포넌트 (2026-10-08 — 업로드 화면 컴포넌트를 대체)
 
-### `<WeekBanner>` · Server
+**2026-10-08.** 부서원 화면이 「이번 주 카드 + 지난 주차」 홈 하나가 되었다(PG-66). 아래 CP-112·113이 그 둘이고,
+그 뒤의 옛 업로드 화면 컴포넌트(WeekBanner · DeadlineCountdown · TemplateDownload · GuideNotice · UploadDropzone · SubmissionStatus)는
+**폐지 2026-10-08** — 표의 ID에 취소선을 긋고 기록으로 남긴다.
+
+### CP-112 — `<ThisWeekCard>` · **Client** (CP-07~10 WeekBanner · CP-34~39 SubmissionStatus 대체)
+
+`src/components/ThisWeekCard.tsx`. 이번 주 카드 하나 — 주 버튼은 **하나**다: 내기 전 [작성하기], 낸 뒤 [열기] (S1 — 2판 이상 0건, 「다시 쓰기」와 「보기」는 같은 행동이었다).
+판정(마감·열림·양식·취소 가능)은 전부 서버가 해서 props로 넘긴다(CP-03). 상태표는 PG-67a.
+
+```ts
+interface ThisWeekCardProps {
+  week: { isoKey; label; month; monthly; weekStartMs };      // WA-36a
+  deadline: { text; changedNote: string | null };            // formatDeadlineNearKo · WS-18 사유
+  phase: 'open' | 'opened' | 'locked';                       // opened = TACP-18 마감 후 열림
+  openUntilText: string | null;
+  refresh: { atMs; serverNowMs } | null;                     // PG-67d
+  mine: { id; at; version; edited } | null;                  // version은 취소 확인 문구에만. 고친 사람은 없다(PG-66e)
+  showMissing: boolean;                                      // user.onRoster
+  canCompose; canCancel; noTemplate; doc: boolean;
+  divisionSlug: string; me: { id; name }; emptyWordsRaw: string;
+  layout: 'paired' | 'alone';                                // PG-66b·d
+}
+```
+
+- 제목(주차)이 페이지의 h1(PG-66a), 칩 자리는 `aria-live="polite"`. 행동 줄: 주 버튼 · [병합본](잠긴 뒤, PG-67c) · 오른쪽 끝 `제출 취소`(글자 링크, `canCancel`일 때만 — TACP-9)
+- [열기]: 낼 수 있으면 낸 판으로 채운 `WebComposer`(WA-35·37 — 표와 고친 사람은 `/api/submissions/{id}/preview` 한 번), 아니면 `FileDrawer`(`members=[me]`). 병합본은 `MergedDrawer variant="view"`(CP-114)
+- 주 버튼은 「작성하기」·「열기」가 바뀌어도 같은 요소(ref 하나) — 드로어를 닫으면 초점이 그 단추로 돌아온다(WA-38)
+- 마감·열림 끝·KST 자정·다음 월요일에 `setTimeout(router.refresh)` 하나, `visibilitychange`로 돌아왔을 때 지났으면 바로. 화면에는 아무것도 그리지 않는다(옛 CP-13·15·17의 일)
+- 취소 확인은 `confirm` 그대로 — 무엇이 사라지는지 말한다(CP-106, 「v1~v2가 모두 삭제」)
+
+### CP-113 — `<PastWeeks>` · **Client** (PG-68·69)
+
+`src/components/PastWeeks.tsx`. 「지난 주차」 카드(`card card-flush`) — 머리 `h2` 하나, 그 아래 `<ol>`에 달 줄 · 해 구분선 · 해 줄.
+`MonthFold`·`WeekDots`는 안에 두고 export하지 않는다(WeekJump 때 꺼낸다). 묶기·접기는 `groupPast`가 정하고 여기서는 그리기만 한다.
+
+- 달 줄·해 줄 = `details.fold > summary`(CP-100). `summary` 안에 제목 요소를 넣지 않는다. 달 이름 앞에 sr-only 해
+- 주 줄 = 640px 이상 `grid-cols-[8.5rem_minmax(0,1fr)_4.5rem_4.5rem]`(주차 · 상태 · 내 일지 · 병합본, 버튼 칸은 자리 고정), 640px 미만은 주차·버튼 둘 한 줄 + 상태 다음 줄. 줄 버튼은 `.btn-ghost`, 터치(`pointer-coarse:`)에서 44px
+- 점은 `.dot text-success` / `.dot-hollow text-border-strong` 둘뿐, `role="img"` + `aria-label="4주 중 3주 제출"`. 「고침」은 `text-warning`. 면 색으로 상태를 칠하지 않는다(CP-97·100)
+- 드로어 둘(제출물 · 병합본 view)을 상태 하나로 들고, 닫으면 누른 단추로 초점을 돌린다(FileDrawer는 그 일을 하지 않는다)
+- 사용 안내 앵커: 카드 `past-weeks`, 처음 보이는 [내 일지] 하나 `past-open` (CP-104)
+
+### ~~`<WeekBanner>` · Server~~ — **폐지 2026-10-08** → CP-112
 
 주차·마감 표시.
 
@@ -77,14 +118,14 @@ interface WeekBannerProps {
 
 | ID | 요구사항 |
 |---|---|
-| CP-07 | `2026년 8월 2주차` 형식으로 제목 |
-| CP-08 | 마감 `8월 11일(화) 14:00` 형식 |
-| CP-09 | 내부에 `<DeadlineCountdown>` 배치 |
-| CP-10 | 잠김이면 `마감됨` 배지 + 다음 개시 시각 |
+| ~~CP-07~~ | `2026년 8월 2주차` 형식으로 제목 |
+| ~~CP-08~~ | 마감 `8월 11일(화) 14:00` 형식 |
+| ~~CP-09~~ | 내부에 `<DeadlineCountdown>` 배치 |
+| ~~CP-10~~ | 잠김이면 `마감됨` 배지 + 다음 개시 시각 |
 
 ---
 
-### `<DeadlineCountdown>` · **Client**
+### ~~`<DeadlineCountdown>` · **Client**~~ — **폐지 2026-10-08** (R14) → `formatDeadlineNearKo` + 보이지 않는 새로 고침 (PG-67d)
 
 ```ts
 interface DeadlineCountdownProps {
@@ -95,29 +136,29 @@ interface DeadlineCountdownProps {
 
 | ID | 요구사항 |
 |---|---|
-| CP-11 | 남은 시간 `22시간 14분` 형식. 1시간 미만이면 `43분 20초`(초 단위) |
-| CP-12 | 갱신 주기: 1시간 초과 시 60초, 이하 시 1초 |
-| CP-13 | 0 도달 시 `onExpire()` 1회 호출 → 페이지에서 `router.refresh()` (PG-14) |
-| CP-14 | 3시간 이내 경고색 |
-| CP-15 | **서버가 준 `deadlineAt`만 신뢰.** 로컬 시계 오차는 최초 1회 서버 시각으로 보정 |
-| CP-16 | 언마운트 시 타이머 정리 |
-| CP-17 | 탭 백그라운드 복귀(`visibilitychange`) 시 즉시 재계산 |
+| ~~CP-11~~ | 남은 시간 `22시간 14분` 형식. 1시간 미만이면 `43분 20초`(초 단위) |
+| ~~CP-12~~ | 갱신 주기: 1시간 초과 시 60초, 이하 시 1초 |
+| ~~CP-13~~ | 0 도달 시 `onExpire()` 1회 호출 → 페이지에서 `router.refresh()` (PG-14) |
+| ~~CP-14~~ | 3시간 이내 경고색 |
+| ~~CP-15~~ | **서버가 준 `deadlineAt`만 신뢰.** 로컬 시계 오차는 최초 1회 서버 시각으로 보정 |
+| ~~CP-16~~ | 언마운트 시 타이머 정리 |
+| ~~CP-17~~ | 탭 백그라운드 복귀(`visibilitychange`) 시 즉시 재계산 |
 
 > CP-17이 없으면 브라우저가 타이머를 스로틀해 몇 시간 뒤진 값을 보여준다.
 
 ---
 
-### `<TemplateDownload>` · Server
+### ~~`<TemplateDownload>` · Server~~ — **폐지 2026-10-08** (R19 — 홈에 「양식 받기」 구역이 없다. `GET /api/template`은 그대로다 — 담당자의 「현재 양식 받기」, WA-39b)
 
 | ID | 요구사항 |
 |---|---|
-| CP-18 | `GET /api/template` 링크 — 자기 부서 active 양식 (API-17) |
-| CP-19 | 파일명에 주차·부서명 포함 (API-18) |
-| CP-20 | 잠김 상태에서도 활성 (다음 주 대비 미리 받기 허용) |
+| ~~CP-18~~ | `GET /api/template` 링크 — 자기 부서 active 양식 (API-17) |
+| ~~CP-19~~ | 파일명에 주차·부서명 포함 (API-18) |
+| ~~CP-20~~ | 잠김 상태에서도 활성 (다음 주 대비 미리 받기 허용) |
 
 ---
 
-### `<GuideNotice>` · Server
+### ~~`<GuideNotice>` · Server~~ — **폐지 2026-10-08** (R5 — 홈에도 작성 화면에도 작성 안내가 없다)
 
 작성 관례 안내. v2: **부서 데이터에서 온다 — 전역 상수 금지** (PG-10).
 
@@ -129,8 +170,8 @@ interface GuideNoticeProps {
 
 | ID | 요구사항 |
 |---|---|
-| CP-21 | 문구 출처는 부서 설정. 비어 있으면 섹션 자체를 렌더하지 않음 |
-| CP-22 | 코드로 강제하지 않는다 — 안내만 |
+| ~~CP-21~~ | 문구 출처는 부서 설정. 비어 있으면 섹션 자체를 렌더하지 않음 |
+| ~~CP-22~~ | 코드로 강제하지 않는다 — 안내만 |
 
 > AI홍보전략실의 관례("AI → 홍보(정간물) → 시스템 → 도서관", "상시 업무 일자 공란")는
 > **그 부서의 시드 값**으로 들어간다. 다른 부서는 자기 관례를 적는다.
@@ -139,7 +180,7 @@ interface GuideNoticeProps {
 
 ---
 
-### `<UploadDropzone>` · **Client** ★
+### ~~`<UploadDropzone>` · **Client** ★~~ — **폐지 2026-10-08** (R19 — 파일을 지웠다. 쓰는 곳이 `SubmitChoice` 하나였다. 받던 라우트 `POST /api/submissions`도 같은 날 지웠다 — WA-39 · ADR-0014 완료)
 
 가장 복잡한 컴포넌트.
 
@@ -160,17 +201,17 @@ type UploadState =
 
 | ID | 요구사항 |
 |---|---|
-| CP-23 | 드래그앤드롭 + 클릭 선택 **둘 다** 지원 |
-| CP-24 | `accept=".hwp"` — 다만 신뢰하지 않고 서버 재검증 (ST-05~06) |
-| CP-25 | 전송 전 클라이언트 1차 검증: 확장자, 20MB. **즉시 피드백용** |
-| CP-26 | 업로드 진행률 표시 (`XMLHttpRequest.upload.onprogress`) |
-| CP-27 | 업로드 중 중복 제출 차단 (버튼 비활성 + 드롭 무시) |
-| CP-28 | 서버 오류 코드 → 한국어 메시지 매핑 |
-| CP-29 | `slot_locked` 응답 시 전용 메시지 + 페이지 새로고침 유도 (PG-16) |
-| CP-30 | 성공 시 `onUploaded` 호출 → 부모가 `router.refresh()` |
-| CP-31 | 다중 파일 드롭 시 첫 번째만 사용 + `한 개만 올릴 수 있습니다` 안내 |
-| CP-32 | 폴더 드롭 거부 |
-| CP-33 | 네트워크 실패 시 재시도 버튼 (자동 재시도 **안 함** — 중복 버전 생성 방지) |
+| ~~CP-23~~ | 드래그앤드롭 + 클릭 선택 **둘 다** 지원 |
+| ~~CP-24~~ | `accept=".hwp"` — 다만 신뢰하지 않고 서버 재검증 (ST-05~06) |
+| ~~CP-25~~ | 전송 전 클라이언트 1차 검증: 확장자, 20MB. **즉시 피드백용** |
+| ~~CP-26~~ | 업로드 진행률 표시 (`XMLHttpRequest.upload.onprogress`) |
+| ~~CP-27~~ | 업로드 중 중복 제출 차단 (버튼 비활성 + 드롭 무시) |
+| ~~CP-28~~ | 서버 오류 코드 → 한국어 메시지 매핑 |
+| ~~CP-29~~ | `slot_locked` 응답 시 전용 메시지 + 페이지 새로고침 유도 (PG-16) |
+| ~~CP-30~~ | 성공 시 `onUploaded` 호출 → 부모가 `router.refresh()` |
+| ~~CP-31~~ | 다중 파일 드롭 시 첫 번째만 사용 + `한 개만 올릴 수 있습니다` 안내 |
+| ~~CP-32~~ | 폴더 드롭 거부 |
+| ~~CP-33~~ | 네트워크 실패 시 재시도 버튼 (자동 재시도 **안 함** — 중복 버전 생성 방지) |
 
 > CP-33: 자동 재시도는 위험하다. 서버가 저장에 성공하고 응답만 유실된 경우
 > 재시도가 v2를 하나 더 만든다. **재시도는 사용자가 결정하게 한다.**
@@ -192,7 +233,7 @@ type UploadState =
 
 ---
 
-### `<SubmissionStatus>` · Server
+### ~~`<SubmissionStatus>` · Server~~ — **폐지 2026-10-08** → CP-112 ([열어보기]·[내 파일 받기]는 없어지고 [열기] 하나 — S1. `MySubmissionCard`·`SubmitChoice`를 지웠다)
 
 ```ts
 interface SubmissionStatusProps {
@@ -203,12 +244,12 @@ interface SubmissionStatusProps {
 
 | ID | 요구사항 |
 |---|---|
-| CP-34 | `null`이면 렌더하지 않는다 (업로드 영역이 주인공) |
-| CP-35 | `제출 완료 (v2)` · 제출시각 · 크기 표시 |
-| CP-36 | `내 파일 받기` 버튼 |
-| CP-37 | 잠기지 않았으면 `다시 올리기` (스크롤 이동 + 드롭존 포커스) |
-| CP-38 | 크기는 `74.4 KB` 형식 |
-| CP-39 | 시각은 `8월 11일 09:12` 형식 |
+| ~~CP-34~~ | `null`이면 렌더하지 않는다 (업로드 영역이 주인공) |
+| ~~CP-35~~ | `제출 완료 (v2)` · 제출시각 · 크기 표시 |
+| ~~CP-36~~ | `내 파일 받기` 버튼 |
+| ~~CP-37~~ | 잠기지 않았으면 `다시 올리기` (스크롤 이동 + 드롭존 포커스) |
+| ~~CP-38~~ | 크기는 `74.4 KB` 형식 |
+| ~~CP-39~~ | 시각은 `8월 11일 09:12` 형식 |
 
 ---
 
@@ -353,6 +394,12 @@ interface FileDrawerProps {
 | CP-110 | **고칠 수 있다는 것이 보인다** (`canEdit`). 칸은 늘 옅은 테두리로 그려 입력칸으로 읽히고, [수정 저장]은 처음부터 보이되 고치기 전에는 비활성이다. 부서장 승인 띠는 「승인 전 · 고쳐 저장하면 승인」 한 마디(2026-10-08 — 같은 날 긴 문장을 줄였다, PG-65) |
 | CP-116 | **머리 줄은 저장 하나** (2026-10-08 — S5·S9, PG-73). [제목 복사]는 수합 관리 병합본 카드의 [받기] 옆으로 옮겼고(CP-117), [hwp로 받기]는 지웠다(병합본 받기는 카드 하나). [작성자 보기] 토글도 지웠다 — 서버가 작성자를 보낸 사람(lead·head·readAll)에게는 작성자 열이 **늘** 있고, 부서원에게는 서버가 보내지 않으므로 열이 없다(TACP-17 · AU-T33 그대로). 머리 줄은 `canEdit`일 때만: 저장 결과·「저장하지 않은 수정」 한 마디와 [수정 저장](고치기 전에는 비활성 — CP-110). 부서장 승인 띠는 그대로다 |
 
+**CP-110 · `variant` (2026-10-08).** `variant="edit"`(기본)이 위의 모양이다. `variant="view"`는 **CP-114**.
+
+| ID | 요구사항 |
+|---|---|
+| CP-114 | **`<MergedDrawer variant="view">`** — 부서원 홈의 [병합본](PG-68d · PG-67c). 누구에게나 읽기 전용: `canEdit`을 무시하고 손잡이·칸 편집·줄 지우기·「공유」 켜고 끄기·[수정 저장]이 없다. **승인 띠 전체**(「승인 완료 · 이름」·[고칠 것 없음 · 승인])도 그리지 않는다([제목 복사]·[hwp로 받기]는 두 변형 모두에서 없어졌다 — CP-116) — 고치기·승인은 수합 관리에서 한다(승인하는 곳이 둘이 되지 않게, ADR-0015). 작성자 열은 TACP-17대로 서버가 보낸 사람에게만(판정 기준은 화면이 아니라 사람). 무엇을 그릴지는 순수 함수 `drawerControls(variant, canEdit, data)`(`src/lib/merged-drawer.ts`)가 정한다. 두 변형 모두: 열면 제목에 초점, Tab은 드로어 안에서 돈다, Esc 닫기 |
+
 **CP-110이 생긴 이유** — 칸이 `border-transparent`라 마우스를 올리기 전에는 그냥 표 글자였다. 처음 쓰는 실장은
 안내가 가리키는 [수정 저장]도, 고칠 방법도 못 찾고 hwp로 받아 한글에서 고쳐 메일로 보낸다 — 승인 기록도
 담당자 알림도 남지 않는다 (HM-47).
@@ -406,7 +453,7 @@ interface FileDrawerProps {
 
 | ID | 요구사항 |
 |---|---|
-| CP-82 | 현재 양식 카드(버전·등록일·등록자·다운로드) + 교체 드롭존(UploadDropzone 재사용) |
+| CP-82 | 현재 양식 카드(버전·등록일·다운로드) + [양식 등록]/[양식 교체] 버튼이 여는 숨은 파일 입력(`accept=".hwp"`) — 2026-10-08 고침: 예전 글의 「교체 드롭존(UploadDropzone 재사용)」은 실제 코드와 달랐다. 제출 드롭존이 지워져도(WA-39) 양식 등록은 그대로다 |
 | CP-83 | 교체 성공 → 「v2 등록됨」 + 서버 경고(있을 때만). 파싱 요약(표·행수)은 2026-10-08에 걷었다(PG-29·65). 「표준 양식 받기」는 버튼 줄의 링크 하나(표준 양식이 있을 때만) — 「우리 부서 부분만 남겨 등록하세요」 설명은 없다 |
 | CP-84 | 교체 실패 → 기존 양식 유지 명시 (`기존 양식은 그대로입니다`) |
 
@@ -419,13 +466,13 @@ interface FileDrawerProps {
 | CP-85 | 부서 선택 → 부서원 목록 + onRoster 토글 + ↑↓ 정렬 (API-26~27) |
 | CP-86 | 변경은 명시적 `저장` 버튼으로 일괄 반영, 저장 후 토스트 |
 
-### `<DivisionStatusList>` · Server — member용 부서 현황 (v2.1)
+### ~~`<DivisionStatusList>` · Server — member용 부서 현황 (v2.1)~~ — **폐지 2026-10-08** (TACP-11 v1.8 · ADR-0016 — 부서원 홈에 명단이 없다)
 
 | ID | 요구사항 |
 |---|---|
-| CP-87 | 이름 · `● 제출됨(시각)` / `○ 아직` 목록. **파일 링크·버전·크기 없음** (AU-06) |
-| CP-88 | 본인 행 강조. 정렬은 lead 현황과 동일 |
-| CP-89 | 업로드 영역보다 시각적 우선순위 낮게 (업로드가 주인공) |
+| ~~CP-87~~ | 이름 · `● 제출됨(시각)` / `○ 아직` 목록. **파일 링크·버전·크기 없음** (AU-06) |
+| ~~CP-88~~ | 본인 행 강조. 정렬은 lead 현황과 동일 |
+| ~~CP-89~~ | 업로드 영역보다 시각적 우선순위 낮게 (업로드가 주인공) |
 
 ---
 
@@ -446,19 +493,19 @@ interface FileDrawerProps {
 
 | ID | 대상 | 내용 |
 |---|---|---|
-| CP-T01 | DeadlineCountdown | 남은 2시간 → `2시간 0분` |
-| CP-T02 | DeadlineCountdown | 남은 45초 → 초 단위 표시 |
-| CP-T03 | DeadlineCountdown | 0 도달 시 `onExpire` **정확히 1회** |
-| CP-T04 | DeadlineCountdown | 언마운트 후 타이머 미실행 |
-| CP-T05 | UploadDropzone | `.txt` 선택 → 전송 없이 즉시 오류 |
-| CP-T06 | UploadDropzone | 업로드 중 두 번째 드롭 무시 |
-| CP-T07 | UploadDropzone | 409 `slot_locked` → 전용 문구 |
-| CP-T08 | UploadDropzone | 파일 2개 드롭 → 첫 번째만, 안내 표시 |
+| ~~CP-T01~~ | DeadlineCountdown | 남은 2시간 → `2시간 0분` |
+| ~~CP-T02~~ | DeadlineCountdown | 남은 45초 → 초 단위 표시 |
+| ~~CP-T03~~ | DeadlineCountdown | 0 도달 시 `onExpire` **정확히 1회** |
+| ~~CP-T04~~ | DeadlineCountdown | 언마운트 후 타이머 미실행 |
+| ~~CP-T05~~ | UploadDropzone | `.txt` 선택 → 전송 없이 즉시 오류 |
+| ~~CP-T06~~ | UploadDropzone | 업로드 중 두 번째 드롭 무시 |
+| ~~CP-T07~~ | UploadDropzone | 409 `slot_locked` → 전용 문구 |
+| ~~CP-T08~~ | UploadDropzone | 파일 2개 드롭 → 첫 번째만, 안내 표시 |
 | CP-T09 | SubmissionTable | 미제출자 행 렌더됨 |
 | CP-T10 | SubmissionTable | onRoster=false 인원은 본 목록에서 제외 |
 | CP-T11 | CopyMissingButton | 미제출 0명 → 렌더 안 됨 |
 | CP-T12 | StatusSummary | 12/12 → 완료 표시 |
-| CP-T13 | SubmissionStatus | `null` → 렌더 안 됨 |
+| ~~CP-T13~~ | SubmissionStatus | `null` → 렌더 안 됨 |
 | CP-T14 | FileDrawer | 픽스처 preview 응답 → 표 3개 렌더, 셀 값 일치 |
 | CP-T15 | FileDrawer | 3번 표 없음 → "관례상 정상" 안내 |
 | CP-T16 | FileDrawer | Esc → 닫히고 트리거로 포커스 복귀 |
@@ -467,6 +514,7 @@ interface FileDrawerProps {
 | ~~CP-T19~~ | RuleEditor | ~~422 problems 행 번호 표시~~ — **폐지 2026-10-08** (CP-79) |
 | CP-T20 | TemplateManager | 교체 실패 → "기존 양식 유지" 문구 |
 | CP-T21 | RosterEditor | 토글 후 저장 전 이탈 → confirm |
+| CP-T100 | MergedDrawer `variant="view"` | `drawerControls('view', …)` — 승인 띠·[승인]·[수정 저장]·손잡이·칸 편집이 없다(부서장에게 `canApprove=true`가 와도) · `'edit'`은 지금 그대로 · 홈의 두 [병합본]은 모두 view (CP-114, `tests/member-home.test.ts`) |
 | CP-T96 | 복사 버튼 전부 | `src/lib/clipboard.ts` 밖에서 `navigator.clipboard`를 부르지 않는다 (소스 검사, CP-109) |
 | ~~CP-T97~~ | MergePanel 「규칙 바뀜」 | **폐지 2026-10-08** (CP-107) — 옛 글: 같은 설정 → 없음 · 정렬만 바꿈 → 「정렬」 · `sort`가 없는 옛 실행은 제출자 순으로 읽음 · `emphasisWords`가 없는 옛 실행은 「모름」 · 제출자 순이면 「날짜 없는 줄」은 비교 안 함 (CP-107) |
 | CP-T98 | MergePanel | (2026-10-08 개정 — 「빠진 사람」 줄과 「규칙 바뀜」 칩이 없어져 그 단언은 CP-T101로) 고친 병합본이어도 [다시 병합]을 시키는 지시문이 없다 — 확인은 누른 자리에서(CP-106). 옛 글: 「빠진 사람」 줄은 시점만 말하고 [다시 병합]을 시키지 않는다(고친 병합본이어도 — 확인은 CP-106이 한다) · 규칙이 바뀌었으면 칩이 그려진다 · [다시 병합] 안내는 버튼을 가진 사람에게만 (CP-106a·107) |
@@ -556,7 +604,7 @@ shadcn/ui 도입 계획은 폐기. `@layer components`의 유틸 클래스
 - **상태 칩** `.chip` + `-ok`·`-warn`·`-muted`·`-info`·`-error` — 낱말 하나(「제출」·「본부 대기」·「올린 파일」). 점은 `.dot`(낸 사람)·`.dot-hollow`(안 낸 사람)으로 그린다 — 「●○✓」 글자는 글꼴마다 크기가 달랐다
 - **큰 초록 면 금지** — `bg-brand`로 칠한 요약 띠·「완료」 카드를 두지 않는다. 진행은 흰 카드 안의 6px 막대(`brand` / `surface-strong`)
 - **탭** — 카드 안 토글은 `.tab-pill`, 페이지 탭(필터)은 `.tab-line`(잉크 밑줄)
-- **접기** — 매주 바꾸지 않는 설정은 `details.disclosure` 뒤에 둔다(「…바꾸기」·「고급 설정」)
+- **접기** — 매주 바꾸지 않는 설정은 `details.disclosure` 뒤에 둔다(「…바꾸기」·「고급 설정」). 줄 전체가 누르는 자리인 목록 접기(부서원 홈의 달 줄·해 줄, PG-69)는 `details.fold` — 같은 선 화살표, 줄 높이 44px, 펼쳐도 줄이 움직이지 않는다
 - **표** — `.table`: 머리는 `surface-soft` 띠·12px `muted`, 줄 44px, 숫자 `tabular-nums`. 640px 미만은 표 대신 줄 목록으로 쌓는다(UX-02)
 
 | ID | 검사 |
@@ -660,8 +708,8 @@ shadcn/ui 도입 계획은 폐기. `@layer components`의 유틸 클래스
 감싸기만 하고 모양은 바꾸지 않는다. 표의 몇 줄처럼 감쌀 수 없는 곳은 단계의 `frameClip`(픽셀)로 줄인다.
 
 구멍(누를 곳)은 **누르는 그것 하나**다(코치 마크, 2026-10-08) — 카드·표 전체에 달지 않는다. 같은 날 검토 뒤 단 앵커:
-`login-submit`([로그인]) · `compose-first`(실적 표 **첫 줄**의 업무 내용 칸) · `history-open`(내 이력 표에서 **낸 주 중 맨 위** 줄의
-[열기] — 넓은 화면의 표에만: 숨은 휴대폰 카드 목록에도 달면 찍기 도구가 숨은 쪽을 먼저 집는다) · `merge-ready`(병합본 「준비됨」 칩) ·
+`login-submit`([로그인]) · `compose-first`(실적 표 **첫 줄**의 업무 내용 칸) · ~~`history-open`(내 이력 표의 [열기])~~ → **`past-open`**(홈 지난 주차에서
+**처음 보이는** [내 일지] 하나, 2026-10-08 — 틀은 ~~`history-table`~~ → **`past-weeks`**, 지난 주차 카드) · `merge-ready`(병합본 「준비됨」 칩) ·
 `merged-cell`(병합본 첫 표 첫 줄의 내용 칸) · `merge-categories`(분류 순서 칸 + 칩, 감싸기만) · `org-total`(전사 「제출 19 / 26명」 합계).
 긴 버튼 이름(「계획 2줄을 이번 주 실적으로」)도 그 버튼(`previous-to-achievements`)에 단다 — 말풍선 머리는 16자까지, 8자 이상은 제 줄이다.
 여러 줄 중 하나만 짚을 때는 조건으로 한 곳에만 단다 — `compose-share`(실적 표 **첫 줄**의 「공유」).

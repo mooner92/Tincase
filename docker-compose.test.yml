@@ -42,8 +42,8 @@ services:
       MESSENGER_URL: ""                       # RU-41 — 알림 끔
       MESSENGER_ALLOWLIST: ""
       MERGE_SCHEDULER: "off"                  # RU-41 — 병합은 버튼으로만
-      # WA-30 · ADR-0014 — 제출은 웹 작성만. hwp 업로드는 410, 화면에서도 드롭존·「양식 받기」가 빠진다.
-      # 운영(docker-compose.yml)은 기본값 on 그대로 — 아직 hwp로 내는 부서가 있다
+      # RU-60a · ADR-0014 — 「전사」 게시판 hwp [올리기]를 닫는다(410, 버튼도 없다). 부서원의 hwp 업로드 제출은
+      # 2026-10-08에 코드째 없어져(WA-39) 이 값과 상관없다. [올리기]가 걷히면 이 줄도 지운다
       SUBMIT_HWP_UPLOAD: "off"
       MERGE_MODEL: hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M
       MERGE_MODEL_URL: http://host.docker.internal:11437

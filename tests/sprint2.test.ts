@@ -47,6 +47,19 @@ let hwp: Buffer;
 let filled: Buffer;
 let subId = '';
 
+/**
+ * 제출물을 만든다 — 웹 작성 라우트와 같은 게이트(`requireSubmitter`)를 지나 저장 함수 `uploadSubmission()`으로.
+ * 2026-10-08 — hwp 업로드 라우트를 지웠다(WA-39). 여기서 필요한 것은 「실제 hwp 내용이 든 제출물」이라
+ * (미리보기 시험이 표 내용을 본다) 픽스처를 저장 함수에 그대로 넘긴다.
+ */
+async function submit(identity: string, bytes: Buffer, fileName: string): Promise<string> {
+  const { requireSubmitter } = await import('@/server/authz');
+  const { uploadSubmission } = await import('@/server/worklog');
+  const scope = await requireSubmitter(new Headers({ 'x-test-identity': identity }));
+  const r = await uploadSubmission({ user: scope.user, division: scope.division, fileName, bytes });
+  return r.submission.id;
+}
+
 beforeAll(async () => {
   const root = path.resolve(__dirname, '..');
   rmSync(path.join(root, 'prisma/test-s2.db'), { force: true });
@@ -69,12 +82,8 @@ beforeAll(async () => {
   hwp = readFileSync(path.join(FIX, 'master-template.hwp'));
   filled = readFileSync(path.join(FIX, 'sample-filled-w2.hwp'));
 
-  // member가 실데이터 파일 업로드 → preview 대상
-  const { POST } = await import('@/app/api/submissions/route');
-  const fd = new FormData();
-  fd.set('file', new File([new Uint8Array(filled)], '주간.hwp'));
-  const res = await POST(nx('/api/submissions', ID.member, { method: 'POST', body: fd }));
-  subId = (await res.json()).submission.id;
+  // member가 실데이터 파일로 낸 제출물 → preview 대상
+  subId = await submit(ID.member, filled, '주간.hwp');
 }, 60_000);
 
 d('preview API (API-22~25)', () => {

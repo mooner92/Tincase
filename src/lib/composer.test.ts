@@ -1,6 +1,6 @@
 // WA-35 · WA-36a — 웹 작성의 시작점과 일자 예시.
 import { describe, expect, it } from 'vitest';
-import { composerStart, dateHint } from './composer';
+import { composerStart, dateHint, sameRows } from './composer';
 
 type Row = { content: string; date: string; place: string; attendee: string; emphasis?: boolean };
 const blank = (): Row => ({ content: '', date: '', place: '', attendee: '', emphasis: false });
@@ -64,5 +64,35 @@ describe('WA-36a — 일자 칸 예시는 이번 주 날짜', () => {
     const sep = Date.UTC(2026, 8, 27, 15); // 2026-09-28(월)
     expect(dateHint(sep)).toBe('9/29');
     expect(dateHint(sep, 1)).toBe('10/6');
+  });
+});
+
+describe('WA-37 — 「바뀌었나」는 내용으로', () => {
+  const start = composerStart<Row>(null, submitted, blank).data;
+  const clone = () => JSON.parse(JSON.stringify(start)) as typeof start;
+
+  it('[WA-T51] 한 글자 쳤다 지우면 같다 · 끝의 빈 줄과 앞뒤 공백은 보지 않는다', () => {
+    const typed = clone();
+    typed.achievements[0].content = '실적 하나x';
+    expect(sameRows(start, typed)).toBe(false);
+    typed.achievements[0].content = '실적 하나';
+    expect(sameRows(start, typed)).toBe(true);
+
+    const padded = clone();
+    padded.plans.push(blank(), blank());
+    padded.achievements[1].content = '  실적 둘 ';
+    expect(sameRows(start, padded)).toBe(true);
+  });
+
+  it('[WA-T51] 「공유」를 켜거나 일자·장소를 바꾸면 다르다 — 문서가 달라진다', () => {
+    const shared = clone();
+    shared.plans[0].emphasis = true;
+    expect(sameRows(start, shared)).toBe(false);
+    const dated = clone();
+    dated.achievements[1].date = '10/7';
+    expect(sameRows(start, dated)).toBe(false);
+    const moved = clone();
+    moved.achievements.reverse();
+    expect(sameRows(start, moved)).toBe(false); // 순서도 문서다
   });
 });

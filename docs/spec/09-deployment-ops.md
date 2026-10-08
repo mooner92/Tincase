@@ -134,7 +134,7 @@ services:
 | `CF_ACCESS_AUD` | `a1b2…` | ✔ | Access 앱 AUD ([Q-04](../../OPEN-QUESTIONS.md)) |
 | `TZ` | `Asia/Seoul` | ✔ | |
 | `MAX_UPLOAD_BYTES` | `20971520` | | 기본 20MB |
-| `SUBMIT_HWP_UPLOAD` | `off` | | 기본 `on`. `off`면 hwp 업로드 제출을 닫고 웹 작성만 받는다 — 테스트 서버만 `off` (WA-30 · [ADR-0014](../adr/0014-web-only-submission.md)) |
+| `SUBMIT_HWP_UPLOAD` | `off` | | 기본 `on`. `off`면 「전사」 게시판 hwp [올리기]를 닫는다(RU-60a) — 테스트 서버만 `off`. 부서원 제출과는 상관없다: hwp 업로드 제출은 2026-10-08에 코드째 없어졌다(WA-39 · [ADR-0014](../adr/0014-web-only-submission.md)). [올리기]가 걷히면 이 변수도 지운다 |
 | `DEV_IDENTITY` | `me@kei.re.kr` | | **개발 전용** (AU-03) |
 
 ### OPS-06 — 기동 시 환경변수 검증

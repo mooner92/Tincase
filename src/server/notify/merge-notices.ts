@@ -465,7 +465,8 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
 
       const jobs = pickJobs(atReview, atSubmit, facts).map((j) => ({
         ...j,
-        url: base ? `${base}/${j.kind === 'merge_review' ? 'archive' : 'manage'}` : undefined,
+        // NT-53 — 알림 종류와 상관없이 수합 관리로. 부서장의 검토·승인도 수합 관리에서 한다(이미 나간 옛 보관함 주소는 PG-70이 받는다)
+        url: base ? `${base}/manage` : undefined,
       }));
 
       for (const j of jobs) {

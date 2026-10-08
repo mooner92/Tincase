@@ -374,7 +374,7 @@ function plan(ai, notice) {
       },
     },
     { id: 'member-done', role: 'memberPending', path: `/${ai}` },
-    { id: 'member-history', role: 'memberPending', path: `/${ai}/history` },
+    { id: 'member-history', role: 'memberPending', path: `/${ai}` },
 
     { id: 'lead-status', role: 'lead', path: `/${ai}/manage` },
     { id: 'lead-nudge', role: 'lead' },
@@ -512,7 +512,7 @@ async function main() {
     STORAGE_ROOT: path.join(work, 'storage'),
     CF_ACCESS_TEAM: 'guide-capture',
     CF_ACCESS_AUD: '',
-    SUBMIT_HWP_UPLOAD: 'off', // WA-32 — 안내는 웹 작성만
+    SUBMIT_HWP_UPLOAD: 'off', // RU-60a — 「전사」 [올리기]를 닫는다. 부서원 업로드 길은 코드째 없다(WA-39)
     MERGE_MODEL: '',
     MERGE_SCHEDULER: 'off',
     MERGE_PAUSE_UNTIL: '',

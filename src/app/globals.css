@@ -238,6 +238,26 @@ body {
     transform: rotate(45deg) translateY(-2px);
   }
 
+  /*
+   * 접는 줄 (CP-100 · PG-69) — 부서원 홈의 달 줄·해 줄. 화살표는 위 disclosure와 같은 선 화살표이고,
+   * 줄 전체가 누르는 자리다(44px — 터치에서도 그대로). 펼쳐도 접어도 같은 줄이라 눌러도 줄이 움직이지 않는다.
+   */
+  details.fold > summary {
+    @apply flex min-h-11 w-full cursor-pointer items-center gap-3 px-5 select-none hover:bg-surface-soft;
+    list-style: none;
+  }
+  details.fold > summary::-webkit-details-marker {
+    display: none;
+  }
+  details.fold > summary::before {
+    content: "";
+    @apply inline-block h-1.5 w-1.5 shrink-0 border-r-[1.5px] border-b-[1.5px] border-current text-muted transition-transform;
+    transform: rotate(-45deg);
+  }
+  details.fold[open] > summary::before {
+    transform: rotate(45deg) translateY(-2px);
+  }
+
   /* 입력 — 초점은 잉크 테두리로. 브랜드색은 CTA에만 쓴다 */
   .input {
     @apply h-11 w-full rounded-lg border border-border-strong bg-canvas px-3.5 text-[15px] text-ink transition-colors placeholder:text-muted-soft focus:border-ink focus:outline-none;
