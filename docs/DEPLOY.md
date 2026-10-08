@@ -212,6 +212,9 @@ cd ~/repman && bash scripts/deploy.sh prod
 
 ### 2b-5. v2 전환 — 한 번 (2026-10-12, `main` v1.39.0 → v2)
 
+> 그날 아침의 시각별 순서 · 합칠 브랜치와 태그 · 배포 뒤 설정(부서 켜기·알림 스위치·섹션·3단계) · 롤백 판단 · Go/No-go는 [LAUNCH-v2.md](LAUNCH-v2.md),
+> 운영에서 나갈 쪽지 문구 전부는 [NOTIFICATIONS-v2.md](NOTIFICATIONS-v2.md), 부서 안내문은 [ANNOUNCE-v2.md](ANNOUNCE-v2.md). 이 절은 스키마와 기동 확인만 다룬다.
+
 절차는 2b-0 ~ 2b-4 그대로다. 다른 것은 2b-3의 `db push`가 **이번에는 반드시 무언가를 만든다**는 것뿐 — 「already in sync」면 체크아웃이 v2가 아니다.
 바뀌는 것은 전부 **더하기만**이라 프롬프트 없이 끝나야 한다. 데이터 손실 경고·확인을 물으면 멈춘다(그럴 변경이 없다 — 체크아웃을 의심한다).
 `Division`은 열 넷이 기본값 있는 NOT NULL이라 Prisma가 **표를 새로 만들어 옮긴다**(행·외래 키 그대로 — 2026-10-09 main 스키마 DB 사본으로 확인). 그래서 스냅샷이 먼저다.
@@ -372,6 +375,8 @@ sudo systemctl daemon-reload && sudo mount -a && findmnt /mnt/backup
 ```
 
 ## 8. 월요일 아침 안내문 (붙여넣기용 초안)
+
+> 아래는 v1 개통(2026-08-17) 때 것이다 — hwp 업로드 시절 문구라 지금은 쓰지 않는다. v2 전환(2026-10-12) 안내문은 [ANNOUNCE-v2.md](ANNOUNCE-v2.md).
 
 > [주간업무 제출 안내]
 > 이번 주부터 주간 업무일지를 웹으로 제출합니다. **사내망에서만 접속됩니다.**
