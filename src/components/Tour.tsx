@@ -34,7 +34,10 @@ const UNIT = 9;
 const PAD = 8;
 /** 카드가 뜨기까지 — 페이지를 먼저 보게 */
 const OFFER_DELAY_MS = 1200;
-const SCROLL_WAIT_MS = 450;
+/** 스크롤이 멈추기를 기다리는 한도 · 「멈춤」으로 보는 연속 프레임 수 · 부드러운 스크롤이 시작되기를 기다리는 최소 시간 */
+const SCROLL_MAX_MS = 2500;
+const STILL_FRAMES = 4;
+const SCROLL_MIN_MS = 120;
 /** 장을 열 때 앵커가 그려지기를 기다리는 한도 — 페이지를 옮겨 온 직후의 `loading.tsx` */
 const ANCHOR_WAIT_MS = 6000;
 
@@ -91,10 +94,13 @@ export function TourHost({ tour, ask = 0 }: { tour: TourProp; ask?: number }) {
   const [run, setRun] = useState<Run | null>(null);
   const [offerGone, setOfferGone] = useState(false);
 
+  // 어느 길로든(카드·메뉴·주소) 둘러보기를 한 번 열면 이 페이지에서는 카드를 다시 띄우지 않는다 — 제안은 페이지를 그릴 때
+  // 서버가 계산한 것이라, 그냥 두면 메뉴·「화면에서」로 막 둘러본 사람에게 끝나자마자 「처음이시죠?」가 다시 튀어나온다
   const go = useCallback(
     (queue: TourChapterId[]) => {
       const [first, ...rest] = queue;
       if (!first) return;
+      setOfferGone(true);
       const path = tourPath(first, tour.slug);
       if (path === pathname) {
         setRun({ queue, at: 0 });
@@ -118,7 +124,9 @@ export function TourHost({ tour, ask = 0 }: { tour: TourProp; ask?: number }) {
       window.history.replaceState(window.history.state, '', `${window.location.pathname}${q.size ? `?${q}` : ''}${window.location.hash}`);
       if (!isTourChapter(first) || !tour.chapters.includes(first)) return;
       const queue = [first, ...then.filter((c) => c !== first && tour.chapters.includes(c))];
-      if (tourPath(first, tour.slug) === pathname) setRun({ queue, at: 0 });
+      if (tourPath(first, tour.slug) !== pathname) return;
+      setOfferGone(true);
+      setRun({ queue, at: 0 });
     };
     fromUrl();
   }, [pathname, tour.chapters, tour.slug]);
@@ -298,10 +306,15 @@ function TourOverlay({ chapter, more, onEnd }: { chapter: TourChapterId; more: b
     }
     const html = document.documentElement;
     const before = html.style.overflow;
+    const beforeBg = html.style.backgroundColor;
     html.style.overflow = 'hidden';
+    // 스크롤바 자리(`scrollbar-gutter: stable`)는 덮개가 덮지 못한다 — 잠그면 빈 띠가 밝은 바탕 그대로 남아 오른쪽 끝에 15~17px
+    // 흰 줄이 섰다(2026-10-08 검증). 그 띠는 html 배경으로 칠해지므로, 둘러보기 동안만 「55% 그늘 밑의 바탕색」으로 둔다
+    html.style.backgroundColor = 'color-mix(in srgb, var(--color-ground) 45%, #000)';
     return () => {
       for (const [el, was] of touched) (el as HTMLElement).inert = was;
       html.style.overflow = before;
+      html.style.backgroundColor = beforeBg;
     };
   }, []);
 
@@ -336,21 +349,57 @@ function TourOverlay({ chapter, more, onEnd }: { chapter: TourChapterId; more: b
     }
     setPlaced(null);
     el.scrollIntoView({ block: 'center', behavior: reducedMotion() ? 'auto' : 'smooth' });
+    /*
+     * 스크롤이 **멈춘 뒤에** 잰다. 예전에는 450ms(또는 scrollend 중 먼저 오는 것)만 기다렸는데, 긴 페이지(/org 맨 아래 전사본 카드)·
+     * 바쁜 PC에서는 부드러운 스크롤이 그보다 오래 걸려 스크롤 도중에 쟀다 — 구멍이 버튼에서 수백 px 비껴 있었다(2026-10-08 검증,
+     * 1920×1080 총괄 2단계 346px). 그래서 scrollend가 오거나, 스크롤 위치가 몇 프레임 연달아 그대로일 때 잰다(스크롤할 것이 없으면
+     * scrollend가 오지 않는다). 잰 뒤에도 스크롤이 움직이거나 앵커 크기가 바뀌면 다시 잰다 — 구멍은 늘 앵커를 따라간다
+     */
     let done = false;
+    let raf = 0;
+    let pos = '';
+    let still = 0;
+    const started = performance.now();
     const settle = () => {
       if (done) return;
       done = true;
+      cancelAnimationFrame(raf);
       measure();
     };
-    const t = window.setTimeout(settle, SCROLL_WAIT_MS);
-    window.addEventListener('scrollend', settle, { once: true });
-    const onResize = () => measure();
+    const watch = () => {
+      const now = `${window.scrollX},${window.scrollY}`;
+      still = now === pos ? still + 1 : 0;
+      pos = now;
+      const t = performance.now() - started;
+      if ((still >= STILL_FRAMES && t >= SCROLL_MIN_MS) || t >= SCROLL_MAX_MS) settle();
+      else raf = requestAnimationFrame(watch);
+    };
+    raf = requestAnimationFrame(watch);
+    const onScrollEnd = () => settle();
+    // 잰 뒤의 스크롤(늦게 끝난 부드러운 스크롤 등) — 프레임마다 한 번만 다시 잰다
+    let again = 0;
+    const onScroll = () => {
+      if (!done || again) return;
+      again = requestAnimationFrame(() => {
+        again = 0;
+        measure();
+      });
+    };
+    window.addEventListener('scrollend', onScrollEnd);
+    document.addEventListener('scroll', onScroll, { capture: true, passive: true });
+    // 크기 변화도 멈춘 뒤에만 — ResizeObserver는 붙이자마자 한 번 부르므로, 그대로 두면 스크롤 전 자리에 구멍이 먼저 그려졌다
+    const onResize = () => {
+      if (done) measure();
+    };
     window.addEventListener('resize', onResize);
     const ro = new ResizeObserver(onResize);
     ro.observe(document.documentElement);
+    ro.observe(el);
     return () => {
-      window.clearTimeout(t);
-      window.removeEventListener('scrollend', settle);
+      cancelAnimationFrame(raf);
+      cancelAnimationFrame(again);
+      window.removeEventListener('scrollend', onScrollEnd);
+      document.removeEventListener('scroll', onScroll, { capture: true });
       window.removeEventListener('resize', onResize);
       ro.disconnect();
     };
@@ -420,6 +469,8 @@ function TourOverlay({ chapter, more, onEnd }: { chapter: TourChapterId; more: b
       aria-labelledby={labelId}
       data-tour=""
       data-tour-step={`${chapter}:${i + 1}`}
+      // 검사 손잡이(PG-T153) — 지금 구멍이 가리키는 앵커. guide-check가 구멍과 실제 앵커 상자를 맞대 본다
+      data-tour-anchor={here?.step.anchor}
       data-settled={here && layout ? '1' : undefined}
       className="fixed inset-0 z-[70] print:hidden"
       style={{ ['--cu' as string]: `${UNIT}px` }}

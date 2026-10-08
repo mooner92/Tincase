@@ -90,9 +90,13 @@ export function GuideSelf({ caps, tour }: { caps: GuideCap[]; tour?: { slug: str
     if (!big) return;
     const html = document.documentElement;
     const before = html.style.overflow;
+    const beforeBg = html.style.backgroundColor;
     html.style.overflow = 'hidden';
+    // 덮개는 스크롤바 자리를 덮지 못한다 — 그 띠(html 배경)도 무대색으로, 오른쪽 끝에 회색 줄이 서지 않게
+    html.style.backgroundColor = 'var(--color-stage)';
     return () => {
       html.style.overflow = before;
+      html.style.backgroundColor = beforeBg;
     };
   }, [big]);
 

@@ -483,6 +483,21 @@ async function main() {
         });
         return posts;
       };
+      /**
+       * 둘러보기 구멍(그늘 − 8px 여백)과 실제 앵커 상자의 네 변 차이(px). 2026-10-08 검증에서 부드러운 스크롤이 끝나기 전에 재
+       * /org 맨 아래 전사본 카드의 구멍이 346px 비껴 있었다 — 단추 상자만 보던 검사는 이것을 못 잡았다
+       */
+      const tourHole = (p) =>
+        p.evaluate(() => {
+          const root = document.querySelector('[data-tour]');
+          const id = root?.getAttribute('data-tour-anchor');
+          const dim = root?.querySelector('.tour-dim')?.getBoundingClientRect();
+          if (!id || !dim) return null;
+          const el = [...document.querySelectorAll(`[data-guide="${id}"]`)].find((e) => !root.contains(e) && e.getBoundingClientRect().width >= 1);
+          if (!el) return null;
+          const a = el.getBoundingClientRect();
+          return Math.max(Math.abs(dim.left + 8 - a.left), Math.abs(dim.top + 8 - a.top), Math.abs(dim.right - 8 - a.right), Math.abs(dim.bottom - 8 - a.bottom));
+        });
       const inertState = (p) =>
         p.evaluate(() => ({
           inert: [...document.body.children].filter((e) => e.inert).length,
@@ -568,11 +583,16 @@ async function main() {
         let worst = 0;
         let clicks = 0;
         let collisions = 0;
+        let worstHole = 0;
+        const holeBad = [];
         const seenSteps = [];
         for (let i = 0; i < 20; i++) {
           const step = await p.evaluate(() => document.querySelector('[data-tour]')?.getAttribute('data-tour-step') ?? null);
           if (!step) break;
-          seenSteps.push(step);
+          seenSteps.push(`${step}(${await p.evaluate(() => document.querySelector('[data-tour]')?.getAttribute('data-tour-anchor') ?? '?')})`);
+          const hd = await tourHole(p);
+          if (hd === null || hd > 2) holeBad.push(`${step}:${hd === null ? '없음' : hd.toFixed(1)}`);
+          else worstHole = Math.max(worstHole, hd);
           const lay = await p.evaluate(() => {
             const q = (s) => document.querySelector(`[data-tour] ${s}`)?.getBoundingClientRect();
             const b = q('.coach-bubble');
@@ -596,9 +616,9 @@ async function main() {
         const other = posts.filter((x) => x.url !== '/api/me/tour');
         const recs = posts.filter((x) => x.url === '/api/me/tour').map((x) => JSON.parse(x.body).outcome);
         check(
-          'PG-T153 담당자 — 홈(부서원) → 수합 관리(부서담당자) → 끝, 같은 좌표로 넘김 · 도크 상자 같음 · 말풍선·고리가 도크와 겹치지 않음',
-          worst <= 0.5 && collisions === 0 && seenSteps.some((s) => s.startsWith('member')) && seenSteps.some((s) => s.startsWith('lead')) && !end.overlay,
-          `${seenSteps.join(' ')} · 도크 최대 차이 ${worst.toFixed(2)}px · 겹침 ${collisions}`,
+          'PG-T153 담당자 — 홈(부서원) → 수합 관리(부서담당자) → 끝, 같은 좌표로 넘김 · 도크 상자 같음 · 말풍선·고리가 도크와 겹치지 않음 · 구멍 ↔ 앵커 2px',
+          worst <= 0.5 && collisions === 0 && holeBad.length === 0 && seenSteps.some((s) => s.startsWith('member')) && seenSteps.some((s) => s.startsWith('lead')) && !end.overlay,
+          `${seenSteps.join(' ')} · 도크 최대 차이 ${worst.toFixed(2)}px · 겹침 ${collisions} · 구멍 ↔ 앵커 최대 ${worstHole.toFixed(2)}px${holeBad.length ? ` · 어긋남 ${holeBad.join(' ')}` : ''}`,
         );
         check(
           'PG-T153 GET이 아닌 요청은 /api/me/tour뿐 · 끝나면 inert·스크롤 잠금이 풀린다',
@@ -635,9 +655,9 @@ async function main() {
         await ctx.close();
       }
 
-      // 4. 사용 안내 목차 「화면에서」 → 그 장의 둘러보기 (기록과 상관없이)
+      // 4. 사용 안내 목차 「화면에서」 → 그 장의 둘러보기 (기록과 상관없이). 1920×1080 — /org는 길어 스크롤이 가장 멀다(맨 아래 전사본 카드)
       {
-        const ctx = await ctxFor('coordinator', { viewport: { width: 1280, height: 900 } });
+        const ctx = await ctxFor('coordinator', { viewport: { width: 1920, height: 1080 } });
         const p = await ctx.newPage();
         await p.goto(`${base}/guide`, { waitUntil: 'networkidle' });
         await p.getByRole('link', { name: '총괄 — 실제 화면에서 둘러보기' }).click();
@@ -646,6 +666,21 @@ async function main() {
         const step = await p.evaluate(() => document.querySelector('[data-tour]')?.getAttribute('data-tour-step'));
         const clean = await p.evaluate(() => !location.search.includes('tour='));
         check('PG-T153 사용 안내 「화면에서」 → /org의 총괄 장 (주소의 ?tour는 지운다)', ok && step === 'org:1' && clean, `${step}`);
+        // 총괄 장 끝까지 — 단계마다 구멍이 실제 앵커와 2px 안 (스크롤이 멈춘 뒤에 잰다)
+        const holes = [];
+        for (let i = 0; i < 8 && ok; i++) {
+          const s = await p.evaluate(() => document.querySelector('[data-tour]')?.getAttribute('data-tour-step') ?? null);
+          if (!s) break;
+          holes.push([s, await tourHole(p)]);
+          await p.locator('[data-tour] [data-dock="next"]').click();
+          await p.waitForFunction((x) => (document.querySelector('[data-tour]')?.getAttribute('data-tour-step') ?? 'end') !== x, s, { timeout: 15_000 }).catch(() => {});
+          await p.waitForSelector('[data-tour][data-settled="1"]', { timeout: 15_000 }).catch(() => {});
+        }
+        check(
+          'PG-T153 총괄 장 1920×1080 — 단계마다 구멍 ↔ 앵커 2px (긴 스크롤 뒤에도)',
+          holes.length >= 3 && holes.every(([, d]) => d !== null && d <= 2),
+          holes.map(([s, d]) => `${s}=${d === null ? '없음' : d.toFixed(2)}`).join(' '),
+        );
         await ctx.close();
       }
 
@@ -659,6 +694,7 @@ async function main() {
         if (shotsDir && card) await p.screenshot({ path: path.join(shotsDir, 'tour-card-member-400.png') });
         await p.getByRole('button', { name: '시작' }).click();
         let allIn = true;
+        let gutter = null;
         let worst = 0;
         await p.waitForSelector('[data-tour][data-settled="1"]', { timeout: 8000 });
         const box0 = await dockBoxes(p, '[data-tour]', ['prev', 'count', 'next', 'skip']);
@@ -676,6 +712,20 @@ async function main() {
           });
           allIn &&= inside;
           if (shotsDir && i === 1) await p.screenshot({ path: path.join(shotsDir, 'tour-step-member-400.png') });
+          // 스크롤바 자리(scrollbar-gutter: stable)도 그늘이어야 한다 — 덮개가 못 덮는 띠가 밝게 남아 오른쪽 끝에 흰 줄이 섰다
+          if (i === 0) {
+            const g = await p.evaluate(() => ({ cw: document.documentElement.clientWidth, w: innerWidth }));
+            if (g.w - g.cw >= 4) {
+              const sharp = require(require.resolve('sharp', { paths: [REPO] }));
+              const { data, info } = await sharp(await p.screenshot()).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+              const lum = (x, y) => {
+                const k = (y * info.width + x) * 3;
+                return (data[k] + data[k + 1] + data[k + 2]) / 3;
+              };
+              // 맨 위 줄(머리) — 구멍은 창 가운데로 오므로 여기는 늘 그늘이다
+              gutter = Math.abs(lum(info.width - 2, 8) - lum(g.cw - 4, 8));
+            } else gutter = 0;
+          }
           const b = await dockBoxes(p, '[data-tour]', ['prev', 'count', 'next', 'skip']);
           if (b) worst = Math.max(worst, diffBoxes(box0, b));
           const at = center(b.next);
@@ -683,7 +733,11 @@ async function main() {
           await p.waitForFunction((s) => (document.querySelector('[data-tour]')?.getAttribute('data-tour-step') ?? 'end') !== s, step, { timeout: 8000 }).catch(() => {});
           await p.waitForSelector('[data-tour][data-settled="1"]', { timeout: 8000 }).catch(() => {});
         }
-        check('PG-T153 400×800 — 카드·말풍선·도크가 창 안 · 도크 상자 같음', cardIn && allIn && worst <= 0.5, `도크 최대 차이 ${worst.toFixed(2)}px`);
+        check(
+          'PG-T153 400×800 — 카드·말풍선·도크가 창 안 · 도크 상자 같음 · 스크롤바 자리도 그늘',
+          cardIn && allIn && worst <= 0.5 && gutter !== null && gutter <= 12,
+          `도크 최대 차이 ${worst.toFixed(2)}px · 스크롤바 자리 밝기 차 ${gutter === null ? '못 잼' : gutter.toFixed(0)}`,
+        );
         await ctx.close();
       }
     }
