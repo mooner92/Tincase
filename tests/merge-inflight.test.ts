@@ -162,6 +162,7 @@ afterEach(() => {
   vi.restoreAllMocks();
   delete process.env.MERGE_JOB_BUDGET_MS;
   delete process.env.MERGE_PAUSE_UNTIL;
+  delete process.env.MERGE_MODEL_KEEP_ALIVE;
   process.env.MERGE_SCHEDULER = 'off'; // vitest.config 기본값으로 되돌린다
 });
 afterAll(() => {
@@ -434,6 +435,12 @@ describe('HM-53 마감 전 데우기', () => {
     expect(modelCalls).toEqual([{ model: 'test-model', stream: false, prompt: '', keep_alive: -1 }]);
     expect(modelGateState().lastWarmup).toMatchObject({ ok: true });
     expect(modelGateState().lastCall).toMatchObject({ label: '데우기(기동)' });
+
+    // 설정한 값을 그대로 붙인다 — 데우기도 병합 호출과 같은 `MERGE_MODEL_KEEP_ALIVE`다 (HM-53b)
+    process.env.MERGE_MODEL_KEEP_ALIVE = '45m';
+    expect(await warmModelAtBoot()).toMatchObject({ ok: true });
+    expect(modelCalls[1]).toEqual({ model: 'test-model', stream: false, prompt: '', keep_alive: '45m' });
+    delete process.env.MERGE_MODEL_KEEP_ALIVE;
 
     vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('fetch failed'))));
     expect(await warmModelAtBoot()).toMatchObject({ ok: false, reason: '모델 호출 연결 실패' }); // 던지지 않는다 · 다시 부르지 않는다
