@@ -967,7 +967,7 @@ describe('RU-80·82·83 화면 — 버튼이 아니라 상태 (그린 결과의 
     await (await db()).user.updateMany({ data: { mustChangePassword: false } });
   });
 
-  it('[RU-T115] 수합 관리 — 「위로」 카드는 상태(U2 · 받는 곳 · 행방), 부서장의 [승인] 옆은 「승인하면 바로 본부가에」 · [제출] 카드는 없다', async () => {
+  it('[RU-T115] 수합 관리 — 「위로」 카드는 상태(U2 · 받는 곳 · 행방), 병합본 카드는 받는 곳(「본부가」)을 안다 — [제목 복사]를 숨긴다 · [제출] 카드는 없다', async () => {
     const { ManageView } = await import('@/app/[division]/manage/ManageView');
     const d = await (await db()).division.findUniqueOrThrow({ where: { id: divId.u1 } });
     const base = { division: d, canMerge: true, canDownloadMerged: true, canDeleteAny: false, canEditMerged: true, canApprove: true };

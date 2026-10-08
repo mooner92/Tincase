@@ -100,8 +100,9 @@ export function MergePanel({
   /** HM-47 — [고칠 것 없음 · 승인]. 이 부서의 head에게만 (TACP-16) */
   canApprove?: boolean;
   /**
-   * RU-80 — 3단계에서 승인이 곧 위로 가는 제출이면 받는 곳(「기획경영본부」·「총괄」). 없으면 null —
-   * [승인] 옆 설명이 「승인하면 바로 ○○에 올라갑니다」가 된다
+   * RU-80 — 3단계에서 승인이 곧 위로 가는 제출이면 받는 곳(「기획경영본부」·「총괄」). 없으면 null.
+   * 있으면 [제목 복사]를 그리지 않는다 — 승인한 판이 저절로 올라가 취합게시판에 올리는 동선이 없다(S5 · ADR-0015).
+   * 「승인하면 바로 ○○에」는 바로 아래 「위로」 카드(HandoffCard)가 말한다 — 이 카드에서 되풀이하지 않는다(PG-65)
    */
   handoffTo?: string | null;
   submitted: number;
@@ -291,8 +292,8 @@ export function MergePanel({
                 받기
               </a>
             )}
-            {/* S5 — 취합게시판에 올릴 때 붙여 넣는 제목. 3단계를 켜는 주에 지운다 — 게시판에 올리는 동선이 없어진다 (ADR-0018) */}
-            {done && canDownload && (
+            {/* S5 — 취합게시판에 올릴 때 붙여 넣는 제목. 3단계로 저절로 올라가는 부서에는 없다 — 게시판에 올리는 동선이 없어진다 (ADR-0018 · ADR-0015) */}
+            {done && canDownload && !handoffTo && (
               <button onClick={copyTitle} className="btn-ghost">
                 {copied === true ? '복사됨 ✓' : copied === false ? '복사하지 못했습니다' : '제목 복사'}
               </button>
@@ -336,8 +337,6 @@ export function MergePanel({
             </div>
           </div>
         )}
-        {/* RU-80 — 3단계에서는 승인이 곧 제출이다. 누르기 전에 어디로 가는지 한 줄 (PG-65의 「짧은 힌트」) */}
-        {approveNow && handoffTo && <p className="mt-2 text-sm text-muted">승인하면 바로 {handoffTo}에 올라갑니다</p>}
       </div>
 
       {err && <p className="callout callout-error mt-4">{err}</p>}

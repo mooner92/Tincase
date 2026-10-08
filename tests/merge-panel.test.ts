@@ -69,6 +69,25 @@ describe('CP-106a · CP-117 — 병합 카드의 첫 그림', () => {
     expect(viewer).not.toContain('>받기<');
     // 병합 전에는 받을 것도 복사할 제목도 없다
     expect(html(state({ status: 'none', rowCounts: null }))).not.toContain('제목 복사');
+    // 3단계로 승인이 곧 위로 가는 부서(받는 곳이 있다)에는 게시판에 올리는 동선이 없다 — [받기]는 남고 [제목 복사]는 없다 (ADR-0015)
+    const auto = renderToStaticMarkup(
+      createElement(MergePanel, {
+        state: state(),
+        isoKey: '2026-W41',
+        divisionSlug: 'x',
+        title: '10월1주차 연구운영회의 주간업무(가부서)',
+        canRun: true,
+        canDownload: true,
+        canEditMerged: true,
+        canApprove: true,
+        handoffTo: '기획경영본부',
+        submitted: 3,
+      }),
+    );
+    expect(auto).toContain('>받기<');
+    expect(auto).not.toContain('제목 복사');
+    // 「승인하면 바로 ○○에」는 아래 「위로」 카드가 한 번 말한다 — 병합본 카드에서 되풀이하지 않는다 (PG-65)
+    expect(auto).not.toContain('승인하면 바로');
   });
 
   it('[CP-T101] 합쳐진 행은 「내용 다른 묶음 n건」 한 줄 — 같은 글자 묶음뿐이면 아무것도 없다 (S8)', () => {
