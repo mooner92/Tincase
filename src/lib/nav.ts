@@ -58,7 +58,7 @@ function claim(prefix: string, pathname: string): number {
  * 지금 화면이 이 메뉴인가.
  *
  * 경로를 **더 길게** 차지하는 메뉴가 이긴다 — 앞부분만 맞춰 보면 한 경로에 메뉴 둘이 같이 켜진다.
- * (예전에는 `/ops/monitor`가 「전사」였는데 `/ops`(운영) 아래라 둘이 같이 켜졌다. 지금 그 주소는 `/org`로 보낸다 — PG-49f)
+ * (예전에는 `/ops/monitor`가 「전사」였는데 `/ops`(운영) 아래라 둘이 같이 켜졌다. 그 주소는 2026-10-08에 지웠다 — R17)
  */
 export function isNavActive(href: string, pathname: string, items: readonly NavItem[], slug: string | null): boolean {
   if (slug && href === `/${slug}`) return pathname === href;

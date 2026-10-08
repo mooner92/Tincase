@@ -90,7 +90,7 @@ export function WebComposer({
   /** WA-36a — 이번 주 월요일 00:00 KST. 일자 예시를 여기서 만든다 */
   weekStartMs: number;
   onClose: () => void;
-  /** HM-33 — 부서가 정한 「내용 없음」 낱말 (`Division.emptyWords`). 비면 검사하지 않는다 */
+  /** HM-33 — 부서가 적어 둔 「내용 없음」 낱말 (`Division.emptyWords`). 비면 전사 기본값으로 검사한다(S7 · HM-51 — `parseFlagWords`) */
   emptyWordsRaw?: string;
 }) {
   const emptyWords = useMemo(() => parseFlagWords(emptyWordsRaw), [emptyWordsRaw]);

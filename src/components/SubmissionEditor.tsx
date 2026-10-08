@@ -109,9 +109,10 @@ export function SubmissionEditor({
   const cell =
     'block resize-none overflow-hidden rounded-md border border-border-strong bg-canvas px-2 py-1.5 text-[13px] leading-snug text-ink focus:border-ink focus:ring-1 focus:ring-ink focus:outline-none';
   /** 칸 하나 — 줄바꿈을 지키는 textarea (HM-39) */
-  const field = (b: Bucket, i: number, f: 'content' | 'date' | 'place' | 'attendee', label: string, extra: string) => (
+  const field = (b: Bucket, i: number, f: 'content' | 'date' | 'place' | 'attendee', label: string, extra: string, placeholder?: string) => (
     <textarea
       aria-label={label}
+      placeholder={placeholder}
       rows={1}
       ref={fit}
       value={data[b][i][f]}
@@ -131,7 +132,12 @@ export function SubmissionEditor({
             {s.no}. {s.title}
           </h3>
           <div className="overflow-hidden rounded-lg border border-hairline">
-            <div className="flex gap-1.5 border-b border-hairline bg-surface-soft px-2 py-1.5 text-xs font-medium text-muted">
+            {/*
+              WA-20a — 640px 미만은 한 줄을 둘로 나눈다(위: 구분·업무 내용·×, 아래: 일자·장소·참석자·공유).
+              한 줄에 일곱 칸을 두면 400px에서 업무 내용 칸이 한 글자 폭으로 눌려 세로로 흘렀다(2026-10-08 wave3 캡처).
+              나뉜 줄과 맞지 않는 머리 행은 감추고, 아랫줄 칸은 빈칸일 때 이름을 보인다(넓은 화면은 머리 행이 말하므로 감춘다)
+            */}
+            <div className="hidden gap-1.5 border-b border-hairline bg-surface-soft px-2 py-1.5 text-xs font-medium text-muted sm:flex">
               <span className="w-8 shrink-0 text-center">구분</span>
               <span className="flex-1">업무 내용</span>
               <span className="w-16 shrink-0">일자</span>
@@ -141,15 +147,16 @@ export function SubmissionEditor({
               <span className="w-5 shrink-0" />
             </div>
             {data[s.key].map((r, i) => (
-              <div key={i} className="flex items-start gap-1.5 border-b border-hairline-soft px-2 py-1 last:border-0">
+              <div key={i} className="flex flex-wrap items-start gap-1.5 border-b border-hairline-soft px-2 py-1 last:border-0 sm:flex-nowrap">
                 <span className="w-8 shrink-0 pt-1.5 text-center text-xs tabular-nums text-muted">
                   {s.no}-{i + 1}
                 </span>
-                {field(s.key, i, 'content', `${s.title} ${i + 1} 내용`, `min-w-0 flex-1 ${r.emphasis ? 'text-emphasis' : ''}`)}
-                {field(s.key, i, 'date', '일자', 'w-16 shrink-0')}
-                {field(s.key, i, 'place', '장소', 'w-20 shrink-0')}
-                {field(s.key, i, 'attendee', '참석자', 'w-20 shrink-0')}
-                <span className="flex w-9 shrink-0 justify-center pt-2">
+                {/* 좁은 화면: 업무 내용이 구분·× 사이를 다 쓰고(4.25rem = 구분 2rem + × 1.25rem + 틈 둘), 나머지는 order-2로 아랫줄에 */}
+                {field(s.key, i, 'content', `${s.title} ${i + 1} 내용`, `min-w-0 flex-1 basis-[calc(100%-4.25rem)] sm:basis-0 ${r.emphasis ? 'text-emphasis' : ''}`)}
+                {field(s.key, i, 'date', '일자', 'order-2 ml-[2.375rem] w-16 shrink-0 sm:order-none sm:ml-0 sm:placeholder:text-transparent', '일자')}
+                {field(s.key, i, 'place', '장소', 'order-2 min-w-0 flex-1 sm:order-none sm:w-20 sm:flex-none sm:shrink-0 sm:placeholder:text-transparent', '장소')}
+                {field(s.key, i, 'attendee', '참석자', 'order-2 min-w-0 flex-1 sm:order-none sm:w-20 sm:flex-none sm:shrink-0 sm:placeholder:text-transparent', '참석자')}
+                <span className="order-2 flex w-9 shrink-0 justify-center pt-2 sm:order-none">
                   <input type="checkbox" aria-label="공유(파란색)" checked={!!r.emphasis} onChange={(e) => set(s.key, i, 'emphasis', e.target.checked)} />
                 </span>
                 <button onClick={() => remove(s.key, i)} aria-label="이 줄 지우기" className="w-5 shrink-0 pt-1.5 text-muted-soft hover:text-error">
