@@ -4,6 +4,10 @@
 // 2026-10-07 (PG-52) — 줄마다 테두리 버튼 「열기」와 ↓ 상자가 있어 표가 버튼 밭이었고, 「크기」 열은 모든 줄이
 // 38.5 KB였다(양식이 같으니 크기도 같다 — 읽을 것이 없는 열). 크기를 빼고, 줄 행동은 테두리 없는 버튼(btn-ghost)으로,
 // 버전은 「v2」만 둔다(「v2 (2)」의 괄호를 읽을 수 있는 사람이 없었다). 640px 미만은 표 대신 줄 목록이다(UX-02).
+//
+// 2026-10-08 (PG-73 — 기능 정리) — 줄마다 [받기](R8)와 머리의 [전체 zip 받기](R1)를 지웠다. 제출물 다운로드는 운영자 3건,
+// zip은 0건이었다 — 받을 일이 있으면 [열기] 드로어의 [원본 다운로드] 하나다. 표 밑 「집계 제외: …」 각주(R7)도 지웠다 —
+// 명단 밖인데 낸 사람은 「추가 제출」 표가 따로 보이고, 안 낸 사람은 셀 것이 없다.
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FileDrawer, type DrawerMember } from './FileDrawer';
@@ -22,18 +26,12 @@ export function SubmissionTableClient({
   members,
   caption,
   title,
-  action,
-  footnote,
   canDelete = false,
 }: {
   members: MemberRow[];
   caption: string;
   /** 카드 제목 — 「부서원 11명」 */
   title: string;
-  /** 표 전체에 대한 행동 하나 (전체 zip 받기) — 카드 머리 오른쪽 */
-  action?: React.ReactNode;
-  /** 표 아래 한 줄 (집계 제외 안내) */
-  footnote?: string;
   /** TACP-14 — operator만. 담당자에게는 렌더하지 않는다 (TACP-9) */
   canDelete?: boolean;
 }) {
@@ -91,20 +89,13 @@ export function SubmissionTableClient({
       </span>
     );
 
-  /** 열기·받기·삭제 — 표와 줄 목록이 같은 것을 쓴다 (두 벌이면 갈라진다) */
+  /** 열기·삭제 — 표와 줄 목록이 같은 것을 쓴다 (두 벌이면 갈라진다) */
   const actions = (m: MemberRow) =>
     m.latest && (
       <span className="inline-flex items-center gap-0.5">
-        <button onClick={() => setOpenId(m.latest!.id)} className="btn-ghost">
+        <button onClick={() => setOpenId(m.latest!.id)} className="btn-ghost" aria-label={`${m.user.name} 제출물 열기`}>
           열기
         </button>
-        <a
-          href={`/api/submissions/${m.latest.id}/download`}
-          className="btn-ghost"
-          aria-label={`${m.user.name} 파일 받기`}
-        >
-          받기
-        </a>
         {/* 운영자 전용 (TACP-14). 파괴적이라 다른 버튼과 같은 무게로 두지 않는다 */}
         {canDelete && (
           <button
@@ -123,10 +114,7 @@ export function SubmissionTableClient({
     <>
       <section className="card card-flush">
         <div className="card-head items-center px-5 pt-4 pb-3 sm:px-6">
-          <div className="min-w-0">
-            <h2 className="card-title">{title}</h2>
-          </div>
-          {action}
+          <h2 className="card-title">{title}</h2>
         </div>
 
         {/* 좁은 화면 — 줄 목록. 표를 누르면 열 머리가 세로로 쪼개지고 버튼이 화면 밖으로 나갔다 (UX-02) */}
@@ -159,7 +147,7 @@ export function SubmissionTableClient({
                 <th scope="col">버전</th>
                 <th scope="col">제출시각</th>
                 <th scope="col" className="text-right">
-                  {canDelete ? '열람 · 받기 · 삭제' : '열람 · 받기'}
+                  {canDelete ? '열람 · 삭제' : '열람'}
                 </th>
               </tr>
             </thead>
@@ -176,9 +164,6 @@ export function SubmissionTableClient({
             </tbody>
           </table>
         </div>
-        {footnote && (
-          <p className="border-t border-hairline-soft px-5 py-3 text-xs leading-5 text-muted sm:px-6">{footnote}</p>
-        )}
         {err && <p className="border-t border-hairline-soft px-5 py-3 text-sm text-error sm:px-6">{err}</p>}
       </section>
 

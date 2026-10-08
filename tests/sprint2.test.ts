@@ -151,17 +151,7 @@ d('preview API (API-22~25)', () => {
   });
 });
 
-d('versions API', () => {
-  it('버전 목록 + isLatest 표시', async () => {
-    const { GET } = await import('@/app/api/submissions/[id]/versions/route');
-    const res = await GET(nx(`/api/submissions/${subId}/versions`, ID.lead), {
-      params: Promise.resolve({ id: subId }),
-    });
-    const body = await res.json();
-    expect(body.versions.length).toBe(1);
-    expect(body.versions[0].isLatest).toBe(true);
-  });
-});
+// versions API — 드로어의 버전 고르기와 함께 폐지 2026-10-08 (R9 · PG-73). 라우트가 없는 것은 CP-T102가 본다
 
 d('template 교체 (API-40/41, ST-19)', () => {
   it('member → 404 · lead 정상 등록 → 파싱 요약 반환', async () => {
@@ -216,43 +206,40 @@ d('template 교체 (API-40/41, ST-19)', () => {
   });
 });
 
-d('rule 저장 (API-28/29)', () => {
-  // GET은 지웠다(2026-10-08, R2) — 설정 화면은 서버에서 그린다. 저장 결과는 DB로 본다
-  it('lead 저장 → 내 부서에 반영 · member 404', async () => {
+d('rule 저장 (API-59)', () => {
+  // GET은 지웠다(2026-10-08, R2) — 설정 화면은 서버에서 그린다. 저장 결과는 DB로 본다.
+  // 2026-10-08 — 받는 키는 categories 하나다(R3 · R5 · S7). 다른 키는 열을 바꾸지 않는다
+  const put = async (who: string, body: unknown) => {
     const { PUT } = await import('@/app/api/division/rule/route');
-    const { prisma } = await import('@/server/db');
-    const put = await PUT(
-      nx('/api/division/rule', ID.lead, {
+    return PUT(
+      nx('/api/division/rule', who, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ruleText: '순서: m, l', guideText: '한 줄 안내' }),
+        body: JSON.stringify(body),
       }),
     );
-    expect(put.status).toBe(200);
-    const saved = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
-    expect(saved.mergeRuleText).toBe('순서: m, l');
-    expect(saved.guideText).toBe('한 줄 안내');
+  };
 
-    const m = await PUT(
-      nx('/api/division/rule', ID.member, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ruleText: '부서원' }),
-      }),
-    );
-    expect(m.status).toBe(404);
-    expect((await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } })).mergeRuleText).toBe('순서: m, l');
+  it('[API-T17] lead 저장 → 분류 순서만 내 부서에 · 옛 키는 열을 바꾸지 않는다 · member 404', async () => {
+    const { prisma } = await import('@/server/db');
+    const before = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
+    const res = await put(ID.lead, { categories: 'm-l', ruleText: '순서: m, l', guideText: '한 줄 안내', emptyWords: '생략' });
+    expect(res.status).toBe(200);
+    expect((await res.json()).parsedCategories).toEqual(['m', 'l']);
+    const saved = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
+    expect(saved.mergeCategories).toBe('m-l');
+    expect([saved.mergeRuleText, saved.guideText, saved.emptyWords]).toEqual([before.mergeRuleText, before.guideText, before.emptyWords]);
+
+    expect((await put(ID.member, { categories: '부서원' })).status).toBe(404);
+    expect((await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } })).mergeCategories).toBe('m-l');
+    // 뒤 병합 시험이 분류 정렬(모델 없음 경고)을 타지 않게 되돌린다
+    expect((await put(ID.lead, { categories: '' })).status).toBe(200);
   });
-  it('10KB 초과 → 422', async () => {
-    const { PUT } = await import('@/app/api/division/rule/route');
-    const res = await PUT(
-      nx('/api/division/rule', ID.lead, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ruleText: 'x'.repeat(10_100) }),
-      }),
-    );
-    expect(res.status).toBe(422);
+
+  it('[API-T17] categories가 없거나(옛 키만) · 문자열이 아니거나 · 500B를 넘으면 422', async () => {
+    expect((await put(ID.lead, { ruleText: '옛 화면' })).status).toBe(422);
+    expect((await put(ID.lead, { categories: 3 })).status).toBe(422);
+    expect((await put(ID.lead, { categories: 'x'.repeat(501) })).status).toBe(422);
   });
 });
 
@@ -306,28 +293,7 @@ d('부서 해석 단일 출처 (v1.3.1 회귀)', () => {
     expect(r.isOwn).toBe(false);
   });
 
-  it('★ zip은 요청한 부서의 파일만 담는다 (헤더/본문 불일치 방지)', async () => {
-    const { GET } = await import('@/app/api/division/download-zip/route');
-    const { POST } = await import('@/app/api/submissions/route');
-    const { prisma } = await import('@/server/db');
-
-    // B부서 제출물 준비 (bLead가 올린다)
-    const fd = new FormData();
-    fd.set('file', new File([new Uint8Array(filled)], 'b주간.hwp'));
-    const up = await POST(nx('/api/submissions', ID.bLead, { method: 'POST', body: fd }));
-    expect(up.status).toBe(201);
-    const bCount = await prisma.submission.count({ where: { division: { slug: B.slug }, isLatest: true } });
-    expect(bCount).toBeGreaterThan(0);
-
-    // operator가 B부서 지정 → 200, 파일명에 B 부서명
-    const ok = await GET(nx(`/api/division/download-zip?division=${B.slug}`, ID.op));
-    expect(ok.status).toBe(200);
-    expect(decodeURIComponent(ok.headers.get('content-disposition') ?? '')).toContain(B.nameKo);
-
-    // lead가 B부서 지정 → 404 (권한 없음)
-    const denied = await GET(nx(`/api/division/download-zip?division=${B.slug}`, ID.lead));
-    expect(denied.status).toBe(404);
-  });
+  // [AU-T22b] 「zip은 요청한 부서의 파일만 담는다」 — zip 경로와 함께 폐지 2026-10-08 (TACP v1.6.4 · R1)
 });
 
 d('병합 API (API-30)', () => {
@@ -508,14 +474,14 @@ d('TACP 준수', () => {
       nx(`/api/division/rule?division=${B.slug}`, ID.op, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ruleText: 'TACP-6 검증', guideText: '' }),
+        body: JSON.stringify({ categories: 'TACP-6 검증' }),
       }),
     );
     expect(res.status).toBe(200);
     const after = await prisma.division.findUniqueOrThrow({ where: { slug: B.slug } });
-    expect(after.mergeRuleText).toBe(before.mergeRuleText); // B는 무사하다
+    expect(after.mergeCategories).toBe(before.mergeCategories); // B는 무사하다
     const own = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
-    expect(own.mergeRuleText).toBe('TACP-6 검증'); // 내 부서에 쓰였다
+    expect(own.mergeCategories).toBe('TACP-6 검증'); // 내 부서에 쓰였다
   });
 });
 

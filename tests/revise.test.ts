@@ -139,7 +139,7 @@ d('TACP-22 담당자 첨삭', () => {
     expect(await prisma.submission.count()).toBe(3);
   });
 
-  it('[WA-T42] 열람 응답 — lead에게만 [고치기], 판 목록에 고친 사람', async () => {
+  it('[WA-T42] 열람 응답 — lead에게만 [고치기], 판마다 고친 사람이 남는다', async () => {
     const { prisma } = await import('@/server/db');
     const latest = await prisma.submission.findFirstOrThrow({ where: { isLatest: true } });
     const { GET } = await import('@/app/api/submissions/[id]/preview/route');
@@ -149,9 +149,14 @@ d('TACP-22 담당자 첨삭', () => {
     const asOwner = await (await GET(nx(`/api/submissions/${latest.id}/preview`, ID.owner), { params: Promise.resolve({ id: latest.id }) })).json();
     expect(asOwner.canRevise).toBe(false);
 
-    const versions = await import('@/app/api/submissions/[id]/versions/route');
-    const v = await (await versions.GET(nx(`/api/submissions/${latest.id}/versions`, ID.owner), { params: Promise.resolve({ id: latest.id }) })).json();
-    expect(v.versions.map((x: { version: number; editedBy: string | null }) => [x.version, x.editedBy])).toEqual([
+    // 판 목록 API(`/versions`)는 드로어의 버전 고르기와 함께 지웠다(R9 · PG-73) — 판마다의 기록은 DB가 그대로 들고 있다
+    const all = await prisma.submission.findMany({
+      where: { userId: latest.userId, weekSlotId: latest.weekSlotId },
+      orderBy: { version: 'desc' },
+      select: { version: true, editedById: true },
+    });
+    const names = new Map((await prisma.user.findMany({ select: { id: true, name: true } })).map((u) => [u.id, u.name]));
+    expect(all.map((x) => [x.version, x.editedById ? names.get(x.editedById) : null])).toEqual([
       [3, 'v-head'],
       [2, 'v-lead'],
       [1, null],
@@ -185,8 +190,6 @@ d('TACP-22 담당자 첨삭', () => {
     const res = await GET(nx(`/api/submissions/${latest.id}/preview`, ID.head), { params: Promise.resolve({ id: latest.id }) });
     expect(res.status).toBe(200);
     expect((await res.json()).canRevise).toBe(true);
-    const versions = await import('@/app/api/submissions/[id]/versions/route');
-    expect((await versions.GET(nx(`/api/submissions/${latest.id}/versions`, ID.head), { params: Promise.resolve({ id: latest.id }) })).status).toBe(200);
     // 같은 부서 member는 여전히 404 (ST-15)
     expect((await GET(nx(`/api/submissions/${latest.id}/preview`, ID.member), { params: Promise.resolve({ id: latest.id }) })).status).toBe(404);
   });
@@ -203,13 +206,12 @@ d('TACP-22 담당자 첨삭', () => {
     expect(all[0].editedAt).toBeNull();
 
     const latest = all[all.length - 1];
-    const versions = await import('@/app/api/submissions/[id]/versions/route');
-    const v = await (await versions.GET(nx(`/api/submissions/${latest.id}/versions`, ID.owner), { params: Promise.resolve({ id: latest.id }) })).json();
-    expect(v.versions[0].editedAt).toMatch(/T\d{2}:\d{2}/);
-    expect(v.versions.at(-1).editedAt).toBeNull();
+    // 드로어 머리의 「○○ 고침 · 시각」은 preview가 준다 — 판 목록 API는 지웠다(R9)
+    const { toKstIso } = await import('@/lib/week');
     const { GET } = await import('@/app/api/submissions/[id]/preview/route');
     const p = await (await GET(nx(`/api/submissions/${latest.id}/preview`, ID.owner), { params: Promise.resolve({ id: latest.id }) })).json();
-    expect(p.submission.editedAt).toBe(v.versions[0].editedAt);
+    expect(p.submission.editedAt).toMatch(/T\d{2}:\d{2}/);
+    expect(p.submission.editedAt).toBe(toKstIso(latest.editedAt!));
   });
 
   it('[WA-T46] 한 칸의 줄바꿈은 고쳐 저장해도 남는다 · 500자를 넘으면 자르지 않고 422', async () => {

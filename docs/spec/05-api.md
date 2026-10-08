@@ -205,18 +205,20 @@ member 응답은 축소판: `members[].{user.name, status, uploadedAt}` 만 —
 | API-25 | 원문 텍스트 그대로 반환 — 요약·가공하지 않는다 (내용 검토가 목적) |
 | API-57 | `tables[].rows`에서 **본문 칸이 모두 빈 행**은 뺀다 — 병합본 보기(UX-03)와 같은 조건(`row.slice(1).some(c => c.trim())`). 양식의 빈 번호 줄(3-1~3-4)이 「잘못 냈나?」로 읽혔다. 머리행은 남긴다. 글자는 건드리지 않는다(API-25). `rowsByTable`은 원래 빈 행이 없고 [고치기]는 그것을 쓰므로 자리가 어긋날 일이 없다 (2026-10-08) |
 
-### `GET /api/submissions/:id/versions`
+### ~~`GET /api/submissions/:id/versions`~~ — **폐지 2026-10-08** (R9 · PG-73)
 
-드로어 버전 전환용 (CP-73). `:id`가 속한 (사용자, 주차)의 전체 버전 목록.
-권한 판정은 `:id` 접근 판정과 동일 (findAccessibleSubmission).
+~~드로어 버전 전환용 (CP-73). `:id`가 속한 (사용자, 주차)의 전체 버전 목록.
+권한 판정은 `:id` 접근 판정과 동일 (findAccessibleSubmission).~~ 2판 이상인 제출이 0건이었다. 드로어는 최신 판만 연다 — 라우트 파일을 지웠다(404).
+옛 판은 DB·저장소에 남는다(ST-19). 첨삭이 만든 새 판은 저장 뒤 드로어가 그 판으로 옮겨 연다.
 
-### `GET /api/division/download-zip`
+### ~~`GET /api/division/download-zip`~~ — **폐지 2026-10-08** (R1 · PG-73)
 
-ST-16. `?slot=` 지원, 0건 409, 스트리밍, 감사 로그.
+~~ST-16. `?slot=` 지원, 0건 409, 스트리밍, 감사 로그.~~ `download_zip` 0건(파일럿 8주). 라우트 파일을 지웠다(404).
+옛 감사 기록의 `download_zip`은 감사 로그 화면이 그대로 읽는다.
 
 ### ~~`GET /api/division/slots`~~ — 폐지 2026-10-08
 
-부서 관점 주차 목록. 수합 관리의 주차 고르기는 서버 함수(`divisionSlots`)를 직접 부르고 이 API를 부른 적이 없다 — 지웠다(R2).
+부서 관점 주차 목록. 수합 관리의 주차 고르기는 서버 함수(당시 `divisionSlots`, 지금 `divisionWeeks` — PG-72)를 직접 부르고 이 API를 부른 적이 없다 — 지웠다(R2).
 
 ### ~~`PUT /api/division/roster`~~ → **`PUT /api/ops/roster`로 이동 (v2.1)**
 
@@ -233,16 +235,17 @@ lead에게는 이 엔드포인트가 존재하지 않는다(404).
 `GET`은 폐지 2026-10-08 — 부서 설정 화면은 서버에서 그리고 이 GET을 부르지 않았다(R2).
 
 ```jsonc
-// PUT 요청: { "ruleText": "..." }
-// PUT 200:  { "ok": true, "parsed": {…} }        // 검증 결과 에코
-// PUT 422:  { "error": "invalid_rule", "problems": ["3행: 알 수 없는 지시어 …"] }
+// PUT 요청: { "categories": "AI-홍보-시스템" }          // 2026-10-08 — 이 키 하나 (API-59)
+// PUT 200:  { "ok": true, "parsedCategories": ["AI","홍보","시스템"] }
+// PUT 422:  { "error": "invalid_rule", "message": "…" }  // 문자열이 아님 · 500B 초과 · categories 없음
 ```
 
 | ID | 요구사항 |
 |---|---|
-| API-28 | 저장 전 문법 검증 (S-08 §6). 절대 규칙과 충돌하는 지시는 저장 거부 |
-| API-29 | Phase 1에서는 GET/PUT 모두 동작하되(저장만), 병합에는 쓰이지 않음을 UI에 명시 |
-| HM-48 | `sort: "input"\|"date"`, `undated: "last"\|"first"` — 그 밖의 값은 422. 감사 로그에 바꾼 값이 남는다 (「GET도 같은 이름으로」는 GET과 함께 폐지 2026-10-08) |
+| ~~API-28~~ | ~~저장 전 문법 검증 (S-08 §6). 절대 규칙과 충돌하는 지시는 저장 거부~~ — **폐지 2026-10-08** (문법은 HM-18 v3에서 없앴다 — 길이·타입만 본다) |
+| ~~API-29~~ | ~~Phase 1에서는 GET/PUT 모두 동작하되(저장만), 병합에는 쓰이지 않음을 UI에 명시~~ — **폐지 2026-10-08** (병합은 가동 중) |
+| ~~HM-48~~ | ~~`sort: "input"\|"date"`, `undated: "last"\|"first"` — 그 밖의 값은 422. 감사 로그에 바꾼 값이 남는다~~ — **폐지 2026-10-08** (R3 · HM-51) |
+| API-59 | **받는 키는 `categories` 하나** (2026-10-08 — R3·R5·S7, [ADR-0018](../adr/0018-manage-settings-trim.md)). 문자열, 500B 이하. 다른 키(`ruleText`·`guideText`·`emptyWords`·`emphasisWords`·`dedupe`·`dropNotes`·`sort`·`undated`)는 **읽지 않는다** — 띄워 둔 옛 화면이 보내도 그 열은 바뀌지 않는다. `categories`가 없으면 422. 쓰기 대상은 신원의 부서(TACP-6), 감사 `rule_update { fields: ["mergeCategories"] }` |
 
 ### `POST /api/division/template` — 부서 양식 교체
 
@@ -309,7 +312,7 @@ v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노�
 
 ### API-34 — 속도 제한
 
-업로드 5분당 10회/사용자 · zip 분당 3회 · preview 분당 30회 · 그 외 분당 120회.
+업로드 5분당 10회/사용자 · ~~zip 분당 3회~~(zip 폐지 2026-10-08) · preview 분당 30회 · 그 외 분당 120회.
 
 ### 지운 엔드포인트 (2026-10-08 기능 정리)
 
@@ -321,9 +324,16 @@ v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노�
 | `GET /api/me` | 신원·슬롯·본인 제출 | 페이지가 서버에서 읽는다 |
 | `PUT /api/me/notify` | 본인 알림 켜고 끄기 (NT-21) | 운영자 인원 드로어의 알림 칸 (NT-22, `PUT /api/ops/roster`) |
 | `GET /api/my/history` | 본인 이력 26주 | 페이지가 서버에서 읽는다 |
-| `GET /api/division/slots` | 부서 주차 목록 | 서버 함수 `divisionSlots` |
+| `GET /api/division/slots` | 부서 주차 목록 | 서버 함수 `divisionWeeks` (PG-72) |
 | `GET /api/division/rule` | 병합 설정 읽기 | 부서 설정 페이지가 서버에서 읽는다 |
 | `GET /api/schedule/deadline` | 이번 주·다음 주 마감 상태 (WS-19l) | 「전사」 화면이 `deadlineStatus()`를 직접 부른다 |
+
+같은 날 **기능과 함께** 지운 것 (PG-73 · [ADR-0018](../adr/0018-manage-settings-trim.md)):
+
+| 경로 | 무엇이었나 | 대신 |
+|---|---|---|
+| `GET /api/division/download-zip` | 그 주 제출물 전체 zip (R1) | 줄의 [열기] → 드로어 [원본 다운로드] |
+| `GET /api/submissions/:id/versions` | 드로어의 버전 목록 (R9) | 드로어는 최신 판만 |
 
 남긴 것: `/api/rollup/*`의 GET(3단계 흐름을 다시 짜는 중이라 그 작업에서 정한다), `GET /api/health`, `POST /api/template/standard`
 (운영자가 화면 없이 쓴다). `GET /api/division/status`는 이 표에서 다루지 않는다 — 부서원에게 남의 제출 현황을 보이느냐(TACP-11)와 한 묶음이다.
@@ -344,8 +354,9 @@ v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노�
 | API-T08 | coordinator가 PUT 계열 호출 → 404 (「GET /api/overview → 200」은 엔드포인트와 함께 폐지 2026-10-08) |
 | API-T09 | 전 엔드포인트 `no-store` · 시각 `+09:00` |
 | API-T10 | health 200/503 + 민감정보 없음 |
-| API-T11 | 규칙 PUT: 절대 규칙 위반 지시 → 422 `invalid_rule` (Phase 2) |
+| ~~API-T11~~ | ~~규칙 PUT: 절대 규칙 위반 지시 → 422 `invalid_rule` (Phase 2)~~ — **폐지 2026-10-08** (API-28) → API-T17 |
 | API-T12 | 양식 교체: 깨진 파일 → 422, active 유지 (ST-T17와 연동) |
 | API-T13 | health — 활성 부서의 양식 파일이 없으면 `checks.template` fail · 503, 응답에 부서명 없음 · `warnings` 배열은 늘 있다 |
 | API-T14 | 병합 재실행 — 고친 병합본이면 409 `edited` + `detail.edits`, `overwriteEdits: true`면 실행 (API-55, HM-T136) |
 | API-T15 | 제출물 열람 — 빈 번호 줄은 `rows`에 없고 머리행은 남는다 · `rowsByTable`은 그대로 (API-57) |
+| API-T17 | 규칙 PUT — `categories`만 저장 · 옛 키(`ruleText`·`guideText`·`emptyWords`·`sort` …)는 열을 바꾸지 않는다 · `categories`가 없거나 500B 초과면 422 · member 404 · 쓰기는 신원의 부서 (API-59, `tests/sprint2.test.ts`) |

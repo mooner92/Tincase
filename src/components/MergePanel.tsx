@@ -7,12 +7,17 @@
 //
 // 2026-10-07 (PG-52 · CP-97) — 초록 칠한 카드 안에 흰 상자 둘·경고 상자·11px 줄이 겹겹이 들어 있었다.
 // 이제 흰 카드 하나: 머리(병합본 + 상태 칩) → 승인 한 줄 → 행동 한 줄(주 버튼 하나) → 확인할 것.
-// 합쳐진 행은 접어 둔다 — 대부분 「똑같이 적어서 합침」이라 펼쳐 볼 일이 드물다.
+//
+// 2026-10-08 (CP-117 · PG-73 — 기능 정리) — 「규칙 바뀜」 칩(R4)·「빠진 사람 n명」 줄(R7)·합쳐진 행 목록(S8)을 걷었다.
+// 합쳐진 행은 「내용 다른 묶음 n건」 한 줄이다 — 실제로 고치는 곳은 [내용 보기]의 병합본이다. 병합본 받기는 이 카드의
+// [받기] 하나이고, 게시판에 올릴 때 쓰는 [제목 복사]가 그 옆으로 왔다(S5 — 드로어의 [hwp로 받기]·[제목 복사]는 지웠다).
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MergedDrawer } from './MergedDrawer';
-import { contentCovered, MODEL_NOT_CONFIGURED } from '@/lib/merge-rows';
+import { MODEL_NOT_CONFIGURED } from '@/lib/merge-rows';
+import { copyText } from '@/lib/clipboard';
 
+/** HM-26 — 실행 기록(`reviewJson.groups`)에 남는 합쳐진 묶음. 화면은 이제 그 수만 센다(`differingGroups`) */
 export interface MergeGroupView {
   authors: string[];
   category: string;
@@ -31,16 +36,15 @@ export interface MergeStateView {
   sha256: string | null;
   status: 'none' | 'succeeded' | 'failed' | 'running';
   finishedAtKst: string | null;
-  trigger: 'auto' | 'manual' | null;
   rowCounts: { achievements: number; plans: number; notes: number } | null;
   warnings: string[];
   errorText: string | null;
-  groups: MergeGroupView[];
+  /** S8 — 내용이 다른 합쳐진 묶음 수 (글자까지 같은 묶음은 세지 않는다 — `differingGroups`) */
+  differing: number;
+  /** 모델을 썼나·왜 안 썼나 — 모델이 원래 없는 서버면 그 경고를 매주 되풀이하지 않는다 (PG-52) */
   modelUsed: boolean;
   modelReason: string | null;
-  categoryOrder: string[];
   sourceCount: number;
-  missing: string[];
   /** HM-33 — 확인이 필요한 행 (「없음」 등). 지우지 않고 보여준다 */
   flagged: { no: string; who: string; content: string; bucket: string }[];
   /** HM-47 — 부서장 승인. 없으면 아직 승인 전 */
@@ -52,8 +56,6 @@ export interface MergeStateView {
    * [다시 병합] 전에 「누가 몇 곳」을 묻는 데 쓴다 — 확인하면 `overwriteEdits: true`로 보낸다 (API-55)
    */
   edits: MergeEditsView | null;
-  /** CP-107 — 이 병합본을 만든 뒤 바뀐 설정 (부서 설정 카드 이름). 없으면 빈 배열 */
-  rulesChanged: string[];
 }
 
 /** HM-49 — 고친 기록 요약. 409 `edited`의 `detail.edits`와 같은 모양이다 (API-55) */
@@ -77,6 +79,7 @@ export function MergePanel({
   state,
   isoKey,
   divisionSlug,
+  title,
   canRun,
   canDownload,
   canEditMerged,
@@ -86,7 +89,10 @@ export function MergePanel({
   state: MergeStateView;
   isoKey: string;
   divisionSlug: string;
+  /** S5 — 게시판에 올릴 제목 (`boardTitle` — 병합본 드로어 머리와 같은 글). [제목 복사]가 그대로 복사한다 */
+  title: string;
   canRun: boolean;
+  /** [내용 보기]·[받기]·[제목 복사] — 담당자 이상 (TACP §3.2) */
   canDownload: boolean;
   /** 병합본 수정 — 담당자 + 내 부서 (TACP-15). «병합 실행»과 다른 판정이다 */
   canEditMerged: boolean;
@@ -96,8 +102,14 @@ export function MergePanel({
 }) {
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [openGroups, setOpenGroups] = useState(false);
   const [openContent, setOpenContent] = useState(false);
+  // CP-109a — 된 것만 「복사됨」. 사내망 평문 HTTP에서는 대체 경로(copyText)가 실패할 수 있다
+  const [copied, setCopied] = useState<boolean | null>(null);
+  const copyTitle = async () => {
+    const ok = await copyText(title);
+    setCopied(ok);
+    setTimeout(() => setCopied(null), ok ? 2000 : 4000);
+  };
   const router = useRouter();
 
   const [openReview, setOpenReview] = useState(false);
@@ -195,20 +207,6 @@ export function MergePanel({
               submitted === 0 ? '제출된 파일이 없습니다.' : '마감 후 자동 병합'
             ) : null}
           </p>
-          {/*
-            CP-107 — 이 병합본을 만든 뒤 병합 설정이 바뀌었다. 규칙 저장은 병합을 다시 돌리지 않는데,
-            그걸 말하지 않으면 「설정이 안 먹는다」가 된다. [다시 병합]해야 한다는 말은 그 버튼을 가진 사람에게만
-          */}
-          {done && state.rulesChanged.length > 0 && (
-            <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-muted">
-              <span className="chip chip-warn">규칙 바뀜</span>
-              <span>
-                {state.rulesChanged.join(' · ')}
-                {canRun &&
-                  ` — 이 병합본에는 [다시 병합]해야 적용됩니다${state.edits ? ' (병합본을 고친 내용은 사라집니다)' : ''}`}
-              </span>
-            </p>
-          )}
         </div>
         {done ? (
           // CP-104 — 사용 안내의 「준비됨」 단계(마감 뒤 저절로 합쳐진다)가 이 칩을 가리킨다
@@ -279,6 +277,12 @@ export function MergePanel({
               <a href={href} className="btn-secondary">
                 받기
               </a>
+            )}
+            {/* S5 — 취합게시판에 올릴 때 붙여 넣는 제목. 3단계를 켜는 주에 지운다 — 게시판에 올리는 동선이 없어진다 (ADR-0018) */}
+            {done && canDownload && (
+              <button onClick={copyTitle} className="btn-ghost">
+                {copied === true ? '복사됨 ✓' : copied === false ? '복사하지 못했습니다' : '제목 복사'}
+              </button>
             )}
             {canRun && (
               <button data-guide="merge-run" onClick={() => run()} disabled={busy || submitted === 0 || !!ask} className={done ? 'btn-ghost' : 'btn-secondary'}>
@@ -366,113 +370,10 @@ export function MergePanel({
           )}
 
           {/*
-            UX-04 — 「지금 미제출」이 아니라 **「이 병합본을 만들 때 빠져 있던 사람」**이다.
-            둘은 다르다: 병합 뒤에 낸 사람은 위 현황표에 «제출»로 뜨는데 여기엔 그대로 남아,
-            같은 화면에서 3/9와 미제출 7명이 동시에 보인다 (실제로 그렇게 보였다). 그래서 **시점을 박아 둔다**.
-            2026-10-08 — 「그 뒤에 낸 사람이 있으면 [다시 병합]을…」 지시문은 걷었다(사용자: 주석 걷기).
-            [다시 병합]을 누르면 고친 내용이 사라진다는 것은 누른 자리의 확인(CP-106)이 말한다.
+            S8 · CP-117 — 합쳐진 행은 수만. 글자까지 같게 적은 묶음은 잃은 것이 없어 세지 않는다.
+            어느 줄인지는 [내용 보기]의 병합본에서 보고 고친다 — 고치는 곳이 거기다
           */}
-          {state.missing.length > 0 && (
-            <p className="mt-4 text-sm text-body">
-              <span className="font-medium text-ink">빠진 사람 {state.missing.length}명</span>
-              <span className="ml-1.5">{state.missing.join(', ')}</span>
-              <span className="ml-1 text-muted">· {state.finishedAtKst ?? '병합'} 기준</span>
-            </p>
-          )}
-
-          {state.groups.length > 0 && (
-            <div className="card-section space-y-3">
-          {(() => {
-            /*
-              옛 실행에는 `identical`이 없다. 그렇다고 전부 「확인 필요」로 몰면 잃은 것이
-              없는 묶음까지 「빠짐」이라고 말하게 된다 — 없던 문제를 만들어 보여주는 셈이다.
-              `sources`만 있으면 여기서 되짚을 수 있으므로 되짚는다.
-            */
-            const isSame = (g: MergeGroupView) =>
-              g.identical ?? new Set(g.sources.map((s) => s.content.trim())).size === 1;
-            const 확인 = state.groups.filter((g) => !isSame(g));
-            const 동일 = state.groups.filter(isSame);
-            /** 문서에 들어간 줄의 자리. 옛 실행에는 keptIndex가 없어 글자로 되짚는다 */
-            const keptAt = (g: MergeGroupView) =>
-              g.keptIndex ?? Math.max(0, g.sources.findIndex((s) => s.content === g.kept));
-
-            return (
-            <div>
-              {/* 접기 — 화살표는 선으로 그린다(globals.css의 disclosure와 같은 모양). 내용이 다른 묶음이 있으면 제목이 경고색이다 */}
-              <button
-                onClick={() => setOpenGroups((v) => !v)}
-                aria-expanded={openGroups}
-                className="flex w-full flex-wrap items-baseline gap-x-2 text-left text-sm font-medium text-ink hover:underline"
-              >
-                <span
-                  aria-hidden
-                  className={`relative -top-0.5 inline-block h-1.5 w-1.5 border-r-[1.5px] border-b-[1.5px] border-current transition-transform ${
-                    openGroups ? 'rotate-45' : '-rotate-45'
-                  }`}
-                />
-                합쳐진 행 {state.groups.length}건
-                {확인.length > 0 && <span className="font-normal text-warning">· 확인 {확인.length}건</span>}
-              </button>
-              {openGroups && (
-                <ul className="mt-3 space-y-2">
-                  {/* 확인이 필요한 것 먼저 — 아래로 내려가면 안 보고 넘어간다 */}
-                  {확인.map((g, i) => {
-                    const ki = keptAt(g);
-                    return (
-                      <li key={`d${i}`} className="callout callout-warn">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="font-semibold text-ink">{g.authors.join(' + ')}</span>
-                          {g.category && (
-                            <span className="chip bg-canvas text-xs text-body">{g.category}</span>
-                          )}
-                          <span className="text-xs text-muted">{g.reason}</span>
-                        </div>
-                        <ul className="mt-2 space-y-1">
-                          {g.sources.map((s, k) => {
-                            // 버린 줄의 말이 남긴 줄에 다 들어 있으면 「빠짐」이 아니다
-                            const covered = k !== ki && contentCovered(g.kept, s.content);
-                            return (
-                              <li key={k} className="flex flex-wrap items-baseline gap-x-2">
-                                <span
-                                  className={`shrink-0 rounded px-1.5 py-0.5 text-xs font-semibold ${
-                                    k === ki
-                                      ? 'bg-ink text-canvas'
-                                      : covered
-                                        ? 'bg-canvas text-muted'
-                                        : 'bg-canvas text-error'
-                                  }`}
-                                >
-                                  {k === ki ? '문서에 들어감' : covered ? '안 씀' : '빠짐'}
-                                </span>
-                                <span className="text-xs text-muted">{s.who}</span>
-                                <span className={k === ki ? 'text-ink' : 'text-body'}>{s.content}</span>
-                              </li>
-                            );
-                          })}
-                        </ul>
-                      </li>
-                    );
-                  })}
-
-                  {/* 똑같이 적은 것 — 잃은 것이 없으므로 한 줄로 조용히 */}
-                  {동일.map((g, i) => (
-                    <li key={`s${i}`} className="callout callout-muted">
-                      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
-                        <span className="font-semibold text-ink">{g.authors.join(' + ')}</span>
-                        {g.category && (
-                          <span className="chip chip-muted text-xs">{g.category}</span>
-                        )}
-                      </div>
-                      <p className="mt-0.5 text-body">{g.kept}</p>
-                    </li>
-                  ))}
-                </ul>
-              )}
-            </div>
-            );
-          })()}
-            </div>
-          )}
+          {state.differing > 0 && <p className="callout callout-warn mt-4">내용 다른 묶음 {state.differing}건</p>}
         </>
       )}
     </section>

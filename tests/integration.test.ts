@@ -253,15 +253,7 @@ d('격리 스위트 — 릴리스 게이트 (AU-T12~T18)', () => {
     });
     expect(r2.status).toBe(404);
   });
-  it('[AU-T14] member가 zip → 404 · lead 자기 부서 zip → 200 (A부서 파일만)', async () => {
-    const { GET } = await import('@/app/api/division/download-zip/route');
-    const r1 = await GET(nx('/api/division/download-zip', ID.aMember));
-    expect(r1.status).toBe(404);
-
-    const r2 = await GET(nx('/api/division/download-zip', ID.aLead));
-    expect(r2.status).toBe(200);
-    expect(r2.headers.get('content-type')).toBe('application/zip');
-  });
+  // [AU-T14] 「member가 zip → 404 · lead 자기 부서 zip → 200」 — zip 경로와 함께 폐지 2026-10-08 (R1 · PG-73)
   it('[AU-T16] operator·coordinator의 타 부서 열람 → 성공 + 감사 로그', async () => {
     const { prisma } = await import('@/server/db');
     const bSub = await prisma.submission.findFirstOrThrow({ where: { division: { slug: B.slug } } });
@@ -523,26 +515,32 @@ d('health (API-T10)', () => {
 /**
  * AU-33 — 상태를 바꾸는 요청은 **같은 출처**에서만. 격리 스위트와 같은 무게의 게이트다:
  * 같은 서버 다른 포트의 페이지가 방문자 쿠키로 대신 보내는 요청은, 신원 판정이 아무리 옳아도 막지 못한다.
- * 양식 파일이 없어도 돈다 — 부서 규칙(PUT /api/division/rule)의 지침 한 줄로 「바뀌었나」를 본다.
+ * 양식 파일이 없어도 돈다 — 부서 규칙(PUT /api/division/rule)의 분류 순서 한 줄로 「바뀌었나」를 본다.
+ * (2026-10-08 — 받는 키가 `categories` 하나가 되었다, API-59. 예전에는 작성 안내 `guideText`로 봤다)
  */
 describe('AU-33 같은 출처 — 다른 포트의 페이지가 대신 보내는 요청 (AU-T84~86)', () => {
   const rule = () => import('@/app/api/division/rule/route');
-  const put = async (guideText: string, headers: Record<string, string>, body?: string) => {
+  const put = async (categories: string, headers: Record<string, string>, body?: string) => {
     const { PUT } = await rule();
     return PUT(
       nx('/api/division/rule', ID.aLead, {
         method: 'PUT',
         headers: { 'content-type': 'application/json', ...headers },
-        body: body ?? JSON.stringify({ guideText }),
+        body: body ?? JSON.stringify({ categories }),
       }),
     );
   };
   const guide = async () => {
     const { prisma } = await import('@/server/db');
-    return (await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } })).guideText;
+    return (await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } })).mergeCategories;
   };
   // 운영 11111 · 테스트 서버 11112 — 쿠키는 포트를 보지 않으므로 둘은 「같은 사이트」다 (RU-42)
   const HOST = { host: 'test.local:11111' };
+  // 분류 순서는 병합에 닿는다 — 뒤 시험의 병합이 분류 정렬(모델 없음 경고)을 타지 않게 비워 둔다
+  afterAll(async () => {
+    const { prisma } = await import('@/server/db');
+    await prisma.division.update({ where: { slug: A.slug }, data: { mergeCategories: '' } });
+  });
 
   it('[AU-T84] ★ 같은 사이트 다른 포트(Sec-Fetch-Site: same-site) → 403 cross_origin, 아무것도 안 바뀐다', async () => {
     const before = await guide();
@@ -557,7 +555,7 @@ describe('AU-33 같은 출처 — 다른 포트의 페이지가 대신 보내는
     expect((await put('위조', { ...HOST, origin: 'http://test.local:11112' })).status).toBe(403);
     // 사전 요청(preflight) 없이 닿는 단순 요청 꼴 — req.json()은 text/plain도 읽으므로 막는 곳이 여기뿐이다
     expect(
-      (await put('', { ...HOST, origin: 'http://test.local:11112', 'content-type': 'text/plain' }, JSON.stringify({ guideText: '위조' }))).status,
+      (await put('', { ...HOST, origin: 'http://test.local:11112', 'content-type': 'text/plain' }, JSON.stringify({ categories: '위조' }))).status,
     ).toBe(403);
     expect((await put('위조', { ...HOST, origin: 'null' })).status).toBe(403);
     expect((await put('위조', { ...HOST, 'sec-fetch-site': 'cross-site' })).status).toBe(403);
@@ -1281,6 +1279,144 @@ d('WS-19 주차 마감 예외 — 총괄이 정한다', () => {
       expect(await prisma.orgSection.count()).toBe(0);
     } finally {
       await prisma.division.update({ where: { slug: A.slug }, data: { boardStatus: 'none' } });
+    }
+  });
+});
+
+/**
+ * PG-72·73·74 — 수합 관리 머리와 부서 설정 (2026-10-08 기능 정리 · ADR-0018).
+ *
+ * 서버 컴포넌트를 직접 불러 **무엇을 어떤 값으로 그리려 했는지**만 본다(PG-T79 방식 — 그리지는 않는다).
+ * 클라이언트 부품(SlotSelector·MergePanel·RuleEditor) 속은 tests/manage-trim.test.ts·merge-panel.test.ts가 그려 본다.
+ */
+describe('PG-72·73·74 수합 관리 머리 · 부서 설정', () => {
+  const texts = (node: unknown, out: string[] = []): string[] => {
+    if (typeof node === 'string') out.push(node);
+    else if (Array.isArray(node)) node.forEach((n) => texts(n, out));
+    else if (node && typeof node === 'object' && 'props' in node) texts((node as El).props.children, out);
+    return out;
+  };
+  const named = (els: El[], n: string) => els.filter((e) => typeof e.type === 'function' && (e.type as { name: string }).name === n);
+  /** 페이지가 던진 Next 신호(notFound·redirect)의 digest. 그렸으면 null */
+  const thrown = async (f: () => Promise<unknown>) => {
+    try {
+      await f();
+      return null;
+    } catch (e) {
+      return (e as { digest?: string }).digest ?? String(e);
+    }
+  };
+  const settings = async (who: string) => {
+    const { default: SettingsPage } = await import('@/app/[division]/manage/settings/page');
+    pageAs.who = who;
+    return SettingsPage({ params: Promise.resolve({ division: A.slug }) });
+  };
+  const PEOPLE = [ID.aLead, ID.aMember, ID.coord];
+
+  beforeAll(async () => {
+    const { prisma } = await import('@/server/db');
+    await prisma.user.updateMany({ where: { email: { in: PEOPLE } }, data: { mustChangePassword: false } });
+  });
+  afterAll(async () => {
+    const { prisma } = await import('@/server/db');
+    await prisma.user.updateMany({ where: { email: { in: PEOPLE } }, data: { mustChangePassword: true } });
+    pageAs.who = '';
+  });
+
+  it('[PG-T101] ★ 부서 설정은 카드 둘 — 부서 양식 · 분류 순서. 작성 안내·병합 설정의 나머지·제출 대상은 없다 (PG-74)', async () => {
+    const els = elements(await settings(ID.aLead));
+    expect(named(els, 'TemplateManager')).toHaveLength(1);
+    const rule = named(els, 'RuleEditor');
+    expect(rule).toHaveLength(1);
+    // 분류 순서 하나만 넘긴다 — 옛 설정 칸의 처음 값(initialSort·initialGuide …)은 없다
+    expect(Object.keys(rule[0].props).sort()).toEqual(['initialCategories', 'thisWeekMerged']);
+    expect(els.filter((e) => e.type === 'section')).toHaveLength(1); // 양식 카드 (분류 순서 카드는 RuleEditor가 그린다)
+    const words = texts(els.map((e) => e.props.children)).join(' ');
+    for (const gone of ['작성 안내', '제출 대상', '집계 제외', '병합 설정', '정렬']) expect(words, gone).not.toContain(gone);
+  });
+
+  it('[PG-T101] 타 부서를 읽는 총괄 — 같은 두 카드를 읽기로만, 편집 부품은 없다 (AU-17d)', async () => {
+    const els = elements(await settings(ID.coord));
+    expect(named(els, 'TemplateManager')).toHaveLength(0);
+    expect(named(els, 'RuleEditor')).toHaveLength(0);
+    expect(els.filter((e) => e.type === 'section')).toHaveLength(2);
+    const words = texts(els.map((e) => e.props.children)).join(' ');
+    expect(words).toContain('읽기 전용');
+    expect(words).toContain('분류 순서');
+  });
+
+  it('[AU-T89] ★ 부서원은 병합 규칙을 읽지 못한다 — 부서 설정 404 · 규칙 GET 없음 · 저장 404 (TACP §3.1 v1.6.4, 새로 금지된 것)', async () => {
+    expect(await thrown(() => settings(ID.aMember))).toBe('NEXT_HTTP_ERROR_FALLBACK;404');
+    const rule = await import('@/app/api/division/rule/route');
+    expect('GET' in rule).toBe(false);
+    const res = await rule.PUT(
+      nx('/api/division/rule', ID.aMember, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ categories: '부서원' }),
+      }),
+    );
+    expect(res.status).toBe(404);
+  });
+
+  it('[PG-T102] 수합 관리 머리 — `부서 설정` 링크 · 전체 zip·집계 제외 각주 없음 · 병합 카드에 게시판 제목 (PG-72·73)', async () => {
+    const { prisma } = await import('@/server/db');
+    const { ManageView } = await import('@/app/[division]/manage/ManageView');
+    const { boardTitle } = await import('@/lib/docname');
+    const { currentWeek, slotKind } = await import('@/lib/week');
+    const division = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
+    const els = elements(
+      await ManageView({ division, canMerge: true, canDownloadMerged: true, canDeleteAny: false, canEditMerged: true }),
+    );
+    const hrefs = els.map((e) => e.props.href).filter((h): h is string => typeof h === 'string');
+    expect(hrefs).toContain(`/${A.slug}/manage/settings`);
+    expect(hrefs.some((h) => h.includes('download-zip'))).toBe(false);
+    const table = named(els, 'SubmissionTableClient')[0].props;
+    expect('action' in table || 'footnote' in table).toBe(false);
+    const slot = await prisma.weekSlot.findUniqueOrThrow({ where: { isoKey: currentWeek(new Date()).isoKey } });
+    expect(named(els, 'MergePanel')[0].props.title).toBe(boardTitle(slot.month, slot.label, A.nameKo, slotKind(slot)));
+    const picker = named(els, 'SlotSelector')[0].props as { slots: { isoKey: string; month?: number; isCurrent: boolean }[] };
+    expect(picker.slots.find((s) => s.isCurrent)).toMatchObject({ isoKey: slot.isoKey, month: slot.month });
+  });
+
+  it('[PG-T99] 수합 관리 주차 — 근거 있는 주 + 이번 주 + 보는 주, 26주 상한 없음 · 수는 명단 기준(명단 밖 제출은 분자에 없다)', async () => {
+    const { prisma } = await import('@/server/db');
+    const { divisionWeeks, ensureCurrentSlot } = await import('@/server/worklog');
+    const current = await ensureCurrentSlot();
+    const division = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
+    const weeksAgo = (n: number) => new Date(current.opensAt.getTime() - n * 7 * 86_400_000);
+    const slotAt = (isoKey: string, n: number) =>
+      prisma.weekSlot.create({ data: { isoKey, label: `T99 ${n}주 전`, year: 2025, month: 1, weekOfMonth: 1, opensAt: weeksAgo(n) } });
+    const [far, bare, counted] = [await slotAt('T99-FAR', 40), await slotAt('T99-BARE', 5), await slotAt('T99-COUNTED', 6)];
+    const [onRoster, offRoster] = await Promise.all(
+      [ID.aMember2, ID.aOff].map((email) => prisma.user.findUniqueOrThrow({ where: { email } })),
+    );
+    const sub = (userId: string, weekSlotId: string) =>
+      prisma.submission.create({
+        data: { divisionId: division.id, userId, weekSlotId, version: 1, filePath: 'x.hwp', originalName: 'x.hwp', byteSize: 1, sha256: 'x' },
+      });
+    try {
+      await prisma.mergeRun.create({
+        data: { divisionId: division.id, weekSlotId: far.id, status: 'succeeded', outputPath: 'x.hwp', sourceIds: '[]', ruleSnapshot: '{}' },
+      });
+      await sub(onRoster.id, counted.id);
+      await sub(offRoster.id, counted.id); // 명단 밖 — 병합에는 들어가도 진척 수에는 없다
+
+      const w = await divisionWeeks(division.id);
+      const ks = w.slots.map((s) => s.isoKey);
+      expect(ks).toContain(current.isoKey);
+      expect(ks).toContain('T99-FAR'); // 40주 전 병합본만 있는 주 — 26주 상한이 없다
+      expect(ks).toContain('T99-COUNTED');
+      expect(ks).not.toContain('T99-BARE'); // 이 부서에 아무 근거도 없는 주
+      expect(ks.indexOf(current.isoKey)).toBe(0); // 최신이 위
+      expect((await divisionWeeks(division.id, bare.id)).slots.map((s) => s.isoKey)).toContain('T99-BARE'); // 보는 주는 들어간다
+      expect(w.submittedOf(counted.id)).toBe(1);
+      expect(w.roster).toBe(await prisma.user.count({ where: { divisionId: division.id, isActive: true, onRoster: true } }));
+    } finally {
+      const ids = [far.id, bare.id, counted.id];
+      await prisma.mergeRun.deleteMany({ where: { weekSlotId: { in: ids } } });
+      await prisma.submission.deleteMany({ where: { weekSlotId: { in: ids } } });
+      await prisma.weekSlot.deleteMany({ where: { id: { in: ids } } });
     }
   });
 });

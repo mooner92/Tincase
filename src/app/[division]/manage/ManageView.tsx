@@ -3,9 +3,13 @@
 // 위에서 아래로 담당자가 한 주에 하는 순서 그대로: 제출 현황 → 병합본(검토) → 위로 제출 → 부서원 표.
 // 2026-10-07 — 요약을 짙은 초록 띠로 칠하던 것을 흰 카드로 바꿨다(CP-100: 큰 초록 면 금지).
 // 긴 표가 맨 위에 있으면 병합본·제출 카드가 스크롤 아래로 밀려 「할 일」이 안 보였다.
+//
+// 2026-10-08 (PG-72·73 — 기능 정리) — 머리는 주차 고르기(달마다 묶음 + ‹ ›)와 오른쪽 구석의 작은 `부서 설정` 링크.
+// 받기는 하나씩(전체 zip·줄 [받기] 없음), 진단 줄(「규칙 바뀜」·「빠진 사람」·집계 제외 각주)은 걷었다.
+import Link from 'next/link';
 import { prisma } from '@/server/db';
 import type { Division } from '@prisma/client';
-import { divisionStatus, divisionSlots, effectiveDeadline, ensureCurrentSlot } from '@/server/worklog';
+import { divisionStatus, divisionWeeks, effectiveDeadline, ensureCurrentSlot } from '@/server/worklog';
 import { formatDeadlineKo, isLocked, toKstIso, currentWeek, slotKind } from '@/lib/week';
 import { isOpenNow, OPEN_MINUTES } from '@/lib/deadline';
 import { openingOf } from '@/server/deadline';
@@ -13,21 +17,21 @@ import { DeadlineOpener } from '@/components/DeadlineOpener';
 import { CopyMissingButton } from '@/components/CopyMissingButton';
 import { SlotSelector } from '@/components/SlotSelector';
 import { SubmissionTableClient, type MemberRow } from '@/components/SubmissionTableClient';
-import { MergePanel, type MergeStateView } from '@/components/MergePanel';
+import { MergePanel, type MergeGroupView, type MergeStateView } from '@/components/MergePanel';
 import { ReportSubmitCard } from '@/components/ReportSubmitCard';
 import { reportState } from '@/server/rollup/report';
 import { rollupEnabled } from '@/server/rollup/schedule';
 import { latestReview } from '@/server/merge/review';
 import { latestEdits } from '@/server/merge/edits';
-import { rulesChangedSince } from '@/server/merge/rule-snapshot';
 import { readStoredFile, sha256 } from '@/server/storage';
+import { boardTitle } from '@/lib/docname';
+import { differingGroups } from '@/lib/merge-rows';
 import { notFound } from 'next/navigation';
 
+/** 실행 기록(`MergeRun.reviewJson`)에서 이 화면이 읽는 것만 (HM-26). `missing`·`categories`도 기록에는 남는다 */
 interface ReviewPayload {
-  groups: MergeStateView['groups'];
+  groups: MergeGroupView[];
   model: { used: boolean; reason: string | null };
-  categories: { order: string[] } | null;
-  missing: string[];
   /** HM-33 — 확인이 필요한 행. 옛 실행에는 없다 */
   flagged?: MergeStateView['flagged'];
 }
@@ -66,9 +70,9 @@ export async function ManageView({
     : await prisma.weekSlot.findUnique({ where: { isoKey: currentKey } });
   if (!slot) notFound(); // 없는 isoKey
 
-  const [{ members, extras, offRoster, summary }, slotList] = await Promise.all([
+  const [{ members, extras, summary }, slotList] = await Promise.all([
     divisionStatus(division.id, slot.id),
-    divisionSlots(division.id),
+    divisionWeeks(division.id, slot.id), // PG-72 — 근거 있는 주 + 이번 주 + 보는 주
   ]);
 
   // RU-30 — 위로 [제출]. 내 부서 lead·head에게만 그린다 (TACP-21·TACP-9). `canMerge`가 아니다 — 거기엔 readAll이
@@ -95,23 +99,19 @@ export async function ManageView({
     sha256: mergedSha,
     status: (lastRun?.status as MergeStateView['status']) ?? 'none',
     finishedAtKst: lastRun?.finishedAt ? toKstIso(lastRun.finishedAt).slice(5, 16).replace('T', ' ') : null,
-    trigger: lastRun ? ((JSON.parse(lastRun.ruleSnapshot) as { trigger?: 'auto' | 'manual' }).trigger ?? null) : null,
     rowCounts: lastRun?.rowCounts ? JSON.parse(lastRun.rowCounts) : null,
     warnings: lastRun?.warnings ? JSON.parse(lastRun.warnings) : [],
     errorText: lastRun?.errorText ?? null,
-    groups: review?.groups ?? [],
+    // S8 — 묶음 원문은 실행 기록에 남기고 화면에는 수만 보낸다. 클라이언트로 원문을 다 실어 보낼 이유가 없다
+    differing: differingGroups(review?.groups ?? []),
     modelUsed: review?.model?.used ?? false,
     modelReason: review?.model?.reason ?? null,
-    categoryOrder: review?.categories?.order ?? [],
     sourceCount: lastRun?.sourceIds ? (JSON.parse(lastRun.sourceIds) as string[]).length : 0,
-    missing: review?.missing ?? [],
     flagged: review?.flagged ?? [],
     review: lastRun?.status === 'succeeded' ? await latestReview(division.id, slot.id) : null,
     hasHead: (await prisma.user.count({ where: { divisionId: division.id, isActive: true, divisionRole: 'head' } })) > 0,
     // HM-49 — 마지막 실행이 실패했어도 덮이는 것은 최신 **성공** 실행의 파일이다. 그래서 따로 찾는다
     edits: (await latestEdits(division.id, slot.id))?.edits ?? null,
-    // CP-107 — 이 병합본을 만든 뒤 바뀐 설정. 규칙 저장은 병합을 다시 돌리지 않으므로 화면이 말해야 한다
-    rulesChanged: lastRun?.status === 'succeeded' ? rulesChangedSince(lastRun.ruleSnapshot, division) : [],
   };
 
   const deadline = effectiveDeadline(slot, division);
@@ -123,7 +123,7 @@ export async function ManageView({
   const openUntilKo = opening ? toKstIso(opening.openUntil).slice(11, 16) : null;
   const missing = members.filter((m) => m.status === 'missing').map((m) => m.user.name);
   const pct = summary.roster > 0 ? Math.round((summary.submitted / summary.roster) * 100) : 0;
-  // DM-17 — 병합·zip은 **모인 파일 전부**를 다룬다 (명단 밖 제출 포함).
+  // DM-17 — 병합은 **모인 파일 전부**를 다룬다 (명단 밖 제출 포함).
   // 진척률(submitted/roster)과 다른 수다. 이걸 같은 수로 쓰면 추가 제출만 있을 때
   // "제출된 파일이 없습니다"라고 하면서 병합은 되는 모순이 생긴다
   const collected = summary.submitted + summary.extras;
@@ -141,7 +141,6 @@ export async function ManageView({
           ? ('changed' as const)
           : null
       : null;
-  const zipHref = `/api/division/download-zip?slot=${slot.isoKey}&division=${encodeURIComponent(division.slug)}`;
   const toRow = (m: (typeof members)[number]): MemberRow => ({
     user: { id: m.user.id, name: m.user.name },
     status: m.status,
@@ -162,19 +161,29 @@ export async function ManageView({
           {/* WS-14 — 이 주에 모으는 것이 월간이면 담당자가 먼저 알아야 한다 */}
           {slotKind(slot) === 'monthly' && <span className="chip chip-ok">{slot.month}월 월간</span>}
         </h1>
-        <SlotSelector
-          baseHref={`/${division.slug}/manage`}
-          selected={slot.isoKey}
-          roster={slotList.roster}
-          slots={slotList.slots.map((s) => ({
-            isoKey: s.isoKey,
-            label: s.label,
-            year: s.year,
-            submitted: slotList.submittedOf(s.id),
-            isCurrent: s.isoKey === currentKey,
-            monthly: slotKind(s) === 'monthly',
-          }))}
-        />
+        <div className="flex w-full flex-wrap items-center justify-end gap-x-4 gap-y-2 sm:w-auto">
+          <SlotSelector
+            baseHref={`/${division.slug}/manage`}
+            selected={slot.isoKey}
+            roster={slotList.roster}
+            slots={slotList.slots.map((s) => ({
+              isoKey: s.isoKey,
+              label: s.label,
+              year: s.year,
+              month: s.month,
+              submitted: slotList.submittedOf(s.id),
+              isCurrent: s.isoKey === currentKey,
+              monthly: slotKind(s) === 'monthly',
+            }))}
+          />
+          {/*
+            PG-72 · S6 — 부서 설정은 메뉴가 아니라 여기서 들어간다. 매주 하는 일이 아니라(양식은 온보딩 때 한 번, 분류 순서는
+            한 곳이 쓴다) 상단 메뉴 한 칸을 차지할 일이 아니다. 이 화면을 보는 사람(canManage)이 예전에 그 메뉴를 보던 사람이다
+          */}
+          <Link href={`/${division.slug}/manage/settings`} className="text-sm text-muted underline underline-offset-2 hover:text-ink">
+            부서 설정
+          </Link>
+        </div>
       </div>
 
       <div className="mt-6 space-y-4 lg:space-y-6">
@@ -255,6 +264,7 @@ export async function ManageView({
           state={mergeState}
           isoKey={slot.isoKey}
           divisionSlug={division.slug}
+          title={boardTitle(slot.month, slot.label, division.nameKo, slotKind(slot))}
           canRun={canMerge}
           canEditMerged={canEditMerged}
           canApprove={canApprove}
@@ -277,28 +287,12 @@ export async function ManageView({
           />
         )}
 
-        {/* SubmissionTable + 드로어 (CP-48~53, PG-19/20). 전체 zip은 표의 머리에 — 표 전체에 대한 행동이다 (CP-58~61) */}
+        {/* SubmissionTable + 드로어 (CP-48~53, PG-19/20). 전체 zip·줄 [받기]·집계 제외 각주는 걷었다 (PG-73) */}
         <SubmissionTableClient
           caption={`${division.nameKo} ${slot.label} 제출 현황`}
           title={`부서원 ${members.length}명`}
-          action={
-            collected > 0 ? (
-              <a href={zipHref} className="btn-ghost">
-                전체 zip 받기 ({collected}개)
-              </a>
-            ) : (
-              <button disabled className="btn-ghost">
-                전체 zip 받기 (0개)
-              </button>
-            )
-          }
           members={members.map(toRow)}
           canDelete={canDeleteAny}
-          footnote={
-            offRoster.length > 0
-              ? `집계 제외: ${offRoster.map((u) => (u.note ? `${u.name}(${u.note})` : u.name)).join(', ')}`
-              : undefined
-          }
         />
 
         {/* DM-17 — 명단 밖인데 낸 사람. 분모에는 없지만 병합에는 들어간다 */}

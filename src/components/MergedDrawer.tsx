@@ -1,12 +1,13 @@
 'use client';
-// 병합본 보기·고치기·복사 (CP-70~74).
+// 병합본 보기·고치기 (CP-70~74 · CP-116).
 //
 // 담당자의 실제 동선은 이렇다: 병합본 받기 → 한글로 열기 → 표 복사 → 게시판에 붙여넣기.
 // 중간에 이상한 행이 하나 보이면 그것만 고치려고 한글을 연다.
 // **한글을 여는 유일한 이유가 그것**이라면, 여기서 보고 고치면 한글을 열 일이 없다.
 //
-// 붙여넣기는 `text/html`로 쓴다 — 한글도 게시판 편집기도 HTML 표를 받으면
-// 표 그대로 들어간다. text/plain만 쓰면 줄글로 쏟아진다 (붙여넣기 파싱에서 배운 것과 같은 이유).
+// 2026-10-08 (S5 · S9 — CP-116) — 받기·제목 복사는 수합 관리 카드의 [받기]·[제목 복사] 하나씩이다. 이 드로어의
+// [hwp로 받기]·[제목 복사]는 같은 일을 두 곳에서 했다. [작성자 보기] 토글도 지웠다 — 작성자는 서버가 보낸 사람
+// (lead·head·readAll)에게만 오고(TACP-17), 그 사람에게는 열이 늘 있다. 판정은 화면이 아니라 서버가 한다.
 //
 // **행 순서 바꾸기 (CP-90).** 부서장이 검토하면서 «이건 위로 올려야지»를 하는데, 지금은
 // 칸 내용을 서로 오려 붙이는 수밖에 없다 — 다섯 칸짜리 행 하나를 옮기려고 다섯 번 오려 붙인다.
@@ -17,7 +18,6 @@
 // 보기·고치기·지우기는 터치에서 그대로 되고, 순서 바꾸기만 마우스·키보드다.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { copyText } from '@/lib/clipboard';
 import { moveItem, rowNo } from '@/lib/merge-rows';
 
 interface TableView {
@@ -91,15 +91,14 @@ export function MergedDrawer({
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [copied, setCopied] = useState<string | null>(null);
+  /** 저장 결과 한 마디 (HM-47 — 승인·알림이 실제로 어떻게 됐는지) */
+  const [notice, setNotice] = useState<string | null>(null);
   /*
-   * TACP-17 — 작성자 열은 **기본으로 접혀 있다.**
-   *
-   * 이 화면의 주된 쓰임은 «슥 보고 제출»이고, 그때 필요한 건 내용이지 사람이 아니다.
-   * 늘 켜 두면 표가 좁아지고 시선이 사람 이름으로 먼저 간다 — 검토가 «누가 뭘 냈나»로
-   * 바뀐다. 잘못된 행을 찾은 **그 순간에만** 펼치면 된다.
+   * TACP-17 · S9 — 작성자 열은 **서버가 작성자를 보냈을 때 늘** 있다. 예전에는 기본으로 접고 눌러 폈는데
+   * (「슥 보고 제출」에는 사람이 필요 없다는 판단), 접어 둔 것을 펴는 사람을 잴 수 없었고 부서장이 물어볼 사람을
+   * 찾는 순간에 토글을 먼저 찾아야 했다. 부서원에게는 서버가 보내지 않으므로 열이 생기지 않는다 (AU-T33)
    */
-  const [showAuthors, setShowAuthors] = useState(false);
+  const showAuthors = data?.canSeeAuthors === true;
   /** CP-90 — 끌고 있는 행. `over`는 지금 가리키는 자리(놓으면 여기로 간다) */
   const [drag, setDrag] = useState<{ ti: number; from: number; over: number } | null>(null);
   /**
@@ -173,8 +172,8 @@ export function MergedDrawer({
   }, [open, onClose, dirty]);
 
   const flash = (what: string) => {
-    setCopied(what);
-    setTimeout(() => setCopied(null), 1600);
+    setNotice(what);
+    setTimeout(() => setNotice(null), 1600);
   };
 
   const edit = (ti: number, ri: number, ci: number, v: string) => {
@@ -349,62 +348,20 @@ export function MergedDrawer({
         </header>
 
         {/*
-          제출 동선 그대로 — 제목 복사 → hwp 받기 → 한글에서 표 복사 → 게시판에 붙여넣기.
-          2026-10-07 — 버튼 넷이 모양 셋(테두리·초록·옅은 테두리·회색)이었다. 이 드로어의 주 버튼은 [수정 저장] 하나,
-          나머지는 보조·글자 버튼이다 (CP-99). 설명 글은 버튼 줄에 끼우지 않고 그 밑 한 줄로
+          CP-116 · CP-110 — 머리 줄은 고칠 수 있는 사람에게만: 저장 결과 한 마디와 [수정 저장]. [수정 저장]은 처음부터 보이고
+          고치기 전에는 꺼져 있다 — 고치는 순간 줄이 새로 생겨 표가 밀려 내려가지 않게. 받기·제목 복사는 수합 관리 카드에 있다(S5)
         */}
-        <div data-guide="merged-head" className="border-b border-hairline px-4 py-3 sm:px-6">
-        <div className="flex flex-wrap items-center gap-2">
-          <button
-            onClick={async () => {
-              if (!data) return;
-              setErr(null);
-              if (await copyText(data.title)) flash('제목');
-              else setErr('제목을 복사하지 못했습니다.');
-            }}
-            disabled={!data}
-            className="btn-ghost"
-          >
-            제목 복사
-          </button>
-          {/*
-            «표 복사»는 뺐다 (v1.16.0). 한컴 웹에디터가 붙여넣은 HTML을 자기 방식으로
-            다시 그려서 양식과 완전히 같게 만들 수 없었다 — 폭·정렬·머리행까지 맞춰도
-            미세하게 어긋났다. 어설프게 비슷한 것보다 **확실한 길 하나**가 낫다.
-            브라우저는 한글 고유 형식을 클립보드에 올릴 수 없으므로(text/plain·html·png만),
-            hwp를 받아 한글에서 복사하는 것이 유일하게 서식이 100% 보존되는 경로다.
-            되살릴 때는 v1.15.1의 표 복사 구현에서 이어가면 된다.
-          */}
-          <a
-            href={`/api/division/merged?division=${divisionSlug}&isoKey=${isoKey}`}
-            className="btn-secondary btn-sm"
-          >
-            hwp로 받기
-          </a>
-          {/* TACP-17 — 서버가 작성자를 보낸 사람에게만 보이는 토글 */}
-          {data?.canSeeAuthors && (
-            <button
-              onClick={() => setShowAuthors((v) => !v)}
-              aria-pressed={showAuthors}
-              className={`tab-pill py-1.5 ${showAuthors ? 'tab-pill-active' : ''}`}
-            >
-              작성자 {showAuthors ? '숨기기' : '보기'}
-            </button>
-          )}
-          <span className="ml-auto text-sm">
-            {copied && (
-              <span className="font-medium text-success">{copied === '제목' ? '제목 복사됨' : copied}</span>
-            )}
-            {dirty && !copied && <span className="text-warning">저장하지 않은 수정</span>}
-          </span>
-          {/* 주 버튼은 고친 것이 있을 때만 나타난다 — 늘 회색으로 누워 있으면 좁은 화면에서 한 줄을 차지한다 */}
-          {canEdit && (dirty || busy) && (
-            <button data-guide="merged-save" onClick={save} disabled={!dirty || busy} className="btn-primary btn-sm">
+        {canEdit && (
+          <div data-guide="merged-head" className="flex flex-wrap items-center gap-2 border-b border-hairline px-4 py-3 sm:px-6">
+            <span className="text-sm">
+              {notice && <span className="font-medium text-success">{notice}</span>}
+              {dirty && !notice && <span className="text-warning">저장하지 않은 수정</span>}
+            </span>
+            <button data-guide="merged-save" onClick={save} disabled={!dirty || busy} className="btn-primary btn-sm ml-auto">
               {busy ? '저장 중…' : '수정 저장'}
             </button>
-          )}
-        </div>
-        </div>
+          </div>
+        )}
 
         {/* HM-47 — 승인 상태. 부서장에게는 [고칠 것 없음 · 승인] — 고쳐 저장하면 그 저장이 승인이다 */}
         {data && (data.review || data.canApprove) && (

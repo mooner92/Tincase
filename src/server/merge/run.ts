@@ -58,7 +58,7 @@ export async function runMergeRecorded(
       status: 'running',
       sourceIds: '[]',
       // DM-13 — 실행 시점 설정을 그대로 박제한다. 나중에 설정이 바뀌어도 이 결과의 근거는 남는다.
-      // 목록은 ruleSnapshotOf 하나가 정한다 — 수합 관리의 「규칙 바뀜」(CP-107)이 같은 목록으로 비교한다
+      // 목록은 ruleSnapshotOf 하나가 정한다 — 2026-10-08부터 분류 순서뿐이다(나머지는 고정값, HM-51)
       ruleSnapshot: JSON.stringify({ trigger, ...ruleSnapshotOf(division) }),
     },
   });

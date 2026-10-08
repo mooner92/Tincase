@@ -33,10 +33,11 @@ model Division {
 
   deadlineDow   Int     @default(4)      // 마감 요일 1=월 … 7=일 (기본 목 — DM-10)
   deadlineTime  String  @default("14:00")// "HH:mm" KST
-  mergeRuleText String  @default("")     // 부서 병합 규칙 (S-08 §6)
-  mergeSort     String  @default("input")// "input" 제출자 순 | "date" 일자 오름차순 (HM-48)
-  mergeUndated  String  @default("last") // 날짜 없는 줄의 자리 "last" | "first" (HM-48, date일 때만)
-  guideText     String  @default("")     // 업로드 화면 작성 안내 (줄 단위, CP-21)
+  // 2026-10-08 (HM-51 · ADR-0018) — 부서가 고르는 병합 설정은 mergeCategories 하나다. 아래 넷은 열만 남는다(아무도 읽지 않는다)
+  mergeRuleText String  @default("")     // ~~부서 병합 규칙 (S-08 §6)~~ 엔진이 읽지 않는다
+  mergeSort     String  @default("input")// ~~"input" 제출자 순 | "date" 일자 오름차순 (HM-48)~~ 제출자 순 고정
+  mergeUndated  String  @default("last") // ~~날짜 없는 줄의 자리 (HM-48)~~ 읽지 않는다
+  guideText     String  @default("")     // ~~업로드 화면 작성 안내 (줄 단위, CP-21)~~ 작성 안내는 폐지 2026-10-08 (R5)
 
   createdAt     DateTime @default(now())
   users         User[]
@@ -142,7 +143,7 @@ model AuditLog {
   at        DateTime @default(now())
   actor     String                        // 검증된 이메일
   divisionId String?                      // 격리 감사용
-  action    String                        // upload|download|download_zip|preview|merge|rule_update|template_update|reject
+  action    String                        // upload|download|download_zip(2026-10-08 폐지 — 옛 기록)|preview|merge|rule_update|template_update|reject
   target    String?
   detail    String?
   @@index([at])
@@ -254,10 +255,10 @@ type MemberStatus = { user: User; latest: Submission | null; versionCount: numbe
 `MergeRun.ruleSnapshot`에 실행 시점 규칙 원문을 저장한다. "그때 왜 이 순서로 나왔지"를
 재현 가능하게 — 규칙은 계속 편집되므로 참조가 아니라 복사여야 한다.
 
-담기는 것: `trigger` · `categories` · `dedupe` · `dropNotes` · `guidance` · `sort` · `undated` (HM-48) ·
-`emphasisWords` (HM-38 — 괄호 낱말을 떼고 파란색으로 바꾸므로 문서가 달라진다, 2026-10-08부터).
+담기는 것: `trigger` · `categories` (2026-10-08 — HM-51. 부서가 고르는 것이 분류 순서 하나다. 고정값은 날짜로 안다).
+~~`dedupe` · `dropNotes` · `guidance` · `sort` · `undated` (HM-48) · `emphasisWords` (HM-38)~~ — 그 전 실행의 스냅샷에는 이 키들이 그대로 있다.
 **순서를 바꾸는 설정은 빠짐없이 들어가야 한다** — 하나라도 빠지면 「왜 이 순서」의 답이 스냅샷에 없다.
-목록은 `ruleSnapshotOf()` 하나가 정하고, 수합 관리의 「규칙 바뀜」(CP-107)도 같은 목록으로 지금 설정과 비교한다.
+목록은 `ruleSnapshotOf()` 하나가 정한다. ~~수합 관리의 「규칙 바뀜」(CP-107)도 같은 목록으로 지금 설정과 비교한다~~ — 「규칙 바뀜」은 폐지 2026-10-08 (R4).
 
 ### DM-14 — 부서 양식 불변식
 
@@ -294,7 +295,7 @@ type MemberStatus = { user: User; latest: Submission | null; versionCount: numbe
 | 인덱스 | 쿼리 |
 |---|---|
 | `Division.slug` (unique) | 페이지 라우팅 |
-| `Submission(divisionId, weekSlotId, isLatest)` | 담당자 현황 / zip / 병합 대상 — **모든 목록 조회의 기본 축** |
+| `Submission(divisionId, weekSlotId, isLatest)` | 담당자 현황 / 병합 대상 (zip은 폐지 2026-10-08) — **모든 목록 조회의 기본 축** |
 | `Submission(userId, weekSlotId, version)` (unique) | 버전 경합 방어 |
 | `User(divisionId, isActive, onRoster, sortOrder)` | 현황 분모 |
 | `Template(divisionId, isActive)` | 양식 다운로드 |
@@ -341,7 +342,7 @@ SQLite로 충분 ([ADR-0003](../adr/0003-sqlite-prisma.md)). `/data` 여유 21TB
 그래서 추가 제출도 병합본에 들어간다.
 
 진척률(`submitted/roster`)과 **모인 파일 수**(`submitted + extras`)는 다른 수다.
-병합 패널과 zip은 후자를 쓴다 — 전자를 쓰면 추가 제출만 있을 때
+병합 패널은 후자를 쓴다(zip은 폐지 2026-10-08) — 전자를 쓰면 추가 제출만 있을 때
 "제출된 파일이 없습니다"라고 하면서 병합은 되는 모순이 생긴다.
 
 | ID | 검증 |

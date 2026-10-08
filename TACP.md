@@ -4,8 +4,8 @@
 > 코드·스펙·UI가 이 문서와 어긋나면 **문서가 아니라 코드가 틀린 것**이다.
 > 규칙을 바꾸려면 §10 절차를 따른다. 코드를 먼저 고치는 것은 위반이다.
 
-버전 1.6.3 · 2026-10-08 · 대상 코드 v1.41.0 (feat/org-rollup)
-관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md) · [ADR-0008](docs/adr/0008-head-principal.md) · [ADR-0012](docs/adr/0012-upward-submission.md) · [ADR-0017](docs/adr/0017-foreign-read-chip.md)
+버전 1.6.4 · 2026-10-08 · 대상 코드 v1.41.0 (feat/org-rollup)
+관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md) · [ADR-0008](docs/adr/0008-head-principal.md) · [ADR-0012](docs/adr/0012-upward-submission.md) · [ADR-0017](docs/adr/0017-foreign-read-chip.md) · [ADR-0018](docs/adr/0018-manage-settings-trim.md)
 
 변경 이력:
 - v1.1 — `delete` Action 신설, TACP-8에 예외 하나(TACP-14) 추가
@@ -21,6 +21,9 @@
   지나고 `download` 기록이 남는다. 라우트가 직접 조회하고 기록 없이 내주던 것을 바로잡았다(TACP-10·12). 취소한 파일은 404
 - v1.6.3 — TACP-9 문구 (2026-10-08, ADR-0017): 타 부서 열람 표시는 **머리의 칩 하나**다 — 본문 위 띠를 걷었다.
   칩은 어느 폭에서도 보이고 [내 부서로]가 옆에 있다. 권한·열람 기록(TACP-10)은 그대로다
+- v1.6.4 — 수합 관리·부서 설정 축소 (2026-10-08, ADR-0018): §3.1 「작성 안내 · 병합 규칙」 칸이 「병합 규칙(분류 순서)」이 된다 —
+  작성 안내가 없어져 부서원이 읽던 유일한 규칙 글이 사라졌다(member `—`, AU-T89). 병합 규칙은 분류 순서 하나다(나머지는 고정값).
+  TACP-17의 작성자 열은 토글 없이 늘 보인다(받는 사람은 그대로). zip 경로를 지워 AU-T22b를 걷었다. 권한이 넓어진 칸은 없다
 - v1.5.2 — **TACP-22 신설: 담당자는 부서원 제출물을 새 판으로 고친다.** 덮어쓰지 않고, 누가 고쳤는지 남긴다 (ADR-0013)
 - v1.5.3 — TACP-22 보정 (2026-10-07 리뷰): **자기 제출물은 첨삭하지 않는다**(마감을 우회하는 길이 된다) ·
   §3.1 operator 첨삭 칸 정정 — 자기 부서의 lead·head 역할이 있을 때만이다(코드와 같게) ·
@@ -151,7 +154,7 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
 | **남의 제출물 첨삭** (새 판으로) | — | **write** | **write** | — | write(자기 부서의 lead·head일 때만) |
 | 부서 양식 내려받기 | read | read | read | read | read |
 | 부서 양식 등록·교체 | — | write | write | write | write |
-| 작성 안내 · 병합 규칙 | read | write | write | write | write |
+| 병합 규칙 (분류 순서) — v1.6.4. 예전 「작성 안내 · 병합 규칙」, member read는 작성 안내였다 | **—** | write | write | write | write |
 | 병합 실행 | — | write | write | write | write |
 | **마감 잠시 열기·닫기** | — | write | write | — | write |
 | 명단 · 역할 · 부서 활성화 | — | — | — | — | manage |
@@ -286,7 +289,7 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
 
 | | 작성자 표시 |
 |---|:---:|
-| Tincase 병합본 화면 — **lead·head·readAll** | **보인다** (기본은 접힘, 눌러서 편다) |
+| Tincase 병합본 화면 — **lead·head·readAll** | **보인다** — 작성자 열이 늘 있다 (v1.6.4 — 「기본은 접힘, 눌러서 편다」 토글을 걷었다) |
 | Tincase 병합본 화면 — **member** | **없다** (서버가 응답에 담지 않는다) |
 | 내려받은 hwp · 취합게시판에 올라가는 문서 | **없다** — 누가 받든 |
 
@@ -528,7 +531,7 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | AU-T19 | 별칭으로 우회 시도 → 404 |
 | AU-T20b | operator의 타 부서 해석 → `isOwn=false` + 감사 로그 |
 | AU-T21b | 별칭 → 정식 슬러그 redirect |
-| AU-T22b | zip은 요청한 부서의 파일만 담는다 |
+| ~~AU-T22b~~ | ~~zip은 요청한 부서의 파일만 담는다~~ — **폐지 2026-10-08** (v1.6.4): 전체 zip 경로를 지웠다(ADR-0018). 내려받기 격리는 개별 다운로드의 AU-T13·T16이 본다 |
 | ST-15 | member의 같은 부서 타인 파일 → 404 |
 | ST-T30 | 본인 삭제 → 허용. 마감 후 본인 삭제 → **409** |
 | ST-T31 | **lead의 같은 부서 타인 제출물 삭제 → 404** (읽기는 되는데 삭제는 안 된다) |
@@ -559,6 +562,7 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | **WA-T43** | **lead·head가 자기 제출물을 첨삭 → 404** (새로 금지된 것 — 마감 우회) · 열람 화면 [고치기]도 없다 |
 | **WA-T44** | **head가 부서원 제출물을 연다 → 200** (§3.1 「남의 제출물 내용」 head=read — 게이트가 lead만 보던 것을 바로잡음) |
 | **AU-T88** | **타 부서 열람 칩은 어느 화면 폭에서도 그린다** + `내 부서로` (TACP-9 — 본문 띠를 걷은 조건, ADR-0017) |
+| **AU-T89** | **member는 병합 규칙을 읽지 못한다** — 부서 설정 화면 404 · 규칙 GET 없음 · 저장 404 (v1.6.4 — 작성 안내가 없어진 칸, 새로 금지된 것) |
 
 새 Resource를 추가하면 **그 Resource의 격리 테스트를 같은 커밋에 넣는다.**
 

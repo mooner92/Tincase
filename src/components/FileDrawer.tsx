@@ -1,5 +1,7 @@
 'use client';
-// CP-70~77 — 제출물 열람 드로어. 읽기 전용, 파싱된 표 렌더, ←→ 제출자 이동, 버전 전환.
+// CP-70~77 — 제출물 열람 드로어. 읽기 전용, 파싱된 표 렌더, ←→ 제출자 이동.
+// 2026-10-08 (R9 · PG-73) — 버전 고르기를 지웠다. 2판 이상인 제출이 0건이었다 — 드로어는 최신 판만 연다.
+// 옛 판은 DB·저장소에 그대로 있다(ST-19). [고치기]로 만든 새 판은 저장 뒤 그 판으로 옮겨 연다(onNavigate).
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { SubmissionEditor, type EditRow } from './SubmissionEditor';
@@ -27,16 +29,6 @@ interface PreviewData {
   canRevise?: boolean;
   rowsByTable?: Record<'achievements' | 'plans' | 'notes', EditRow[]>;
 }
-interface VersionRow {
-  id: string;
-  version: number;
-  isLatest: boolean;
-  uploadedAt: string;
-  byteSize: number;
-  /** TACP-22 — 담당자가 고친 판이면 고친 사람 */
-  editedBy?: string | null;
-  editedAt?: string | null;
-}
 
 /** TACP-22 — 「○○ 고침 · 14:30」. 제출 시각과 고친 시각을 섞지 않는다 */
 const editedLabel = (by: string, at?: string | null) => `${by} 고침${at ? ` · ${at.slice(11, 16)}` : ''}`;
@@ -53,7 +45,6 @@ export function FileDrawer({
   onNavigate: (submissionId: string) => void;
 }) {
   const [data, setData] = useState<PreviewData | null>(null);
-  const [versions, setVersions] = useState<VersionRow[]>([]);
   const [error, setError] = useState<string | null>(null);
   // WA-20 — 고치는 중인 판의 id. 다른 판·다른 사람으로 옮기면 저절로 풀린다
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -76,19 +67,14 @@ export function FileDrawer({
   useEffect(() => {
     if (!openId) return;
     let alive = true;
-    Promise.all([
-      fetch(`/api/submissions/${openId}/preview`).then(async (r) => {
+    fetch(`/api/submissions/${openId}/preview`)
+      .then(async (r) => {
         if (!r.ok) throw new Error((await r.json().catch(() => null))?.message ?? '열람에 실패했습니다.');
         return r.json() as Promise<PreviewData>;
-      }),
-      fetch(`/api/submissions/${openId}/versions`)
-        .then((r) => (r.ok ? r.json() : { versions: [] }))
-        .then((b) => b.versions as VersionRow[]),
-    ])
-      .then(([p, v]) => {
+      })
+      .then((p) => {
         if (!alive) return;
         setData(p);
-        setVersions(v);
         setError(null);
         titleRef.current?.focus(); // 접근성: 열릴 때 제목 포커스
       })
@@ -188,23 +174,6 @@ export function FileDrawer({
                 '불러오는 중…'
               )}
             </h2>
-            {/* 고치는 중에는 판을 바꾸지 않는다 — 바꾸는 순간 고치던 내용이 사라진다 */}
-            {versions.length > 1 && data && !editing && (
-              <select
-                aria-label="버전 선택"
-                value={data.submission.id}
-                onChange={(e) => onNavigate(e.target.value)}
-                className="select h-8"
-              >
-                {versions.map((v) => (
-                  <option key={v.id} value={v.id}>
-                    v{v.version}
-                    {v.isLatest ? ' (현재본)' : ''} · {v.uploadedAt.slice(5, 16).replace('T', ' ')}
-                    {v.editedBy ? ` · ${editedLabel(v.editedBy, v.editedAt)}` : ''}
-                  </option>
-                ))}
-              </select>
-            )}
           </div>
           <div className="flex items-center gap-2">
             {/* ←→ 는 **제출자 사이** 이동이다. 혼자 볼 때는 갈 곳이 없으므로 숨긴다 —

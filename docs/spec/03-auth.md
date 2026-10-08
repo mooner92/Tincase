@@ -149,7 +149,7 @@ const user = await findUser(formData.get('userId'));
 |---|---|---|---|---|
 | 자기 부서 페이지 · 본인 업로드/다운로드 | ✔ | ✔ | ✔ (자기 부서원으로서) | ✔ |
 | **부서 제출 현황 (이름·제출여부·시각)** | **✔ 자기 부서** | ✔ 자기 부서 | ✔ **전 부서** | ✔ 전 부서 |
-| 타인 제출물 **내용** 열람(드로어)·다운로드·zip | ✘ | ✔ 자기 부서 | ✔ 전 부서 (읽기) | ✔ 전 부서 |
+| 타인 제출물 **내용** 열람(드로어)·다운로드 (zip은 폐지 2026-10-08) | ✘ | ✔ 자기 부서 | ✔ 전 부서 (읽기) | ✔ 전 부서 |
 | 병합 규칙 편집 / 병합 실행 / 양식 관리 | ✘ | ✔ 자기 부서 | ✘ (읽기만) | ✔ |
 | 인원 배치 — 부서 생성·활성화, 사용자 배정·역할·onRoster | ✘ | ✘ | ✘ | ✔ **전용** |
 
@@ -368,7 +368,7 @@ Cloudflare 경유(HTTPS)일 때만 `secure`를 켠다 — 요청의 프로토콜
 
 ### AU-09 — 감사 로그
 
-`upload`, `download`, `download_zip`, `merge` 는 `AuditLog`에 남긴다.
+`upload`, `download`, ~~`download_zip`~~(2026-10-08 폐지 — 옛 기록만), `merge` 는 `AuditLog`에 남긴다.
 `actor`는 **검증된 JWT의 이메일**이어야 한다 (헤더 값이 아니라).
 
 ---
@@ -498,7 +498,7 @@ curl -m 5 http://<서버-내부-IP>:11111/          # 실패해야 정상
 |---|---|
 | AU-T12 | A부서 member가 B부서 페이지 `GET /{B-slug}` → **404** |
 | AU-T13 | A부서 lead가 B부서 submissionId 다운로드/드로어 → **404** |
-| AU-T14 | A부서 lead가 B부서 zip/현황 API → **404** |
+| AU-T14 | A부서 lead가 B부서 ~~zip/~~현황 API → **404** (zip은 폐지 2026-10-08) |
 | AU-T15 | member가 같은 부서 **현황 조회 → 성공(이름·여부·시각)**, 타인 파일 다운로드/드로어 → **404** |
 | AU-T16 | operator·coordinator의 타 부서 열람 → 성공 + **감사 로그 기록** (AU-15·16) |
 | AU-T17 | (member 기준) 존재하지 않는 slug와 남의 slug의 응답이 **구별 불가능** (동일 404) |
@@ -506,10 +506,11 @@ curl -m 5 http://<서버-내부-IP>:11111/          # 실패해야 정상
 | AU-T19 | member·lead의 타 부서 슬러그·**별칭** 해석 → 404 (AU-17) |
 | AU-T20b | operator의 타 부서 해석 → `isOwn=false` + 감사 로그 |
 | AU-T21b | 내 별칭 → 정식 슬러그 redirect · 타 부서 별칭도 정식으로 redirect |
-| AU-T22b | **zip은 요청한 부서의 파일만** 담고, 권한 없으면 404 (헤더/본문 불일치 방지) |
+| ~~AU-T22b~~ | ~~**zip은 요청한 부서의 파일만** 담고, 권한 없으면 404 (헤더/본문 불일치 방지)~~ — **폐지 2026-10-08** (TACP v1.6.4 — zip 경로가 없다) |
 | AU-T84 | 같은 사이트 다른 포트에서 온 POST(`Sec-Fetch-Site: same-site` · `Origin` 포트 다름) → **403 `cross_origin`**, 아무것도 바뀌지 않는다 (AU-33) |
 | AU-T85 | 같은 출처 POST(`Sec-Fetch-Site: same-origin` · `Origin` = `Host`) → 그대로 처리 |
 | AU-T86 | `Origin`·`Sec-Fetch-Site` 둘 다 없는 POST(스크립트) → 그대로 처리 · GET은 출처를 보지 않는다 |
 | AU-T88 | 타 부서 열람 중이면 머리에 「열람」 칩 + `내 부서로` — 칩에 좁은 화면에서 숨기는 클래스가 없다 · 내 부서면 둘 다 없다 · 본문 띠 부품이 없다 (AU-17c, `tests/app-header.test.ts`) |
+| AU-T89 | member는 병합 규칙을 읽지 못한다 — 부서 설정 페이지 404 · 규칙 라우트에 GET이 없다 · 저장 404 (TACP §3.1 v1.6.4 — 작성 안내가 없어져 member read가 사라진 칸, 새로 금지된 것. `tests/integration.test.ts`) |
 
 > AU-T09·T10(위조 방어)과 AU-T12~T17(격리)이 이 스펙의 핵심 회귀 테스트다.

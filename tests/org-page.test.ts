@@ -203,21 +203,10 @@ describe('PG-49f 「전사」 한 화면 · WS-19l 일정은 머리글 한 곳',
     expect(stale).toContain('섹션이 바뀜');
     expect(stale).not.toContain('만든 뒤 섹션이 바뀌었습니다');
 
-    // 부서 설정 — 사용자가 짚은 두 문장
-    const rules = renderToStaticMarkup(
-      createElement(RuleEditor, {
-        initialCategories: 'AI-홍보',
-        initialDedupe: true,
-        initialDropNotes: true,
-        initialSort: 'input',
-        initialUndated: 'last',
-        initialRule: '',
-        initialGuide: '',
-        initialEmptyWords: '없음',
-        initialEmphasisWords: '하이라이트',
-      }),
-    );
-    expect(rules).toContain('확인할 낱말');
+    // 부서 설정 — 사용자가 짚은 두 문장. 2026-10-08 기능 정리로 카드가 분류 순서 하나가 되어 「확인할 낱말」 칸째 없다(S7 · CP-118)
+    const rules = renderToStaticMarkup(createElement(RuleEditor, { initialCategories: 'AI-홍보', thisWeekMerged: null }));
+    expect(rules).toContain('분류 순서');
+    expect(rules).not.toContain('확인할 낱말');
     for (const gone of ['어떤 설정으로도 바꿀 수 없습니다', '뺄지는 사람이 정합니다', '문서는 그대로 둡니다']) expect(rules, gone).not.toContain(gone);
   });
 });

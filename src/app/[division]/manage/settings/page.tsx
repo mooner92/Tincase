@@ -1,27 +1,17 @@
-// `/{slug}/manage/settings` — 부서 설정 (PG §5 · PG-53). lead 전용.
-// 카드 넷: 부서 양식 · 작성 안내 · 병합 설정 · 제출 대상. 카드 안에 카드를 두지 않는다 (CP-97).
+// `/{slug}/manage/settings` — 부서 설정 (PG-74). lead 전용. 들어가는 길은 수합 관리 머리의 작은 링크다 (PG-72).
+//
+// 2026-10-08 (S6 · R3 · R5 · R6 — ADR-0018) — 카드 둘: 부서 양식 · 분류 순서. 작성 안내·병합 설정의 나머지는 엔진의
+// 고정값이 되었고(HM-51), 「제출 대상」 카드는 수합 관리 부서원 표·운영자 인원 드로어와 같은 것을 보였다.
+// 타 부서를 읽는 사람에게는 같은 두 카드를 읽기로만 그린다 — 설정을 한 덩어리로 쏟던 읽기 전용 덤프는 지웠다.
 import { notFound, redirect } from 'next/navigation';
 import { prisma } from '@/server/db';
 import { getPageScope, getDivisionView } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { TemplateManager } from '@/components/TemplateManager';
 import { RuleEditor } from '@/components/RuleEditor';
-import { toPlan } from '@/server/merge/rules';
+import { parseCategories } from '@/server/merge/rules';
 import { latestEdits } from '@/server/merge/edits';
 import { currentWeek, toKstIso } from '@/lib/week';
-
-/**
- * 타 부서 설정은 열람만 — 실수로 내 부서를 고치는 사고를 구조적으로 막는다 (AU-16).
- * 2026-10-08 — 「변경은 해당 부서 담당자가 합니다」 같은 설명을 걷고 상태만 (사용자: 주석 걷기)
- */
-function ReadOnlyNotice({ detail }: { detail?: string }) {
-  return (
-    <p className="callout callout-warn">
-      읽기 전용
-      {detail && <span className="ml-1 text-muted">· {detail}</span>}
-    </p>
-  );
-}
 
 export const dynamic = 'force-dynamic';
 
@@ -34,35 +24,29 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
   if (ps.scope.user.mustChangePassword) redirect('/password?first=1'); // AU-22
   const { division: slugParam } = await params;
   const view = await getDivisionView(slugParam);
-  if (!view.canManage) notFound();
+  if (!view.canManage) notFound(); // AU-T89 — 부서원은 규칙을 읽지 못한다
   const { division, isOwn } = view;
-  // HM-48 — 엔진과 **같은 해석**으로 보여준다. DB에 모르는 값이 있으면 엔진이 기본값으로 돌므로 화면도 그렇게
-  const plan = toPlan(division);
 
-  const [template, users, standard, thisWeek] = await Promise.all([
+  const [template, standard, thisWeek] = await Promise.all([
     prisma.template.findFirst({ where: { divisionId: division.id, isActive: true } }),
-    prisma.user.findMany({
-      where: { divisionId: division.id, isActive: true },
-      orderBy: [{ sortOrder: 'asc' }, { name: 'asc' }],
-    }),
     prisma.standardTemplate.findFirst({ where: { isActive: true } }),
     prisma.weekSlot.findUnique({ where: { isoKey: currentWeek(new Date()).isoKey } }),
   ]);
-  // CP-108 — 규칙을 바꿔도 이미 만든 이번 주 병합본은 그대로다. 저장 뒤 그걸 말하려면 있는지·고쳤는지 알아야 한다
+  // CP-108 — 분류를 바꿔도 이미 만든 이번 주 병합본은 그대로다. 저장 뒤 그걸 말하려면 있는지·고쳤는지 알아야 한다
   const merged = isOwn && thisWeek ? await latestEdits(division.id, thisWeek.id) : null;
+  // 엔진과 **같은 해석**으로 보여준다 (HM-18 — 구분자는 아무거나)
+  const categories = parseCategories(division.mergeCategories);
 
   return (
     <main className="pt-8">
-      {/* 「← 수합 관리로」는 뺐다 — 상단 메뉴의 [수합 관리]와 같은 곳이다 */}
       <h1 className="page-title">부서 설정</h1>
 
       <div className="mt-6 space-y-4 lg:space-y-6">
-        {/* ② 부서 양식 (PG-28~30) */}
+        {/* 부서 양식 (PG-28·29) — 웹 작성 제출물이 이 양식으로 만들어진다 (WA-33) */}
         <section className="card" aria-labelledby="template">
           <h2 id="template" className="card-title">
             부서 양식
           </h2>
-          {/* WA-33 — 업로드가 닫혀도 이 양식은 남는다. 웹 작성 제출물이 이 양식으로 만들어진다 */}
           <div className="mt-4">
             {isOwn ? (
               <TemplateManager
@@ -75,62 +59,36 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
                 }
               />
             ) : (
-              <ReadOnlyNotice detail={template ? `현재 v${template.version} 등록됨` : '등록된 양식 없음'} />
+              /* 타 부서 설정은 읽기만 — 실수로 내 부서를 고치는 사고를 구조적으로 막는다 (AU-17d) */
+              <p className="callout callout-warn">
+                읽기 전용<span className="ml-1 text-muted">· {template ? `현재 v${template.version} 등록됨` : '등록된 양식 없음'}</span>
+              </p>
             )}
           </div>
         </section>
 
-        {/* ① 작성 안내 + 병합 규칙 (PG-25~27) — RuleEditor가 카드 둘(작성 안내 · 병합 설정)을 그린다 */}
+        {/* 분류 순서 (CP-118) */}
         {isOwn ? (
-          <RuleEditor
-            initialCategories={division.mergeCategories}
-            initialDedupe={division.mergeDedupe}
-            initialDropNotes={division.mergeDropNotes}
-            initialSort={plan.sort}
-            initialUndated={plan.undated}
-            initialRule={division.mergeRuleText}
-            initialGuide={division.guideText}
-            initialEmptyWords={division.emptyWords}
-            initialEmphasisWords={division.emphasisWords}
-            thisWeekMerged={merged ? { edited: !!merged.edits } : null}
-          />
+          <RuleEditor initialCategories={division.mergeCategories} thisWeekMerged={merged ? { edited: !!merged.edits } : null} />
         ) : (
           <section className="card" aria-labelledby="merge-settings">
             <h2 id="merge-settings" className="card-title">
-              작성 안내 · 병합 설정
+              분류 순서
             </h2>
-            <div className="mt-4 space-y-3">
-              <ReadOnlyNotice />
-              <pre className="callout callout-muted max-h-60 overflow-auto text-xs leading-5 whitespace-pre-wrap">
-                {[
-                  division.mergeCategories && `분류 순서: ${division.mergeCategories}`,
-                  `중복 묶기: ${division.mergeDedupe ? '켬' : '끔'}`,
-                  `정렬: ${plan.sort === 'date' ? `일자 순 (날짜 없는 줄 ${plan.undated === 'first' ? '앞' : '뒤'})` : '제출자 순'}`,
-                  division.mergeRuleText && `지침: ${division.mergeRuleText}`,
-                  division.guideText,
-                ]
-                  .filter(Boolean)
-                  .join('\n') || '(비어 있음)'}
-              </pre>
-            </div>
+            {categories.length > 0 ? (
+              <div className="mt-4 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+                {categories.map((c) => (
+                  <span key={c} className="chip chip-muted text-xs">
+                    {c}
+                  </span>
+                ))}
+                <span className="chip text-xs text-muted ring-1 ring-hairline ring-inset">기타</span>
+              </div>
+            ) : (
+              <p className="mt-3 text-sm text-muted">없음</p>
+            )}
           </section>
         )}
-
-        {/* ③ 제출 대상 — 읽기 전용 (PG-31/32, DM-04) */}
-        <section className="card" aria-labelledby="roster">
-          <h2 id="roster" className="card-title">
-            제출 대상
-          </h2>
-          <p className="card-desc">취소선 = 집계 제외</p>
-          <ul className="mt-4 grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm sm:grid-cols-3">
-            {users.map((u) => (
-              <li key={u.id} className={u.onRoster ? 'text-ink' : 'text-muted-soft line-through'}>
-                {u.name}
-                {u.divisionRole === 'lead' && <span className="chip chip-muted ml-1.5 px-2 text-xs">담당</span>}
-              </li>
-            ))}
-          </ul>
-        </section>
       </div>
     </main>
   );

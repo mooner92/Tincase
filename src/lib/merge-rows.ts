@@ -135,6 +135,14 @@ export function mergeRowCells<T extends RowLike>(members: readonly T[], best: T)
 }
 
 /**
+ * S8 · CP-117 — 수합 관리 병합본 카드의 「내용 다른 묶음 n건」. 글자까지 같게 적은 묶음은 잃은 것이 없어 세지 않는다.
+ * 옛 실행에는 `identical`이 없다 — 그때는 원문을 되짚는다. 전부 「다름」으로 몰면 없던 확인거리를 만들어 보이는 셈이다.
+ */
+export function differingGroups(groups: readonly { identical?: boolean; sources: readonly { content: string }[] }[]): number {
+  return groups.filter((g) => !(g.identical ?? new Set(g.sources.map((s) => s.content.trim())).size === 1)).length;
+}
+
+/**
  * HM-36 — 남긴 줄이 버린 줄의 **말을 다 담고 있는가.**
  *
  * 화면이 「빠짐」이라고 쓰려면 정말 빠졌어야 한다. 「…(유튜브 1건)」은

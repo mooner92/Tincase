@@ -87,6 +87,4 @@ export function boardTitle(
   return `${period} 연구운영회의 ${doc}(${divisionName})`;
 }
 
-/** 전체 묶음 */
-export const zipName = (year: number, weekLabel: string, divisionName: string) =>
-  docName({ year, weekLabel, divisionName, suffix: '제출물', ext: 'zip' });
+// (전체 묶음 `zipName`은 zip 받기와 함께 폐지 2026-10-08 — R1, PG-73)
