@@ -407,17 +407,22 @@ environment:
   MERGE_MODEL: hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M
   MERGE_MODEL_URL: http://host.docker.internal:11437
   MERGE_MODEL_TIMEOUT_MS: "60000"   # 호출 한 번의 제한 — 모델 문을 통과한 뒤부터 잰다 (HM-52·57)
+  MERGE_MODEL_KEEP_ALIVE: "-1"      # 모델을 내리지 않는다 — 상주 (HM-53, 2026-10-08)
 ```
 
 함께 읽는 값(compose에 없으면 기본값): `MERGE_JOB_BUDGET_MS`(병합 한 번의 예산, 기본 240000 — 이것 + 6분이 지난
 `running`은 멈춘 실행으로 회수, 기동 때는 남은 `running`을 모두 회수, HM-55) · `MERGE_MODEL_RETRIES`(시간 초과·연결 실패·5xx 때 다시 부르는 횟수, 기본 1).
-스케줄러가 켜진 서버는 마감 10분 전에 모델을 한 번 데운다(HM-53) — 로그 `[merge] 모델 데우기`.
+**모델은 상주한다** (HM-53, 2026-10-08 「독점하듯이 사용해도 돼」 — 이 ollama는 Tincase만 쓴다). 모든 호출이 `keep_alive`에
+`MERGE_MODEL_KEEP_ALIVE`(기본 `"-1"` — 내리지 않음. 숫자는 초로 보낸다, `"30m"` 같은 기간도 된다)를 붙이고, 스케줄러가 켜진 서버는
+**기동하자마자** 한 번, 그리고 마감 10분 전에 한 번 더 데운다 — 로그 `[merge] 모델 데우기 — 기동 …`·`— 기준 …`.
+§9.4의 `/api/ps`에서 `expires_at`이 아주 먼 미래면 상주 중이다. 이 ollama를 다른 일과 나누게 되면 compose에서 그 값을 `"30m"` 같은 기간으로 바꾼다.
 
 ### 9.4 확인
 
 ```bash
 sudo docker exec repman node -e "fetch(process.env.MERGE_MODEL_URL+'/api/tags').then(r=>r.json()).then(d=>console.log(d.models.length))"
-sudo docker logs repman 2>&1 | grep '\[merge\]'      # 스케줄러 등록 확인
+sudo docker logs repman 2>&1 | grep '\[merge\]'      # 스케줄러 등록 · 「모델 데우기 — 기동」 확인
+curl -s 127.0.0.1:11437/api/ps                         # 모델이 올라와 있고 expires_at이 아주 먼 미래(상주)
 ```
 
 ### 9.5 되돌리기

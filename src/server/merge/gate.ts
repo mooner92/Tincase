@@ -1,6 +1,6 @@
 // HM-52 — 모델 문: 같은 모델 서버(`MERGE_MODEL_URL`)에는 **한 번에 한 호출만** 보낸다.
 // HM-57 — 호출이 일시적으로 실패하면(시간 초과·연결 실패·5xx) 한 번 더 부른다.
-// HM-53 — 마감 시간대의 호출은 모델을 30분 붙잡아 두게 한다(keep_alive).
+// HM-53 — 모든 호출이 모델을 **내리지 않게** 한다(keep_alive, 기본 -1 — 상주).
 //
 // ── 왜 문이 필요한가 ───────────────────────────────────────
 // 모델 서버는 한 번에 하나만 처리한다(NUM_PARALLEL=1). 그런데 스케줄러 자동 병합과 [지금 병합]은 서로를 모르고
@@ -144,25 +144,43 @@ export function modelGateState(url: string = env.MERGE_MODEL_URL, now: number = 
   };
 }
 
-// ── 마감 시간대 keep_alive (HM-53) ─────────────────────────
+// ── keep_alive — 상주 (HM-53, 2026-10-08 개정) ─────────────
+//
+// 처음에는 마감 시간대(기준 −10분 ~ +60분)에만 30분 붙잡았다 — 같은 GPU를 쓰는 다른 사람을 생각해서였다.
+// 2026-10-08 사용자 결정(「독점하듯이 사용해도 돼」): data04의 tincase-ollama(11437)는 이 앱 말고 쓰는 곳이 없다.
+// 그래서 **모든 호출이 모델을 내리지 않게** 한다. 마감 시간대만 붙잡으면 [지금 병합](마감 전 미리 보기 · 마감 뒤 다시 병합)이
+// 5분 쉰 모델을 올리는 25~46초를 떠안는다 — 첫 표가 그 시간 때문에 60초 제한에 걸려 모델 없이 확정된다(2026-10-07에 두 번).
+// 테스트·시연 서버도 같은 모델 서버의 **같은 모델**을 쓰므로(compose) 그쪽 호출이 붙잡아도 운영과 다투지 않는다.
+// 값은 `MERGE_MODEL_KEEP_ALIVE`로 바꿀 수 있다 — 모델 서버를 나눠 쓰게 되면 그 서버에서 "30m" 같은 값으로 되돌린다.
 
-/** 마감 시간대 호출이 모델을 붙잡아 두는 시간. 기본(5분)이면 부서 사이 틈에 모델이 내려가 다음 호출이 올리는 시간을 떠안는다 */
-export const KEEP_ALIVE = '30m';
-/** 마감 시간대 = 병합 기준 시각 10분 전(데우기)부터 */
-export const KEEP_ALIVE_BEFORE_MS = 10 * 60_000;
-/** … 대외 마감(기준 +60분, HM-50)까지. 그 뒤의 병합은 드물고, 모델을 30분 더 붙잡을 이유가 없다 */
-export const KEEP_ALIVE_AFTER_MS = 60 * 60_000;
+/** ollama `keep_alive` — 숫자는 초(음수면 내리지 않는다), 문자열은 Go 기간("30m" · "1h30m" · "-1m") */
+export type KeepAlive = number | string;
+/** HM-53 — `MERGE_MODEL_KEEP_ALIVE`의 기본값. 내리지 않는다 */
+export const DEFAULT_KEEP_ALIVE = '-1';
 
-let deadlineGates: number[] = [];
+const GO_DURATION = /^-?(?:(?:\d+(?:\.\d*)?|\.\d+)(?:ns|us|µs|μs|ms|s|m|h))+$/;
+const SECONDS = /^-?\d+(?:\.\d+)?$/;
+const keepAliveWarned = new Set<string>();
 
-/** 스케줄러가 매분 알려 준다 (warmup.ts). 스케줄러가 꺼진 서버(MERGE_SCHEDULER=off)는 비어 있다 — 모델을 붙잡지 않는다 */
-export function setDeadlineGates(gateTimes: readonly number[]): void {
-  deadlineGates = [...gateTimes];
-}
-
-/** 지금 보내는 호출에 붙일 keep_alive. 마감 시간대가 아니면 null — 서버 기본값을 따른다 */
-export function keepAliveFor(now: number = Date.now()): string | null {
-  return deadlineGates.some((g) => now >= g - KEEP_ALIVE_BEFORE_MS && now <= g + KEEP_ALIVE_AFTER_MS) ? KEEP_ALIVE : null;
+/**
+ * HM-53 — 호출마다 붙일 keep_alive (`MERGE_MODEL_KEEP_ALIVE`, 기본 "-1").
+ *
+ * **숫자로 된 값은 숫자로 보낸다.** ollama는 본문의 문자열을 Go 기간으로만 읽어 `"-1"`(단위 없음)을 거절한다(400) —
+ * 서버 쪽 환경변수 `OLLAMA_KEEP_ALIVE`는 초로 읽어 주지만 요청 본문은 아니다. 그래서 "-1" → -1, "3600" → 3600(초).
+ * 기간 문자열("30m" · "24h" · "-1m")은 그대로. 읽을 수 없는 값은 기본값으로 돌고 한 번 경고한다(budget.ts와 같은 방식 —
+ * 품질 조절이지 안전장치가 아니라서 병합을 멈출 이유가 없다).
+ * 환경변수를 env.ts가 아니라 여기서 읽는 이유도 budget.ts와 같다.
+ */
+export function modelKeepAlive(raw: string | undefined = process.env.MERGE_MODEL_KEEP_ALIVE): KeepAlive {
+  const v = (raw ?? '').trim();
+  const pick = (x: string): KeepAlive => (SECONDS.test(x) ? Number(x) : x);
+  if (!v) return pick(DEFAULT_KEEP_ALIVE);
+  if (SECONDS.test(v) || GO_DURATION.test(v)) return pick(v);
+  if (!keepAliveWarned.has(v)) {
+    keepAliveWarned.add(v);
+    console.warn(`[merge] MERGE_MODEL_KEEP_ALIVE="${v}"를 읽을 수 없어 기본값 ${DEFAULT_KEEP_ALIVE}(내리지 않음)으로 돈다`);
+  }
+  return pick(DEFAULT_KEEP_ALIVE);
 }
 
 // ── 재시도 판정 (HM-57) ───────────────────────────────────
@@ -197,9 +215,7 @@ export interface ModelRequest {
   budget?: MergeBudget | null;
   /** 다시 부르는 횟수. 없으면 `MERGE_MODEL_RETRIES` */
   retries?: number;
-  /** 주면 그대로 붙인다(데우기). 안 주면 마감 시간대인지 보고 정한다 */
-  keepAlive?: string | null;
-  /** 데우기면 참 — 문 상태에 따로 남는다 */
+  /** 데우기면 참 — 문 상태에 따로 남는다. keep_alive는 데우기든 병합이든 같다(`modelKeepAlive`, HM-53) */
   warmup?: boolean;
 }
 
@@ -255,7 +271,7 @@ async function attemptOnce(gate: Gate, req: ModelRequest, timeoutMs: number, wai
   const t0 = Date.now();
   let out: Attempt = { ok: false, kind: 'connection', status: null, reason: '모델 호출 연결 실패' };
   try {
-    out = await send(req, timeoutMs, t0);
+    out = await send(req, timeoutMs);
     return out;
   } finally {
     const rec: CallRecord = {
@@ -272,7 +288,7 @@ async function attemptOnce(gate: Gate, req: ModelRequest, timeoutMs: number, wai
   }
 }
 
-async function send(req: ModelRequest, timeoutMs: number, t0: number): Promise<Attempt> {
+async function send(req: ModelRequest, timeoutMs: number): Promise<Attempt> {
   /*
    * 제한 시간은 **여기서**, 문을 통과한 뒤에 만든다 (HM-52). 예전에는 요청을 보내기 전, 즉 줄에 서기 전에 만들었다.
    * AbortSignal.timeout과 같은 일이지만 setTimeout으로 만든다 — 끝나면 치울 수 있고, 시험이 가짜 시계로 잴 수 있다.
@@ -280,7 +296,6 @@ async function send(req: ModelRequest, timeoutMs: number, t0: number): Promise<A
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(new DOMException('모델 호출 시간 초과', 'TimeoutError')), timeoutMs);
   const signal = req.budget ? AbortSignal.any([ctrl.signal, req.budget.signal]) : ctrl.signal;
-  const keepAlive = req.keepAlive !== undefined ? req.keepAlive : keepAliveFor(t0);
 
   let out: Attempt;
   let reading = false;
@@ -293,7 +308,7 @@ async function send(req: ModelRequest, timeoutMs: number, t0: number): Promise<A
         model: env.MERGE_MODEL,
         stream: false,
         ...req.body,
-        ...(keepAlive ? { keep_alive: keepAlive } : {}),
+        keep_alive: modelKeepAlive(),
       }),
     });
     if (!res.ok) {

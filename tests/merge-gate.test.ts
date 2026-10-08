@@ -1,4 +1,4 @@
-// HM-52 · HM-57 · HM-53 — 모델 문 · 호출 재시도 · 실행 예산 · 마감 시간대 keep_alive.
+// HM-52 · HM-57 · HM-53 — 모델 문 · 호출 재시도 · 실행 예산 · keep_alive(상주).
 //
 // 모델 서버는 흉내 낸다: 받은 요청을 적고, 정해 둔 시간만큼 걸린 뒤 답한다. 시계는 가짜다 — 「50초 걸리는 호출」을
 // 50초 기다리지 않고 잰다. 여기서 보려는 것은 시간의 순서다: 서버에 동시에 몇 개가 들어갔나, 제한 시간은 언제부터 흘렀나.
@@ -100,7 +100,7 @@ beforeEach(() => {
   maxInFlight = 0;
   delete process.env.MERGE_MODEL_RETRIES;
   delete process.env.MERGE_JOB_BUDGET_MS;
-  gate.setDeadlineGates([]);
+  delete process.env.MERGE_MODEL_KEEP_ALIVE;
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
 afterEach(() => {
@@ -120,7 +120,7 @@ describe('HM-52 모델 문 — 같은 모델 서버에는 한 번에 한 호출�
       model.groupDuplicates(rows, '', { label: '가실 · 실적 중복 묶기' }), // 스케줄러
       model.groupDuplicates(rows, '', { label: '나실 · 실적 중복 묶기' }), // [지금 병합]
       classify.classifyRows(rows, ['홍보'], '', { label: '가실 · 분류' }),
-      gate.callModel({ label: '데우기', warmup: true, retries: 0, keepAlive: gate.KEEP_ALIVE, body: { prompt: '' } }),
+      gate.callModel({ label: '데우기', warmup: true, retries: 0, body: { prompt: '' } }),
     ]);
     await vi.advanceTimersByTimeAsync(40 * S);
     const [a, b, c, w] = await all;
@@ -326,25 +326,55 @@ describe('HM-57 실행 예산 — 기다림까지 포함해 실행의 끝을 정
   });
 });
 
-describe('HM-53 마감 시간대 keep_alive', () => {
-  it('[HM-T154] 기준 시각 10분 전 ~ 60분 뒤의 병합 호출은 모델을 30분 붙잡는다 · 그 밖은 서버 기본값', async () => {
+describe('HM-53 keep_alive — 상주 (2026-10-08 개정)', () => {
+  it('[HM-T154] ★ 모든 호출(병합 · 분류 · 데우기)이 시각과 상관없이 keep_alive -1(숫자)을 붙인다 — 기준 시각을 몰라도(스케줄러 꺼짐)', async () => {
     const g = new Date('2026-10-15T14:00:00+09:00').getTime();
-    gate.setDeadlineGates([g]);
-    serve(() => ({ ms: 1 * S }));
-    const at = async (min: number) => {
+    serve((_n, body) => ({ ms: 1 * S, response: okFor(body) }));
+    const at = async (min: number, call: () => Promise<unknown>) => {
       vi.setSystemTime(g + min * 60 * S);
-      const p = model.groupDuplicates(rows, '', { label: `${min}분` });
+      const p = call();
       await vi.advanceTimersByTimeAsync(2 * S);
       await p;
       return seen[seen.length - 1].body.keep_alive;
     };
-    expect(await at(-11)).toBeUndefined();
-    expect(await at(-10)).toBe('30m');
-    expect(await at(1)).toBe('30m');
-    expect(await at(59)).toBe('30m');
-    expect(await at(61)).toBeUndefined();
-    // 스케줄러가 꺼진 서버는 기준 시각을 알려 주지 않는다 — 붙잡지 않는다
-    gate.setDeadlineGates([]);
-    expect(await at(1)).toBeUndefined();
+    // 예전에는 기준 −10분 ~ +60분만 "30m", 그 밖은 붙이지 않았다(서버 기본 5분에 내려가 다음 호출이 올리는 시간을 떠안았다)
+    for (const min of [-24 * 60, -11, -10, 1, 59, 61, 3 * 24 * 60]) {
+      expect(await at(min, () => model.groupDuplicates(rows, '', { label: `${min}분` }))).toBe(-1);
+    }
+    expect(await at(5, () => classify.classifyRows(rows, ['홍보'], '', { label: '분류' }))).toBe(-1);
+    expect(await at(-10, () => gate.callModel({ label: '데우기', warmup: true, retries: 0, body: { prompt: '' } }))).toBe(-1);
+  });
+
+  it('[HM-T154] MERGE_MODEL_KEEP_ALIVE — 숫자는 숫자(초)로, 기간은 문자열 그대로. ollama는 본문의 "-1"(단위 없는 문자열)을 400으로 거절한다', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(gate.DEFAULT_KEEP_ALIVE).toBe('-1');
+    expect(gate.modelKeepAlive(undefined)).toBe(-1);
+    expect(gate.modelKeepAlive('')).toBe(-1);
+    expect(gate.modelKeepAlive(' -1 ')).toBe(-1);
+    expect(gate.modelKeepAlive('3600')).toBe(3600);
+    expect(gate.modelKeepAlive('0')).toBe(0); // 바로 내린다 — 고른 사람의 뜻대로
+    expect(gate.modelKeepAlive('30m')).toBe('30m');
+    expect(gate.modelKeepAlive('1h30m')).toBe('1h30m');
+    expect(gate.modelKeepAlive('-1m')).toBe('-1m');
+    expect(warn).not.toHaveBeenCalled();
+    // 읽을 수 없으면 기본값(-1)으로 돌고 한 번만 경고한다
+    expect(gate.modelKeepAlive('forever')).toBe(-1);
+    expect(gate.modelKeepAlive('forever')).toBe(-1);
+    expect(gate.modelKeepAlive('30 m')).toBe(-1);
+    expect(warn.mock.calls.filter((c) => String(c[0]).includes('MERGE_MODEL_KEEP_ALIVE="forever"'))).toHaveLength(1);
+
+    // 호출 본문에 그대로 실린다
+    serve(() => ({ ms: 1 * S }));
+    process.env.MERGE_MODEL_KEEP_ALIVE = '30m';
+    let p = model.groupDuplicates(rows, '', { label: '30분' });
+    await vi.advanceTimersByTimeAsync(2 * S);
+    await p;
+    expect(seen[seen.length - 1].body.keep_alive).toBe('30m');
+    process.env.MERGE_MODEL_KEEP_ALIVE = '-1';
+    p = model.groupDuplicates(rows, '', { label: '상주' });
+    await vi.advanceTimersByTimeAsync(2 * S);
+    await p;
+    expect(seen[seen.length - 1].body.keep_alive).toBe(-1);
+    expect(typeof seen[seen.length - 1].body.keep_alive).toBe('number');
   });
 });

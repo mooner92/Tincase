@@ -45,7 +45,7 @@ export async function register() {
   }
 
   const { runDueMerges } = await import('./server/merge/run');
-  const { warmModelIfDue } = await import('./server/merge/warmup');
+  const { warmModelAtBoot, warmModelIfDue } = await import('./server/merge/warmup');
   const { mergePauseState } = await import('./server/merge/pause');
   const { runDueReminders } = await import('./server/notify/deadline-reminder');
   const { runDueMergeNotices } = await import('./server/notify/merge-notices');
@@ -81,6 +81,13 @@ export async function register() {
     if (st.paused && st.until) console.log(`[merge] 자동 병합 일시정지 — ${st.until.toISOString()}까지 (그 뒤 저절로 재개)`);
     else if (st.paused) console.error(`[merge] ${st.reason} — 자동 병합을 멈춘 채로 둔다`);
   }
+
+  /*
+   * HM-53 (2026-10-08 — 상주) — 기동하자마자 모델을 올려 둔다. 마감까지 기다리면 그 사이의 [지금 병합]이 모델을 올리는
+   * 25~46초를 떠안는다. 모든 호출이 keep_alive -1을 붙이므로 한 번 올리면 내려가지 않는다. 기다리지 않는다 — 올리는 데
+   * 수십 초가 걸리고, 그동안 기동은 계속 간다. 일시정지(HM-44) 중이면 데우지 않는다(warmup.ts).
+   */
+  void warmModelAtBoot().catch((e) => console.error('[merge] 기동 데우기 오류', e));
 
   // 겹쳐 도는 걸 막는다. 한 번 실행이 5분을 넘길 수 있다 (부서 30개 × 모델 호출)
   let running = false;
@@ -157,7 +164,7 @@ export async function register() {
         return; // finally에서 running이 풀린다
       }
 
-      // HM-53 — 마감 10분 전이면 모델을 올려 둔다. 기다리지 않는다 — 올리는 데 수십 초가 걸리고, 그동안 이 주기의 일은 계속 간다
+      // HM-53 — 마감 10분 전이면 모델을 다시 올린다(모델 서버가 재시작했거나 밀려났으면). 기다리지 않는다 — 올리는 데 수십 초가 걸리고, 그동안 이 주기의 일은 계속 간다
       void warmModelIfDue(new Date()).catch((e) => console.error('[merge] 모델 데우기 오류', e));
 
       /*

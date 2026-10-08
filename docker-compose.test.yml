@@ -52,6 +52,9 @@ services:
       # HM-52 · HM-57 — 모델 호출 한 번의 제한. 모델 문을 통과한 **뒤부터** 잰다(줄에서 기다린 시간은 빼고).
       # 코드 기본값과 같지만 적어 둔다 — 기본값에 기대면 「지금 몇 초인가」를 코드에서 찾아야 한다
       MERGE_MODEL_TIMEOUT_MS: "60000"
+      # HM-53 — 운영과 같은 모델 서버의 같은 모델이라 상주(-1)를 함께 쓴다. 스케줄러가 꺼져 있어 기동 때 데우지는 않는다 —
+      # 첫 [지금 병합]이 올리고, 올린 모델은 내려가지 않는다
+      MERGE_MODEL_KEEP_ALIVE: "-1"
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

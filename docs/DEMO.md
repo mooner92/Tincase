@@ -221,8 +221,9 @@ sudo bash scripts/demo-snapshot.sh status       # 「시연 데이터」 — 아
 curl -s 127.0.0.1:11112/api/health
 
 # 병합 보조 모델 데우기 — 식은 모델은 첫 병합이 수십 초 걸린다(시간 초과 60초면 모델 없이 끝나지만 강당에서는 길다)
-# num_ctx는 앱과 같게(바꾸면 다시 올린다). 앱의 요청이 오면 보관 시간은 기본(5분)으로 돌아가니 회의 직전에 한 번 더
-curl -s 127.0.0.1:11437/api/generate -d '{"model":"hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M","prompt":"ok","stream":false,"keep_alive":"4h","options":{"num_ctx":8192,"num_predict":1}}' >/dev/null
+# num_ctx는 앱과 같게(바꾸면 다시 올린다). 2026-10-08부터 앱의 요청도 keep_alive -1(상주, HM-53)을 붙이므로 한 번 올리면 내려가지 않는다 —
+# 운영 서버가 기동 때 이미 올려 두었으면 이 줄은 바로 끝난다
+curl -s 127.0.0.1:11437/api/generate -d '{"model":"hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M","prompt":"ok","stream":false,"keep_alive":-1,"options":{"num_ctx":8192,"num_predict":1}}' >/dev/null
 curl -s 127.0.0.1:11437/api/ps                  # 모델이 올라와 있다
 sudo docker exec repman-test node -e "fetch(process.env.MERGE_MODEL_URL+'/api/ps').then(r=>r.json()).then(d=>console.log(d.models.map(m=>m.name)))"
 
@@ -270,7 +271,7 @@ sudo bash scripts/demo-snapshot.sh save d0-0700
 cd ~/repman-c
 TINCASE_TEST_MODE=test bash scripts/deploy.sh test --no-build      # test를 적어 — 평소 데이터로
 sudo bash scripts/demo-snapshot.sh status       # 「테스트 데이터 — /data/worklog-test」
-curl -s 127.0.0.1:11437/api/generate -d '{"model":"hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M","keep_alive":0}' >/dev/null   # 모델 내리기
+# 모델은 내리지 않는다 — 운영과 같은 모델이고 상주로 쓴다(HM-53). 내리면 다음 운영 병합이 올리는 시간을 떠안는다
 sudo rm -rf /data/worklog-demo                  # 가짜 데이터뿐이다 — 다시 쓸 일이 없으면
 rm -f docs/private/demo-accounts.md
 ```

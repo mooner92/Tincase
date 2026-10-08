@@ -363,10 +363,10 @@ describe('HM-55 멈춘 실행 회수', () => {
 });
 
 describe('HM-53 마감 전 데우기', () => {
-  it('[HM-T156] ★ 가장 이른 병합 기준 시각 10분 전에 한 번 — 빈 프롬프트 · keep_alive 30m · 같은 기준 시각에는 다시 안 보낸다', async () => {
+  it('[HM-T156] ★ 가장 이른 병합 기준 시각 10분 전에 한 번 — 빈 프롬프트 · keep_alive -1(상주) · 같은 기준 시각에는 다시 안 보낸다', async () => {
     process.env.MERGE_SCHEDULER = 'on';
     const { warmModelIfDue, resetWarmupForTest } = await import('@/server/merge/warmup');
-    const { keepAliveFor, modelGateState } = await import('@/server/merge/gate');
+    const { modelGateState } = await import('@/server/merge/gate');
     resetWarmupForTest();
     await mkDivision('데움실');
 
@@ -375,14 +375,11 @@ describe('HM-53 마감 전 데우기', () => {
 
     const w = await warmModelIfDue(at(-10));
     expect(w).toMatchObject({ ok: true, gate: D });
-    expect(modelCalls).toEqual([{ model: 'test-model', stream: false, prompt: '', keep_alive: '30m' }]);
+    expect(modelCalls).toEqual([{ model: 'test-model', stream: false, prompt: '', keep_alive: -1 }]);
     expect(modelGateState().lastWarmup).toMatchObject({ ok: true });
 
     for (const m of [-9, -1, 0, 0.5]) expect(await warmModelIfDue(at(m))).toBeNull();
     expect(modelCalls).toHaveLength(1);
-    // 마감 시간대 — 병합 호출도 모델을 붙잡는다
-    expect(keepAliveFor(at(5).getTime())).toBe('30m');
-    expect(keepAliveFor(at(-20).getTime())).toBeNull();
   });
 
   it('[HM-T156] 마감 열기가 닫히는 시각도 기준 시각이다 (DM-20) — 그 시각마다 한 번', async () => {
@@ -418,5 +415,51 @@ describe('HM-53 마감 전 데우기', () => {
     vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('fetch failed'))));
     const r = await warmModelIfDue(at(-10));
     expect(r).toMatchObject({ ok: false, reason: '모델 호출 연결 실패' }); // 데우기는 다시 부르지 않는다
+  });
+
+  it('[HM-T161] ★ (2026-10-08 상주) 기동할 때 한 번 데운다 — 마감을 기다리지 않는다 · 스케줄러가 꺼진 서버 · 일시정지면 안 데운다', async () => {
+    const { warmModelAtBoot } = await import('@/server/merge/warmup');
+    const { modelGateState } = await import('@/server/merge/gate');
+    vi.setSystemTime(at(-3 * 24 * 60)); // 월요일 — 어느 기준 시각에서도 먼 때
+
+    process.env.MERGE_SCHEDULER = 'off';
+    expect(await warmModelAtBoot()).toBeNull();
+    process.env.MERGE_SCHEDULER = 'on';
+    process.env.MERGE_PAUSE_UNTIL = at(60).toISOString(); // HM-44
+    expect(await warmModelAtBoot()).toBeNull();
+    expect(modelCalls).toHaveLength(0);
+
+    delete process.env.MERGE_PAUSE_UNTIL;
+    expect(await warmModelAtBoot()).toMatchObject({ ok: true, gate: null });
+    expect(modelCalls).toEqual([{ model: 'test-model', stream: false, prompt: '', keep_alive: -1 }]);
+    expect(modelGateState().lastWarmup).toMatchObject({ ok: true });
+    expect(modelGateState().lastCall).toMatchObject({ label: '데우기(기동)' });
+
+    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('fetch failed'))));
+    expect(await warmModelAtBoot()).toMatchObject({ ok: false, reason: '모델 호출 연결 실패' }); // 던지지 않는다 · 다시 부르지 않는다
+  });
+
+  it('[HM-T161] 스케줄러가 켜진 서버는 register()가 기동하자마자 데운다 — 첫 주기(20초 뒤)를 기다리지 않는다', async () => {
+    await mkDivision('기동데움실');
+    vi.setSystemTime(at(-3 * 24 * 60));
+    process.env.MERGE_SCHEDULER = 'on';
+    const env = process.env as Record<string, string | undefined>;
+    const before = env.NEXT_RUNTIME;
+    env.NEXT_RUNTIME = 'nodejs';
+    // 주기는 걸지 않는다 — 이 시험이 보는 것은 기동 때의 데우기 하나다
+    const realSetTimeout = globalThis.setTimeout;
+    const firstTick = vi.fn();
+    vi.spyOn(globalThis, 'setInterval').mockImplementation((() => ({ unref() {} })) as never);
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
+      ms === 20_000 ? (firstTick(), { unref() {} }) : realSetTimeout(fn, ms, ...rest)) as never);
+    try {
+      const { register } = await import('@/instrumentation');
+      await register();
+    } finally {
+      env.NEXT_RUNTIME = before;
+    }
+    expect(firstTick).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(modelCalls).toHaveLength(1));
+    expect(modelCalls[0]).toEqual({ model: 'test-model', stream: false, prompt: '', keep_alive: -1 });
   });
 });
