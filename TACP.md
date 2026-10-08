@@ -4,7 +4,7 @@
 > 코드·스펙·UI가 이 문서와 어긋나면 **문서가 아니라 코드가 틀린 것**이다.
 > 규칙을 바꾸려면 §10 절차를 따른다. 코드를 먼저 고치는 것은 위반이다.
 
-버전 1.9 · 2026-10-08 · 대상 코드 v1.41.0 (feat/org-rollup) — v1.6.3·v1.6.4·v1.7~v1.7.2·v1.8을 한 판으로 합쳤다
+버전 1.10 · 2026-10-08 · 대상 코드 v1.41.0 (feat/org-rollup) — v1.6.3·v1.6.4·v1.7~v1.7.2·v1.8을 한 판으로 합쳤다 · v1.10 노트(새 권한 없음)
 관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md) · [ADR-0008](docs/adr/0008-head-principal.md) · [ADR-0012](docs/adr/0012-upward-submission.md) · [ADR-0015](docs/adr/0015-approval-is-handoff.md) · [ADR-0016](docs/adr/0016-division-status-visibility.md) · [ADR-0017](docs/adr/0017-foreign-read-chip.md) · [ADR-0018](docs/adr/0018-manage-settings-trim.md)
 
 변경 이력:
@@ -61,6 +61,14 @@
   양식 픽스처가 있는 체크아웃에서 RU-T23~76이 처음 자동 진행과 함께 돈다 — RU-T71은 본부장이 있는 본부의 자기 몫(rollupSelf)을
   부서장 없는 단위의 맞추기로 올리려 해 실패했다. 그 본부의 head가 곧 그 몫의 부서장이므로 **그 head의 병합본 승인**으로 올리고,
   맞추기는 새 사본을 만들지 않음을 함께 본다(넓어진 칸 없음 — TACP-23 표 그대로). ④ TACP-21 본문의 「[제출]로 보낸」을 v1.7의 뜻으로(문구만)
+
+- v1.10 — **노트 (규칙 변경 없음 — 새 권한 없음, 2026-10-08)**: 화면 둘러보기(PG-84) · 기록 `GuideTourSeen`(DM-25) · `POST /api/me/tour`(API-60).
+  §10 절차의 1·3·4만 해당한다(불변식·게이트 칸이 바뀌지 않는다). ① **보이는 것이 늘지 않는다** — 둘러보기는 그 사람에게 이미 그려진 화면(TACP-9가 거른 DOM)의
+  앵커만 가리키고, 없으면 건너뛴다. 새 데이터를 읽거나 숨은 단추를 그리지 않는다 ② **판정은 한 곳** — 어떤 장을 권할지는 `guideCaps`(체험하기와 같은 함수),
+  운영자에게 카드를 띄우지 않는 것은 `authz.ts`의 화면 판정 `tourEligible` — 라우트·컴포넌트가 역할 플래그를 비교하지 않는다(TACP-12)
+  ③ **새 기록은 자기 것만** — 쓰는 사람 = 세션의 Principal(TACP-1), 본문이 사람을 고르지 못한다, 남의 기록을 읽는 길이 없다(GET 없음). 부서 문서·권한·경계와
+  무관해 TACP-6·8·10의 대상이 아니다 ④ **실제 동작을 일으키지 않는다** — 덮개 밖은 `inert`, 구멍은 누를 수 없다, 둘러보기가 보내는 요청은 기록 하나.
+  새 Resource의 격리 시험은 PG-T151(내 줄만 — 남의 `userId`를 실어도 내 줄)
 
 ---
 
@@ -625,6 +633,7 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | `requireDeletableSubmission(scope, id)` | 제출물 **삭제** 판정 (TACP-14) | **404** / 409 |
 | `requireSubmitter(headers)` | 제출 진입점. 부서원이면 통과 (DM-16) | 401 / 403 |
 | `getDivisionView(slug)` | 페이지용 — 위를 묶어 `{division, isOwn, canManage, canSubmit}` | 404 |
+| `tourEligible(scope)` | 화면 판정 — 첫 로그인 둘러보기 카드를 띄울 사람인가(운영자 제외). 권하는 장은 `guideCaps`가 정한다 (v1.10 노트 — 권한 아님) | 카드 없음 |
 
 ### 판정 순서
 
@@ -705,6 +714,7 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | **AU-T87** | **부서원은 부서 제출 현황(이름·시각)을 받는 길이 없다** — `api/division/status` 라우트 없음 · API 라우트가 `divisionStatus`를 부르지 않음 · 부서원의 수합 관리 404 · 홈 데이터에 남의 이름·id 없음(PG-T97). lead는 수합 관리에서 그대로 (v1.8 — 새로 금지된 것) |
 | **AU-T88** | **타 부서 열람 칩은 어느 화면 폭에서도 그린다** + `내 부서로` (TACP-9 — 본문 띠를 걷은 조건, ADR-0017) |
 | **AU-T89** | **member는 병합 규칙을 읽지 못한다** — 부서 설정 화면 404 · 규칙 GET 없음 · 저장 404 (v1.6.4 — 작성 안내가 없어진 칸, 새로 금지된 것) |
+| **PG-T151** | **둘러보기 기록은 내 줄만** — 본문에 남의 `userId`를 실어도 세션의 사람 줄만 생긴다 · 가지지 않은 장은 무시 · 로그인 없음 401 (v1.10 노트 — 새 Resource `GuideTourSeen`의 격리) |
 
 새 Resource를 추가하면 **그 Resource의 격리 테스트를 같은 커밋에 넣는다.**
 

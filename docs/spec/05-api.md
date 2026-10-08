@@ -86,6 +86,21 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 | API-14 | 저장 결과에 `sameAsPrevious`(직전 버전과 sha256 동일) 포함 (DM-07) |
 | ~~API-54~~ | ~~`SUBMIT_HWP_UPLOAD=off`면 **410 `upload_closed`** — 인증 다음, 속도 제한·본문 읽기보다 먼저. 파일·DB 행·감사 기록을 남기지 않는다. 권한이 아니라 누구에게나 닫힌 길이라 404가 아니다 (WA-30~34)~~ — **폐지 2026-10-08** → WA-39 (라우트가 없다. 같은 스위치·410은 「전사」 [올리기]에만 남는다 — RU-60a) |
 
+### API-60 — `POST /api/me/tour` — 화면 둘러보기 기록 (2026-10-08 · PG-84 · DM-25)
+
+```
+요청  { "chapters": ["member", "lead"], "outcome": "dismissed" | "started" | "done" | "skipped" }
+응답  200 { "ok": true, "seen": [{ "chapter": "member", "outcome": "started" }, …] }
+      401 로그인 없음 · 422 모르는 장·결과, 빈 목록, 6개 이상
+```
+
+- 대상은 **세션의 사람뿐**(`requireScope` → `scope.user.id`). 본문의 `userId`류는 읽지 않는다(TACP-1·6)
+- 이 사람이 갖지 않은 장(`tourChapters(guideCaps(scope))` 밖)은 **조용히 뺀다** — 역할이 빠진 뒤 남은 탭이 보내도 오류가 아니다
+- 덮어쓰기: `done`은 끝 — 뒤의 `started`·`skipped`·`dismissed`로 바꾸지 않는다. 나머지는 마지막 것이 이긴다. 같은 요청을 두 번 보내도 같다
+- 감사 기록은 남기지 않는다 — 문서·권한·경계를 넘는 접근이 아니라 안내 표시 기록이다(TACP-10의 대상이 아니다)
+- GET은 없다 — 제안은 서버가 페이지를 그릴 때 계산해 머리에 넘긴다(`getTour` — `src/server/tour.ts`)
+- 시험 `[PG-T151]` (`tests/guide-tour.test.ts`)
+
 ### `GET /api/submissions/:id/download`
 
 | ID | 요구사항 |
