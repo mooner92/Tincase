@@ -7,6 +7,8 @@ import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
 import Link from 'next/link';
 import { messengerSinkOpen } from '@/server/messenger-sink';
+import { MergeQueueCard } from './MergeQueueCard';
+import { ensureCurrentSlot } from '@/server/worklog';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +20,8 @@ export default async function OpsPage() {
   }
   if (ps.scope.user.mustChangePassword) redirect('/password?first=1'); // AU-22
   if (!ps.scope.user.isOperator) notFound();
+  // PG-90 — 「병합 줄」은 이번 주차의 것 (HM-45와 같이 이번 주 슬롯을 보장한다)
+  const slot = await ensureCurrentSlot();
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -49,6 +53,10 @@ export default async function OpsPage() {
               감사 로그
             </Link>
           </div>
+        </div>
+        {/* PG-90 · TACP-30 — 병합 줄. 운영자 문 안에서 서버가 그린다(새 API 없음) */}
+        <div className="mt-6">
+          <MergeQueueCard slot={slot} />
         </div>
         {/* PG-34는 v2.1에서 개정 — 운영자는 전체 열람 가능 (AU-15) */}
         <div className="mt-6">

@@ -155,9 +155,18 @@ async function save(who: string, key: Key, text: string) {
     nx('/api/division/merged/content', who, jsonInit('PUT', { isoKey, ...(await viewed(key)), tables: [{ key: 'achievements', rows: [['', text, '', '', '']] }] })),
   );
 }
+/**
+ * [지금 병합] — 2026-10-08 2단계(HM-60b)부터 202로 줄에 넣고 바로 돌아온다. 이 시험이 보는 것은 병합 **뒤**의 일(넘김 · 사본 · 알림)이라
+ * 줄이 빌 때까지 기다린 뒤 돌려준다
+ */
 async function mergeNow(who: string) {
   const { POST } = await import('@/app/api/division/merge/route');
-  return POST(nx('/api/division/merge', who, jsonInit('POST', { isoKey, overwriteEdits: true })));
+  const res = (await POST(nx('/api/division/merge', who, jsonInit('POST', { isoKey, overwriteEdits: true })))) as Response;
+  if (res.status === 202) {
+    const { settleMergeQueue } = await import('@/server/merge/queue');
+    await settleMergeQueue();
+  }
+  return res;
 }
 async function hqApprove(who: string) {
   const { latestHqRun } = await import('@/server/rollup/handoff');
@@ -289,7 +298,7 @@ describe('RU-53~57b · NT-52 — 3단계 알림은 막고 있는 사람에게만
     expect(await due(plus(t.unitDue, 2))).toEqual([]); // 같은 창에서 두 번 가지 않는다
     // 실둘(부서장 없음) 마감 뒤 병합 → 저절로 올라옴 → 다 모임
     nextMerge.set(divId.u2, '실둘 최종본');
-    expect((await mergeNow(P.u2Lead.email)).status).toBe(200);
+    expect((await mergeNow(P.u2Lead.email)).status).toBe(202);
     await settle();
     got = take();
     expect(to(got)).toEqual([P.hqHead.no]);
@@ -345,7 +354,7 @@ describe('RU-53~57b · NT-52 — 3단계 알림은 막고 있는 사람에게만
     expect(take()).toEqual([]);
     // 다시 병합(늦게 낸 사람) — 판은 또 바뀌었지만 부서장의 할 일(다시 승인)은 같다. 그 승인에 대해서는 이미 알렸다
     nextMerge.set(divId.u1, '실하나 다시 병합');
-    expect((await mergeNow(P.u1Lead.email)).status).toBe(200);
+    expect((await mergeNow(P.u1Lead.email)).status).toBe(202);
     await settle();
     expect(take().filter((g) => g.to === P.u1Head.no)).toEqual([]);
     // 부서장이 다시 승인한 뒤 또 바뀌면 — 새 승인이므로 한 번 더

@@ -14,6 +14,12 @@
  */
 export const MODEL_NOT_CONFIGURED = '모델이 설정되지 않았습니다';
 
+/**
+ * HM-61 — 쓰기 직전 확인이 병합을 쓰지 않았을 때 실행에 남는 문구. 서버(병합 기록 · 점검 요약)와 화면(MergePanel — 실패가 아니라
+ * 「고친 판을 지켰다」로 그린다)이 같은 글로 알아본다 — 두 곳에 따로 적으면 한쪽만 바뀐다.
+ */
+export const HELD_TEXT = '병합하는 동안 고친 판이 있어 덮지 않았어요';
+
 /** 표 순서. 구분 번호의 앞자리가 여기서 나온다 (실적=1, 계획=2, 특이사항=3) */
 export const BUCKETS = ['achievements', 'plans', 'notes'] as const;
 export type BucketKey = (typeof BUCKETS)[number];

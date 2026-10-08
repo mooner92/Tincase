@@ -11,10 +11,13 @@
 // 2026-10-08 (CP-117 · PG-73 — 기능 정리) — 「규칙 바뀜」 칩(R4)·「빠진 사람 n명」 줄(R7)·합쳐진 행 목록(S8)을 걷었다.
 // 합쳐진 행은 「내용 다른 묶음 n건」 한 줄이다 — 실제로 고치는 곳은 [내용 보기]의 병합본이다. 병합본 받기는 이 카드의
 // [받기] 하나이고, 게시판에 올릴 때 쓰는 [제목 복사]가 그 옆으로 왔다(S5 — 드로어의 [hwp로 받기]·[제목 복사]는 지웠다).
-import { useState } from 'react';
+//
+// 2026-10-08 (CP-130 · HM-59·60 — 병합 줄) — [지금 병합]은 줄에 넣고 바로 돌아온다(202). 버튼은 서버가 알려 주는 자리(「줄 n번째」 ·
+// 「병합 중…」)로 막는다 — 예전의 `busy`는 그 탭에만 있어서 다른 탭 · 다른 사람 · 스케줄러를 몰랐다. 끝날 때까지 2초마다 묻는다.
+import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MergedDrawer } from './MergedDrawer';
-import { MODEL_NOT_CONFIGURED } from '@/lib/merge-rows';
+import { HELD_TEXT, MODEL_NOT_CONFIGURED } from '@/lib/merge-rows';
 import { copyText } from '@/lib/clipboard';
 
 /** HM-26 — 실행 기록(`reviewJson.groups`)에 남는 합쳐진 묶음. 화면은 이제 그 수만 센다(`differingGroups`) */
@@ -56,6 +59,27 @@ export interface MergeStateView {
    * [다시 병합] 전에 「누가 몇 곳」을 묻는 데 쓴다 — 확인하면 `overwriteEdits: true`로 보낸다 (API-55)
    */
   edits: MergeEditsView | null;
+  /** CP-130 — 이 부서·주차의 줄 작업(대기 · 병합 중). 없으면 null */
+  job?: MergeJobView | null;
+  /** CP-130 · HM-61d — 가장 최근 병합이 「병합하는 동안 고친 판」을 지켜 쓰지 않았다. 카드는 고친 판을 그대로 그린다 */
+  held?: boolean;
+}
+
+/** CP-130 — 줄의 자리. `position`은 병합 중인 작업이 1, 대기가 2, 3 … (HM-59f · API-65) */
+export interface MergeJobView {
+  id: string;
+  status: 'queued' | 'running';
+  position: number;
+  etaMinutes: number | null;
+}
+
+/** CP-130 — 줄 작업을 묻는 간격 */
+const POLL_MS = 2000;
+
+/** CP-130 — 버튼 자리의 글. 대기면 순번(과 대략의 분), 병합 중이면 「병합 중…」 */
+export function jobLabel(job: Pick<MergeJobView, 'status' | 'position' | 'etaMinutes'>): string {
+  if (job.status === 'running') return '병합 중…';
+  return `줄 ${job.position}번째${job.etaMinutes ? ` · 약 ${job.etaMinutes}분` : ''}`;
 }
 
 /** HM-49 — 고친 기록 요약. 409 `edited`의 `detail.edits`와 같은 모양이다 (API-55) */
@@ -165,6 +189,50 @@ export function MergePanel({
    * 이 화면을 연 뒤에 누가 고쳤으면 서버가 409로 멈추고 같은 요약을 주므로, 그때도 같은 자리에서 묻는다.
    */
   const [ask, setAsk] = useState<MergeEditsView | null>(null);
+
+  /*
+   * CP-130 — 줄 작업. 서버가 그려 준 것(`state.job`) 또는 [지금 병합]의 202 응답으로 알게 된다. 끝난 것으로 본 작업(`doneId`)은
+   * 새로 그린 화면이 도착하기 전까지 서버의 옛 값으로 되살리지 않는다.
+   */
+  const [tracked, setTracked] = useState<MergeJobView | null>(null);
+  const [doneId, setDoneId] = useState<string | null>(null);
+  const serverJob = state.job && state.job.id !== doneId ? state.job : null;
+  const job = tracked ?? serverJob;
+  const jobId = job?.id ?? null;
+  useEffect(() => {
+    // 타 부서를 읽는 사람(버튼이 없다)은 묻지 않는다 — 그 작업은 그 사람의 것이 아니다(API-65은 내 부서 작업만)
+    if (!jobId || !canRun) return;
+    let stopped = false;
+    const timer = setInterval(async () => {
+      try {
+        const r = await fetch(`/api/division/merge?jobId=${encodeURIComponent(jobId)}`);
+        if (stopped) return;
+        const b = (await r.json().catch(() => ({}))) as {
+          status?: string;
+          position?: number | null;
+          etaMinutes?: number | null;
+          errorText?: string | null;
+        };
+        if (r.ok && (b.status === 'queued' || b.status === 'running')) {
+          setTracked({ id: jobId, status: b.status, position: b.position ?? 1, etaMinutes: b.etaMinutes ?? null });
+          return;
+        }
+        clearInterval(timer);
+        setTracked(null);
+        setDoneId(jobId);
+        // 고친 판을 지킨 것(HM-61)은 실패가 아니다 — 새로 그린 카드가 그 한 줄을 보인다
+        if (r.ok && b.status !== 'done' && b.errorText && b.errorText !== HELD_TEXT) setErr(b.errorText);
+        router.refresh();
+      } catch {
+        // 네트워크가 잠깐 끊겨도 다음 번에 다시 묻는다
+      }
+    }, POLL_MS);
+    return () => {
+      stopped = true;
+      clearInterval(timer);
+    };
+  }, [jobId, canRun, router]);
+
   const run = (overwriteEdits = false) => {
     if (!overwriteEdits && state.edits) {
       setErr(null);
@@ -185,9 +253,15 @@ export function MergePanel({
           error?: string;
           message?: string;
           detail?: { edits?: MergeEditsView };
+          jobId?: string;
+          status?: 'queued' | 'running';
+          position?: number;
+          etaMinutes?: number | null;
         };
         if (r.status === 409 && b.error === 'edited' && b.detail?.edits) setAsk(b.detail.edits);
         else if (!r.ok) setErr(b.message ?? '병합에 실패했습니다.');
+        // HM-60b — 202: 줄에 넣었다(또는 같은 부서 작업에 합류했다). 끝나면 위의 물음이 새로 그린다
+        else if (b.jobId) setTracked({ id: b.jobId, status: b.status ?? 'queued', position: b.position ?? 1, etaMinutes: b.etaMinutes ?? null });
         else router.refresh();
       })
       .catch(() => setErr('네트워크 오류로 병합하지 못했습니다.'))
@@ -228,6 +302,8 @@ export function MergePanel({
             <span aria-hidden className="dot" />
             준비됨{state.finishedAtKst && ` ${state.finishedAtKst}`}
           </span>
+        ) : job ? (
+          <span className="chip chip-info">{job.status === 'running' ? '병합 중' : '대기 중'}</span>
         ) : state.status === 'failed' ? (
           <span className="chip chip-error">병합 실패</span>
         ) : state.status === 'running' ? (
@@ -299,8 +375,13 @@ export function MergePanel({
               </button>
             )}
             {canRun && (
-              <button data-guide="merge-run" onClick={() => run()} disabled={busy || submitted === 0 || !!ask} className={done ? 'btn-ghost' : 'btn-secondary'}>
-                {busy ? '병합 중…' : done ? '다시 병합' : '지금 병합'}
+              <button
+                data-guide="merge-run"
+                onClick={() => run()}
+                disabled={busy || submitted === 0 || !!ask || !!job}
+                className={done ? 'btn-ghost' : 'btn-secondary'}
+              >
+                {job ? jobLabel(job) : busy ? '병합 중…' : done ? '다시 병합' : '지금 병합'}
               </button>
             )}
           </div>
@@ -328,7 +409,7 @@ export function MergePanel({
             )}
             {done && canDownload && <p className="mt-1.5 text-xs text-muted">고친 판이 필요하면 먼저 [받기]</p>}
             <div className="mt-2.5 flex flex-wrap items-center gap-2">
-              <button onClick={() => run(true)} disabled={busy} className="btn-secondary btn-sm">
+              <button onClick={() => run(true)} disabled={busy || !!job} className="btn-secondary btn-sm">
                 {busy ? '병합 중…' : '고친 내용 버리고 다시 병합'}
               </button>
               <button onClick={() => setAsk(null)} disabled={busy} className="btn-ghost">
@@ -339,6 +420,8 @@ export function MergePanel({
         )}
       </div>
 
+      {/* HM-61d — 병합하는 동안 고친 판을 지켜 쓰지 않았다. 카드는 고친 판을 그대로 그린다 — 실패가 아니라 한 줄 */}
+      {state.held && !job && <p className="callout callout-warn mt-4">{HELD_TEXT}</p>}
       {err && <p className="callout callout-error mt-4">{err}</p>}
       {note && !err && <p className="mt-3 text-sm font-medium text-success">{note}</p>}
 

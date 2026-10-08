@@ -437,6 +437,15 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
         });
         if (inFlight) continue;
         /*
+         * HM-59 · HM-60 (2026-10-08 2단계) — **줄에 선 부서**도 기다린다. 줄에 넣었지만 차례가 오지 않은 부서, 실패 뒤 다시 줄에 선 부서는
+         * 「병합본이 아직 없어요 — [지금 병합]」이 아니다 — 누를 것이 없다. 끝나면 창이 그 시각부터 열린다(HM-50).
+         * queue.ts를 잇지 않고 표를 직접 본다 — queue → run → 이 파일 고리가 된다
+         */
+        const queued = await prisma.mergeJob.count({
+          where: { divisionId: division.id, weekSlotId: slot.id, status: { in: ['queued', 'running'] } },
+        });
+        if (queued > 0) continue;
+        /*
          * HM-50 — 아직 **차례가 오지 않은** 부서도 기다린다. 스케줄러는 부서를 차례로 병합하고 하나 끝날 때마다
          * 여기를 부른다 — 뒤 부서는 아직 시도조차 안 됐다. 그것을 「병합본이 아직 없어요 — [지금 병합]」으로 보내면
          * 줄 서 있는 것을 실패라고 부르는 셈이다(13개 부서를 흉내 낸 시험에서 일곱 통이 그렇게 나갔다).

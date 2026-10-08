@@ -4,7 +4,8 @@
 //   전날 11:45  미제출자에게 «내일이 마감이에요»                      (NT-41)
 //   13:00       미제출자에게 «아직 안 냈어요»                          (NT-10)
 //   14:00       마감 — 제출 잠김                                       (WS-06)
-//   14:01       자동 병합 시작                                         (HM-25·HM-35)
+//   14:01       자동 병합 — 줄에 넣고, 줄의 일꾼이 하나씩               (HM-25·HM-35·HM-60)
+//   ~14:15      운영자·기획조정실 담당에게 «병합 점검» 요약              (HM-54)
 //   14:10       실/팀장에게 «검토 부탁드려요» · 실패면 담당자에게 경보  (NT-40)
 //   14:30       담당자에게 «최종 확인하고 제출해주세요»                (NT-40)
 //   15:00       대외업무 마감
@@ -44,19 +45,30 @@ export async function register() {
   } catch (e) {
     console.error('[merge] 기동 시 멈춘 실행 회수 실패', e);
   }
+  /*
+   * HM-59e — 줄도 같다. 기동할 때 `running` 작업은 모두 죽은 것이다 — 한 번 잡혔던 것은 다시 대기(맨 앞), 두 번째면 실패.
+   * 그리고 일꾼을 깨운다 — 스케줄러가 꺼진 서버도(재시작 전에 [지금 병합]으로 넣은 작업이 이어 돈다). 기다리지 않는다.
+   * 켜진 서버는 알림 고리(HM-60c)를 건 뒤에 깨운다 — 고리 없이 끝난 작업의 안내가 다음 주기까지 밀리지 않게.
+   */
+  const { bindMergeWorkerRoot, kickMergeQueue, recoverMergeJobs } = await import('./server/merge/queue');
+  try {
+    // HM-59d — 일꾼은 요청 밖의 맥락에서 세운다 — [지금 병합] 요청이 깨워도 그 요청의 저장소가 일꾼에 따라가지 않게(queue.ts)
+    const { AsyncLocalStorage } = await import('node:async_hooks');
+    bindMergeWorkerRoot(AsyncLocalStorage.snapshot());
+    await recoverMergeJobs(new Date(), { atBoot: true });
+  } catch (e) {
+    console.error('[merge] 기동 시 줄 작업 회수 실패', e);
+  }
 
   if (process.env.MERGE_SCHEDULER === 'off') {
+    void kickMergeQueue();
     console.log('[merge] 스케줄러 꺼짐 (MERGE_SCHEDULER=off)');
     return;
   }
 
-  const { runDueMerges } = await import('./server/merge/run');
-  const { warmModelAtBoot, warmModelIfDue } = await import('./server/merge/warmup');
+  const { warmModelAtBoot } = await import('./server/merge/warmup');
   const { mergePauseState } = await import('./server/merge/pause');
-  const { runDueReminders } = await import('./server/notify/deadline-reminder');
-  const { runDueMergeNotices } = await import('./server/notify/merge-notices');
-  const { runDueRollupNotices } = await import('./server/rollup/notices');
-  const { runDueRollupSync } = await import('./server/rollup/auto');
+  const { installMergeQueueHooks, makeSchedulerTick } = await import('./server/scheduler');
 
   /*
    * NT-32 — 기동할 때마다 **알림이 켜진 부서를 로그에 찍는다.**
@@ -95,106 +107,13 @@ export async function register() {
    */
   void warmModelAtBoot().catch((e) => console.error('[merge] 기동 데우기 오류', e));
 
-  // 겹쳐 도는 걸 막는다. 한 번 실행이 5분을 넘길 수 있다 (부서 30개 × 모델 호출)
-  let running = false;
-  // 멈춰 있는 동안 1분마다 같은 줄을 찍지 않는다 — 한 시간에 한 번이면 «살아서 멈춰 있다»가 보인다
-  let pauseLoggedAt = 0;
-
-  // 알림이 실패해도 병합은 돌아야 한다 — 본업이 남의 사정에 멈추지 않게 따로 감싼다
-  const reminders = async () => {
-    try {
-      const sent = await runDueReminders();
-      for (const r of sent) {
-        const when = { deadline_1d: '마감 하루 전', deadline_1h: '마감 1시간 전', deadline_10m: '마감 10분 전' }[r.kind];
-        console.log(`[알림] ${when} — ${r.division} ${r.isoKey}: ${r.sent}/${r.targets}명 발송`);
-      }
-    } catch (e) {
-      console.error('[알림] 마감 전 알림 오류', e);
-    }
-  };
-  // 여기도 따로 감싼다: 알림이 실패해도 병합은 이미 끝났고, 그게 본업이다
-  const notices = async () => {
-    try {
-      for (const r of await runDueMergeNotices()) {
-        console.log(
-          `[알림] ${r.kind} — ${r.division} ${r.isoKey}(${r.status}): ${r.sent}/${r.targets}명` +
-            (r.blocked ? ` · 허용목록 밖 ${r.blocked}명` : ''),
-        );
-      }
-    } catch (e) {
-      console.error('[알림] 병합 안내 오류', e);
-    }
-  };
-
-  const tick = async () => {
-    if (running) return;
-    running = true;
-    try {
-      await reminders();
-
-      /*
-       * RU-72 — 3단계 자동 진행의 **안전망**. 넘김·조립은 승인 요청과 화면 열기가 이미 맞춘다 — 여기는 그것들이 놓친 것
-       * (요청 뒤 프로세스 종료 등)을 따라잡을 뿐이다. 이것에만 기대는 것은 없다(테스트 서버는 스케줄러를 끈다, RU-41).
-       * 알림보다 먼저 — 알림이 맞춘 상태를 보게.
-       */
-      try {
-        await runDueRollupSync();
-      } catch (e) {
-        console.error('[자동] 3단계 맞추기 오류', e);
-      }
-
-      /*
-       * RU-54~57 — 3단계 알림. 꺼져 있으면(RU-52) 아무것도 하지 않는다.
-       * 병합 일시정지(HM-44) **앞에서** 돈다 — 실장·본부장의 승인과 그 뒤의 넘김은 사람의 결정에서 나오므로
-       * 자동 병합이 멈춰 있어도 계속된다. 뒤에 두면 멈춘 주에는 본부·총괄 기한 알림이 하나도 안 나간다.
-       */
-      try {
-        for (const r of await runDueRollupNotices()) console.log(`[알림] ${r.kind}: ${r.sent}/${r.targets}명`);
-      } catch (e) {
-        console.error('[알림] 3단계 알림 오류', e);
-      }
-
-      /*
-       * HM-44 — 멈춰 있으면 **여기서 끝난다.** 마감 전 알림·3단계 알림은 위에서 이미 돌았다 —
-       * 그게 「병합 일시정지」와 「스케줄러 정지」의 차이다. 제출은 계속 받고 재촉도 하되,
-       * 병합본을 새로 만들지도 「검토해 주세요」를 보내지도 않는다.
-       */
-      const pause = mergePauseState(new Date());
-      if (pause.paused) {
-        const now = Date.now();
-        if (now - pauseLoggedAt > 60 * 60_000) {
-          pauseLoggedAt = now;
-          if (pause.until) console.log(`[merge] 일시정지 중 — ${pause.until.toISOString()}까지`);
-          else console.error(`[merge] ${pause.reason} — 멈춘 채로 둔다`);
-        }
-        return; // finally에서 running이 풀린다
-      }
-
-      // HM-53 — 마감 10분 전이면 모델을 다시 올린다(모델 서버가 재시작했거나 밀려났으면). 기다리지 않는다 — 올리는 데 수십 초가 걸리고, 그동안 이 주기의 일은 계속 간다
-      void warmModelIfDue(new Date()).catch((e) => console.error('[merge] 모델 데우기 오류', e));
-
-      /*
-       * HM-50 — 부서 하나를 병합할 때마다 알림을 다시 본다. 예전에는 모든 부서 병합이 끝난 뒤에 한 번 봤다 —
-       * 13개 부서가 부서당 100초씩 걸리면 마지막이 14:23에 끝나고, 그때는 모든 부서의 검토 요청 창이 지나 있다.
-       * 같은 이유로 다른 마감을 쓰는 부서의 「10분 전」(창 3분)도 이 사이에 다시 본다.
-       */
-      const { ran } = await runDueMerges(new Date(), {
-        afterEach: async () => {
-          await reminders();
-          await notices();
-        },
-      });
-      if (ran > 0) console.log(`[merge] 자동 병합 ${ran}건 실행`);
-
-      // 병합이 없던 주기에도 돈다 — +30분 안내처럼 병합과 무관하게 창이 오는 것이 있다
-      await notices();
-    } catch (e) {
-      // 스케줄러는 절대 죽지 않는다 — 다음 주기에 다시 시도한다
-      console.error('[merge] 스케줄러 오류', e);
-    } finally {
-      running = false;
-    }
-  };
+  /*
+   * HM-60 (2026-10-08 2단계) — 한 주기는 server/scheduler.ts에 있다. 판정해서 줄에 넣기만 하고 바로 끝난다 — 병합은 줄의 일꾼이 한다.
+   * 일꾼이 부서 하나를 끝낼 때마다 · 줄이 빌 때 병합 안내와 점검 요약을 다시 본다(HM-50 · HM-54) — 그 고리는 여기서만 건다.
+   */
+  installMergeQueueHooks();
+  void kickMergeQueue();
+  const tick = makeSchedulerTick();
 
   // 기동 직후 한 번 — 컨테이너가 마감 시각에 재시작됐다면 바로 따라잡는다
   setTimeout(tick, 20_000);

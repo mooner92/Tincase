@@ -152,11 +152,17 @@ beforeEach(async () => {
   stubModel();
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
-  // 각 테스트는 자기 부서만 본다 — 앞 테스트의 부서는 끈다
+  // 각 테스트는 자기 부서만 본다 — 앞 테스트의 부서는 끈다. 줄(HM-59)도 비운다
   const { prisma } = await import('@/server/db');
   await prisma.division.updateMany({ data: { isActive: false } });
+  await prisma.mergeJob.deleteMany({});
+  const { resetMergeQueueForTest } = await import('@/server/merge/queue');
+  resetMergeQueueForTest();
 });
-afterEach(() => {
+afterEach(async () => {
+  // 줄의 일꾼이 다음 시험으로 넘어가지 않게 — 남은 병합을 끝낸다
+  const { settleMergeQueue } = await import('@/server/merge/queue');
+  await settleMergeQueue();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -186,37 +192,38 @@ describe('HM-58 · API-31 같은 부서·주차 병합은 하나만 — [지금 
   });
 
   it('[HM-T157] 멈춘 실행(10분 넘은 running)은 막지 않는다 — 죽은 기록이 [지금 병합]을 영영 막으면 안 된다', async () => {
+    const { settleMergeQueue } = await import('@/server/merge/queue');
     const { div, lead } = await mkDivision('끊김실');
     await runningRun(div.id, at(1));
     vi.setSystemTime(at(11.5)); // 10분 30초 지남
     const res = await mergeNow(lead.email);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(202); // 2단계(HM-60b) — 줄에 넣고 바로 돌아온다
+    await settleMergeQueue();
     expect(runMergeMock).toHaveBeenCalledTimes(1);
   });
 
-  it('[HM-T157] ★ 같은 순간 두 번 누르면 하나만 돈다 (다른 탭 · Cloudflare 524 뒤 다시 누름)', async () => {
+  it('[HM-T157] ★ 같은 순간 두 번 누르면 하나만 돈다 (다른 탭 · Cloudflare 524 뒤 다시 누름) — 2단계부터 둘째는 409가 아니라 같은 작업에 합류(202)', async () => {
     const { prisma } = await import('@/server/db');
+    const { settleMergeQueue } = await import('@/server/merge/queue');
     const { div, lead } = await mkDivision('동시실');
     let finish!: () => void;
     runMergeMock.mockImplementationOnce(() => new Promise((r) => (finish = () => r(OUTCOME))));
 
-    const [first, second] = [mergeNow(lead.email), mergeNow(lead.email)];
-    // 둘 중 하나는 곧바로 409로 끝난다 — 다른 하나는 병합 중
-    const quick = await Promise.race([first, second]);
-    expect(quick.status).toBe(409);
-    // 확인 단계에서 걸렸든 잡는 순간에 걸렸든 응답 모양은 같다 (API-31 `detail: { runId, startedAt }`)
-    const qb = (await quick.json()) as { error: string; detail: { startedAt: string | null } };
-    expect(qb.error).toBe('merging');
-    expect(qb.detail.startedAt).toMatch(/\+09:00$/);
+    const [first, second] = await Promise.all([mergeNow(lead.email), mergeNow(lead.email)]);
+    expect([first.status, second.status]).toEqual([202, 202]);
+    const [a, b] = [await first.json(), await second.json()];
+    expect(a.jobId).toBe(b.jobId);
+    expect([a.joined, b.joined].sort()).toEqual([false, true]);
     await vi.waitFor(() => expect(runMergeMock).toHaveBeenCalledTimes(1));
     finish();
-    const statuses = (await Promise.all([first, second])).map((r) => r.status).sort();
-    expect(statuses).toEqual([200, 409]);
+    await settleMergeQueue();
     expect(runMergeMock).toHaveBeenCalledTimes(1);
     expect(await prisma.mergeRun.count({ where: { divisionId: div.id } })).toBe(1);
 
-    // 끝나면 다시 누를 수 있다
-    expect((await mergeNow(lead.email)).status).toBe(200);
+    // 끝나면 다시 누를 수 있다 — 새 작업
+    const again = await mergeNow(lead.email);
+    expect(again.status).toBe(202);
+    expect((await again.json()).jobId).not.toBe(a.jobId);
   });
 
   it('[HM-T158] ★ 스케줄러는 [지금 병합]이 돌고 있는 부서를 건너뛴다 · 멈춘 실행은 회수하고 다시 돈다', async () => {
@@ -226,12 +233,14 @@ describe('HM-58 · API-31 같은 부서·주차 병합은 하나만 — [지금 
     const manual = await runningRun(div.id, at(1.5)); // 14:01:30 담당자가 [지금 병합]
 
     vi.setSystemTime(at(2));
-    expect(await runDueMerges(at(2))).toEqual({ ran: 0, skipped: 1 });
+    expect(await runDueMerges(at(2))).toEqual({ queued: 0, skipped: 1 });
     expect(runMergeMock).not.toHaveBeenCalled();
 
-    // 그 실행이 재시작에 끊겼다 — 10분이 지나면 실패로 회수되고, 재시도 간격(HM-43, 1분)은 이미 지났으니 바로 돈다
+    // 그 실행이 재시작에 끊겼다 — 10분이 지나면 실패로 회수되고, 재시도 간격(HM-43, 1분)은 이미 지났으니 바로 줄에 선다
     vi.setSystemTime(at(12));
-    expect(await runDueMerges(at(12))).toEqual({ ran: 1, skipped: 0 });
+    expect(await runDueMerges(at(12))).toEqual({ queued: 1, skipped: 0 });
+    const { settleMergeQueue } = await import('@/server/merge/queue');
+    await settleMergeQueue();
     expect(runMergeMock).toHaveBeenCalledTimes(1);
     const old = await prisma.mergeRun.findUniqueOrThrow({ where: { id: manual.id } });
     expect(old).toMatchObject({ status: 'failed', errorText: '중단됨(재시작 등)' });
@@ -247,7 +256,7 @@ describe('HM-58 · API-31 같은 부서·주차 병합은 하나만 — [지금 
     const manual = runMergeRecorded(div.id, slotId, 'manual');
     await vi.waitFor(() => expect(runMergeMock).toHaveBeenCalledTimes(1));
 
-    expect(await runDueMerges(at(2))).toEqual({ ran: 0, skipped: 1 });
+    expect(await runDueMerges(at(2))).toEqual({ queued: 0, skipped: 1 });
     // 직접 불러도 시작하지 않는다 — 프로세스 안에서 먼저 잡은 쪽이 있다 (DB를 보기 전에 걸린다)
     expect(await runMergeRecorded(div.id, slotId, 'auto')).toEqual({ runId: '', status: 'busy', errorText: '이미 병합 중입니다', outcome: null });
     finish();
@@ -359,7 +368,7 @@ describe('HM-55 멈춘 실행 회수', () => {
     expect(interval).not.toHaveBeenCalled(); // 1분 주기(데우기 포함)를 걸지 않았다
     expect(modelCalls).toHaveLength(0);
     // 끊긴 부서는 곧바로 다시 누를 수 있다 — 아무것도 돌지 않는데 「이미 병합 중」으로 막지 않는다
-    expect((await mergeNow(lead.email)).status).toBe(200);
+    expect((await mergeNow(lead.email)).status).toBe(202);
   });
 });
 

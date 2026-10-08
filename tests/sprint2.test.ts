@@ -34,6 +34,20 @@ const ID = {
   coord: 'co@t.kei.re.kr', // A부서 소속 총괄 — readAll이지만 담당자는 아니다
 };
 
+/**
+ * [지금 병합] — 2026-10-08 2단계(HM-60b)부터 202로 줄에 넣고 바로 돌아온다. 이 파일이 보는 것은 병합 **뒤**(파일 · 권한)라
+ * 줄이 빌 때까지 기다린다. 돌려주는 것은 그 응답(202)과 작업이 만든 실행 id
+ */
+async function settleMerge(res: Response): Promise<{ status: number; runId: string | null }> {
+  if (res.status !== 202) return { status: res.status, runId: null };
+  const { jobId } = (await res.json()) as { jobId: string };
+  const { settleMergeQueue } = await import('@/server/merge/queue');
+  await settleMergeQueue();
+  const { prisma } = await import('@/server/db');
+  const job = await prisma.mergeJob.findUniqueOrThrow({ where: { id: jobId } });
+  return { status: 202, runId: job.mergeRunId };
+}
+
 function nx(url: string, identity?: string, init?: RequestInit) {
   const r = new Request(`http://t.local${url}`, {
     ...init,
@@ -314,15 +328,16 @@ d('병합 API (API-30)', () => {
   it('lead가 병합하면 MergeRun이 남고 결과 파일이 생긴다', async () => {
     const { POST } = await import('@/app/api/division/merge/route');
     const { prisma } = await import('@/server/db');
-    const res = await POST(nx('/api/division/merge', ID.lead, { method: 'POST' }));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.status).toBe('succeeded');
-    expect(body.outcome.outputRelPath).toMatch(/\/merged\//);
-    expect(body.outcome.bytes).toBeGreaterThan(0);
-
-    const run = await prisma.mergeRun.findUniqueOrThrow({ where: { id: body.runId } });
+    // HM-60b — 202로 줄에 넣고 바로 돌아온다. 병합은 줄의 일꾼이 한다
+    const res = await settleMerge(await POST(nx('/api/division/merge', ID.lead, { method: 'POST' })));
+    expect(res.status).toBe(202);
+    const run = await prisma.mergeRun.findUniqueOrThrow({ where: { id: res.runId! } });
     expect(run.status).toBe('succeeded');
+    expect(run.outputPath).toMatch(/\/merged\//);
+    const { readStoredFile, sha256 } = await import('@/server/storage');
+    const bytes = await readStoredFile(run.outputPath!);
+    expect(bytes.length).toBeGreaterThan(0);
+    expect(run.outputSha).toBe(sha256(bytes)); // HM-56e
     expect(run.finishedAt).not.toBeNull();
     // DM-13 — 실행 시점 설정이 박제된다
     expect(JSON.parse(run.ruleSnapshot)).toMatchObject({ trigger: 'manual' });
@@ -332,7 +347,7 @@ d('병합 API (API-30)', () => {
     const { POST } = await import('@/app/api/division/merge/route');
     const { prisma } = await import('@/server/db');
     const before = await prisma.mergeRun.count({ where: { division: { slug: B.slug } } });
-    await POST(nx(`/api/division/merge?division=${B.slug}`, ID.lead, { method: 'POST' }));
+    await settleMerge(await POST(nx(`/api/division/merge?division=${B.slug}`, ID.lead, { method: 'POST' })));
     const after = await prisma.mergeRun.count({ where: { division: { slug: B.slug } } });
     expect(after).toBe(before); // B부서에는 아무 일도 일어나지 않았다
   });
@@ -503,7 +518,7 @@ d('병합본 접근', () => {
 
   it('[TACP-15] member도 자기 부서 병합본을 받는다 (v1.2 개정 — 이전에는 404였다)', async () => {
     const { POST } = await import('@/app/api/division/merge/route');
-    await POST(nx('/api/division/merge', ID.lead, { method: 'POST' }));
+    await settleMerge(await POST(nx('/api/division/merge', ID.lead, { method: 'POST' })));
 
     const { GET } = await merged();
     const res = await GET(nx('/api/division/merged', ID.member));
@@ -513,7 +528,7 @@ d('병합본 접근', () => {
 
   it('lead는 병합 후 자기 부서 병합본을 받는다 — 파일명이 그대로 올릴 수 있는 형태', async () => {
     const { POST } = await import('@/app/api/division/merge/route');
-    expect((await POST(nx('/api/division/merge', ID.lead, { method: 'POST' }))).status).toBe(200);
+    expect((await settleMerge(await POST(nx('/api/division/merge', ID.lead, { method: 'POST' })))).status).toBe(202);
 
     const { GET } = await merged();
     const res = await GET(nx('/api/division/merged', ID.lead));
@@ -562,7 +577,7 @@ d('병합본 접근', () => {
 d('head Principal (TACP-16·17)', () => {
   it('[AU-T30] head가 자기 부서 병합본을 수정한다 — 새로 허용된 것', async () => {
     const { POST } = await import('@/app/api/division/merge/route');
-    await POST(nx('/api/division/merge', ID.lead, { method: 'POST' }));
+    await settleMerge(await POST(nx('/api/division/merge', ID.lead, { method: 'POST' })));
     const { PUT, GET } = await import('@/app/api/division/merged/content/route');
     // HM-47 — 저장은 **본 판**에만. 화면이 GET으로 받은 판을 그대로 돌려보낸다
     const { runId, sha256 } = await (await GET(nx('/api/division/merged/content', ID.head))).json();
@@ -586,7 +601,7 @@ d('head Principal (TACP-16·17)', () => {
         body: JSON.stringify({ overwriteEdits: true }),
       }),
     );
-    expect(res.status).toBe(200);
+    expect((await settleMerge(res)).status).toBe(202);
   });
 
   it('[AU-T31] head의 타 부서 접근 → 404 — 새로 금지된 것 (lead와 같은 선)', async () => {
@@ -630,6 +645,6 @@ d('head Principal (TACP-16·17)', () => {
     expect(edit.status).toBe(404);
 
     const { POST } = await import('@/app/api/division/merge/route');
-    expect((await POST(nx('/api/division/merge', ID.coord, { method: 'POST' }))).status).toBe(200);
+    expect((await settleMerge(await POST(nx('/api/division/merge', ID.coord, { method: 'POST' })))).status).toBe(202);
   });
 });

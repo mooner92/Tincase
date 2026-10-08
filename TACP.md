@@ -4,8 +4,8 @@
 > 코드·스펙·UI가 이 문서와 어긋나면 **문서가 아니라 코드가 틀린 것**이다.
 > 규칙을 바꾸려면 §10 절차를 따른다. 코드를 먼저 고치는 것은 위반이다.
 
-버전 1.11 · 2026-10-08 · 대상 코드 v1.41.0 (feat/org-rollup) — v1.9에 TACP-26(가짜 알림 수신함)을 더했다 (v1.10은 병합 줄 작업 — feat/merge-queue)
-관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md) · [ADR-0008](docs/adr/0008-head-principal.md) · [ADR-0012](docs/adr/0012-upward-submission.md) · [ADR-0015](docs/adr/0015-approval-is-handoff.md) · [ADR-0016](docs/adr/0016-division-status-visibility.md) · [ADR-0017](docs/adr/0017-foreign-read-chip.md) · [ADR-0018](docs/adr/0018-manage-settings-trim.md)
+버전 1.11 · 2026-10-08 · 대상 코드 v1.41.0 (feat/org-rollup) — v1.9 위에 v1.10(병합 줄 · 「병합 점검」 TACP-30 — feat/merge-queue)과 v1.11(가짜 알림 수신함 TACP-26)을 차례로 합쳤다
+관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md) · [ADR-0008](docs/adr/0008-head-principal.md) · [ADR-0012](docs/adr/0012-upward-submission.md) · [ADR-0015](docs/adr/0015-approval-is-handoff.md) · [ADR-0016](docs/adr/0016-division-status-visibility.md) · [ADR-0017](docs/adr/0017-foreign-read-chip.md) · [ADR-0018](docs/adr/0018-manage-settings-trim.md) · [ADR-0019](docs/adr/0019-merge-queue.md)
 
 변경 이력:
 - v1.1 — `delete` Action 신설, TACP-8에 예외 하나(TACP-14) 추가
@@ -61,6 +61,12 @@
   양식 픽스처가 있는 체크아웃에서 RU-T23~76이 처음 자동 진행과 함께 돈다 — RU-T71은 본부장이 있는 본부의 자기 몫(rollupSelf)을
   부서장 없는 단위의 맞추기로 올리려 해 실패했다. 그 본부의 head가 곧 그 몫의 부서장이므로 **그 head의 병합본 승인**으로 올리고,
   맞추기는 새 사본을 만들지 않음을 함께 본다(넓어진 칸 없음 — TACP-23 표 그대로). ④ TACP-21 본문의 「[제출]로 보낸」을 v1.7의 뜻으로(문구만)
+- v1.10 — **TACP-30 신설: 병합 줄과 「병합 점검」** (2026-10-08, 마감 병합 2단계 · HM-54·59~61 · [ADR-0019](docs/adr/0019-merge-queue.md)). 번호는 30 — 같은 날 다른 갈래(가짜 알림 수신함 — `feat/org-rollup` v1.11)가 TACP-26을 쓰고 있어 겹치지 않게 띄웠다.
+  새 Resource 둘 — 병합 **작업**(`MergeJob`)과 「병합 점검」 요약 알림. ① 내 부서 작업의 상태(`GET /api/division/merge?jobId=`)는 병합 실행과 같은 사람이
+  내 부서 것만 읽는다(§3.2 새 행 — 넓어진 칸 없음: 실행할 수 있는 사람이 자기가 낸 작업의 진행을 보는 것이다) ② 전 부서의 병합 줄은 운영자만(`/ops` 카드 — 서버가 그린다, 새 API 없음)
+  ③ **「병합 점검」 요약은 운영자와 기획조정실 담당(총괄이 있는 부서의 lead)이 받는다** — 새로 허용된 것: 그 lead가 다른 부서들의 병합 **상태**(부서 이름 · 끝/실패/대기 ·
+  모델을 못 쓴 표와 사유 · 늦게 낸 수)를 한 통으로 받는다. 문서 내용 · 사람 이름은 없다. 판정은 `authz.ts`의 `mergeBatchAudience` 하나(TACP-12).
+  새로 금지된 것: 다른 부서의 lead · head · member와 (lead가 아닌) 총괄은 받지 않는다 · 남의 부서 작업 id로 상태를 물으면 404. 시험 HM-T171 · API-T25
 
 - v1.11 — **TACP-26 신설: 가짜 알림 수신함은 시험·시연 서버의 운영자만 본다** (2026-10-08 — v2 전환 전 주말 시험, NT-56). 새 Resource 「수신함 기록」과
   새 경로 셋: 받는 곳 `POST·GET /api/dev/messenger-sink`(신원을 묻지 않는다 — §6에 넷째 공개 경로로, **시험·시연 서버에서만**), 화면 `/ops/notify-sink`, 비우기
@@ -214,10 +220,35 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
 | 내 부서 병합본 **수정** | — | write | **write** | — | write(자기 부서) |
 | 내 부서 병합본 **작성자 보기** | — | read | **read** | read | read |
 | 병합 **실행·재실행** | — | write | **write** | write(자기 부서) | write(자기 부서) |
+| 내 부서 병합 **작업 상태** (줄 순번·진행·결과 — v1.10, TACP-30) | — | read | read | read(자기 부서) | read(자기 부서) |
 | **타 부서** 병합본 내려받기 | — | — | — | **read** | **read** |
 | 전사 병합 실행 | — | — | — | **write** | **write** |
 
 3단계를 쓰면(RU-52) 「전사 병합 실행」은 `system`이 한다(TACP-23). coordinator·operator의 write는 **실패했을 때 [다시 시도]**로만 남는다.
+
+### TACP-30 — 병합 줄은 운영자가 보고, 「병합 점검」은 운영자와 기획조정실 담당이 받는다 (v1.10 신설)
+
+마감 병합이 줄 하나에 선다(HM-59). 줄은 **작업**(`MergeJob`)이라는 새 자원을 만들고, 줄이 비면 「다 끝났나 · 문제없나」를 누군가 받아야 한다(HM-54).
+
+| 무엇 | member | lead | head | coordinator | operator |
+|---|:---:|:---:|:---:|:---:|:---:|
+| 내 부서 병합 작업의 상태 — `GET /api/division/merge?jobId=` (API-65) · 수합 관리 병합 카드의 「줄 n번째」(CP-130) | — | read | read | read(자기 부서) | read(자기 부서) |
+| 전 부서 병합 줄 — `/ops` 「병합 줄」 카드 (PG-90: 부서 이름 · 상태 · 시각 · 표별 모델 사용) | — | — | — | — | **read** |
+| 「병합 점검」 요약 알림 (NT-60: 부서 이름 · 상태 수 · 문제 종류) | — | **받음 — 기획조정실 담당만** | — | — | **받음** |
+
+#### 규칙
+
+- **작업 상태는 병합 실행과 같은 문이다** (`requireManager`). 대상은 신원의 부서다 — `resolveTargetDivision`을 슬러그 없이 부른다(TACP-7). 작업 id를 알아도
+  남의 부서 작업은 없는 작업과 같은 **404**다(TACP-5). member는 실행 칸이 `—`이므로 상태도 `—`다.
+- **「병합 줄」 카드는 `/ops`의 운영자 문 안에서 서버가 그린다** — 새 API가 없다. 담는 것은 부서의 운영 상태(시각 · 상태 · 표별 모델 사용 · 못 쓴 사유)뿐이고
+  문서 내용 · 제출자 이름은 없다. 운영자의 부서 표(PG-33 — 마감 · 양식 상태)와 같은 무리라 부서마다 열람 기록(TACP-10)을 남기지 않는다.
+- **「병합 점검」은 밀어 보내는 알림이다.** 요청이 없으므로 받는 사람이 대상을 고르지 못하고(TACP-6·7의 걱정이 없다), 보낸 것은 사람마다 `NotifyLog`에 남는다 —
+  「기록되지 않는 열람은 구멍」(TACP-10)을 그 기록이 대신한다.
+- **기획조정실 담당이 받는 것은 사용자 결정(2026-10-08)이다** — 마감 병합이 다 끝났는지 확인하고 알리는 일을 기획조정실이 맡는다. 그 lead가 다른 부서의
+  제출물 · 제출 현황 · 병합본을 읽게 되는 것이 **아니다**(§3.3 그대로) — 새로 열리는 것은 이 요약 한 통이다. 총괄(coordinator)은 **총괄이라서** 받지는 않는다(고른 안이 아니다 —
+  총괄은 readAll로 화면에서 본다). 판정은 역할(`divisionRole`)이다 — 총괄이 기획조정실의 `lead`이기도 하면 그 lead로서 받는다(사번으로 한 번).
+- 「기획조정실」은 이름으로 찾지 않는다 — **총괄(`isCoordinator`, 활성)이 있는 부서**다(RU-68의 전사본 양식 후보와 같은 판정). 받는 사람은 `authz.ts`의
+  `mergeBatchAudience()` 하나가 정한다(TACP-12): `isOperator` ∪ 그 부서들의 `lead`, 활성 · 알림 켬 · 사번 있음, 사번으로 한 번씩.
 
 ### TACP-21 — 위로 올린 제출은 **받는 쪽이 읽는다** (v1.6 신설)
 
@@ -640,6 +671,7 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | `canUseHandoffEscape(scope)` | 화면 판정 — 비상구 링크: lead. `requireHandoffEscape`의 사람 부분과 같은 식 (v1.7.1) | 링크 없음 |
 | `unitEditorRole(scope)` | 기록 판정 — 병합본 수정 저장을 한 사람의 역할(`head`·`lead`·`operator`)을 고친 기록(`reviewJson.edits`)에 남긴다. 부서장 없는 단위에서 `operator`의 저장은 위로 가지 않는다(TACP-23 v1.7.2). 라우트가 역할 플래그를 비교하지 않게 (TACP-12) | — |
 | `messengerSinkOpen()` | **서버** 판정(역할 아님) — 가짜 알림 수신함이 열린 서버인가(`TINCASE_ENV` test·demo + `MESSENGER_SINK=on`). 수신함 경로·화면은 이것을 **신원보다 먼저** 본다 — 닫혀 있으면(운영) 누구에게나 404 (TACP-26). 그 뒤 화면은 `canOperate`, 비우기는 `requireOperator`. `authz.ts`가 아니라 `src/server/messenger-sink.ts`에 있다 — 「누가」가 아니라 「이 서버가 길을 여는가」라서 누구에게나 같은 답이다(`submit-mode.ts`와 같은 이유) | **404** |
+| `mergeBatchAudience()` | 받는 사람 판정 — 「병합 점검」 요약(HM-54): 운영자 ∪ 총괄(`isCoordinator`)이 있는 부서의 lead, 활성 · 알림 켬 · 사번 있음 (TACP-30, v1.10) | — |
 | `requireOrgRollup(headers)` | coordinator·operator — **전사 섹션 구성·파일 올리기·실패 때 [다시 시도]** (TACP-21·23) | **404** |
 | `findReadableReport(scope, id)` | 보낸 사본 **읽기** 판정 — 보낸 부서·받는 본부·readAll (TACP-21) | **404** |
 | `findReadableSectionUpload(scope, id)` | 총괄이 올린 섹션 파일 **내려받기** — 전사 취합의 문(`canOpenOrgDesk`), 취소한 파일 제외, `download` 기록 (TACP-21) | **404** |
@@ -733,6 +765,7 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | **NT-T77** | **운영(시험·시연 아님)에서 가짜 알림 수신함 경로·화면·비우기는 operator에게도 404** — `MESSENGER_SINK=on`을 줘도 · 시험 서버라도 스위치가 없으면 404 (v1.11 새로 금지된 것) |
 | **NT-T78** | **시험·시연 서버: 수신함 화면·비우기는 operator만 200** — member·head 404 (v1.11 새로 허용된 것 · 그대로 금지인 것) · 받는 경로는 신원 없이 쓰기만 |
 | **AU-T89** | **member는 병합 규칙을 읽지 못한다** — 부서 설정 화면 404 · 규칙 GET 없음 · 저장 404 (v1.6.4 — 작성 안내가 없어진 칸, 새로 금지된 것) |
+| **HM-T171** | **「병합 점검」은 운영자와 기획조정실 담당(총괄이 있는 부서의 lead)만 받는다** (v1.10 새로 허용된 것) — 다른 부서의 lead · head · member와 (lead가 아닌) 총괄은 받지 않는다(새로 금지된 것) · **병합 작업 상태는 내 부서 것만** — 남의 부서 작업 id → 404, member → 404, 내 부서 lead · head 200 (TACP-30) |
 
 새 Resource를 추가하면 **그 Resource의 격리 테스트를 같은 커밋에 넣는다.**
 

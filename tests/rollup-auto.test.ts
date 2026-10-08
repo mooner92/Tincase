@@ -213,9 +213,22 @@ async function save(who: string, key: Key, text: string, v?: { runId: string; sh
   );
 }
 
+/**
+ * [지금 병합] — 2026-10-08 2단계(HM-60b)부터 202로 줄에 넣고 바로 돌아온다. 이 시험이 보는 것은 병합 **뒤**의 일(넘김 · 사본 · 알림)이라
+ * 줄이 빌 때까지 기다린 뒤 돌려준다 — 본문에 그 작업이 만든 실행 id(`runId`)를 덧붙여(예전 200 응답과 같은 자리)
+ */
 async function mergeNow(who: string, body: Record<string, unknown> = {}) {
   const { POST } = await import('@/app/api/division/merge/route');
-  return POST(nx('/api/division/merge', who, jsonInit('POST', { isoKey, ...body })));
+  const res = (await POST(nx('/api/division/merge', who, jsonInit('POST', { isoKey, ...body })))) as Response;
+  return settledMerge(res);
+}
+async function settledMerge(res: Response): Promise<Response> {
+  if (res.status !== 202) return res;
+  const b = (await res.json()) as { jobId: string };
+  const { settleMergeQueue } = await import('@/server/merge/queue');
+  await settleMergeQueue();
+  const job = await (await db()).mergeJob.findUniqueOrThrow({ where: { id: b.jobId } });
+  return new Response(JSON.stringify({ ...b, runId: job.mergeRunId, jobStatus: job.status }), { status: 202 });
 }
 
 async function escape(who: string, level: 'unit' | 'hq') {
@@ -472,7 +485,7 @@ describe('RU-70~73 · HM-47 실·팀 — 부서장 승인이 곧 위로 가는 �
     expect((await stored(org.at(-1)!.outputPath!)).toString()).toContain('단독단 미리보기');
     // 마감 뒤 최종본 ([지금 병합]) — 판이 바뀐다
     hooks.nextMerge.set(divId.solo, '단독단 최종본');
-    expect((await mergeNow(ID.soloLead)).status).toBe(200);
+    expect((await mergeNow(ID.soloLead)).status).toBe(202);
     await settle();
     expect((await unitState('solo')).state).toBe('U3');
     expect(JSON.parse((await stored((await orgRuns()).at(-1)!.outputPath!)).toString()).find((s: string[]) => s[0] === '단독단')[1]).toContain('단독단 미리보기');
@@ -488,7 +501,7 @@ describe('RU-70~73 · HM-47 실·팀 — 부서장 승인이 곧 위로 가는 �
     const sub = (await current('u3'))!;
     const res = await mergeNow(ID.u3Lead);
     expect(res.status).toBe(409); // 사람이 고친 병합본 — 묻기 전에는 덮지 않는다 (API-55)
-    expect((await mergeNow(ID.u3Lead, { overwriteEdits: true })).status).toBe(200);
+    expect((await mergeNow(ID.u3Lead, { overwriteEdits: true })).status).toBe(202);
     await settle();
     expect((await current('u3'))!.id).toBe(sub.id);
     expect(sha(await stored(sub.filePath))).toBe(sub.sha256);
@@ -503,7 +516,7 @@ describe('RU-70~73 · HM-47 실·팀 — 부서장 승인이 곧 위로 가는 �
     expect((await unitState('u2')).state).toBe('Hf'); // 마감이 지났는데 최종본이 없다 — 미리보기는 올라가지 않는다
     hooks.nextMerge.set(divId.u2, '실둘 최종본');
     const m = await mergeNow(ID.u2Lead);
-    expect(m.status).toBe(200);
+    expect(m.status).toBe(202);
     const runId = (await m.json()).runId;
     const sub = (await current('u2'))!;
     expect([sub.basis, sub.submittedBy, sub.cause, sub.reviewId]).toEqual(['no_head', 'system', `merge_final:${runId}`, null]);
@@ -516,23 +529,23 @@ describe('RU-70~73 · HM-47 실·팀 — 부서장 승인이 곧 위로 가는 �
     expect(edited.id).not.toBe(sub.id);
     expect([edited.basis, edited.cause]).toEqual(['no_head', `edit:${runId}`]);
     // 같은 바이트로 다시 병합 두 번 — 두 번째는 새 행이 없다 (RU-02)
-    expect((await mergeNow(ID.u2Lead, { overwriteEdits: true })).status).toBe(200);
+    expect((await mergeNow(ID.u2Lead, { overwriteEdits: true })).status).toBe(202);
     const n = await prisma.reportSubmission.count({ where: { divisionId: divId.u2 } });
-    expect((await mergeNow(ID.u2Lead)).status).toBe(200);
+    expect((await mergeNow(ID.u2Lead)).status).toBe(202);
     expect(await prisma.reportSubmission.count({ where: { divisionId: divId.u2 } })).toBe(n);
     // 부서장 계정이 생기면 그 뒤로는 승인이 있어야 바뀐다 — 비활성 계정은 「없음」
     const head = await prisma.user.create({ data: { email: 'a-u2-head@test.local', name: 'u2Head', divisionId: divId.u2, divisionRole: 'head', isActive: false } });
     hooks.nextMerge.set(divId.u2, '실둘 비활성 부서장 때');
-    expect((await mergeNow(ID.u2Lead)).status).toBe(200);
+    expect((await mergeNow(ID.u2Lead)).status).toBe(202);
     expect(await prisma.reportSubmission.count({ where: { divisionId: divId.u2 } })).toBe(n + 1);
     await prisma.user.update({ where: { id: head.id }, data: { isActive: true } });
     hooks.nextMerge.set(divId.u2, '실둘 부서장 생긴 뒤');
-    expect((await mergeNow(ID.u2Lead)).status).toBe(200);
+    expect((await mergeNow(ID.u2Lead)).status).toBe(202);
     expect(await prisma.reportSubmission.count({ where: { divisionId: divId.u2 } })).toBe(n + 1);
     expect((await unitState('u2')).state).toBe('U3');
     await prisma.user.update({ where: { id: head.id }, data: { isActive: false } }); // 뒤 시험을 위해 다시 「부서장 없음」
     hooks.nextMerge.set(divId.u2, '실둘 최종');
-    expect((await mergeNow(ID.u2Lead)).status).toBe(200);
+    expect((await mergeNow(ID.u2Lead)).status).toBe(202);
     await settle();
   });
 
@@ -749,7 +762,7 @@ describe('RU-71~76 본부 — 저절로 이어 붙고, 본부장 승인이 곧 �
     expect(subs.at(-1)!.sourceRunId).toBe(run.id);
     // 본부나 자체(부서장 없음)도 올라오면 다시 만들어지고 다시 넘어간다
     hooks.nextMerge.set(divId.hq2, '본부나 자체');
-    expect((await mergeNow(ID.hq2Lead)).status).toBe(200);
+    expect((await mergeNow(ID.hq2Lead)).status).toBe(202);
     await settle();
     const after = await prisma.reportSubmission.findMany({ where: { divisionId: divId.hq2, level: 'hq' } });
     expect(after.length).toBe(subs.length + 1);
@@ -924,7 +937,7 @@ describe('RU-72 스케줄러 없이 끝까지 · RU-T130 메신저 꺼짐', () =
     const spySync = vi.spyOn(auto, 'runDueRollupSync');
     const spyMerge = vi.spyOn(merge, 'runDueMerges');
     hooks.nextMerge.set(divId.u1, '실하나 끝까지 간 판');
-    expect((await mergeNow(ID.u1Lead)).status).toBe(200);
+    expect((await mergeNow(ID.u1Lead)).status).toBe(202);
     expect((await approve(ID.u1Head, 'u1')).status).toBe(200);
     await settle();
     const { hqBoard } = await import('@/server/rollup/run');
@@ -1094,16 +1107,21 @@ describe('검증 — 비상구 뒤 되돌림 · 같은 바이트 · 동시 승�
     await settle();
   });
 
-  it('[RU-T132] 다시 병합해 같은 바이트가 나온 새 실행을 승인 → 새 사본은 없지만 응답(그리고 NT-46′)은 「올라가 있음」', async () => {
+  it('[RU-T132 · HM-T167] 다시 병합해 같은 바이트가 나온 새 실행 — 승인은 그대로 유효하다(HM-56): 「승인 뒤 바뀜」이 아니고, 다시 눌러도 「이미 승인한 판」 · 새 승인 · 새 사본 · 알림 없음', async () => {
     const prisma = await db();
+    const { latestReview } = await import('@/server/merge/review');
     await merged('solo', '단독단 같은 바이트');
     expect((await approve(ID.soloHead, 'solo')).status).toBe(200);
     await settle();
     const before = await prisma.reportSubmission.count({ where: { divisionId: divId.solo } });
+    const reviews = await prisma.mergeReview.count({ where: { divisionId: divId.solo } });
     await merged('solo', '단독단 같은 바이트'); // 새 실행, 같은 바이트
+    // 2026-10-08 HM-56 — 승인은 실행 번호가 아니라 내용에 묶인다. 예전에는 실행이 바뀌었다는 것만으로 「승인 뒤 바뀜」 · 새 승인이었다
+    expect((await latestReview(divId.solo, (await slot()).id))?.changedAfter).toBe(false);
+    expect((await unitState('solo')).state).toBe('U2'); // 승인한 판이 위에 그대로 있다
     const body = await (await approve(ID.soloHead, 'solo')).json();
-    expect(body.unchanged).toBe(false); // 새 실행에 대한 승인은 남는다
-    expect(body.handedOff?.target).toBe('총괄'); // 승인한 판은 위에 있다 — 담당자에게 「게시판에 올리세요」라고 하지 않는다
+    expect(body.unchanged).toBe(true);
+    expect(await prisma.mergeReview.count({ where: { divisionId: divId.solo } })).toBe(reviews); // 승인 · 담당자 알림(NT-46′)을 또 만들지 않는다
     expect(await prisma.reportSubmission.count({ where: { divisionId: divId.solo } })).toBe(before); // RU-02 — 같은 판·같은 근거면 새 행 없음
     await settle();
   });
@@ -1357,7 +1375,7 @@ describe('운영자 결정 a~d — 비상구 창 · 운영자 수정 · 병합 �
     const lastOf = async () => lastEditor((await prisma.mergeRun.findUniqueOrThrow({ where: { id: (await viewed('u2')).runId } })).reviewJson);
     try {
       hooks.nextMerge.set(divId.u2, '실둘 결정b 병합');
-      expect((await mergeNow(ID.u2Lead, { overwriteEdits: true })).status).toBe(200);
+      expect((await mergeNow(ID.u2Lead, { overwriteEdits: true })).status).toBe(202);
       await settle();
       const fromMerge = (await current('u2'))!;
       expect([fromMerge.basis, (await unitState('u2')).state]).toEqual(['no_head', 'H1']);
@@ -1382,7 +1400,7 @@ describe('운영자 결정 a~d — 비상구 창 · 운영자 수정 · 병합 �
       expect((await save(OP, 'u2', '실둘 운영자 또 고침')).status).toBe(200);
       expect((await current('u2'))!.id).toBe(byLead.id);
       hooks.nextMerge.set(divId.u2, '실둘 결정b 다시 병합');
-      expect((await mergeNow(ID.u2Lead, { overwriteEdits: true })).status).toBe(200);
+      expect((await mergeNow(ID.u2Lead, { overwriteEdits: true })).status).toBe(202);
       const remerged = (await current('u2'))!;
       expect(remerged.id).not.toBe(byLead.id);
       expect((await stored(remerged.filePath)).toString()).toContain('실둘 결정b 다시 병합');
@@ -1403,9 +1421,9 @@ describe('운영자 결정 a~d — 비상구 창 · 운영자 수정 · 병합 �
     } finally {
       await prisma.user.update({ where: { id: op.id }, data: { isActive: false } });
     }
-  });
+  }, 20_000); // 병합이 줄을 지나고(HM-59) 저장 · 맞추기가 여러 번 — 느린 디스크에서 5초를 넘는다
 
-  it('[RU-T141] ★ (결정 c) 수정 저장이 병합본을 쓰려는 순간 병합이 끝난다 → 병합의 쓰기·기록은 저장 뒤로 줄을 선다 · 모델이 도는 동안에는 줄을 잡지 않는다', async () => {
+  it('[RU-T141] ★ (결정 c · HM-61) 수정 저장이 병합본을 쓰려는 순간 병합이 끝난다 → 병합의 쓰기는 저장 뒤로 줄을 서고, 그 저장을 보고 **쓰지 않는다** · 모델이 도는 동안에는 줄을 잡지 않는다', async () => {
     const prisma = await db();
     const { mergedRelPath } = await import('@/server/merge');
     const { runMergeRecorded } = await import('@/server/merge/run');
@@ -1431,16 +1449,17 @@ describe('운영자 결정 a~d — 비상구 창 · 운영자 수정 · 병합 �
     }
     expect(res.status).toBe(200);
     const m = await box.merge!;
-    expect(m.status).toBe('succeeded');
+    // HM-61 (2026-10-08) — 병합의 쓰기는 저장 뒤로 줄을 섰고, 줄 안에서 그 저장(병합을 시작한 뒤의 고친 기록)을 보고 쓰지 않았다.
+    // 예전(결정 c만 있을 때)은 저장 뒤에 써서 담당자의 수정을 덮었다
+    expect(m).toMatchObject({ status: 'failed', errorText: '병합하는 동안 고친 판이 있어 덮지 않았어요' });
     const latest = await prisma.mergeRun.findFirstOrThrow({ where: { divisionId: divId.u1, weekSlotId: s.id, status: 'succeeded' }, orderBy: { startedAt: 'desc' } });
-    expect(latest.id).toBe(m.runId);
-    // 가장 최근 실행이 가리키는 파일 = 그 병합의 바이트, 고친 기록은 옛 실행에 (새 실행은 병합 결과 그대로)
-    expect((await stored(rel)).toString()).toContain('실하나 끼어든 병합');
-    expect(editsOf(await prisma.mergeRun.findUniqueOrThrow({ where: { id: before.id } }))?.saves).toBe(1);
-    expect(editsOf(latest)).toBeNull();
+    expect(latest.id).toBe(before.id);
+    expect((await stored(rel)).toString()).toContain('실하나 담당자가 고친 판');
+    expect(editsOf(latest)?.saves).toBe(1);
     await settle();
 
-    // 모델이 도는 동안(엔진이 바이트를 만드는 중)에는 줄을 잡지 않는다 — 같은 부서의 저장이 병합을 기다리지 않고 끝난다
+    // 모델이 도는 동안(엔진이 바이트를 만드는 중)에는 줄을 잡지 않는다 — 같은 부서의 저장이 병합을 기다리지 않고 끝난다.
+    // 그리고 병합은 그 저장을 덮지 않는다(HM-61)
     const w = await viewed('u1');
     const during: { status?: number } = {};
     hooks.duringMerge = async (d) => {
@@ -1448,13 +1467,14 @@ describe('운영자 결정 a~d — 비상구 창 · 운영자 수정 · 병합 �
       during.status = (await save(ID.u1Lead, 'u1', '실하나 모델이 도는 동안 고침', w)).status;
     };
     try {
-      expect((await runMergeRecorded(divId.u1, s.id, 'manual', ID.u1Lead)).status).toBe('succeeded');
+      expect((await runMergeRecorded(divId.u1, s.id, 'manual', ID.u1Lead)).status).toBe('failed');
     } finally {
       hooks.duringMerge = undefined;
     }
     expect(during.status).toBe(200);
+    expect((await stored(rel)).toString()).toContain('실하나 모델이 도는 동안 고침');
     await settle();
-  });
+  }, 20_000); // 병합이 줄을 지나고(HM-59) 저장 · 맞추기가 여러 번 — 느린 디스크에서 5초를 넘는다
 
   it('[RU-T141] (엇갈림 — 검증) 병합이 줄 안에서 쓰고 기록하는 사이에 온 담당자 저장·부서장 승인은 그 뒤로 줄을 서고, 옛 판을 본 것이라 409 — 병합 결과를 덮지도, 옛 판을 승인하지도 않는다', async () => {
     const prisma = await db();
@@ -1499,7 +1519,7 @@ describe('운영자 결정 a~d — 비상구 창 · 운영자 수정 · 병합 �
     expect(editsOf(latest)).toBeNull();
     expect(await reviews()).toBe(reviewsBefore);
     await settle();
-  });
+  }, 20_000); // 병합이 줄을 지나고(HM-59) 저장 · 맞추기가 여러 번 — 느린 디스크에서 5초를 넘는다
 
   it('[RU-T142] ★ (결정 d) 본부본 다시 만들기가 실패해도(Qf) 본부장은 마지막 본부본(본 판)을 승인한다 — 화면에 [승인] · 본부 사본 = 그 실행 · 승인 뒤에는 없다', async () => {
     const prisma = await db();

@@ -138,12 +138,14 @@ export function requireViewedVersion(
 }
 
 /**
- * HM-47 — 이 실행의 **이 판**을 이미 승인했나. 같은 판을 두 번 승인하면 담당자에게 알림이 두 번 간다 —
+ * HM-47 — **이 판**을 이미 승인했나. 같은 판을 두 번 승인하면 담당자에게 알림이 두 번 간다 —
  * [승인]을 두 번 누른 것도, 부서장이 아무것도 안 바꾸고 [수정 저장]을 한 번 더 누른 것도 같은 일이다.
+ * HM-56a (2026-10-08) — 판은 **내용**(sha)이다. 가장 최근 승인의 sha가 같으면 실행 번호가 달라도 같은 판이다 — 같은 입력으로
+ * 다시 병합해 바이트가 같은 병합본에 [승인]을 또 누르면 「이미 승인한 판」이다.
  */
 export async function alreadyApproved(run: Pick<MergeRun, 'id' | 'divisionId' | 'weekSlotId'>, sha: string): Promise<boolean> {
   const last = await prisma.mergeReview.findFirst({
-    where: { divisionId: run.divisionId, weekSlotId: run.weekSlotId, mergeRunId: run.id, ...UNIT_REVIEW },
+    where: { divisionId: run.divisionId, weekSlotId: run.weekSlotId, ...UNIT_REVIEW },
     orderBy: NEWEST_FIRST,
   });
   return !!last && last.sha256 === sha;
@@ -280,8 +282,10 @@ export async function latestReview(divisionId: string, weekSlotId: string): Prom
     where: { divisionId, weekSlotId, status: 'succeeded', outputPath: { not: null } },
     orderBy: { startedAt: 'desc' },
   });
-  let changedAfter = !run || run.id !== review.mergeRunId;
-  if (!changedAfter && run?.outputPath) {
+  // HM-56a — 승인은 실행 번호가 아니라 **내용**에 묶인다. 같은 입력으로 다시 병합해 바이트가 같으면 승인은 그대로다(예전에는 실행 번호가
+  // 다르다는 것만으로 「승인 뒤 바뀜」이었다 — 시뮬레이션 p06). 내용이 다르면 실행이 같아도(담당자 수정 저장) 「승인 뒤 바뀜」이다
+  let changedAfter = true;
+  if (run?.outputPath) {
     try {
       changedAfter = sha256(await readStoredFile(run.outputPath)) !== review.sha256;
     } catch {
@@ -305,18 +309,24 @@ export async function latestReview(divisionId: string, weekSlotId: string): Prom
   };
 }
 
-/** NT-47 — 이 실행(최종본)에 대한 승인이 있나. 마감 뒤 알림이 문구를 고르는 데 쓴다 */
+/**
+ * NT-47 — 이 실행(최종본)의 병합본에 대한 승인이 있나. 마감 뒤 알림이 문구를 고르는 데 쓴다.
+ * HM-56a (2026-10-08) — 그 부서·주차의 **가장 최근 승인**을 보고, 그 승인의 sha가 이 병합본과 같으면 유효하다. 실행 번호는 보지 않는다 —
+ * 승인 뒤 같은 입력으로 다시 병합해 바이트가 같으면 +10분 검토 요청을 다시 보내지 않고 +30분 안내는 「승인 완료」라고 한다.
+ * 다른 판을 승인했었으면 `changedAfter` — 「승인한 뒤 병합본이 바뀌었어요」(마감 전 미리보기를 승인했는데 최종본이 다를 때도).
+ */
 export async function approvalOf(run: Pick<MergeRun, 'id' | 'divisionId' | 'weekSlotId' | 'outputPath'>) {
   const review = await prisma.mergeReview.findFirst({
-    where: { divisionId: run.divisionId, weekSlotId: run.weekSlotId, mergeRunId: run.id, ...UNIT_REVIEW },
+    where: { divisionId: run.divisionId, weekSlotId: run.weekSlotId, ...UNIT_REVIEW },
     orderBy: NEWEST_FIRST,
   });
   if (!review) return null;
   /*
    * 승인한 **판**인가 — 담당자가 같은 실행의 파일을 고치면(API-50) 실행 id는 그대로다.
    * 화면(`latestReview`)은 sha로 「승인 뒤 바뀜」을 보이는데 알림만 「승인 완료」라고 하면 둘이 갈라진다.
+   * 파일을 못 읽으면 같은 실행에 대한 승인만 믿는다 — 판을 확인할 수 없으니 실행 번호가 마지막 근거다.
    */
-  let changedAfter = false;
+  let changedAfter = review.mergeRunId !== run.id;
   if (run.outputPath) {
     try {
       changedAfter = sha256(await readStoredFile(run.outputPath)) !== review.sha256;

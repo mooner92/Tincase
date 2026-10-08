@@ -263,6 +263,8 @@ export const PUT = handler(async (req: NextRequest) => {
       where: { id: run.id },
       data: {
         rowCounts: JSON.stringify(rowCounts),
+        // HM-56e — 파일을 다시 썼으니 기록도 그 바이트를 가리킨다. 점검 요약(HM-54)이 「디스크 파일 = 기록」을 이것으로 본다
+        outputSha: savedSha,
         finishedAt: savedAt,
         ...(record && {
           reviewJson: withEdit(run.reviewJson, {

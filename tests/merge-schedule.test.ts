@@ -113,13 +113,23 @@ beforeEach(async () => {
   vi.useFakeTimers({ toFake: ['Date'] });
   outbox.length = 0;
   runMergeMock.mockClear();
-  // 각 테스트는 자기 부서만 본다 — 앞 테스트의 부서는 끈다
+  // 각 테스트는 자기 부서만 본다 — 앞 테스트의 부서는 끈다. 줄(HM-59)도 비운다
   const { prisma } = await import('@/server/db');
   await prisma.division.updateMany({ data: { isActive: false } });
+  await prisma.mergeJob.deleteMany({});
+  const { resetMergeQueueForTest } = await import('@/server/merge/queue');
+  resetMergeQueueForTest();
 });
-afterEach(() => {
+afterEach(async () => {
+  await settled();
   vi.useRealTimers();
 });
+
+/** HM-60a — 스케줄러는 줄에 넣기만 한다. 병합은 줄의 일꾼이 하므로 시험은 줄이 빌 때까지 기다린다 */
+async function settled() {
+  const { settleMergeQueue } = await import('@/server/merge/queue');
+  await settleMergeQueue();
+}
 afterAll(() => {
   rmSync(TMP_STORAGE, { recursive: true, force: true });
 });
@@ -137,7 +147,8 @@ describe('HM-49 · NT-51 마감 열기가 닫힌 뒤 — 사람이 고친 최종
 
     vi.setSystemTime(at(51));
     const r = await runDueMerges(at(51));
-    expect(r.ran).toBe(0);
+    expect(r.queued).toBe(0);
+    await settled();
     expect(runMergeMock).not.toHaveBeenCalled(); // 실장 수정이 그대로 남는다
     expect(await prisma.mergeRun.count({ where: { divisionId: div.id } })).toBe(1);
 
@@ -176,7 +187,8 @@ describe('HM-49 · NT-51 마감 열기가 닫힌 뒤 — 사람이 고친 최종
     await prisma.slotOpening.create({ data: { divisionId: a.div.id, weekSlotId: slotId, openUntil: at(50), openedBy: '담당' } });
     await submit(a.div.id, a.lead.id, at(30));
     vi.setSystemTime(at(51));
-    expect((await runDueMerges(at(51))).ran).toBe(1);
+    expect((await runDueMerges(at(51))).queued).toBe(1);
+    await settled();
     expect(outbox).toHaveLength(0);
 
     // 마감 **전** 미리보기를 고쳤어도, 마감이 오면 최종본은 반드시 한 번 만든다
@@ -186,7 +198,8 @@ describe('HM-49 · NT-51 마감 열기가 닫힌 뒤 — 사람이 고친 최종
     const s2 = await submit(b.div.id, b.member.id, at(-120));
     await finalRun(b.div.id, at(-90), [s2.id], true);
     vi.setSystemTime(at(2));
-    expect((await runDueMerges(at(2))).ran).toBe(1);
+    expect((await runDueMerges(at(2))).queued).toBe(1);
+    await settled();
     expect(runMergeMock).toHaveBeenCalledTimes(1);
   });
 
@@ -205,7 +218,8 @@ describe('HM-49 · NT-51 마감 열기가 닫힌 뒤 — 사람이 고친 최종
     await prisma.slotOpening.create({ data: { divisionId: n.div.id, weekSlotId: slotId, openUntil: at(50), openedBy: '담당' } });
 
     vi.setSystemTime(at(51));
-    expect((await runDueMerges(at(51))).ran).toBe(0);
+    expect((await runDueMerges(at(51))).queued).toBe(0);
+    await settled();
     expect(runMergeMock).not.toHaveBeenCalled();
     expect(outbox).toHaveLength(0);
   });
@@ -248,12 +262,16 @@ describe('HM-50 마감 뒤 병합과 알림이 서로를 기다리지 않는다'
       heads.push(x.head.employeeNo!);
     }
 
-    // 14:01 한 번의 주기 — 스케줄러(instrumentation)와 같은 배선: 부서 하나 끝날 때마다 안내를 다시 본다
+    // 14:01 한 번의 주기 — 2단계(HM-60)부터 스케줄러는 줄에 넣기만 하고, 줄의 일꾼이 부서 하나 끝날 때마다 안내를 다시 본다
+    // (스케줄러가 켜진 서버에서 기동 때 거는 고리와 같다 — installMergeQueueHooks)
+    const { setMergeQueueHooks } = await import('@/server/merge/queue');
+    setMergeQueueHooks({ afterEach: async () => void (await runDueMergeNotices()) });
     vi.setSystemTime(at(1));
-    const { ran } = await runDueMerges(at(1), { afterEach: async () => void (await runDueMergeNotices()) });
+    const { queued } = await runDueMerges(at(1));
+    await settled();
     const loopEnd = Date.now();
     await runDueMergeNotices(); // 주기 끝의 판정
-    expect(ran).toBe(13);
+    expect(queued).toBe(13);
     expect(loopEnd - at(1).getTime()).toBe(13 * MERGE_MS.value); // 마지막 병합은 14:22:40에 끝났다
 
     const reviews = outbox.filter((m) => m.subject.includes('검토 부탁드려요'));

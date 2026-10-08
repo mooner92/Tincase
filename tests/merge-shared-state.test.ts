@@ -41,6 +41,19 @@ describe('모듈 사본이 달라도 표는 하나 (Next 번들 층)', () => {
     again!();
   });
 
+  it('[HM-T163] (HM-59d) 줄의 일꾼도 하나다 — 한 사본이 깨운 일꾼이 돌고 있으면 다른 사본은 새 일꾼을 세우지 않고 그 일꾼을 돌려받는다', async () => {
+    // DB는 없다 — 일꾼은 첫 집기에서 오류를 로그로 남기고 쉰다. 여기서 보는 것은 「하나」뿐이다
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+    const a = await import('@/server/merge/queue');
+    vi.resetModules();
+    const b = await import('@/server/merge/queue');
+    expect(b).not.toBe(a);
+    const first = a.kickMergeQueue();
+    expect(b.kickMergeQueue()).toBe(first);
+    await first;
+    await b.settleMergeQueue();
+  });
+
   it('[HM-T149] 한 사본이 문을 쥐고 있으면 다른 사본의 호출은 줄을 선다 — 모델 서버에 동시에 둘이 들어가지 않는다', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     let inFlight = 0;

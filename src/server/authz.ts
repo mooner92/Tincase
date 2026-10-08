@@ -179,6 +179,50 @@ export function canOperate(user: Pick<User, 'isOperator'>): boolean {
   return user.isOperator;
 }
 
+/** HM-54 · TACP-30 — 「병합 점검」 요약을 받는 사람 한 명 */
+export interface MergeBatchRecipient {
+  id: string;
+  name: string;
+  employeeNo: string;
+  divisionId: string;
+  /** 운영자인가 — 링크(`/ops` 「병합 줄」)를 붙일지 정한다. 기획조정실 담당은 그 화면을 열 수 없다 */
+  operator: boolean;
+}
+
+/**
+ * TACP-30 (v1.10) — 「병합 점검」 요약(HM-54)을 **누가 받나.** 운영자 + 기획조정실 담당.
+ *
+ * 기획조정실은 이름으로 찾지 않는다 — **총괄(`isCoordinator`, 활성)이 있는 부서**다(RU-68 전사본 양식 후보와 같은 판정). 그 부서의 `lead`가
+ * 받는다(사용자 결정 2026-10-08 — 마감 병합이 다 끝났는지 확인하고 알리는 일을 기획조정실이 맡는다). 총괄은 총괄이라서 받지는 않는다(고른 안이 아니다) —
+ * 판정은 역할(`divisionRole`)이라, 총괄이 그 부서의 lead이기도 하면 lead로서 받는다.
+ * 그 lead가 남의 부서 문서를 읽게 되는 것이 아니다 — 요약은 부서 이름과 상태뿐이다(§3.3 그대로).
+ * 알림 공통 조건: 활성 · 알림 켬(NT-20) · 사번 있음(NT-01). 한 사람이 둘 다여도 한 번(사번으로).
+ */
+export async function mergeBatchAudience(): Promise<MergeBatchRecipient[]> {
+  const coordDivisions = await prisma.division.findMany({
+    where: { users: { some: { isCoordinator: true, isActive: true } } },
+    select: { id: true },
+  });
+  const users = await prisma.user.findMany({
+    where: {
+      isActive: true,
+      notifyEnabled: true,
+      employeeNo: { not: null },
+      OR: [{ isOperator: true }, { divisionRole: 'lead', divisionId: { in: coordDivisions.map((d) => d.id) } }],
+    },
+    select: { id: true, name: true, employeeNo: true, divisionId: true, isOperator: true },
+    orderBy: { id: 'asc' },
+  });
+  const seen = new Set<string>();
+  const out: MergeBatchRecipient[] = [];
+  for (const u of users) {
+    if (!u.employeeNo || seen.has(u.employeeNo)) continue;
+    seen.add(u.employeeNo);
+    out.push({ id: u.id, name: u.name, employeeNo: u.employeeNo, divisionId: u.divisionId, operator: canOperate(u) });
+  }
+  return out;
+}
+
 /**
  * TACP-20 — 주차 마감 일정을 바꿀 수 있는가 (총괄·운영자).
  *
