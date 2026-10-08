@@ -652,6 +652,8 @@ describe('RU-71~76 본부 — 저절로 이어 붙고, 본부장 승인이 곧 �
     const lastOrg = (await orgRuns()).at(-1)!;
     expect(lastOrg.cause).toBe(`hq_handoff:${sub.id}`);
     expect(await causeLabel(lastOrg.cause)).toBe('본부가 승인으로');
+    // 실패 뒤 [다시 시도]로 만든 판의 상태 줄도 「무엇 때문에」로 읽힌다 — 버튼 이름(「다시 시도」)이 성공 줄에 남지 않게
+    expect(await causeLabel('retry')).toBe('다시 시도해서');
     // 전사본 — 본부가 승인해 보낸 판의 실·팀 사본으로
     const org = JSON.parse((await stored(lastOrg.outputPath!)).toString()) as [string, string | null][];
     expect(org.map((s) => s[0])).toEqual(['본부가(실하나)', '본부가(실둘)', '본부나', '본부나(실셋)', '단독단']);

@@ -326,7 +326,8 @@ export async function causeLabel(cause: string | null): Promise<string> {
       tree: '조직이 바뀌어서',
       sections: '섹션 구성이 바뀌어서',
       upload: '섹션 파일이 바뀌어서',
-      retry: '다시 시도',
+      // 「다시 시도」만 쓰면 성공한 상태 줄에 버튼 이름이 남아 아직 누를 것이 있는 것처럼 읽힌다 — 다른 사건처럼 「~해서」
+      retry: '다시 시도해서',
       rollup_enabled: '3단계를 켜서',
     } as Record<string, string>
   )[kind] ?? '';
