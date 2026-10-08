@@ -15,7 +15,7 @@
  *   3. 시드는 표식(감사 기록 `guide_seed` + 이번 실행의 nonce)을 남기고, 찍기는 표식이 맞을 때만 시작한다
  *
  * 부서 이름은 공개 조직도의 것이다(사람 이름 아님). 사람은 전부 @example.invalid.
- * 조직·사람·업무일지는 `scripts/fake-org.ts`에 있다 — 운영회의 시연 서버(`scripts/demo-seed.ts`, RU-45)와 같은 사람들이다.
+ * 조직·사람·업무일지는 `scripts/fake-org.ts`에 있다 — 운영회의 시연 데이터(`scripts/demo-seed.ts`, RU-45 — 11112 시연 모드)와 같은 사람들이다.
  * 비밀번호는 매번 임의로 만든다 — 로그인은 세션 토큰으로 한다(공개 저장소에 비밀번호 모양의 문자열을 두지 않는다).
  */
 import path from 'node:path';
@@ -113,7 +113,7 @@ async function seed() {
   const now = new Date();
   const lastWeek = new Date(now.getTime() - 7 * 86400_000);
 
-  // ── 부서 · 사람 · 양식 ── (scripts/fake-org.ts — 시연 서버와 같은 사람들)
+  // ── 부서 · 사람 · 양식 ── (scripts/fake-org.ts — 시연 데이터와 같은 사람들)
   const org = await createFakeOrg(template, await hashPassword(randomBytes(18).toString('base64url')));
   const { div, roles, ai, pco, rmo, ca } = org;
   const rmoLead = org.person['rm-lead'];

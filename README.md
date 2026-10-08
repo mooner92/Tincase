@@ -85,7 +85,7 @@ Spec Driven Development — 스펙이 먼저, 코드가 나중. 테스트 501개
 | ★ | [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md) | 미결 사항 |
 | | [CHANGELOG.md](CHANGELOG.md) | 릴리스 이력 |
 | | [docs/DEPLOY.md](docs/DEPLOY.md) | 배포·운영 절차 |
-| | [docs/DEMO.md](docs/DEMO.md) | 11/2 운영회의 시연 서버(11113, 가짜 인원) — 준비·리허설·당일 절차 |
+| | [docs/DEMO.md](docs/DEMO.md) | 11/2 운영회의 시연 — 테스트 서버(11112)를 가짜 인원 데이터로 전환·되돌리기, 준비·리허설·당일 절차 |
 | ★ | [ROADMAP.md](ROADMAP.md) | 작업 순서 |
 
 ### 설계 결정 (ADR)
@@ -137,7 +137,7 @@ tincase/
 
 ## 지금 필요한 것
 
-- 🟡 **3단계 취합 시연** — 11/2(월) 운영회의 목표. 개발은 테스트 서버, 강당 화면은 가짜 인원만 있는 시연 서버(11113) — [DEMO](docs/DEMO.md) · [S-12 §9a](docs/spec/12-org-rollup.md)
+- 🟡 **3단계 취합 시연** — 11/2(월) 운영회의 목표. 개발은 테스트 서버(11112), 강당 화면도 같은 11112를 가짜 인원만 있는 **시연 모드**로 바꿔 띄운다(별도 포트 없음) — [DEMO](docs/DEMO.md) · [S-12 §9a](docs/spec/12-org-rollup.md)
 - 🟡 **다음 배포 전 운영 작업** — 백업 크론·fstab 줄 반영([DEPLOY](docs/DEPLOY.md) §7), 빌드 전 디스크 정리(§2b)
 
 미결 목록: [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md) *(2026-08 이후 갱신 안 됨)*

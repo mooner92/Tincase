@@ -84,7 +84,10 @@ export function parseUntil(s: string, now: Date): Date {
 
 // ── 경로 ────────────────────────────────────────────────────────────────────
 
-/** 시연 서버의 데이터 디렉터리 — docker-compose.demo.yml의 볼륨 */
+/**
+ * 시연 데이터 디렉터리 — docker-compose.test.yml을 시연 모드(`TINCASE_TEST_MODE=demo`)로 띄울 때 11112에 붙는 볼륨.
+ * 평소 11112의 볼륨(/data/worklog-test)은 운영 사본(실명)이라 여기와 겹치면 안 된다 — tests/demo-seed.test.ts RU-T85
+ */
 export const DEMO_ROOT = '/data/worklog-demo';
 
 const inside = (p: string, root: string) => p.startsWith(root.endsWith(path.sep) ? root : root + path.sep);
