@@ -2,21 +2,22 @@
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { requirePageScope } from '@/server/page-scope';
-import { HttpError, resolveHqView, rollupNav } from '@/server/authz';
+import { canUseHandoffEscape, HttpError, isReviewer, resolveHqView, rollupNav } from '@/server/authz';
 import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
 import { OrderList, RunCard } from '@/components/RollupDesk';
-import { ReportSubmitCard } from '@/components/ReportSubmitCard';
 import { WeekPicker } from '@/components/WeekPicker';
-import { hqBoard } from '@/server/rollup/run';
-import { reportState } from '@/server/rollup/report';
-import { rollupSlot } from '@/server/rollup/slot';
-import { kst, runView, unitRow, weekOptions } from '@/server/rollup/view';
-import { hqApproval, stageLabels } from '@/server/rollup/notices';
 import { HqApprovalCard } from '@/components/HqApprovalCard';
-import { isReviewer } from '@/server/authz';
+import { hqBoard } from '@/server/rollup/run';
+import { readRepairHq } from '@/server/rollup/auto';
+import { escapeOpensAt } from '@/server/rollup/handoff';
+import { rollupSlot } from '@/server/rollup/slot';
+import { stageTimes } from '@/server/rollup/schedule';
+import { kst, runView, unitRow, weekOptions } from '@/server/rollup/view';
+import { stageLabels } from '@/server/rollup/notices';
 import { STAGE_HQ, STAGE_UNIT } from '@/lib/rollup-stages';
+import { toKstIso } from '@/lib/week';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,20 +36,18 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
   }
   const { node, canWrite } = view;
   const slot = await rollupSlot(sp.isoKey ?? null);
-  const [board, weeks, nav, stages, approval] = await Promise.all([
-    hqBoard(node, slot),
-    weekOptions(slot),
-    rollupNav(scope),
-    stageLabels(slot),
-    hqApproval(node.node.id, slot),
-  ]);
-  const hqReport = canWrite ? await reportState(node.node.id, slot, 'hq') : null;
+  // RU-72 — 그리기 **전에** 맞춘다(읽기 수리). 스케줄러가 꺼진 테스트 서버에서도 본부장은 연 순간 지금까지 온 것이 이어 붙은 판을 본다
+  await readRepairHq(node, slot);
+  const [board, weeks, nav, stages, times] = await Promise.all([hqBoard(node, slot), weekOptions(slot), rollupNav(scope), stageLabels(slot), stageTimes(slot)]);
   const sent = board.units.filter((u) => u.report).length;
+  const missing = board.units.filter((u) => !u.report).map((u) => u.division.nameKo);
   const baseHref = canWrite ? '/hq' : `/hq?node=${encodeURIComponent(node.node.slug)}`;
-  // RU-55 · CP-99 — 본부장에게 승인할 본부본이 있으면 그것이 주 버튼이고, [총괄에 제출]은 승인 뒤에 주 버튼이 된다
+  // RU-55 — [검토 완료 · 승인]은 본부의 head에게만 (requireHqReviewer와 같은 판정 — TACP-9)
   const canApprove = canWrite && isReviewer(scope);
-  const awaitingApproval =
-    canApprove && board.lastRun?.status === 'succeeded' && (!approval || approval.changedAfter);
+  // RU-77 — 본부 lead의 비상구. 「본부 → 총괄」 기한 15분 전부터만 그린다
+  const opens = escapeOpensAt(times.hqDue);
+  const escape = canWrite && canUseHandoffEscape(scope) && board.hasHead ? { open: new Date() >= opens, opensAtKst: toKstIso(opens).slice(11, 16) } : null;
+  const current = runView(board.current);
 
   return (
     <div className="flex min-h-screen flex-col">
@@ -73,7 +72,7 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
             <p className="page-sub">
               {/* RU-59 — 「전사」 머리글·일정 카드와 같은 이름 한 쌍 */}
               {STAGE_UNIT} {stages.unitDueKo} · {STAGE_HQ} <strong className="font-semibold text-ink">{stages.hqDueKo}</strong>
-              {' · '}산하 {board.units.length}곳 중 <strong className="font-semibold text-ink">{sent}곳 제출</strong>
+              {' · '}산하 {board.units.length}곳 중 <strong className="font-semibold text-ink">{sent}곳 올라옴</strong>
               {!canWrite && <span> · 읽기 전용</span>}
             </p>
           </div>
@@ -89,7 +88,7 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
           </div>
         </div>
 
-        {/* PG-54 — 카드 둘: 산하 제출·순서 / 본부본(결과 · 본부장 승인 · 총괄에 제출) */}
+        {/* PG-54 · RU-82 — 카드 둘: 산하 현황·순서 / 본부본(저절로 이어 붙음 · 본부장 승인 = 총괄로) */}
         <div className="mt-6 space-y-4 lg:space-y-6">
           <OrderList
             key={board.units.map((u) => u.division.id).join()}
@@ -100,40 +99,34 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
             pageBreak={board.node.pageBreak}
             self={{ value: board.node.self, nodeId: node.node.id, nodeName: node.node.nameKo }}
             unitWord="실·팀"
+            approved={!!board.approval && !board.approval.changedAfter}
           />
           <RunCard
-            run={runView(board.lastRun)}
-            canWrite={canWrite}
-            runUrl="/api/rollup/hq"
+            current={current}
+            failed={board.lastRun?.status === 'failed' ? runView(board.lastRun) : null}
+            arrived={{ n: sent, of: board.units.length, missing }}
+            canRetry={canWrite}
             isoKey={slot.isoKey}
-            ready={sent}
-            title="아직 이어 붙이지 않았습니다"
-            resultWord="본부본"
           >
-            {/* RU-55 — 본부장 승인. 버튼은 본부의 head에게만 (HM-47과 같은 규칙) */}
-            {board.lastRun?.status === 'succeeded' && (
-              <HqApprovalCard isoKey={slot.isoKey} approval={approval} canApprove={canApprove} />
-            )}
-            {hqReport && (
-              <ReportSubmitCard
-                bare
+            {current && (
+              <HqApprovalCard
                 isoKey={slot.isoKey}
-                primary={!awaitingApproval}
-                state={{
-                  ...hqReport,
-                  current: hqReport.current && { ...hqReport.current, submittedAtKst: kst(hqReport.current.submittedAt)! },
-                }}
+                state={board.state}
+                approval={board.approval}
+                viewed={current.sha256 ? { runId: current.id, sha256: current.sha256 } : null}
+                canApprove={canApprove}
+                hasHead={board.hasHead}
+                missing={missing}
+                hqReport={
+                  board.hqReport && { atKst: kst(board.hqReport.submittedAt)!, basis: board.hqReport.basis, by: board.hqReport.submittedBy }
+                }
+                escape={escape}
               />
-            )}
-            {!canWrite && board.hqReport && (
-              <p className="card-section text-sm text-body">
-                총괄에 제출됨 · {kst(board.hqReport.submittedAt)} · {board.hqReport.submittedBy}
-              </p>
             )}
           </RunCard>
           <p className="px-1 text-xs leading-5 text-muted">
-            본부본은 여기서 고치지 않습니다 — 단위 안의 내용은 그 실·팀의 것입니다. 고칠 곳이 있으면 그 실·팀이 고쳐 다시
-            제출하고, 여기서 다시 이어 붙이세요.
+            본부본은 여기서 고치지 않습니다 — 단위 안의 내용은 그 실·팀의 것입니다. 고칠 곳이 있으면 그 실·팀이 고쳐 다시 승인하면
+            여기에 저절로 반영됩니다.
           </p>
         </div>
       </main>

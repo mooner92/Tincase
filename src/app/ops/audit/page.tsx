@@ -31,7 +31,8 @@ const ACTION_KO: Record<string, { label: string; tone: 'normal' | 'watch' | 'str
   deadline_override: { label: '마감 변경', tone: 'watch' },
   report_submit: { label: '위로 제출', tone: 'normal' },
   report_withdraw: { label: '제출 취소', tone: 'watch' },
-  rollup: { label: '이어 붙이기', tone: 'normal' },
+  // 2026-10-08(ADR-0015) — 본부본·전사본은 자동(`system`)으로 만들어진다. 본부장 승인도 같은 동작 이름(rollup · action approve)으로 남는다
+  rollup: { label: '본부본·전사본', tone: 'normal' },
   rollup_order: { label: '순서 변경', tone: 'watch' },
   submission_revise: { label: '제출물 고침', tone: 'watch' },
   approve: { label: '승인', tone: 'normal' },
@@ -200,7 +201,8 @@ export default async function AuditPage({
                       </td>
                       <td className="whitespace-nowrap">
                         <Link href={qs({ actor: l.actor })} className="text-ink hover:underline">
-                          {l.actor.replace('@kei.re.kr', '')}
+                          {/* TACP-23 — 자동 진행의 기록은 actor 'system'. 누가 일으켰는지는 대상 칸의 causedBy에 있다 */}
+                          {l.actor === 'system' ? '자동' : l.actor.replace('@kei.re.kr', '')}
                         </Link>
                       </td>
                       <td className="whitespace-nowrap">

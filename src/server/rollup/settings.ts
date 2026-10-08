@@ -96,7 +96,8 @@ export const scheduleInput = z
   .strict();
 export type ScheduleInput = z.infer<typeof scheduleInput>;
 
-export async function setOrgSchedule(scope: Scope, input: ScheduleInput) {
+/** 켰는지(꺼져 있다가 켜짐)를 돌려준다 — RU-79 그 순간 이번 주를 맞춘다 */
+export async function setOrgSchedule(scope: Scope, input: ScheduleInput): Promise<{ turnedOn: boolean }> {
   const before = await loadOrgSetting();
   const unit = input.unitDueMinutes ?? before.unitDueMinutes;
   const hq = input.hqDueMinutes ?? before.hqDueMinutes;
@@ -111,4 +112,5 @@ export async function setOrgSchedule(scope: Scope, input: ScheduleInput) {
     before: { enabled: before.enabled, unitDueMinutes: before.unitDueMinutes, hqDueMinutes: before.hqDueMinutes },
     after: { enabled: input.enabled ?? before.enabled, unitDueMinutes: unit, hqDueMinutes: hq },
   });
+  return { turnedOn: !before.enabled && input.enabled === true };
 }

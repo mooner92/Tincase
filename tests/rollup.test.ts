@@ -109,7 +109,7 @@ async function topParas(bytes: Buffer) {
   return out;
 }
 
-/** 본부 이어 붙이기와 같은 부름 — 사본 하나 = 섹션 하나 (server/rollup/run.ts runHqRollup) */
+/** 본부 이어 붙이기와 같은 부름 — 사본 하나 = 섹션 하나 (server/rollup/run.ts composeHq) */
 const hq = (template: Buffer, sections: { title: string; source: Buffer }[], pageBreak = true) =>
   composeOrgDocument(template, sections, { pageBreak });
 

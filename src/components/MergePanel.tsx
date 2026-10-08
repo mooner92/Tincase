@@ -81,6 +81,7 @@ export function MergePanel({
   canDownload,
   canEditMerged,
   canApprove = false,
+  handoffTo = null,
   submitted,
 }: {
   state: MergeStateView;
@@ -92,6 +93,11 @@ export function MergePanel({
   canEditMerged: boolean;
   /** HM-47 — [고칠 것 없음 · 승인]. 이 부서의 head에게만 (TACP-16) */
   canApprove?: boolean;
+  /**
+   * RU-80 — 3단계에서 승인이 곧 위로 가는 제출이면 받는 곳(「기획경영본부」·「총괄」). 없으면 null —
+   * [승인] 옆 설명이 「승인하면 바로 ○○에 올라갑니다」가 된다
+   */
+  handoffTo?: string | null;
   submitted: number;
 }) {
   const [busy, setBusy] = useState(false);
@@ -113,18 +119,25 @@ export function MergePanel({
       body: JSON.stringify({ isoKey, runId: state.runId, sha256: state.sha256 }),
     })
       .then(async (r) => {
-        const b = (await r.json().catch(() => ({}))) as { message?: string; notified?: number; unchanged?: boolean };
+        const b = (await r.json().catch(() => ({}))) as {
+          message?: string;
+          notified?: number;
+          unchanged?: boolean;
+          handedOff?: { target: string } | null;
+        };
         if (!r.ok) {
           setErr(b.message ?? '승인하지 못했습니다.');
           return;
         }
-        // 알림이 실제로 나갔을 때만 「알렸습니다」라고 말한다
+        // 알림이 실제로 나갔을 때만 「알렸습니다」라고 말한다. 3단계면 승인이 곧 제출이다 — 어디로 갔는지를 먼저 (RU-80 · HM-T145)
         setNote(
           b.unchanged
             ? '이미 승인한 판입니다'
-            : (b.notified ?? 0) > 0
-              ? '승인 완료 — 담당자에게 알렸습니다'
-              : '승인 기록됨 — 알림은 보내지 않았어요',
+            : b.handedOff
+              ? `승인했어요 — ${b.handedOff.target}에 올라갔어요${(b.notified ?? 0) > 0 ? ' · 담당자에게 알렸습니다' : ''}`
+              : (b.notified ?? 0) > 0
+                ? '승인 완료 — 담당자에게 알렸습니다'
+                : '승인 기록됨 — 알림은 보내지 않았어요',
         );
         router.refresh();
       })
@@ -249,6 +262,8 @@ export function MergePanel({
                 {state.review.changedAfter && (
                   <p className="mt-1 text-muted">
                     승인한 뒤 병합본이 다시 만들어졌거나 고쳐졌습니다 — 지금 판은 승인한 판과 다릅니다.
+                    {/* RU-80 · U3 — 담당자의 저장·다시 병합은 위로 가지 않는다. 위에는 승인한 판이 그대로 있다 */}
+                    {handoffTo && ` 부서장이 다시 승인해야 ${handoffTo}에 올라갑니다(지금 ${handoffTo}에는 승인한 판이 있습니다).`}
                   </p>
                 )}
                 {openReview && (
@@ -262,7 +277,11 @@ export function MergePanel({
             ) : (
               <p className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="chip chip-muted">부서장 승인 전</span>
-                <span className="text-muted">부서장이 고쳐 저장하거나 [승인]을 누르면 담당자에게 알림이 갑니다</span>
+                <span className="text-muted">
+                  {handoffTo
+                    ? `부서장이 [승인]하거나 고쳐 저장하면 바로 ${handoffTo}에 올라갑니다`
+                    : '부서장이 고쳐 저장하거나 [승인]을 누르면 담당자에게 알림이 갑니다'}
+                </span>
               </p>
             )}
           </div>
@@ -328,7 +347,11 @@ export function MergePanel({
           </div>
         )}
         {approveNow && (
-          <p className="mt-2 text-sm text-muted">고칠 곳이 있으면 [내용 보기]에서 고쳐 저장하세요 — 저장이 곧 승인입니다.</p>
+          <p className="mt-2 text-sm text-muted">
+            {/* RU-80 — 승인이 곧 제출이다. 누르기 전에 무엇이 일어나는지 같은 줄에서 */}
+            {handoffTo && <>승인하면 바로 {handoffTo}에 올라갑니다. </>}
+            고칠 곳이 있으면 [내용 보기]에서 고쳐 저장하세요 — 저장이 곧 승인입니다.
+          </p>
         )}
       </div>
 

@@ -5,7 +5,8 @@
 //            들어간 그 실의 사본을 쓴다 — 본부장이 검토한 것과 같은 것이 최종본에 들어간다
 //   upload   총괄이 올린 파일 — 아직 Tincase를 안 쓰는 섹션(취합게시판으로 받은 것)
 //   missing  아무것도 없다 → 제목 + 「미제출」 (분석 Q3 기본값)
-// 화면에는 둘이 더 있다(조립에는 미제출과 같다): waiting_hq(본부가 아직 총괄에 안 냄) · not_in_hq(실은 냈는데 본부본에 없음)
+// 화면에는 둘이 더 있다(조립에는 미제출과 같다): waiting_hq(본부장 승인 대기 — 본부본이 아직 총괄에 안 옴) ·
+// not_in_hq(본부장 재승인 대기 — 실은 올렸는데 본부장이 승인해 보낸 판에 그 실이 없다). RU-83 (2026-10-08)
 import path from 'node:path';
 import type { OrgSection, ReportSubmission, WeekSlot } from '@prisma/client';
 import { prisma } from '../db';
@@ -38,12 +39,27 @@ export const DEFAULT_SECTIONS: { title: string; division: string; kind: string }
   { title: '국가지속가능발전연구센터', division: '국가지속가능발전연구센터', kind: 'hq' },
 ];
 
-/** 섹션 목록 — 비어 있으면 기본 13개를 만든다(부서는 이름으로 찾는다) */
-export async function loadSections(): Promise<OrgSection[]> {
+/**
+ * 섹션 목록 — 비어 있으면 기본 13개를 만든다(부서는 이름으로 찾는다).
+ *
+ * `create: false`면 **만들지 않고** 기본 13개를 이름으로 맞춘 목록(저장되지 않은 행, id `default-n`)을 돌려준다 —
+ * 자동 조립(`system`, RU-83)이 총괄의 설정 화면 상태를 바꾸면 안 된다(sectionTitles·PG-51d와 같은 이유).
+ */
+export async function loadSections(opts: { create?: boolean } = {}): Promise<OrgSection[]> {
   const have = await prisma.orgSection.findMany({ orderBy: { sortOrder: 'asc' } });
   if (have.length) return have;
   const divisions = await prisma.division.findMany({ select: { id: true, nameKo: true } });
   const byName = new Map(divisions.map((d) => [d.nameKo, d.id]));
+  if (opts.create === false) {
+    return DEFAULT_SECTIONS.map((s, i) => ({
+      id: `default-${i + 1}`,
+      sortOrder: (i + 1) * 10,
+      title: s.title,
+      kind: s.kind,
+      divisionId: byName.get(s.division) ?? null,
+      isActive: true,
+    }));
+  }
   await prisma.orgSection.createMany({
     data: DEFAULT_SECTIONS.map((s, i) => ({ sortOrder: (i + 1) * 10, title: s.title, kind: s.kind, divisionId: byName.get(s.division) ?? null })),
   });
@@ -104,6 +120,13 @@ export async function sectionList(divisions: readonly { id: string; nameKo: stri
 
 export type SectionSourceKind = 'tincase' | 'upload' | 'waiting_hq' | 'not_in_hq' | 'missing';
 
+/**
+ * RU-83 — 칩에 덧붙는 표시. 조립에는 영향이 없다(들어가는 것은 kind가 정한다).
+ *   unapproved  비상구로 올라온 판 — 주황 「승인 없이」 (RU-77)
+ *   reapprove   실이 다시 올렸는데 총괄에는 본부장이 앞서 승인한 옛 판이 있다 — 「본부장 재승인 대기」(§12 Q10)
+ */
+export type SectionFlag = 'unapproved' | 'reapprove';
+
 /** 섹션을 이루는 사본 하나 — 본부본에 붙어 있던 제목 그대로 (RU-67) */
 export interface SectionPart {
   title: string;
@@ -117,7 +140,7 @@ export interface SectionSource {
   kind: SectionSourceKind;
   /** 파일 자리 (STORAGE_ROOT 기준) — tincase·upload일 때. parts가 있으면 그 첫 사본 */
   filePath?: string;
-  /** 화면용 — 「제출 10-07 13:52 · 담당자 이름」 등 */
+  /** 화면용 — 「승인 10-07 13:52 · 홍길동 실장」 등 */
   label: string;
   /** tincase: ReportSubmission.id(사본이 여럿이면 본부본) · upload: OrgSectionUpload.id */
   refId?: string;
@@ -128,6 +151,8 @@ export interface SectionSource {
    * 섹션 하나가 사본 여럿이 될 수 있는 곳은 여기뿐이다 — 조립은 사본마다 제목 하나씩 (orgrun.ts)
    */
   parts?: SectionPart[];
+  /** RU-83 — 주황 표시 */
+  flag?: SectionFlag;
 }
 
 const kstShort = (d: Date) => new Date(d.getTime() + 9 * 3600_000).toISOString().slice(5, 16).replace('T', ' ');
@@ -158,17 +183,54 @@ async function hqCopies(nodeId: string, slot: WeekSlot): Promise<{ hq: ReportSub
   return { hq, copies: ids.map((id) => byId.get(id)).filter((r): r is CopyWithDivision => !!r) };
 }
 
-/** 섹션마다 무엇으로 채울지 — 전사 조립과 현황판이 같은 판정을 쓴다 */
-export async function resolveSections(slot: WeekSlot, tree?: OrgTree): Promise<SectionSource[]> {
-  const sections = (await loadSections()).filter((s) => s.isActive);
+/**
+ * RU-83 — 사본이 **무엇을 근거로** 왔나를 한 줄로 (DM-18b). 승인으로 왔으면 승인 시각과 승인한 사람 —
+ * 총괄이 「누가 봤나」를 이 줄에서 읽는다. 자동(부서장 없음)·비상구·옛 [제출]·적재도 그대로 말한다.
+ */
+async function arrivalLabel(r: ReportSubmission, who: 'unit' | 'hq', names: Map<string, string>): Promise<string> {
+  const at = kstShort(r.submittedAt);
+  const boss = who === 'hq' ? '본부장' : '부서장';
+  if (r.origin === 'import') return `적재 ${at}`;
+  if (r.basis === 'no_head') return `자동 ${at} · ${boss} 없음`;
+  if (r.basis === 'unapproved') return `${boss} 승인 없이 ${at} · ${names.get(r.submittedBy) ?? ''}`.trim();
+  if (r.basis === 'approved' && r.reviewId) {
+    const review = await prisma.mergeReview.findUnique({ where: { id: r.reviewId }, select: { reviewerId: true, createdAt: true } });
+    if (review) return `승인 ${kstShort(review.createdAt)} · ${names.get(review.reviewerId) ?? boss}`;
+  }
+  return `제출 ${at} · ${r.submittedBy === 'system' ? '자동' : (names.get(r.submittedBy) ?? '')}`.trim();
+}
+
+/**
+ * 섹션마다 무엇으로 채울지 — 전사 조립과 현황판이 같은 판정을 쓴다.
+ * `create: false`면 섹션 목록이 비어 있어도 만들지 않는다 — 자동 조립(`system`)은 총괄의 설정을 바꾸지 않는다 (loadSections)
+ */
+export async function resolveSections(slot: WeekSlot, tree?: OrgTree, opts: { create?: boolean } = {}): Promise<SectionSource[]> {
+  const sections = (await loadSections(opts)).filter((s) => s.isActive);
   const t = tree ?? (await loadTree());
-  const names = new Map((await prisma.user.findMany({ select: { id: true, name: true } })).map((u) => [u.id, u.name]));
+  const names = new Map(
+    (await prisma.user.findMany({ select: { id: true, name: true, jobTitle: true, divisionRole: true } })).map((u) => [
+      u.id,
+      u.divisionRole === 'head' ? `${u.name} ${u.jobTitle?.trim() || '부서장'}` : u.name,
+    ]),
+  );
   // RU-67 — 켜진 섹션이 가리키는 부서. 본부 자신의 섹션은 여기 없는 부서의 사본을 「남은 것」으로 가져간다
   const claimed = new Set(sections.map((s) => s.divisionId).filter((id): id is string => !!id));
   const hqCache = new Map<string, ReturnType<typeof hqCopies>>();
   const copiesOf = (nodeId: string) => {
     if (!hqCache.has(nodeId)) hqCache.set(nodeId, hqCopies(nodeId, slot));
     return hqCache.get(nodeId)!;
+  };
+  /**
+   * §12 Q10 — 본부가 승인해 보낸 판에 든 이 실의 사본이, 그 실이 지금 올린 것보다 옛것인가. **내용(sha)으로** 본다(RU-02):
+   * 비상구 사본을 부서장이 같은 바이트로 뒤늦게 승인하면 사본 행은 새것이지만 본부본은 같은 바이트로 다시 만들어지고 본부장 승인은
+   * 그대로다(Q2) — 행 id로 보면 할 일이 없는 본부장을 「재승인 대기」로 가리킨다(RU-T133)
+   */
+  const outdated = async (copies: CopyWithDivision[]) => {
+    for (const c of copies) {
+      const now = await currentReport(c.divisionId, slot.id, 'unit');
+      if (now && now.id !== c.id && now.sha256 !== c.sha256) return true;
+    }
+    return false;
   };
   const out: SectionSource[] = [];
   for (const section of sections) {
@@ -184,9 +246,10 @@ export async function resolveSections(slot: WeekSlot, tree?: OrgTree): Promise<S
         const own = node.node.id === section.divisionId;
         const mine = copies.filter((c) => c.divisionId === section.divisionId || (own && !claimed.has(c.divisionId)));
         if (hq && mine.length) {
-          const at = `${node.node.nameKo} 제출 ${kstShort(hq.submittedAt)}`;
+          const at = `${node.node.nameKo} ${await arrivalLabel(hq, 'hq', names)}`;
+          const flag: SectionFlag | undefined = hq.basis === 'unapproved' ? 'unapproved' : (await outdated(mine)) ? 'reapprove' : undefined;
           if (!own) {
-            out.push({ section, kind: 'tincase', filePath: mine[0].filePath, refId: mine[0].id, offline: false, label: at });
+            out.push({ section, kind: 'tincase', filePath: mine[0].filePath, refId: mine[0].id, offline: false, label: at, flag });
             continue;
           }
           // 사본마다 본부본에 붙어 있던 제목 그대로 — 본부장이 검토한 꼴이 최종본의 꼴이다 (RU-11)
@@ -201,30 +264,40 @@ export async function resolveSections(slot: WeekSlot, tree?: OrgTree): Promise<S
             offline: false,
             label: parts.length > 1 ? `${at} · ${parts.length}개 단위` : at,
             parts,
+            flag,
           });
           continue;
         }
         if (!upload) {
           if (!hq) {
-            out.push({ section, kind: 'waiting_hq', offline: false, label: `${node.node.nameKo} 제출 전` });
+            // 칩이 「본부장 승인 대기」라고 말한다 — 옆 글자는 기다리는 곳(그 본부 취합 화면으로 가는 길)
+            out.push({ section, kind: 'waiting_hq', offline: false, label: `${node.node.nameKo} 본부본 승인 전` });
             continue;
           }
-          // 본부본은 왔는데 이 부서가 없다. 이 부서가 본부에 냈다면 본부가 다시 이어 붙여 내야 한다 —
-          // 회색 「미제출」로 두면 낸 실이 안 낸 것처럼 보이고, 총괄은 고칠 곳(본부)을 모른다 (RU-32)
+          // 본부본은 왔는데 이 부서가 없다. 이 부서가 본부에 올렸다면 본부장이 다시 승인하면 된다(이어 붙이기는 이미 자동이다) —
+          // 회색 「미제출」로 두면 올린 실이 안 낸 것처럼 보이고, 총괄은 기다릴 곳(본부장)을 모른다 (RU-32·83)
           const sent = await currentReport(section.divisionId, slot.id, 'unit');
           out.push(
             sent
-              ? { section, kind: 'not_in_hq', offline: false, label: `${node.node.nameKo}에서 다시 이어 붙여야 합니다` }
+              ? { section, kind: 'not_in_hq', offline: false, label: `${node.node.nameKo} — 승인한 판에 없음` }
               : { section, kind: 'missing', offline: false, label: '미제출' },
           );
           continue;
         }
       } else {
-        // 본부 단계가 없다 — 그 단위의 [제출]이 곧 총괄로 (RU-07)
+        // 본부 단계가 없다 — 그 단위의 승인이 곧 총괄로 (RU-07)
         const sender = node.node.id === section.divisionId && node.contributors.length === 1 ? node.contributors[0] : t.nodes.flatMap((n) => n.contributors).find((c) => c.id === section.divisionId);
         const r = sender ? await currentReport(sender.id, slot.id, 'unit') : null;
         if (r) {
-          out.push({ section, kind: 'tincase', filePath: r.filePath, refId: r.id, offline: false, label: `제출 ${kstShort(r.submittedAt)} · ${names.get(r.submittedBy) ?? ''}`.trim() });
+          out.push({
+            section,
+            kind: 'tincase',
+            filePath: r.filePath,
+            refId: r.id,
+            offline: false,
+            label: await arrivalLabel(r, 'unit', names),
+            flag: r.basis === 'unapproved' ? 'unapproved' : undefined,
+          });
           continue;
         }
       }
@@ -282,11 +355,13 @@ export async function uploadSectionFile(scope: Scope, sectionId: string, slot: W
   return row;
 }
 
-export async function withdrawSectionFile(scope: Scope, uploadId: string) {
+/** 올린 파일 취소. 그 파일의 주차를 돌려준다 — 부르는 쪽이 그 주차의 전사본을 다시 맞춘다 */
+export async function withdrawSectionFile(scope: Scope, uploadId: string): Promise<WeekSlot | null> {
   const u = await prisma.orgSectionUpload.findUnique({ where: { id: uploadId } });
   if (!u) throw new HttpError(404, 'not_found', '올린 파일을 찾을 수 없습니다.');
   await prisma.orgSectionUpload.update({ where: { id: u.id }, data: { withdrawnAt: new Date() } });
   await audit(scope.user.email, 'rollup', null, `org-section:${u.sectionId}`, { action: 'withdraw_upload', upload: u.id });
+  return prisma.weekSlot.findUnique({ where: { id: u.weekSlotId } });
 }
 
 /** 섹션 설정 저장 — 순서·제목·부서·사용 */

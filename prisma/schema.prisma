@@ -388,11 +388,18 @@ model ReportSubmission {
   sourceRunId String?
   /// "app" | "import" (RU-44 — 테스트 서버에 지난 자료를 넣은 것)
   origin      String    @default("app")
-  submittedBy String // User.id
+  /// User.id — 또는 'system'(RU-78 · TACP-23: 부서장 없는 단위의 사본·켤 때 따라잡은 승인). 화면은 「자동」으로 쓴다
+  submittedBy String
   submittedAt DateTime  @default(now())
-  /// RU-03 — 제출 취소. 취소한 행은 「지금 제출된 것」에서 빠진다
+  /// RU-03 — 제출 취소. 2026-10-08(v1.7)부터는 생기지 않는다 — 지난 기록만 남는다
   withdrawnAt DateTime?
   withdrawnBy String?
+  /// RU-74 — 이 사본을 낳은 승인(MergeReview.id). 승인 하나에 사본은 많아야 하나 — 두 요청이 같은 승인을 넘기려 해도 DB가 하나만 받는다
+  reviewId    String?   @unique
+  /// RU-77·78 · DM-18b — 무엇을 근거로 갔나: approved | no_head | unapproved | manual(v1.7 전의 [제출])
+  basis       String    @default("manual")
+  /// RU-78 — 일으킨 사건: approval · merge_final:<runId> · edit:<runId> · rollup_enabled · escape · catch_up …
+  cause       String?
 
   division Division @relation(fields: [divisionId], references: [id])
   weekSlot WeekSlot @relation(fields: [weekSlotId], references: [id])
@@ -421,9 +428,14 @@ model RollupRun {
   unitsJson   String?
   warnings    String?
   errorText   String?
-  createdBy   String // User.id
+  /// User.id — v1.7부터 자동 조립은 'system'(TACP-23). 일으킨 사건·사람은 cause와 감사 기록에 남는다
+  createdBy   String
   startedAt   DateTime  @default(now())
   finishedAt  DateTime?
+  /// RU-74 — 입력 열쇠(sha256). 가장 최근 성공한 실행과 같으면 다시 만들지 않는다. v1.7 전 행은 null
+  inputKey    String?
+  /// RU-78 — 화면의 「무엇 때문에」: unit_handoff:<사본 id> · hq_handoff:<사본 id> · order · template · retry · read_repair …
+  cause       String?
 
   division Division? @relation(fields: [divisionId], references: [id])
   weekSlot WeekSlot  @relation(fields: [weekSlotId], references: [id])
@@ -466,6 +478,12 @@ model MergeReview {
   changes    String   @default("[]")
   /// 승인한 판 — 그 뒤 병합본이 바뀌면 「승인 뒤 바뀜」으로 보인다
   sha256     String
+  /**
+   * RU-73 · HM-47 (2026-10-08) — 승인한 판의 **불변 사본** (STORAGE_ROOT 기준). 병합본 파일은 다시 병합·수정 저장에 덮이므로
+   * 승인한 바이트는 여기에만 남는다. 3단계에서 위로 가는 사본이 이 파일이다. 본부 승인(`hq_approve`)은 그 본부본 실행 파일.
+   * v1.7 전 행은 null
+   */
+  filePath   String?
   createdAt  DateTime @default(now())
 
   @@index([divisionId, weekSlotId, createdAt])

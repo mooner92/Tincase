@@ -1,12 +1,20 @@
-// RU-01·03·30 — 위로 [제출]·취소 (TACP-21).
-//   GET    ?level=unit|hq&isoKey=   내 부서의 제출 상태 (본부본 `hq`는 본부의 lead·head만)
-//   POST   { level, isoKey }        내 부서 결과를 위로 보낸다 — 그 순간의 사본
-//   DELETE ?id=                     제출 취소 (내 부서가 보낸 것만)
+// RU-80 · RU-77 · RU-84 — 위로 간 사본의 **상태**와 **비상구** (TACP-21 v1.7 · TACP-23).
+//   GET    ?level=unit|hq&isoKey=                   내 부서의 「위로」 상태 (행방은 lead·head에게만 — canSeeHandoff)
+//   POST   { level, isoKey, withoutApproval: true }  비상구 「승인 없이 올리기」 — 그 단계 lead만, 기한 15분 전부터
+//   DELETE                                           없앴다(RU-03) — 모든 역할 404
+//
+// 2026-10-08(ADR-0015) 전에는 POST가 [본부에 제출]·[총괄에 제출], DELETE가 [제출 취소]였다. 승인이 곧 제출이 되면서
+// 사람이 누르는 제출은 비상구 하나로 좁혔다 — 승인할 사람이 자리에 없는 날의 길이다.
 import { NextRequest } from 'next/server';
 import { z } from 'zod';
-import { assertReportSender, hqNodeOfManager, requireReportSender, requireScope, HttpError } from '@/server/authz';
+import { canSeeHandoff, canUseHandoffEscape, hqNodeOfManager, notFound, requireHandoffEscape, requireScope, HttpError } from '@/server/authz';
 import { handler, json } from '@/server/http';
-import { reportState, submitReport, withdrawReport } from '@/server/rollup/report';
+import { escapeHq, escapeUnit } from '@/server/rollup/handoff';
+import { laterAfterUnit, syncOrg } from '@/server/rollup/auto';
+import { later } from '@/server/after';
+import { unitHandoffView } from '@/server/rollup/state';
+import { hqBoard } from '@/server/rollup/run';
+import { stageCells, stageTimes, rollupEnabled } from '@/server/rollup/schedule';
 import { rollupSlot } from '@/server/rollup/slot';
 
 export const dynamic = 'force-dynamic';
@@ -16,35 +24,42 @@ const levelOf = (v: unknown) => (v === 'hq' ? 'hq' : 'unit');
 export const GET = handler(async (req: NextRequest) => {
   const scope = await requireScope(req.headers);
   const level = levelOf(req.nextUrl.searchParams.get('level'));
-  // TACP-21 — 본부본의 제출 상태는 본부 쓰기와 같은 칸이다(lead·head). 본부원(member)에게는 404
-  if (level === 'hq') await hqNodeOfManager(scope);
+  if (!(await rollupEnabled())) throw notFound(); // RU-52 — 꺼져 있으면 3단계의 문이 없다
   const slot = await rollupSlot(req.nextUrl.searchParams.get('isoKey'));
-  // 내 부서의 상태만 — 대상은 신원의 부서다 (TACP-6·7)
-  const state = await reportState(scope.division.id, slot, level);
-  return json({ state });
+  if (level === 'hq') {
+    // TACP-21 — 본부본의 상태는 본부 쓰기와 같은 칸이다(lead·head). 본부원(member)에게는 404
+    const node = await hqNodeOfManager(scope);
+    const [board, t] = await Promise.all([hqBoard(node, slot), stageTimes(slot)]);
+    return json({ state: { level: 'hq', target: '총괄', dueKo: stageCells(t.anchor, t).hqDueKo, hqState: board.state } });
+  }
+  // 내 부서의 상태만 — 대상은 신원의 부서다 (TACP-6·7). 행방(시각)은 lead·head에게만 (TACP-21 v1.7 · RU-T122)
+  const view = await unitHandoffView(scope.division, slot, { trail: canSeeHandoff(scope), canEscape: canUseHandoffEscape(scope) });
+  return json({ state: view && { level: 'unit', ...view } });
 });
 
-const body = z.object({ level: z.enum(['unit', 'hq']), isoKey: z.string().optional() });
+const body = z.object({ level: z.enum(['unit', 'hq']), isoKey: z.string().optional(), withoutApproval: z.literal(true).optional() });
 
 export const POST = handler(async (req: NextRequest) => {
-  // 신원부터 — 본문을 읽거나 주차를 만들기 전에 (인증 안 된 요청이 DB에 아무것도 남기지 않게)
-  const scope = await requireScope(req.headers);
+  // 본문부터 본다 — 비상구가 아니면(예전 [제출]) 누구에게나 404다 (RU-T118). 그다음 신원·게이트
   const parsed = body.safeParse(await req.json().catch(() => null));
-  if (!parsed.success) throw new HttpError(422, 'invalid_request', '요청 형식이 맞지 않습니다.');
-  if (parsed.data.level === 'hq') {
-    const node = await hqNodeOfManager(scope);
-    const r = await submitReport(scope, 'hq', await rollupSlot(parsed.data.isoKey), node);
-    return json({ id: r.report.id, unchanged: r.unchanged });
+  if (!parsed.success || parsed.data.withoutApproval !== true) {
+    await requireScope(req.headers); // 인증 안 된 요청은 401 그대로
+    throw notFound();
   }
-  await assertReportSender(scope);
-  const r = await submitReport(scope, 'unit', await rollupSlot(parsed.data.isoKey));
-  return json({ id: r.report.id, unchanged: r.unchanged });
+  const { scope, node } = await requireHandoffEscape(req.headers, parsed.data.level);
+  const slot = await rollupSlot(parsed.data.isoKey);
+  if (parsed.data.level === 'hq') {
+    const r = await escapeHq(scope, node!, slot);
+    later('syncOrg', () => syncOrg(slot, { cause: `hq_handoff:${r.submission.id}`, causedBy: scope.user.email }));
+    return json({ id: r.submission.id, target: r.target, basis: r.submission.basis });
+  }
+  const r = await escapeUnit(scope, slot);
+  laterAfterUnit(scope.division.id, slot, { cause: `unit_handoff:${r.submission.id}`, causedBy: scope.user.email });
+  return json({ id: r.submission.id, target: r.target, basis: r.submission.basis });
 });
 
+/** RU-03 · RU-84 — 제출 취소는 없앴다. 다음 승인이 앞의 사본을 대신한다. 있다는 것도 알리지 않는다 (TACP-5) */
 export const DELETE = handler(async (req: NextRequest) => {
-  const scope = await requireReportSender(req.headers);
-  const id = req.nextUrl.searchParams.get('id');
-  if (!id) throw new HttpError(422, 'invalid_request', '취소할 제출을 지정하세요.');
-  await withdrawReport(scope, id);
-  return json({ ok: true });
+  await requireScope(req.headers);
+  throw new HttpError(404, 'not_found', '요청한 페이지를 찾을 수 없습니다');
 });

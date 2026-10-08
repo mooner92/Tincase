@@ -2,7 +2,8 @@
 //
 // 2026-10-07 (사용자: 전사 한 화면으로 단순화) — 그 전까지 「전사」 메뉴는 [현황](/ops/monitor)·[취합](/org) 두 탭이었다.
 // 같은 부서를 두 모양(본부별 팀 막대 · 섹션 판)으로 두 번 보여 주었고, 주차 고르기는 한쪽에, 일정 카드는 다른 쪽에 있었다.
-// 이제 위에서 아래로 한 번만 읽는다: 머리글(주차 · 마감 한 줄 · [일정 바꾸기]) → 섹션 표(제출 · 최종본에) → 전사 취합본 만들기.
+// 이제 위에서 아래로 한 번만 읽는다: 머리글(주차 · 마감 한 줄 · [일정 바꾸기]) → 섹션 표(제출 · 최종본에) → 전사본.
+// 2026-10-08(ADR-0015) — 전사본은 섹션 출처가 바뀌면 저절로 다시 만들어진다(RU-83). 이 화면은 그리기 전에 맞추고(읽기 수리) 보여 줄 뿐이다.
 // `/ops/monitor`는 여기로 보낸다 — 옛 주소·알림 링크가 끊기지 않게.
 //
 // 무엇을 그릴지는 `orgPageView` 하나가 정한다(TACP-9·12): 제출 열·감사 링크는 전 부서를 읽는 사람(readAll),
@@ -27,6 +28,7 @@ import { loadOrgSetting } from '@/server/rollup/tree';
 import { rollupSlot } from '@/server/rollup/slot';
 import { stageCells, stageTimes } from '@/server/rollup/schedule';
 import { weekOptions } from '@/server/rollup/view';
+import { readRepairOrg } from '@/server/rollup/auto';
 import { currentWeek, formatDeadlineKo } from '@/lib/week';
 import { STAGE_HQ, STAGE_UNIT } from '@/lib/rollup-stages';
 
@@ -48,7 +50,14 @@ export default async function OrgPage({ searchParams }: { searchParams: Promise<
     const q = [weekQuery, extra].filter(Boolean).join('&');
     return q ? `/org?${q}` : '/org';
   };
-  const [board, weeks, nav, t] = await Promise.all([orgBoard(slot, can, weekQuery), weekOptions(slot), rollupNav(scope), stageTimes(slot)]);
+  // RU-72 — 그리기 **전에** 전사본을 맞춘다(읽기 수리). 취합을 여는 사람에게만 — 스위치가 꺼져 있으면 아무것도 하지 않는다
+  if (can.desk) await readRepairOrg(slot);
+  const [board, weeks, nav, t] = await Promise.all([
+    orgBoard(slot, can, weekQuery, { email: scope.user.email }),
+    weekOptions(slot),
+    rollupNav(scope),
+    stageTimes(slot),
+  ]);
   // WS-19l — 「주차 일정」 카드는 바꿀 수 있는 것이 하나라도 있는 사람에게만: 마감 바꾸기(TACP-20) · 3단계 스위치와 간격(취합과 같은 문).
   // 위의 읽기 뒤에 — deadlineStatus는 다음 주 주차를 만들 수 있어서(upsert) 다른 주차 읽기와 겹치지 않게 한다
   const setting = can.desk ? await loadOrgSetting() : null;
@@ -191,7 +200,14 @@ export default async function OrgPage({ searchParams }: { searchParams: Promise<
 
             {board.ready !== null && (
               <div className="mt-6">
-                <OrgRunCard isoKey={slot.isoKey} ready={board.ready} run={board.run} coverage={board.coverage ?? []} />
+                <OrgRunCard
+                  isoKey={slot.isoKey}
+                  ready={board.ready}
+                  run={board.run}
+                  failed={board.failed}
+                  changedSinceDownload={board.changedSinceDownload}
+                  coverage={board.coverage ?? []}
+                />
               </div>
             )}
           </>

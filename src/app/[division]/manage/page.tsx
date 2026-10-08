@@ -3,7 +3,7 @@ import { notFound, redirect } from 'next/navigation';
 import { getPageScope, getDivisionView } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { ManageView } from './ManageView';
-import { canSendReport, isReviewer } from '@/server/authz';
+import { canSeeHandoff, canUseHandoffEscape, isReviewer } from '@/server/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +24,6 @@ export default async function ManagePage({ params }: { params: Promise<{ divisio
       canDeleteAny={view.canDeleteAny}
       canEditMerged={view.canEditMerged}
       canApprove={view.isOwn && isReviewer(view.scope)}
-      canSendReport={view.isOwn && canSendReport(view.scope)}
+      handoff={view.isOwn && canSeeHandoff(view.scope) ? { escape: canUseHandoffEscape(view.scope) } : null}
     />;
 }

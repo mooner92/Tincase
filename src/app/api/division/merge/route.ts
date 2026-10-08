@@ -35,7 +35,7 @@ export const POST = handler(async (req: NextRequest) => {
     return json({ error: 'edited', message: editedMessage(edits), detail: { edits, runId: latest!.run.id } }, { status: 409 });
   }
 
-  const result = await runMergeRecorded(scope.division.id, slot.id, 'manual');
+  const result = await runMergeRecorded(scope.division.id, slot.id, 'manual', scope.user.email);
   await audit(scope.user.email, 'merge', scope.division.id, `slot:${slot.isoKey}`, {
     status: result.status,
     // 덮은 수고가 기록에 남아야 「실장 수정이 왜 사라졌나」에 답할 수 있다

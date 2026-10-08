@@ -7,6 +7,7 @@ import { audit } from '@/server/audit';
 import { validateHwpUpload, UploadValidationError } from '@/lib/hwp/reader';
 import { sha256, templateRelPath, writeFileAtomic } from '@/server/storage';
 import { env } from '@/server/env';
+import { laterSyncCurrentWeek } from '@/server/rollup/auto';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,6 +71,9 @@ export const POST = handler(async (req: NextRequest) => {
   await audit(scope.user.email, 'template_update', scope.division.id, `template:v${result.version}`, {
     bytes: bytes.length,
   });
+  // RU-72 — 양식이 본부본·전사본의 열쇠에 들어 있다(RU-74). 이번 주를 맞추면 그 양식을 쓰는 것만 다시 만들어진다 —
+  // 양식이 없어 실패하던 조립도 이 요청 뒤에 성공한다(RU-T106)
+  laterSyncCurrentWeek({ cause: 'template', causedBy: scope.user.email });
 
   return json(
     {

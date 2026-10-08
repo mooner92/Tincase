@@ -20,6 +20,8 @@ export interface FinalCell {
   source: FinalSource;
   label: string;
   refId: string | null;
+  /** RU-83 — 주황 표시: 비상구로 올라온 판(`unapproved`) · 총괄에는 본부장이 앞서 승인한 옛 판(`reapprove`) */
+  flag?: 'unapproved' | 'reapprove' | null;
 }
 
 export interface OrgBoardRow {
@@ -54,11 +56,15 @@ const TONE: Record<FinalSource, string> = {
 const WORD: Record<FinalSource, string> = {
   tincase: 'Tincase',
   upload: '올린 파일',
-  waiting_hq: '본부 대기',
-  // RU-32 — 실은 냈는데 본부가 낸 판에 없다. 회색 「미제출」이면 낸 실이 안 낸 것처럼 보인다
-  not_in_hq: '본부본에 없음',
+  // RU-83 (2026-10-08) — 이어 붙이기는 저절로 된다. 기다리는 것은 본부장의 승인 하나다
+  waiting_hq: '본부장 승인 대기',
+  // RU-32·83 — 실은 올렸는데 본부장이 승인해 보낸 판에 없다. 회색 「미제출」이면 올린 실이 안 낸 것처럼 보인다.
+  // 총괄이 할 일은 없다 — 본부장이 다시 승인하면 된다
+  not_in_hq: '본부장 재승인 대기',
   missing: '미제출',
 };
+/** RU-83 — 칩 덧표시: 들어가기는 하지만 주황으로 */
+const FLAG_WORD = { unapproved: '승인 없이', reapprove: '본부장 재승인 대기' } as const;
 
 function Bar({ value, max }: { value: number; max: number }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0;
@@ -291,15 +297,17 @@ function FinalView({
   // 미제출은 칩과 [올리기]가 다 말한다 — 「Tincase 밖 — 게시판 파일을 올려 주세요」를 줄마다 되풀이하면
   // 정작 다른 줄(본부 대기·제출 시각)이 묻힌다. Tincase를 쓰는 곳인지는 제출 열이 말한다
   const label = f.source === 'missing' ? '' : f.label;
+  // RU-83 — 들어가는 판이 승인 없이 왔거나(비상구) 본부장이 앞서 승인한 옛 판이면 주황으로. 최종본에는 그 판이 들어간다
+  const flagged = f.source === 'tincase' && f.flag ? FLAG_WORD[f.flag] : null;
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-      <span className={`chip shrink-0 ${TONE[f.source]}`}>
+      <span className={`chip shrink-0 ${flagged ? 'chip-warn' : TONE[f.source]}`}>
         {ok && <span aria-hidden className="dot" />}
-        {WORD[f.source]}
+        {flagged ?? WORD[f.source]}
       </span>
       {label &&
         /* 본부 대기·본부본에 없음 — 고칠 곳은 본부다. 그 본부 취합 화면으로 가는 길을 단다 */
-        ((f.source === 'waiting_hq' || f.source === 'not_in_hq') && hq ? (
+        ((f.source === 'waiting_hq' || f.source === 'not_in_hq' || f.flag === 'reapprove') && hq ? (
           <Link href={hq.href} className="min-w-0 truncate text-xs text-muted underline hover:text-ink" title={`${label} — 본부 취합 보기`}>
             {label}
           </Link>

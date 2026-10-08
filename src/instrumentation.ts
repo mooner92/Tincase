@@ -36,6 +36,7 @@ export async function register() {
   const { runDueReminders } = await import('./server/notify/deadline-reminder');
   const { runDueMergeNotices } = await import('./server/notify/merge-notices');
   const { runDueRollupNotices } = await import('./server/rollup/notices');
+  const { runDueRollupSync } = await import('./server/rollup/auto');
 
   /*
    * NT-32 — 기동할 때마다 **알림이 켜진 부서를 로그에 찍는다.**
@@ -105,8 +106,19 @@ export async function register() {
       await reminders();
 
       /*
+       * RU-72 — 3단계 자동 진행의 **안전망**. 넘김·조립은 승인 요청과 화면 열기가 이미 맞춘다 — 여기는 그것들이 놓친 것
+       * (요청 뒤 프로세스 종료 등)을 따라잡을 뿐이다. 이것에만 기대는 것은 없다(테스트 서버는 스케줄러를 끈다, RU-41).
+       * 알림보다 먼저 — 알림이 맞춘 상태를 보게.
+       */
+      try {
+        await runDueRollupSync();
+      } catch (e) {
+        console.error('[자동] 3단계 맞추기 오류', e);
+      }
+
+      /*
        * RU-54~57 — 3단계 알림. 꺼져 있으면(RU-52) 아무것도 하지 않는다.
-       * 병합 일시정지(HM-44) **앞에서** 돈다 — 실·팀 [제출]·본부 이어 붙이기·총괄 도착은 사람이 하는 일이라
+       * 병합 일시정지(HM-44) **앞에서** 돈다 — 실장·본부장의 승인과 그 뒤의 넘김은 사람의 결정에서 나오므로
        * 자동 병합이 멈춰 있어도 계속된다. 뒤에 두면 멈춘 주에는 본부·총괄 기한 알림이 하나도 안 나간다.
        */
       try {

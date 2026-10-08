@@ -21,6 +21,7 @@ import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
 import { latestEdits } from './edits';
 import { ruleSnapshotOf } from './rule-snapshot';
 import { noticeMergeHeld } from '../notify/merge-notices';
+import { NEWEST_FIRST, UNIT_REVIEW } from './review-scope';
 
 /** HM-35 — 마감 후 이만큼 지나서 시작한다. 마감 정각에 들어온 제출이 커밋될 시간 */
 export const MERGE_DELAY_MINUTES = 1;
@@ -46,6 +47,8 @@ export async function runMergeRecorded(
   divisionId: string,
   weekSlotId: string,
   trigger: 'auto' | 'manual',
+  /** RU-78 — [지금 병합]·[다시 병합]을 누른 사람 (자동이면 없다). 부서장 없는 단위의 사본 기록에 「일으킨 사람」으로 붙는다 */
+  actorEmail: string | null = null,
 ): Promise<MergeRunResult> {
   const division = await prisma.division.findUniqueOrThrow({ where: { id: divisionId } });
   const run = await prisma.mergeRun.create({
@@ -96,6 +99,7 @@ export async function runMergeRecorded(
         finishedAt: new Date(),
       },
     });
+    await afterMerged(divisionId, weekSlotId, run.id, outcome.sourceIds, actorEmail);
     return { runId: run.id, status: 'succeeded', errorText: null, outcome };
   } catch (e) {
     const known = e instanceof MergeUnavailable || e instanceof MergeFailed;
@@ -106,6 +110,42 @@ export async function runMergeRecorded(
     });
     if (!known) console.error('[merge] 예상치 못한 실패', e);
     return { runId: run.id, status: 'failed', errorText, outcome: null };
+  }
+}
+
+/** NT-52 — 승인한 판 뒤에 새로 들어온 제출 수 (「늦게 낸 n명 포함」) */
+async function lateSinceApproval(divisionId: string, weekSlotId: string, sourceIds: readonly string[]): Promise<number> {
+  const review = await prisma.mergeReview.findFirst({ where: { divisionId, weekSlotId, ...UNIT_REVIEW }, orderBy: NEWEST_FIRST, select: { mergeRunId: true } });
+  if (!review) return 0;
+  const prev = await prisma.mergeRun.findUnique({ where: { id: review.mergeRunId }, select: { sourceIds: true } });
+  let before: string[] = [];
+  try {
+    before = JSON.parse(prev?.sourceIds ?? '[]') as string[];
+  } catch {
+    before = [];
+  }
+  const seen = new Set(before);
+  return sourceIds.filter((id) => !seen.has(id)).length;
+}
+
+/**
+ * RU-72 · HM-47 (2026-10-08) — 병합이 판을 바꿨다. 3단계에서 부서장 없는 단위는 마감 뒤 최종본이 곧 넘김이고,
+ * 부서장 있는 단위는 승인이 있었으면 부서장에게 NT-52 「다시 승인해 주세요」 — 병합은 승인이 아니므로 위로 가지 않는다.
+ * 스케줄러의 자동 병합(테스트 서버에서는 꺼져 있다)이든 [지금 병합]이든 같은 길이다. 실패해도 병합 결과는 그대로다.
+ */
+async function afterMerged(divisionId: string, weekSlotId: string, runId: string, sourceIds: readonly string[], actorEmail: string | null) {
+  try {
+    const slot = await prisma.weekSlot.findUnique({ where: { id: weekSlotId } });
+    if (!slot) return;
+    // 정적으로 이으면 rollup/schedule → slot-deadline → 이 파일 고리가 된다
+    const { onUnitVersionChanged } = await import('../rollup/auto');
+    await onUnitVersionChanged(divisionId, slot, {
+      cause: `merge_final:${runId}`,
+      causedBy: actorEmail,
+      reason: { kind: 'merge', late: await lateSinceApproval(divisionId, weekSlotId, sourceIds) },
+    });
+  } catch (e) {
+    console.error('[merge] 병합 뒤 자동 진행 오류', e);
   }
 }
 

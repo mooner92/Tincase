@@ -1,9 +1,14 @@
-// TACP-21 · RU-01~07 — 위로 올린 제출과 본부·전사 취합의 **경계**.
+// TACP-21 · TACP-23 · RU-01~07 — 위로 올린 제출과 본부·전사 취합의 **경계**.
 //
 // 새로 열린 것은 하나다: 본부 담당자·본부장이 산하 실·팀이 **보낸 사본**을 읽는다.
 // 그래서 테스트는 「열린 것이 열렸나」와 「나머지는 그대로 닫혀 있나」를 같은 무게로 본다 (TACP §10-4).
+//
+// 2026-10-08(v1.7 · ADR-0015) — 승인이 곧 제출이다. 사람이 누르던 [제출]·[이어 붙이기]·[총괄에 제출]·[만들기]가 없어지고,
+// 이 파일의 시험 조직은 실·팀에 부서장이 없어(본부가에만 본부장) **마감 뒤 최종본이 저절로 올라간다**(RU-71 — `handOff`).
+// 픽스처 없이 도는 경계 시험(RU-T118~124)은 맨 끝에 — 문서를 조립하지 않는 것만 본다.
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { execSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -83,9 +88,42 @@ async function merged(key: keyof typeof DIV, content: string) {
   });
 }
 
+/** RU-T118 — 예전의 [제출] 요청(비상구가 아님). v1.7부터 누구에게나 404 */
 async function submitUnit(identity: string) {
   const { POST } = await import('@/app/api/rollup/report/route');
   return POST(nx('/api/rollup/report', identity, jsonInit('POST', { level: 'unit', isoKey })));
+}
+
+/**
+ * RU-71 — 부서장 없는 실·팀은 마감 뒤 최종본이 **저절로** 올라간다. 병합 뒤 훅이 하는 맞추기를 여기서 부르고(`merged`는 훅을 부르지 않는다),
+ * 받는 곳(본부본·전사본)까지 맞춘 뒤 돌아온다. 새 사본이 없으면(같은 판) null
+ */
+async function handOff(key: keyof typeof DIV) {
+  const { prisma } = await import('@/server/db');
+  const { syncUnit } = await import('@/server/rollup/handoff');
+  const { syncAfterUnit } = await import('@/server/rollup/auto');
+  const { settleLater } = await import('@/server/after');
+  const slot = await prisma.weekSlot.findUniqueOrThrow({ where: { isoKey } });
+  const sub = await syncUnit(divId[key], slot, { cause: 'test', causedBy: null });
+  if (sub) await syncAfterUnit(divId[key], slot, { cause: `unit_handoff:${sub.id}`, causedBy: null });
+  await settleLater();
+  return sub;
+}
+
+/** RU-55 — 본부장 승인 = 총괄로 제출. 화면처럼 지금 본부본(본 판)을 보고 그 판에 */
+async function hqApproveAs(identity: string, nodeKey: 'hq' | 'hq2') {
+  const { prisma } = await import('@/server/db');
+  const { latestHqRun } = await import('@/server/rollup/handoff');
+  const { readStoredFile, sha256 } = await import('@/server/storage');
+  const { settleLater } = await import('@/server/after');
+  const slot = await prisma.weekSlot.findUniqueOrThrow({ where: { isoKey } });
+  const run = await latestHqRun(divId[nodeKey], slot.id);
+  const { POST } = await import('@/app/api/rollup/hq/approve/route');
+  const res = await POST(
+    nx('/api/rollup/hq/approve', identity, jsonInit('POST', { isoKey, runId: run?.id, sha256: run ? sha256(await readStoredFile(run.outputPath!)) : undefined })),
+  );
+  await settleLater();
+  return res;
 }
 
 beforeAll(async () => {
@@ -97,7 +135,8 @@ beforeAll(async () => {
   const { ensureCurrentSlot } = await import('@/server/worklog');
   isoKey = (await ensureCurrentSlot()).isoKey;
 
-  const tpl = readFileSync(path.join(FIX, 'master-template.hwp'));
+  // 픽스처가 없으면 양식 자리에 아무 바이트 — 그때 도는 시험(RU-09·RU-T118~124)은 문서를 조립하지 않는다
+  const tpl = hasFixtures ? readFileSync(path.join(FIX, 'master-template.hwp')) : Buffer.from('no-fixture-template');
   for (const [key, d] of Object.entries(DIV)) {
     const row = await prisma.division.create({
       data: {
@@ -108,6 +147,9 @@ beforeAll(async () => {
         parentKo: 'parentKo' in d ? d.parentKo : '한국환경연구원',
         // RU-08 — 본부가는 산하 실 것만 모은다
         rollupSelf: key !== 'hq',
+        // 마감 = 그 주 월 00:00 — 시험이 언제 돌든 병합본은 「마감 뒤 최종본」이다(HM-34). 부서장 없는 단위는 그래야 저절로 올라간다
+        deadlineDow: 1,
+        deadlineTime: '00:00',
       },
     });
     divId[key] = row.id;
@@ -197,28 +239,26 @@ describe('RU-09 단위 나무 (순수)', () => {
 });
 
 d('TACP-21 위로 올린 제출', () => {
-  it('[RU-T33] member는 [제출] 404 · coordinator도 남의 것을 대신 내지 못한다(자기 부서 manager가 아니면 404)', async () => {
+  it('[RU-T33] 위로 가는 사본은 결정이 만든다 — 예전 [제출] 요청은 담당자·부서원·총괄 모두 404, 사본도 생기지 않는다 (TACP-23)', async () => {
     await merged('u1', '실하나 첫 판');
-    expect((await submitUnit(ID.u1Member)).status).toBe(404);
-    expect((await submitUnit(ID.coord)).status).toBe(404);
+    for (const who of [ID.u1Lead, ID.u1Member, ID.coord]) expect((await submitUnit(who)).status, who).toBe(404);
+    const { prisma } = await import('@/server/db');
+    expect(await prisma.reportSubmission.count({ where: { divisionId: divId.u1 } })).toBe(0);
   });
 
-  it('[RU-T23] 실·팀 담당자가 [제출] → 본부로 간다. 같은 판을 또 내면 새 행을 만들지 않는다', async () => {
-    const res = await submitUnit(ID.u1Lead);
-    expect(res.status).toBe(200);
-    const first = await res.json();
-    expect(first.unchanged).toBe(false);
-    const again = await (await submitUnit(ID.u1Lead)).json();
-    expect(again).toEqual({ id: first.id, unchanged: true });
+  it('[RU-T23] 부서장 없는 실·팀 — 마감 뒤 병합본이 저절로 본부로(no_head · system). 같은 판을 다시 맞춰도 새 행을 만들지 않는다', async () => {
+    const first = await handOff('u1');
+    expect(first).toMatchObject({ basis: 'no_head', submittedBy: 'system', level: 'unit' });
+    expect(await handOff('u1')).toBeNull();
 
     const { GET } = await import('@/app/api/rollup/report/route');
     const state = (await (await GET(nx(`/api/rollup/report?level=unit&isoKey=${isoKey}`, ID.u1Lead))).json()).state;
-    expect(state.targetLabel).toBe('본부가');
+    expect([state.target, state.state]).toEqual(['본부가', 'H1']);
     const solo = (await (await GET(nx(`/api/rollup/report?level=unit&isoKey=${isoKey}`, ID.soloLead))).json()).state;
-    expect(solo.targetLabel).toBe('총괄'); // RU-07 — 본부 밖 단위는 바로 총괄
+    expect(solo.target).toBe('총괄'); // RU-07 — 본부 밖 단위는 바로 총괄
   });
 
-  it('[RU-T30] ★ 본부 담당자는 산하가 **보낸 사본**을 읽고 이어 붙인다 + 감사 기록', async () => {
+  it('[RU-T30] ★ 본부 담당자는 산하가 **보낸 사본**을 읽는다 + 감사 기록 · 본부본은 저절로 이어 붙었다(system)', async () => {
     const { prisma } = await import('@/server/db');
     const report = await prisma.reportSubmission.findFirstOrThrow({ where: { divisionId: divId.u1 } });
     const { GET } = await import('@/app/api/rollup/report/[id]/route');
@@ -227,12 +267,15 @@ d('TACP-21 위로 올린 제출', () => {
     const log = await prisma.auditLog.findFirst({ where: { action: 'cross_division_read', target: `report:${report.id}`, actor: ID.hqLead } });
     expect(log).not.toBeNull();
 
+    // 본부본 — 사람이 누르지 않았다. 기록의 주체는 system (TACP-23)
+    const run = await prisma.rollupRun.findFirstOrThrow({ where: { level: 'hq', divisionId: divId.hq } });
+    expect([run.status, run.createdBy, run.cause]).toEqual(['succeeded', 'system', `unit_handoff:${report.id}`]);
+    expect(await prisma.auditLog.count({ where: { action: 'rollup', actor: 'system' } })).toBe(1);
+    // [다시 시도]는 본부의 lead·head에게 열려 있지만 성공 상태에서는 아무것도 하지 않는다 (RU-76)
     const hq = await import('@/app/api/rollup/hq/route');
-    const run = await hq.POST(nx('/api/rollup/hq', ID.hqLead, jsonInit('POST', { isoKey })));
-    expect(run.status).toBe(200);
-    // 본부장(head)도 같다 — TACP-16
+    expect((await hq.POST(nx('/api/rollup/hq', ID.hqLead, jsonInit('POST', { isoKey })))).status).toBe(200);
     expect((await hq.POST(nx('/api/rollup/hq', ID.hqHead, jsonInit('POST', { isoKey })))).status).toBe(200);
-    expect(await prisma.auditLog.count({ where: { action: 'rollup', actor: ID.hqLead } })).toBe(1);
+    expect(await prisma.rollupRun.count({ where: { level: 'hq', divisionId: divId.hq } })).toBe(1);
   });
 
   it('[RU-T31] ★ 본부 담당자도 산하의 **병합본 원본**은 404 — 열린 것은 보낸 사본뿐이다', async () => {
@@ -261,53 +304,50 @@ d('TACP-21 위로 올린 제출', () => {
     expect([ro.board.node.nameKo, ro.canWrite]).toEqual(['본부가', false]);
   });
 
-  it('[RU-T24] RU-02 — 보낸 뒤 다시 병합하면 「바뀜」이 뜨고, 본부는 여전히 보낸 판을 쓴다', async () => {
+  it('[RU-T24] RU-02 — 다시 병합해도 맞추기 전에는 본부본이 보낸 판을 쓴다 · 맞추면 새 사본이 대신하고 본부본이 저절로 다시', async () => {
     await merged('u1', '실하나 둘째 판');
-    const { GET } = await import('@/app/api/rollup/report/route');
-    const state = (await (await GET(nx(`/api/rollup/report?level=unit&isoKey=${isoKey}`, ID.u1Lead))).json()).state;
-    expect(state.changedSinceSubmit).toBe(true);
-
-    const hq = await import('@/app/api/rollup/hq/route');
-    await hq.POST(nx('/api/rollup/hq', ID.hqLead, jsonInit('POST', { isoKey })));
     const { prisma } = await import('@/server/db');
-    const run = await prisma.rollupRun.findFirstOrThrow({ where: { level: 'hq' }, orderBy: { startedAt: 'desc' } });
     const { readStoredFile } = await import('@/server/storage');
     const { readUnits } = await import('@/lib/hwp/rollup');
-    const units = readUnits(await readStoredFile(run.outputPath!), 'x').units;
-    expect(units.map((u) => u.tables.achievements[0].content)).toEqual(['실하나 첫 판']);
+    const hqDoc = async () => {
+      const run = await prisma.rollupRun.findFirstOrThrow({ where: { level: 'hq', status: 'succeeded' }, orderBy: { startedAt: 'desc' } });
+      return readUnits(await readStoredFile(run.outputPath!), 'x').units.map((u) => u.tables.achievements[0].content);
+    };
+    expect(await hqDoc()).toEqual(['실하나 첫 판']);
+    expect(await handOff('u1')).not.toBeNull();
+    expect(await hqDoc()).toEqual(['실하나 둘째 판']);
   });
 
-  it('[RU-T25] 다시 제출하면 본부의 이어 붙인 결과가 「바뀜」 — 다시 이어 붙이면 새 판', async () => {
-    await submitUnit(ID.u1Lead);
+  it('[RU-T25] 같은 상태로 화면을 다시 열면(읽기 수리) 새 실행이 없다 — 열쇠가 같다(RU-74)', async () => {
+    const { prisma } = await import('@/server/db');
     const hq = await import('@/app/api/rollup/hq/route');
-    const before = await (await hq.GET(nx(`/api/rollup/hq?isoKey=${isoKey}`, ID.hqLead))).json();
-    expect(before.board.lastRun.stale).toBe(true);
-    await hq.POST(nx('/api/rollup/hq', ID.hqLead, jsonInit('POST', { isoKey })));
-    const after = await (await hq.GET(nx(`/api/rollup/hq?isoKey=${isoKey}`, ID.hqLead))).json();
-    expect(after.board.lastRun.stale).toBe(false);
-    expect(after.board.lastRun.units.map((u: { name: string }) => u.name)).toEqual(['실하나']);
+    const n = await prisma.rollupRun.count({ where: { level: 'hq', divisionId: divId.hq } });
+    const b = await (await hq.GET(nx(`/api/rollup/hq?isoKey=${isoKey}`, ID.hqLead))).json();
+    expect(await prisma.rollupRun.count({ where: { level: 'hq', divisionId: divId.hq } })).toBe(n);
+    expect(b.board.current.stale).toBe(false);
+    expect(b.board.current.units.map((u: { name: string }) => u.name)).toEqual(['실하나']);
   });
 
-  it('[RU-T26] 순서 — 본부가 정한 대로 이어 붙고, 모르는 단위를 끼우면 422', async () => {
+  it('[RU-T26] 순서 — 본부가 정한 대로 저절로 다시 이어 붙고, 모르는 단위를 끼우면 422', async () => {
     await merged('u2', '실둘 내용');
-    await submitUnit(ID.u2Lead);
+    await handOff('u2');
     const order = await import('@/app/api/rollup/hq/order/route');
     expect((await order.PUT(nx('/api/rollup/hq/order', ID.hqLead, jsonInit('PUT', { order: [divId.u2, divId.u1] })))).status).toBe(200);
     expect((await order.PUT(nx('/api/rollup/hq/order', ID.hqLead, jsonInit('PUT', { order: [divId.u3] })))).status).toBe(422);
     expect((await order.PUT(nx('/api/rollup/hq/order', ID.u1Lead, jsonInit('PUT', { order: [divId.u1] })))).status).toBe(404);
+    await (await import('@/server/after')).settleLater();
 
     const hq = await import('@/app/api/rollup/hq/route');
-    await hq.POST(nx('/api/rollup/hq', ID.hqLead, jsonInit('POST', { isoKey })));
     const b = await (await hq.GET(nx(`/api/rollup/hq?isoKey=${isoKey}`, ID.hqLead))).json();
-    expect(b.board.lastRun.units.map((u: { name: string }) => u.name)).toEqual(['실둘', '실하나']);
+    expect(b.board.current.units.map((u: { name: string }) => u.name)).toEqual(['실둘', '실하나']);
   });
 
-  it('[RU-T34] ★ 전사 취합본 — 총괄 허용, 본부 담당자 404. 섹션마다: 본부가 낸 판의 실 사본 / 단독 단위의 제출 / 본부 제출 전', async () => {
-    const report = await import('@/app/api/rollup/report/route');
-    expect((await report.POST(nx('/api/rollup/report', ID.hqLead, jsonInit('POST', { level: 'hq', isoKey })))).status).toBe(200);
-    // 본부 밖 단위 — 실·팀 [제출]이 곧 총괄로
+  it('[RU-T34] ★ 전사본 — 저절로 · [다시 시도]는 총괄만(본부 담당자 404). 섹션마다: 본부장이 승인해 보낸 판의 실 사본 / 단독 단위의 사본 / 본부장 승인 대기', async () => {
+    // RU-55 — 본부장 승인 = 총괄로 제출 (본 판에)
+    expect((await hqApproveAs(ID.hqHead, 'hq')).status).toBe(200);
+    // 본부 밖 단위 — 부서장 없는 단위의 최종본이 곧 총괄로
     await merged('solo', '단독단 내용');
-    await submitUnit(ID.soloLead);
+    await handOff('solo');
 
     // RU-60 — 시험용 섹션 4개 (실제 기본 13개는 실제 부서 이름으로 찾는다)
     const { prisma } = await import('@/server/db');
@@ -322,13 +362,12 @@ d('TACP-21 위로 올린 제출', () => {
 
     const org = await import('@/app/api/rollup/org/route');
     expect((await org.POST(nx('/api/rollup/org', ID.hqLead, jsonInit('POST', { isoKey })))).status).toBe(404);
-    const res = await org.POST(nx('/api/rollup/org', ID.coord, jsonInit('POST', { isoKey })));
-    expect(res.status).toBe(200);
+    expect((await org.POST(nx('/api/rollup/org', ID.coord, jsonInit('POST', { isoKey })))).status).toBe(200);
     const board = await (await org.GET(nx(`/api/rollup/org?isoKey=${isoKey}`, ID.coord))).json();
     expect(board.sections.map((x: { title: string; source: string }) => [x.title, x.source])).toEqual([
       ['본부가(실하나)', 'tincase'],
       ['본부가(실둘)', 'tincase'],
-      ['본부나(실셋)', 'waiting_hq'], // 본부나는 아직 총괄에 내지 않았다 — 실이 냈어도 본부를 거친다
+      ['본부나(실셋)', 'waiting_hq'], // 본부나는 아직 총괄에 온 판이 없다 — 실이 올려도 본부를 거친다
       ['단독단', 'tincase'],
     ]);
     expect(board.lastRun.sections.map((x: { title: string; status: string }) => [x.title, x.status])).toEqual([
@@ -337,7 +376,8 @@ d('TACP-21 위로 올린 제출', () => {
       ['본부나(실셋)', 'missing'],
       ['단독단', 'copied'],
     ]);
-    // 결과 문서 — 본부가 총괄에 낸 판에 든 것(RU-T25에서 다시 낸 둘째 판)이 들어갔다
+    expect((await prisma.rollupRun.findFirstOrThrow({ where: { level: 'org' }, orderBy: { startedAt: 'desc' } })).createdBy).toBe('system');
+    // 결과 문서 — 본부장이 승인해 보낸 판에 든 것(RU-T24에서 올라온 둘째 판)이 들어갔다
     const { readStoredFile } = await import('@/server/storage');
     const run = await prisma.rollupRun.findFirstOrThrow({ where: { level: 'org' }, orderBy: { startedAt: 'desc' } });
     const { readWorklog } = await import('@/lib/hwp/reader');
@@ -345,21 +385,29 @@ d('TACP-21 위로 올린 제출', () => {
     expect(readWorklog(bytes).worklog.achievements[0].content).toBe('실하나 둘째 판');
   });
 
-  it('[RU-T28] RU-10·61 — 본부 이어 붙이기도 전사와 같은 섹션 제목을 단다 (섹션이 없는 부서는 부서 이름 — RU-T25·26)', async () => {
+  it('[RU-T28] RU-10·61 — 본부본도 전사와 같은 섹션 제목을 단다 · 제목만 바뀌어서는 다시 만들지 않는다(승인을 풀지 않게)', async () => {
     // RU-T34가 섹션을 만들었다: 본부가(실하나)·본부가(실둘). 본부가의 순서는 RU-T26에서 실둘 → 실하나
+    const { prisma } = await import('@/server/db');
+    const { syncHq } = await import('@/server/rollup/auto');
+    const { hqNodeOf, loadTree } = await import('@/server/rollup/tree');
+    const slot = await prisma.weekSlot.findUniqueOrThrow({ where: { isoKey } });
+    const n = await prisma.rollupRun.count({ where: { level: 'hq', divisionId: divId.hq } });
+    await syncHq(hqNodeOf(await loadTree(), divId.hq)!, slot, { cause: 'test', causedBy: null });
+    expect(await prisma.rollupRun.count({ where: { level: 'hq', divisionId: divId.hq } })).toBe(n); // 열쇠에 제목이 없다 (RU-74)
+    // 입력이 바뀌어 다시 만들어질 때 새 제목을 받는다 — 쪽 나누기를 바꾼다
+    const order = await import('@/app/api/rollup/hq/order/route');
+    expect((await order.PUT(nx('/api/rollup/hq/order', ID.hqLead, jsonInit('PUT', { order: [divId.u2, divId.u1], pageBreak: false })))).status).toBe(200);
+    await (await import('@/server/after')).settleLater();
     const hq = await import('@/app/api/rollup/hq/route');
-    expect((await hq.POST(nx('/api/rollup/hq', ID.hqLead, jsonInit('POST', { isoKey })))).status).toBe(200);
     const b = await (await hq.GET(nx(`/api/rollup/hq?isoKey=${isoKey}`, ID.hqLead))).json();
-    expect(b.board.lastRun.status).toBe('succeeded');
-    expect(b.board.lastRun.units.map((u: { name: string }) => u.name)).toEqual(['본부가(실둘)', '본부가(실하나)']);
+    expect(b.board.current.units.map((u: { name: string }) => u.name)).toEqual(['본부가(실둘)', '본부가(실하나)']);
     // 화면의 행 수는 보낸 사본에서 센다 — 정규화가 넣는 「특이사항 없음」은 세지 않는다
-    expect(b.board.lastRun.units.map((u: { rows: unknown; emphasis: number }) => [u.rows, u.emphasis])).toEqual([
+    expect(b.board.current.units.map((u: { rows: unknown; emphasis: number }) => [u.rows, u.emphasis])).toEqual([
       [{ achievements: 1, plans: 1, notes: 0 }, 1],
       [{ achievements: 1, plans: 1, notes: 0 }, 1],
     ]);
     // 문서 안의 제목도 같다 — 원본 맨 위 부서명 줄(「실둘」)은 빠지고 생성한 제목이 단위명이 된다
-    const { prisma } = await import('@/server/db');
-    const run = await prisma.rollupRun.findFirstOrThrow({ where: { level: 'hq' }, orderBy: { startedAt: 'desc' } });
+    const run = await prisma.rollupRun.findFirstOrThrow({ where: { level: 'hq', status: 'succeeded' }, orderBy: { startedAt: 'desc' } });
     const { readStoredFile } = await import('@/server/storage');
     const { readUnits } = await import('@/lib/hwp/rollup');
     const units = readUnits(await readStoredFile(run.outputPath!), 'x').units;
@@ -367,31 +415,31 @@ d('TACP-21 위로 올린 제출', () => {
     // RU-19 — 자동 수정은 「확인해 주세요」(warnings)가 아니라 단위의 fixed로 따로 (2026-10-08). 생성한 제목으로 바꾼 부서명 줄은 소음이라 알리지 않는다
     const warnings: string[] = JSON.parse(run.warnings ?? '[]');
     expect(warnings.join(' ')).not.toContain('자동 수정');
-    expect(b.board.lastRun.units.every((u: { fixed: string[] }) => u.fixed.length > 0)).toBe(true); // 빈 3번 표에 「특이사항 없음」
+    expect(b.board.current.units.every((u: { fixed: string[] }) => u.fixed.length > 0)).toBe(true); // 빈 3번 표에 「특이사항 없음」
     expect(warnings.join(' ')).not.toContain('제목 「실둘」');
     // 섹션 설정을 읽기만 한다 — 본부 실행이 총괄의 섹션 목록을 만들거나 바꾸지 않는다
     expect(await prisma.orgSection.count()).toBe(4);
   });
 
-  it('[RU-T27] 제출 취소 — 내 부서 것만. 취소하면 위의 결과가 「바뀜」', async () => {
+  it('[RU-T27] 제출 취소는 없다 — DELETE는 보낸 부서에도 404, 사본은 그대로 (RU-03 · RU-84)', async () => {
     const { prisma } = await import('@/server/db');
     const r = await prisma.reportSubmission.findFirstOrThrow({ where: { divisionId: divId.u2, withdrawnAt: null } });
     const route = await import('@/app/api/rollup/report/route');
-    expect((await route.DELETE(nx(`/api/rollup/report?id=${r.id}`, ID.u1Lead, { method: 'DELETE' }))).status).toBe(404);
-    expect((await route.DELETE(nx(`/api/rollup/report?id=${r.id}`, ID.u2Lead, { method: 'DELETE' }))).status).toBe(200);
-    const hq = await import('@/app/api/rollup/hq/route');
-    const b = await (await hq.GET(nx(`/api/rollup/hq?isoKey=${isoKey}`, ID.hqLead))).json();
-    expect(b.board.lastRun.stale).toBe(true);
-    expect(b.board.units.find((u: { division: { nameKo: string } }) => u.division.nameKo === '실둘').report).toBeNull();
+    for (const who of [ID.u1Lead, ID.u2Lead, ID.coord]) {
+      expect((await route.DELETE(nx(`/api/rollup/report?id=${r.id}`, who, { method: 'DELETE' }))).status, who).toBe(404);
+    }
+    expect((await prisma.reportSubmission.findUniqueOrThrow({ where: { id: r.id } })).withdrawnAt).toBeNull();
   });
 });
 
 d('RU-50~58 단계 일정 · 스위치 · 본부장 승인', () => {
-  it('[RU-T40] ★ 3단계가 꺼져 있으면 [제출]·본부·전사 문이 닫힌다 — 운영자의 설정 화면만 열린다', async () => {
+  it('[RU-T40] ★ 3단계가 꺼져 있으면 「위로」·비상구·본부·전사 문이 닫힌다 — 운영자의 설정 화면만 열린다', async () => {
     const { prisma } = await import('@/server/db');
     await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { enabled: false } });
     try {
-      expect((await submitUnit(ID.u1Lead)).status).toBe(404);
+      const report = await import('@/app/api/rollup/report/route');
+      expect((await report.GET(nx(`/api/rollup/report?level=unit&isoKey=${isoKey}`, ID.u1Lead))).status).toBe(404);
+      expect((await report.POST(nx('/api/rollup/report', ID.u1Lead, jsonInit('POST', { level: 'unit', isoKey, withoutApproval: true })))).status).toBe(404);
       const hq = await import('@/app/api/rollup/hq/route');
       expect((await hq.GET(nx(`/api/rollup/hq?isoKey=${isoKey}`, ID.hqLead))).status).toBe(404);
       const org = await import('@/app/api/rollup/org/route');
@@ -434,13 +482,17 @@ d('RU-50~58 단계 일정 · 스위치 · 본부장 승인', () => {
     expect((await orgPageView(coord)).desk).toBe(await canOpenOrgDesk(coord));
   });
 
-  it('[RU-T46] [제출] 카드는 내 부서 lead·head에게만 — 총괄(readAll)에게는 누르면 404인 버튼을 그리지 않는다', async () => {
-    const { canSendReport, requireScope } = await import('@/server/authz');
-    const can = async (who: string) => canSendReport(await requireScope(new Headers({ 'x-test-identity': who })));
-    expect([await can(ID.u1Lead), await can(ID.hqHead), await can(ID.u1Member), await can(ID.coord)]).toEqual([true, true, false, false]);
-    // 화면은 canMerge(readAll 포함)가 아니라 이 판정을 쓴다 — API(requireReportSender)와 같은 것
+  it('[RU-T46] 「위로」 카드(RU-80)는 내 부서 lead·head에게만 — 비상구 링크는 lead에게만 (TACP-21 v1.7 · TACP-23)', async () => {
+    const { canSeeHandoff, canUseHandoffEscape, requireScope } = await import('@/server/authz');
+    const as = async (who: string) => requireScope(new Headers({ 'x-test-identity': who }));
+    const who = [ID.u1Lead, ID.hqHead, ID.u1Member, ID.coord];
+    expect(await Promise.all(who.map(async (w) => canSeeHandoff(await as(w))))).toEqual([true, true, false, false]);
+    expect(await Promise.all(who.map(async (w) => canUseHandoffEscape(await as(w))))).toEqual([true, false, false, false]);
+    // 화면은 canMerge(readAll 포함)가 아니라 이 판정을 쓴다 — API(GET 행방 · requireHandoffEscape)와 같은 것
     for (const f of ['src/app/[division]/manage/page.tsx', 'src/app/[division]/manage/[isoKey]/page.tsx']) {
-      expect(readFileSync(path.resolve(__dirname, '..', f), 'utf8'), f).toContain('canSendReport={view.isOwn && canSendReport(view.scope)}');
+      expect(readFileSync(path.resolve(__dirname, '..', f), 'utf8'), f).toContain(
+        'handoff={view.isOwn && canSeeHandoff(view.scope) ? { escape: canUseHandoffEscape(view.scope) } : null}',
+      );
     }
   });
 
@@ -466,49 +518,56 @@ d('RU-50~58 단계 일정 · 스위치 · 본부장 승인', () => {
     expect((await prisma.orgRollupSetting.findUniqueOrThrow({ where: { id: 'org' } })).hqDueMinutes).toBe(180);
   });
 
-  it('[RU-T43] ★ 본부장 승인 — head만, 같은 판은 한 번. 다시 이어 붙이면 「승인 뒤 바뀜」', async () => {
-    const { POST } = await import('@/app/api/rollup/hq/approve/route');
-    const approve = (who: string) => POST(nx('/api/rollup/hq/approve', who, jsonInit('POST', { isoKey })));
-    expect((await approve(ID.hqLead)).status).toBe(404); // 담당자는 자기가 만든 것을 승인하지 않는다
-    expect((await approve(ID.hqMember)).status).toBe(404);
-    const ok = await approve(ID.hqHead);
+  it('[RU-T43] ★ 본부장 승인 — head만, 본 판에만, 같은 판은 한 번. 다시 이어 붙어 바이트가 바뀌면 「승인 뒤 바뀜」', async () => {
+    expect((await hqApproveAs(ID.hqLead, 'hq')).status).toBe(404); // 담당자는 자기가 만든 것을 승인하지 않는다
+    expect((await hqApproveAs(ID.hqMember, 'hq')).status).toBe(404);
+    const ok = await hqApproveAs(ID.hqHead, 'hq');
     expect(ok.status).toBe(200);
     expect((await ok.json()).unchanged).toBe(false);
-    expect((await (await approve(ID.hqHead)).json()).unchanged).toBe(true);
+    expect((await (await hqApproveAs(ID.hqHead, 'hq')).json()).unchanged).toBe(true);
+    // 본 판을 안 보내는 옛 화면 — 무엇을 봤는지 모르면 승인하지 않는다 (RU-55)
+    const { POST } = await import('@/app/api/rollup/hq/approve/route');
+    expect((await POST(nx('/api/rollup/hq/approve', ID.hqHead, jsonInit('POST', { isoKey })))).status).toBe(409);
 
     const { prisma } = await import('@/server/db');
-    const { hqApproval } = await import('@/server/rollup/notices');
+    const { hqApproval } = await import('@/server/rollup/run');
     const slot = await prisma.weekSlot.findUniqueOrThrow({ where: { isoKey } });
     expect((await hqApproval(divId.hq, slot))?.changedAfter).toBe(false);
-    const hq = await import('@/app/api/rollup/hq/route');
-    await hq.POST(nx('/api/rollup/hq', ID.hqLead, jsonInit('POST', { isoKey })));
+    // 쪽 나누기를 다시 켠다 — 저절로 다시 이어 붙고 바이트가 달라진다
+    const order = await import('@/app/api/rollup/hq/order/route');
+    expect((await order.PUT(nx('/api/rollup/hq/order', ID.hqLead, jsonInit('PUT', { order: [divId.u2, divId.u1], pageBreak: true })))).status).toBe(200);
+    await (await import('@/server/after')).settleLater();
     expect((await hqApproval(divId.hq, slot))?.changedAfter).toBe(true);
   });
 
-  it('[RU-T44] 알림 문구 — 본부 담당자에게 제출·미제출, 총괄에게 도착·미도착, 할 일 한 줄', async () => {
-    const { hqCollectMessage, orgArrivalMessage, hqDueSoonMessage } = await import('@/server/rollup/notices');
+  it('[RU-T44] 알림 문구 — 본부장에게 산하 올라옴·미제출과 「승인하면 바로 총괄로」, 총괄에게 도착·미도착, 기한 15분 전', async () => {
+    const { hqReadyMessage, orgReadyMessage, hqHeadDueSoonMessage } = await import('@/server/rollup/notices');
     const slot = { label: '10월 2주차', opensAt: new Date('2026-10-11T15:00:00Z'), year: 2026, month: 10, weekOfMonth: 2 } as never;
     const p = { name: '담당', employeeNo: '1' };
-    const a = hqCollectMessage(p, slot, '기획경영본부', ['기획조정실', 'AI홍보전략실'], ['인사관리실']);
-    expect(a.subject).toContain('2/3곳 제출');
+    const a = hqReadyMessage(p, slot, '기획경영본부', ['기획조정실', 'AI홍보전략실'], ['인사관리실']);
+    expect(a.subject).toContain('2/3곳');
     expect(a.contents).toContain('아직 1곳: 인사관리실');
-    expect(a.contents).toContain('본부장 검토');
-    const b = orgArrivalMessage(p, slot, ['기획경영본부'], ['환경평가본부', '임원실']);
+    expect(a.contents).toContain('누르면 바로 총괄로 갑니다');
+    const b = orgReadyMessage(p, slot, ['기획경영본부'], ['환경평가본부', '임원실']);
     expect(b.subject).toContain('1/3곳 도착');
     expect(b.contents).toContain('아직 2곳: 환경평가본부·임원실');
-    expect(hqDueSoonMessage(p, slot, new Date('2026-10-15T07:00:00Z')).contents).toContain('16:00까지');
+    expect(hqHeadDueSoonMessage(p, slot, new Date('2026-10-15T07:00:00Z')).contents).toContain('16:00까지');
   });
 
   it('[RU-T76] RU-59 — 두 기한의 이름은 어디서나 한 쌍(「실·팀 → 본부」·「본부 → 총괄」) · 알림에도 시각이 있다 (RU-53)', async () => {
-    const { hqCollectMessage, orgArrivalMessage, hqDueSoonMessage } = await import('@/server/rollup/notices');
+    const { unitDueSoonMessage, hqHeadDueSoonMessage } = await import('@/server/rollup/notices');
     const { submitLines } = await import('@/server/notify/merge-notices');
     const slot = { label: '10월 2주차', opensAt: new Date('2026-10-11T15:00:00Z'), year: 2026, month: 10, weekOfMonth: 2 } as never;
     const p = { name: '담당', employeeNo: '1' };
-    expect(hqCollectMessage(p, slot, '본부가', ['실하나'], [], new Date('2026-10-15T06:00:00Z')).contents).toContain('「실·팀 → 본부」 기한(15:00)이 됐어요');
-    expect(orgArrivalMessage(p, slot, ['본부가'], []).contents).toContain('「본부 → 총괄」 기한이 됐어요');
-    expect(hqDueSoonMessage(p, slot, new Date('2026-10-15T07:00:00Z')).subject).toContain('「본부 → 총괄」 기한 15분 전');
-    // 실·팀 담당자의 마감 +30분 알림 — 언제까지 어느 버튼인지 (3단계를 안 쓰면 게시판 문구 그대로)
-    expect(submitLines({ submitTo: '본부가', submitDue: '15:00' })).toEqual(['15:00까지 Tincase 수합 관리에서 [본부가에 제출]을 눌러주세요.']);
+    const u = unitDueSoonMessage(p, slot, '본부가', new Date('2026-10-15T06:00:00Z'), true);
+    expect(u.subject).toContain('「실·팀 → 본부」 기한 15분 전');
+    expect(u.contents).toContain('15:00까지');
+    expect(unitDueSoonMessage(p, slot, '총괄', new Date('2026-10-15T07:00:00Z'), false).subject).toContain('「본부 → 총괄」 기한 15분 전');
+    expect(hqHeadDueSoonMessage(p, slot, new Date('2026-10-15T07:00:00Z')).subject).toContain('「본부 → 총괄」 기한 15분 전');
+    // 실·팀 담당자의 마감 +30분 알림 — 누를 버튼이 없다(NT-47′). 무엇을 기다리는지와 기한 (3단계를 안 쓰면 게시판 문구 그대로)
+    expect(submitLines({ submitTo: '본부가', submitDue: '15:00', hasHead: true, approval: null })).toEqual([
+      '아직 부서장 승인 전이에요 — 승인되면 저절로 본부가에 올라갑니다(기한 15:00).',
+    ]);
     expect(submitLines({ submitTo: null, submitDue: null })[0]).toContain('취합게시판');
     // 옛 이름이 화면·알림 글자에 남지 않는다 (주석은 보지 않는다 — 사용 안내는 따로 다시 쓰는 중이라 뺀다)
     const walk = (dir: string): string[] =>
@@ -591,7 +650,7 @@ d('RU-02 · RU-08 · HM-47 · RU-57 — 바뀜 판정 · 본부 스위치 · 승
   it('[RU-T37] ★ RU-02 — 다시 병합해 **같은 파일**이 나오면 「바뀜」이 아니다 (실·팀 사본·본부본 모두 내용으로 본다)', async () => {
     const { prisma } = await import('@/server/db');
     const slot = await prisma.weekSlot.findUniqueOrThrow({ where: { isoKey } });
-    // 실·팀 — 보낸 사본과 같은 바이트의 새 병합 실행
+    // 실·팀 — 보낸 사본과 같은 바이트의 새 병합 실행 → 맞춰도 새 사본이 없다, 상태는 「올라감」
     const unitRep = await prisma.reportSubmission.findFirstOrThrow({ where: { divisionId: divId.u1, level: 'unit', withdrawnAt: null }, orderBy: { submittedAt: 'desc' } });
     await prisma.mergeRun.create({
       data: {
@@ -604,15 +663,18 @@ d('RU-02 · RU-08 · HM-47 · RU-57 — 바뀜 판정 · 본부 스위치 · 승
         finishedAt: new Date(),
       },
     });
+    expect(await handOff('u1')).toBeNull();
     const { GET } = await import('@/app/api/rollup/report/route');
     const state = (await (await GET(nx(`/api/rollup/report?level=unit&isoKey=${isoKey}`, ID.u1Lead))).json()).state;
-    expect(state.changedSinceSubmit).toBe(false);
+    expect(state.state).toBe('H1');
 
-    // 본부 — 보낸 본부본과 같은 바이트의 새 이어 붙이기 실행
-    const hqRep = await prisma.reportSubmission.findFirstOrThrow({ where: { divisionId: divId.hq, level: 'hq', withdrawnAt: null } });
+    // 본부 — 총괄에 가 있는 본부본과 같은 바이트의 새 실행 → 「보낸 뒤 바뀜」이 아니다(Q2), 승인도 그대로
+    const hqRep = await prisma.reportSubmission.findFirstOrThrow({ where: { divisionId: divId.hq, level: 'hq', withdrawnAt: null }, orderBy: { submittedAt: 'desc' } });
     const last = await prisma.rollupRun.findFirstOrThrow({ where: { level: 'hq', divisionId: divId.hq, status: 'succeeded' }, orderBy: { startedAt: 'desc' } });
-    const hq = await import('@/app/api/rollup/hq/route');
-    expect((await (await hq.GET(nx(`/api/rollup/hq?isoKey=${isoKey}`, ID.hqLead))).json()).board.hqReportOutdated).toBe(true); // RU-T43이 다시 이어 붙였다
+    const { hqBoard } = await import('@/server/rollup/run');
+    const { hqNodeOf, loadTree } = await import('@/server/rollup/tree');
+    const node = hqNodeOf(await loadTree(), divId.hq)!;
+    expect((await hqBoard(node, slot)).state).toBe('Q3'); // RU-T43이 다시 이어 붙였다
     await prisma.rollupRun.create({
       data: {
         level: 'hq',
@@ -621,14 +683,15 @@ d('RU-02 · RU-08 · HM-47 · RU-57 — 바뀜 판정 · 본부 스위치 · 승
         status: 'succeeded',
         inputIds: last.inputIds,
         unitsJson: last.unitsJson,
+        inputKey: last.inputKey,
         outputPath: await copyStored(hqRep.filePath, `divisions/${DIV.hq.slug}/rollup`),
-        createdBy: 'test',
+        createdBy: 'system',
+        startedAt: new Date(),
         finishedAt: new Date(),
       },
     });
-    expect((await (await hq.GET(nx(`/api/rollup/hq?isoKey=${isoKey}`, ID.hqLead))).json()).board.hqReportOutdated).toBe(false);
-    const hqState = (await (await GET(nx(`/api/rollup/report?level=hq&isoKey=${isoKey}`, ID.hqLead))).json()).state;
-    expect(hqState.changedSinceSubmit).toBe(false);
+    const board = await hqBoard(node, slot);
+    expect([board.state, board.approval?.changedAfter]).toEqual(['Q2', false]);
   });
 
   it('[RU-T38] ★ HM-47 — 본부장의 본부본 승인(hq_approve)은 본부 **자체 병합본**의 승인이 아니다', async () => {
@@ -648,10 +711,10 @@ d('RU-02 · RU-08 · HM-47 · RU-57 — 바뀜 판정 · 본부 스위치 · 승
     };
     expect((await (await unitApprove()).json()).unchanged).toBe(false);
     // 그 사이 본부본을 승인해도(가장 최근 행이 hq_approve가 되어도) 같은 병합본을 두 번 승인하지 않는다
-    const hqApprove = await import('@/app/api/rollup/hq/approve/route');
-    const hq = await import('@/app/api/rollup/hq/route');
-    await hq.POST(nx('/api/rollup/hq', ID.hqLead, jsonInit('POST', { isoKey })));
-    expect((await (await hqApprove.POST(nx('/api/rollup/hq/approve', ID.hqHead, jsonInit('POST', { isoKey })))).json()).unchanged).toBe(false);
+    const order = await import('@/app/api/rollup/hq/order/route');
+    expect((await order.PUT(nx('/api/rollup/hq/order', ID.hqLead, jsonInit('PUT', { order: [divId.u1, divId.u2] })))).status).toBe(200);
+    await (await import('@/server/after')).settleLater();
+    expect((await hqApproveAs(ID.hqHead, 'hq')).status).toBe(200);
     const again = await (await unitApprove()).json();
     expect(again.unchanged).toBe(true);
     expect(again.review.kind).toBe('approve');
@@ -696,13 +759,13 @@ d('RU-02 · RU-08 · HM-47 · RU-57 — 바뀜 판정 · 본부 스위치 · 승
       const c2 = await prisma.user.create({ data: { email: 'coord2@test.kei.re.kr', name: '총괄둘', employeeNo: '9002', isCoordinator: true, divisionId: divId.solo } });
 
       vi.resetModules(); // env(메신저 주소)는 모듈 로드 때 굳는다
-      const { runDueRollupNotices, orgArrivalKind } = await import('@/server/rollup/notices');
+      const { runDueRollupNotices, orgReadyKind } = await import('@/server/rollup/notices');
       const { stageTimes } = await import('@/server/rollup/schedule');
       const slot = await prisma.weekSlot.findUniqueOrThrow({ where: { isoKey } });
       const now = new Date((await stageTimes(slot)).hqDue.getTime() + 60_000); // 본부 → 총괄 기한 직후
 
       const sent = await runDueRollupNotices(now);
-      expect(sent.map((r) => r.kind).sort()).toEqual([orgArrivalKind(c1.id), orgArrivalKind(c2.id)].sort());
+      expect(sent.map((r) => r.kind).sort()).toEqual([orgReadyKind(c1.id), orgReadyKind(c2.id)].sort());
       expect(received.map((f) => f.get('RecvId')).sort()).toEqual(['9001', '9002']);
       for (const f of received) {
         expect(f.get('Contents')).toContain('외딴실');
@@ -724,6 +787,7 @@ d('RU-02 · RU-08 · HM-47 · RU-57 — 바뀜 판정 · 본부 스위치 · 승
 
 d('RU-60~68 · TACP-21 — 전사 섹션: 경계 · 본부본에 없음 · 본부 자신의 섹션 · 누락·중복 · 양식 (2026-10-08 점검)', () => {
   const U3_LEAD = 'u3-lead@test.kei.re.kr';
+  const HQ2_HEAD = 'hq2-head@test.kei.re.kr';
   const OP2 = 'op2@test.kei.re.kr';
   type SectionRow = { id: string; title: string; divisionId: string | null; isActive: boolean };
   const activeSections = async (): Promise<SectionRow[]> => {
@@ -753,9 +817,13 @@ d('RU-60~68 · TACP-21 — 전사 섹션: 경계 · 본부본에 없음 · 본�
       sections: { title: string; status: string; source: string }[];
     };
   };
+  /** 전사본 [다시 시도] — 요청 뒤로 미룬 맞추기까지 끝난 뒤의 상태를 본다 */
   const makeOrg = async (who: string) => {
     const org = await import('@/app/api/rollup/org/route');
-    return (await org.POST(nx('/api/rollup/org', who, jsonInit('POST', { isoKey })))).status;
+    await (await import('@/server/after')).settleLater();
+    const status = (await org.POST(nx('/api/rollup/org', who, jsonInit('POST', { isoKey })))).status;
+    await (await import('@/server/after')).settleLater();
+    return status;
   };
 
   it('[RU-T70] ★ TACP-21 — 전사 섹션 경로(파일 올리기·받기·취소, 섹션 저장, 전사본 받기): member·lead·본부 담당자 404, 총괄 200 + 기록 1건 · 취소한 파일은 받기 404', async () => {
@@ -818,21 +886,20 @@ d('RU-60~68 · TACP-21 — 전사 섹션: 경계 · 본부본에 없음 · 본�
     expect((await get(ID.coord)).status).toBe(404);
   });
 
-  it('[RU-T71] ★ RU-32 — 실은 냈는데 본부가 낸 판에 없으면 「본부본에 없음」(그 본부 취합 길), 회색 「미제출」이 아니다', async () => {
+  it('[RU-T71] ★ RU-32·83 — 실은 올렸는데 본부장이 승인해 보낸 판에 없으면 「본부장 재승인 대기」(그 본부 취합 길), 회색 「미제출」이 아니다', async () => {
     const { prisma } = await import('@/server/db');
     await prisma.user.create({ data: { email: U3_LEAD, name: 'u3-lead', divisionId: divId.u3, divisionRole: 'lead' } });
-    const hq = await import('@/app/api/rollup/hq/route');
-    const report = await import('@/app/api/rollup/report/route');
-    // 본부나 = 자체 + 실셋 (RU-T39에서 자체 켬). 본부나가 자기 몫만 이어 붙여 총괄에 낸 **뒤에** 실셋이 낸다
+    // 본부나에 본부장이 있다 — 본부본은 본부장이 승인해야 총괄로 간다(본부장 없는 본부는 저절로 간다, RU-T107)
+    await prisma.user.create({ data: { email: HQ2_HEAD, name: 'hq2-head', divisionId: divId.hq2, divisionRole: 'head' } });
+    // 본부나 = 자체 + 실셋 (RU-T39에서 자체 켬). 본부나 자기 몫만 이어 붙은 판을 본부장이 승인해 총괄에 보낸 **뒤에** 실셋이 올린다
     await merged('hq2', '본부나 자체 내용');
-    expect((await submitUnit(ID.hq2Lead)).status).toBe(200);
-    expect((await hq.POST(nx('/api/rollup/hq', ID.hq2Lead, jsonInit('POST', { isoKey })))).status).toBe(200);
-    expect((await report.POST(nx('/api/rollup/report', ID.hq2Lead, jsonInit('POST', { level: 'hq', isoKey })))).status).toBe(200);
+    expect(await handOff('hq2')).not.toBeNull();
+    expect((await hqApproveAs(HQ2_HEAD, 'hq2')).status).toBe(200);
     await merged('u3', '실셋 내용');
-    expect((await submitUnit(U3_LEAD)).status).toBe(200);
+    expect(await handOff('u3')).not.toBeNull();
 
     const row = (await orgView()).rows.find((r) => r.title === '본부나(실셋)')!;
-    expect(row.final).toMatchObject({ source: 'not_in_hq', label: '본부나에서 다시 이어 붙여야 합니다' });
+    expect(row.final).toMatchObject({ source: 'not_in_hq', label: '본부나 — 승인한 판에 없음' });
     expect(row.hq?.href).toBe('/hq?node=HQ_B');
   });
 
@@ -848,11 +915,8 @@ d('RU-60~68 · TACP-21 — 전사 섹션: 경계 · 본부본에 없음 · 본�
     expect(await makeOrg(ID.coord)).toBe(200);
     expect((await lastOrgRunOf(ID.coord)).warnings[0]).toContain('「본부나」 사본이 어느 섹션에도 없어');
 
-    // 본부나가 실셋까지 넣어 다시 이어 붙여 내면 실셋 섹션은 Tincase로
-    const hq = await import('@/app/api/rollup/hq/route');
-    const report = await import('@/app/api/rollup/report/route');
-    expect((await hq.POST(nx('/api/rollup/hq', ID.hq2Lead, jsonInit('POST', { isoKey })))).status).toBe(200);
-    expect((await report.POST(nx('/api/rollup/report', ID.hq2Lead, jsonInit('POST', { level: 'hq', isoKey })))).status).toBe(200);
+    // 실셋까지 저절로 이어 붙은 본부본을 본부장이 다시 승인하면 실셋 섹션은 Tincase로
+    expect((await hqApproveAs(HQ2_HEAD, 'hq2')).status).toBe(200);
     board = await orgView();
     expect(board.rows.find((r) => r.title === '본부나(실셋)')!.final!.source).toBe('tincase');
 
@@ -885,7 +949,7 @@ d('RU-60~68 · TACP-21 — 전사 섹션: 경계 · 본부본에 없음 · 본�
     expect(names.slice(at, at + 2)).toEqual(['본부나', '본부나(실셋)']);
   });
 
-  it('[RU-T73] RU-60 · RU-64 — 같은 부서를 두 섹션에 두면 422(어느 부서·어느 섹션인지) · 만든 뒤 제목만 고쳐도 「섹션이 바뀜」', async () => {
+  it('[RU-T73] RU-60 · RU-64 · RU-83 — 같은 부서를 두 섹션에 두면 422(어느 부서·어느 섹션인지) · 제목만 고쳐도 전사본이 새 제목으로 저절로 다시', async () => {
     const list = await activeSections();
     const res = await putSections(
       ID.coord,
@@ -893,10 +957,14 @@ d('RU-60~68 · TACP-21 — 전사 섹션: 경계 · 본부본에 없음 · 본�
     );
     expect(res.status).toBe(422);
     expect((await res.json()).message).toBe('한 부서는 한 섹션에만 둘 수 있습니다 — 실하나(「본부가(실하나)」·「단독단」)');
-    // 바로 앞(RU-T72)에서 만든 전사본은 아직 그대로다. 제목만 바꿔도 받은 파일의 제목은 옛것이므로 「바뀜」
-    expect((await lastOrgRunOf(ID.coord)).stale).toBe(false);
+    // 바로 앞(RU-T72)에서 만든 전사본은 지금 입력 그대로다. 제목만 바꿔도 받은 파일의 제목은 옛것이므로 다시 만든다(RU-61)
+    const before = await lastOrgRunOf(ID.coord);
+    expect(before.stale).toBe(false);
     expect((await putSections(ID.coord, list.map((x) => (x.title === '단독단' ? { ...x, title: '단독단(새 제목)' } : x)))).status).toBe(200);
-    expect((await lastOrgRunOf(ID.coord)).stale).toBe(true);
+    await (await import('@/server/after')).settleLater();
+    const after = await lastOrgRunOf(ID.coord);
+    expect(after.stale).toBe(false);
+    expect(after.sections.map((x) => x.title)).toContain('단독단(새 제목)');
   });
 
   it('[RU-T74] RU-68 — 전사본 양식은 누가 눌렀나와 상관없이 총괄 부서의 것 · 쓴 양식이 결과에 남는다', async () => {
@@ -909,7 +977,7 @@ d('RU-60~68 · TACP-21 — 전사 섹션: 경계 · 본부본에 없음 · 본�
     expect((await lastOrgRunOf(OP2)).template).toBe('단독단 양식 v1');
   });
 
-  it('[RU-T75] RU-30 — [제출] 카드의 기한은 그 단위의 것: 본부로 내면 실·팀 → 본부, 바로 총괄로 내면(본부본 포함) 본부 → 총괄', async () => {
+  it('[RU-T75] RU-30 · RU-80 — 「위로」 카드의 기한은 그 단위의 것: 본부로 가면 실·팀 → 본부, 바로 총괄로 가면(본부본 포함) 본부 → 총괄', async () => {
     const { prisma } = await import('@/server/db');
     const { stageTimes, stageCells } = await import('@/server/rollup/schedule');
     const { GET } = await import('@/app/api/rollup/report/route');
@@ -921,5 +989,198 @@ d('RU-60~68 · TACP-21 — 전사 섹션: 경계 · 본부본에 없음 · 본�
     expect(await dueOf(ID.u1Lead)).toBe(cells.unitDueKo); // 실하나 → 본부가
     expect(await dueOf(ID.soloLead)).toBe(cells.hqDueKo); // 단독단 → 바로 총괄 (RU-07)
     expect(await dueOf(ID.hq2Lead, 'hq')).toBe(cells.hqDueKo); // 본부본 → 총괄
+  });
+});
+
+// ── TACP-23 (v1.7) — 자동 진행의 경계. 픽스처 없이 돈다(문서를 조립하지 않는 것만 본다) ────────────────
+describe('TACP-23 자동 진행의 경계 (RU-T118~123)', () => {
+  // 지어낸 조직 — 위의 시험과 섞이지 않게 따로: 본부다(본부장·담당) ← 실다섯(실장·담당·부서원)·실여섯(담당). 본부마는 기여 단위가 하나라 본부 단계가 없다
+  const T = {
+    hq: { slug: 'T23_HQ', nameKo: '본부다' },
+    u5: { slug: 'T23_U5', nameKo: '실다섯', parentKo: '본부다' },
+    u6: { slug: 'T23_U6', nameKo: '실여섯', parentKo: '본부다' },
+    solo: { slug: 'T23_SOLO', nameKo: '본부마' },
+  } as const;
+  const P = {
+    hqHead: 't23-hq-head@test.kei.re.kr',
+    hqLead: 't23-hq-lead@test.kei.re.kr',
+    u5Head: 't23-u5-head@test.kei.re.kr',
+    u5Lead: 't23-u5-lead@test.kei.re.kr',
+    u5Member: 't23-u5-member@test.kei.re.kr',
+    u6Lead: 't23-u6-lead@test.kei.re.kr',
+    soloHead: 't23-solo-head@test.kei.re.kr',
+    op: 't23-op@test.kei.re.kr',
+  };
+  const tid: Record<string, string> = {};
+  const uid: Record<string, string> = {};
+  const sha = (b: Buffer) => createHash('sha256').update(b).digest('hex');
+
+  const slotNow = async () => (await import('@/server/db')).prisma.weekSlot.findUniqueOrThrow({ where: { isoKey } });
+  /** 병합본 흉내 — 승인·비상구는 파일의 바이트(sha)만 본다. 조립하지 않으므로 아무 바이트면 된다 */
+  const fakeMerged = async (key: keyof typeof T, text: string) => {
+    const { prisma } = await import('@/server/db');
+    const { writeFileAtomic } = await import('@/server/storage');
+    const rel = `divisions/${T[key].slug}/merged/${Date.now()}_${Math.random().toString(36).slice(2)}.hwp`;
+    await writeFileAtomic(rel, Buffer.from(text));
+    return prisma.mergeRun.create({
+      data: { divisionId: tid[key], weekSlotId: (await slotNow()).id, status: 'succeeded', outputPath: rel, sourceIds: '[]', ruleSnapshot: '{}', startedAt: new Date(), finishedAt: new Date() },
+    });
+  };
+  const approveUnit = async (who: string, run: { id: string; outputPath: string | null }) => {
+    const { readStoredFile } = await import('@/server/storage');
+    const { POST } = await import('@/app/api/division/merged/approve/route');
+    return POST(nx('/api/division/merged/approve', who, jsonInit('POST', { isoKey, runId: run.id, sha256: sha(await readStoredFile(run.outputPath!)) })));
+  };
+  const settle = async () => (await import('@/server/after')).settleLater();
+  const report = () => import('@/app/api/rollup/report/route');
+
+  beforeAll(async () => {
+    const { prisma } = await import('@/server/db');
+    const { writeFileAtomic } = await import('@/server/storage');
+    for (const [key, d] of Object.entries(T)) {
+      const row = await prisma.division.create({
+        data: {
+          slug: d.slug,
+          nameKo: d.nameKo,
+          nameEn: d.slug,
+          isActive: true,
+          parentKo: 'parentKo' in d ? d.parentKo : '한국환경연구원',
+          rollupSelf: key !== 'hq',
+          deadlineDow: 1,
+          deadlineTime: '00:00',
+        },
+      });
+      tid[key] = row.id;
+      await writeFileAtomic(`divisions/${d.slug}/template/active.hwp`, Buffer.from('no-fixture-template'));
+      await prisma.template.create({ data: { divisionId: row.id, filePath: `divisions/${d.slug}/template/active.hwp`, sha256: 'x', version: 1, uploadedBy: 'seed' } });
+    }
+    const mk = async (k: keyof typeof P, key: keyof typeof T, extra: object = {}) => {
+      uid[k] = (await prisma.user.create({ data: { email: P[k], name: k, divisionId: tid[key], ...extra } })).id;
+    };
+    await mk('hqHead', 'hq', { divisionRole: 'head' });
+    await mk('hqLead', 'hq', { divisionRole: 'lead' });
+    await mk('u5Head', 'u5', { divisionRole: 'head', jobTitle: '실장' });
+    await mk('u5Lead', 'u5', { divisionRole: 'lead' });
+    await mk('u5Member', 'u5');
+    await mk('u6Lead', 'u6', { divisionRole: 'lead' });
+    await mk('soloHead', 'solo', { divisionRole: 'head' });
+    await mk('op', 'solo', { isOperator: true });
+    await prisma.orgRollupSetting.upsert({ where: { id: 'org' }, update: { enabled: true }, create: { id: 'org', enabled: true } });
+  });
+
+  it('[RU-T118] ★ [제출]·취소는 없다 — 예전 [제출](비상구 아님)·DELETE는 모든 역할 404 · 비상구는 그 단계 lead만(head는 승인하면 된다)', async () => {
+    const r = await report();
+    const run = await fakeMerged('u5', '실다섯 첫 판');
+    for (const who of [P.u5Lead, P.u5Head, P.u5Member, ID.coord, P.op]) {
+      expect((await r.POST(nx('/api/rollup/report', who, jsonInit('POST', { level: 'unit', isoKey })))).status, who).toBe(404);
+      expect((await r.POST(nx('/api/rollup/report', who, jsonInit('POST', { level: 'hq', isoKey })))).status, who).toBe(404);
+      expect((await r.DELETE(nx('/api/rollup/report?id=x', who, { method: 'DELETE' }))).status, who).toBe(404);
+    }
+    for (const who of [P.u5Head, P.u5Member, ID.coord, P.op]) {
+      expect((await r.POST(nx('/api/rollup/report', who, jsonInit('POST', { level: 'unit', isoKey, withoutApproval: true })))).status, who).toBe(404);
+    }
+    expect((await r.POST(nx('/api/rollup/report', P.hqHead, jsonInit('POST', { level: 'hq', isoKey, withoutApproval: true })))).status).toBe(404);
+    const { prisma } = await import('@/server/db');
+    expect(await prisma.reportSubmission.count({ where: { divisionId: { in: Object.values(tid) } } })).toBe(0);
+    expect(run.id).toBeTruthy();
+  });
+
+  it('[RU-T120] ★ 기록의 주체 — 승인으로 생긴 사본 = 승인한 사람 · 본부본 = system · 비상구 = 그 lead + unapproved. 일으킨 실장의 이름으로 본부본이 기록되지 않는다', async () => {
+    const { prisma } = await import('@/server/db');
+    const run = await prisma.mergeRun.findFirstOrThrow({ where: { divisionId: tid.u5 }, orderBy: { startedAt: 'desc' } });
+    const res = await approveUnit(P.u5Head, run);
+    expect(res.status).toBe(200);
+    expect((await res.json()).handedOff?.target).toBe('본부다');
+    await settle();
+    const sub = await prisma.reportSubmission.findFirstOrThrow({ where: { divisionId: tid.u5 } });
+    expect([sub.submittedBy, sub.basis]).toEqual([uid.u5Head, 'approved']);
+    const log = await prisma.auditLog.findFirstOrThrow({ where: { action: 'report_submit', target: `report:${sub.id}` } });
+    expect([log.actor, JSON.parse(log.detail!).auto]).toEqual([P.u5Head, true]);
+    // 본부본(조립은 이 시험에서 바이트가 hwp가 아니라 실패하지만) — 만든 이는 system, 실장이 아니다
+    const runs = await prisma.rollupRun.findMany({ where: { divisionId: tid.hq } });
+    expect(runs.length).toBeGreaterThan(0);
+    expect(runs.every((r) => r.createdBy === 'system' && r.cause === `unit_handoff:${sub.id}`)).toBe(true);
+    expect(await prisma.auditLog.count({ where: { action: 'rollup', actor: P.u5Head } })).toBe(0);
+    // 비상구 — 승인 뒤 바뀐 판을 담당자가 (기한 15분 전부터) 올린다
+    await fakeMerged('u5', '실다섯 승인 뒤 바뀜');
+    await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { unitDueMinutes: -60, hqDueMinutes: -30 } });
+    try {
+      const r = await (await report()).POST(nx('/api/rollup/report', P.u5Lead, jsonInit('POST', { level: 'unit', isoKey, withoutApproval: true })));
+      expect(r.status).toBe(200);
+    } finally {
+      await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { unitDueMinutes: 60, hqDueMinutes: 120 } });
+    }
+    await settle();
+    const esc = await prisma.reportSubmission.findFirstOrThrow({ where: { divisionId: tid.u5 }, orderBy: { submittedAt: 'desc' } });
+    expect([esc.submittedBy, esc.basis, esc.cause]).toEqual([uid.u5Lead, 'unapproved', 'escape']);
+    expect((await prisma.auditLog.findFirstOrThrow({ where: { action: 'report_submit', target: `report:${esc.id}` } })).actor).toBe(P.u5Lead);
+  });
+
+  it('[RU-T119] ★ 본부본 승인은 그 본부의 head만 — 본부 lead·산하 실장·본부 단계 없는 곳의 장·총괄 → 404 · 본 판이 아니면 409 + 사본 없음 · head 200', async () => {
+    const { prisma } = await import('@/server/db');
+    const { writeFileAtomic } = await import('@/server/storage');
+    const { POST } = await import('@/app/api/rollup/hq/approve/route');
+    // 본부다의 본부본 — 이 시험은 조립하지 않으므로 성공한 실행을 하나 둔다
+    const bytes = Buffer.from('본부다 본부본');
+    await writeFileAtomic('divisions/T23_HQ/rollup/doc.hwp', bytes);
+    const run = await prisma.rollupRun.create({
+      data: { level: 'hq', divisionId: tid.hq, weekSlotId: (await slotNow()).id, status: 'succeeded', outputPath: 'divisions/T23_HQ/rollup/doc.hwp', inputIds: '[]', createdBy: 'system', startedAt: new Date(), finishedAt: new Date() },
+    });
+    const viewed = { isoKey, runId: run.id, sha256: sha(bytes) };
+    for (const who of [P.hqLead, P.u5Head, P.soloHead, ID.coord]) {
+      expect((await POST(nx('/api/rollup/hq/approve', who, jsonInit('POST', viewed)))).status, who).toBe(404);
+    }
+    const stale = await POST(nx('/api/rollup/hq/approve', P.hqHead, jsonInit('POST', { ...viewed, sha256: 'f'.repeat(64) })));
+    expect(stale.status).toBe(409);
+    expect(await prisma.reportSubmission.count({ where: { divisionId: tid.hq, level: 'hq' } })).toBe(0);
+    const ok = await POST(nx('/api/rollup/hq/approve', P.hqHead, jsonInit('POST', viewed)));
+    expect(ok.status).toBe(200);
+    await settle();
+    const sub = await prisma.reportSubmission.findFirstOrThrow({ where: { divisionId: tid.hq, level: 'hq' } });
+    expect([sub.submittedBy, sub.basis, sub.sha256]).toEqual([uid.hqHead, 'approved', sha(bytes)]);
+    // 다른 본부의 head가 같은 판을 보내도 대상은 신원의 본부다(TACP-6) — 본부다에는 아무 일도 없다
+    await POST(nx('/api/rollup/hq/approve', ID.hqHead, jsonInit('POST', viewed)));
+    expect(await prisma.mergeReview.count({ where: { divisionId: tid.hq, kind: 'hq_approve' } })).toBe(1);
+  });
+
+  it('[RU-T121] 입력은 요청이 고르지 못한다 — [다시 시도]에 inputIds·nodeId·division을 실어도 무시하고 DB 상태로만 · 본부 lead의 다시 시도는 내 본부만', async () => {
+    const { prisma } = await import('@/server/db');
+    const hq = await import('@/app/api/rollup/hq/route');
+    const before = await prisma.rollupRun.findMany({ where: { level: 'hq' }, select: { id: true } });
+    const known = new Set(before.map((r) => r.id));
+    await hq.POST(nx('/api/rollup/hq', P.hqLead, jsonInit('POST', { isoKey, inputIds: ['forged'], nodeId: divId.hq, division: DIV.hq.slug })));
+    const made = (await prisma.rollupRun.findMany({ where: { level: 'hq' } })).filter((r) => !known.has(r.id));
+    expect(made.every((r) => r.divisionId === tid.hq && r.createdBy === 'system')).toBe(true);
+    expect(made.every((r) => !r.inputIds.includes('forged'))).toBe(true);
+    // 다른 본부(본부가)에는 이 요청으로 생긴 실행이 없다
+    expect(made.some((r) => r.divisionId === divId.hq)).toBe(false);
+    // 산하 실의 담당자·부서원은 다시 시도 404
+    for (const who of [P.u5Lead, P.u5Member]) expect((await hq.POST(nx('/api/rollup/hq', who, jsonInit('POST', { isoKey })))).status, who).toBe(404);
+  });
+
+  it('[RU-T122] ★ 행방은 내 부서 사본만 — 실·팀 lead·head는 시각을 본다(새로 허용) · member는 받지 않는다 · 본부본 내용·다른 단위 이름은 응답에 없다', async () => {
+    const r = await report();
+    const get = async (who: string, extra = '') => (await (await r.GET(nx(`/api/rollup/report?level=unit&isoKey=${isoKey}${extra}`, who))).json()).state;
+    const lead = await get(P.u5Lead);
+    expect(lead.target).toBe('본부다');
+    expect(lead.trail).toMatchObject({ hqArrivedKst: expect.stringMatching(/^\d\d-\d\d \d\d:\d\d$/) });
+    const head = await get(P.u5Head);
+    expect(head.trail).not.toBeNull();
+    const member = await get(P.u5Member);
+    expect([member.trail, member.escape]).toEqual([null, null]);
+    expect(JSON.stringify(lead)).not.toContain('실여섯');
+    // 다른 부서를 가리켜도(대상은 신원의 부서 — TACP-6·7) 실여섯 담당자는 실여섯의 것만 본다
+    const other = await get(P.u6Lead, `&division=${T.u5.slug}`);
+    expect([other.sent, other.trail]).toEqual([null, null]);
+  });
+
+  it('[RU-T123] ★ 사본을 만드는 곳은 하나 — `reportSubmission.create`는 src/server/rollup/handoff.ts(와 지난 자료 적재 스크립트) 밖에 없다 (TACP-12의 짝)', () => {
+    const ROOT = path.resolve(__dirname, '..');
+    const walk = (dir: string): string[] =>
+      readdirSync(path.join(ROOT, dir), { withFileTypes: true }).flatMap((e) =>
+        e.isDirectory() ? walk(path.join(dir, e.name)) : /\.(ts|tsx|cjs|mjs)$/.test(e.name) ? [path.join(dir, e.name)] : [],
+      );
+    const makers = [...walk('src'), ...walk('scripts')].filter((f) => /reportSubmission\.(create|createMany|upsert)\(/.test(readFileSync(path.join(ROOT, f), 'utf8')));
+    expect(makers.sort()).toEqual([path.join('scripts', 'import-reports.ts'), path.join('src', 'server', 'rollup', 'handoff.ts')].sort());
   });
 });

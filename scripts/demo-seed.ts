@@ -43,11 +43,11 @@ import { readStoredFile, resolveInRoot } from '../src/server/storage';
 import { ensureCurrentSlot, uploadSubmission } from '../src/server/worklog';
 import { runMergeRecorded } from '../src/server/merge/run';
 import { recordReview } from '../src/server/merge/review';
-import { submitReport } from '../src/server/rollup/report';
 import { hqNodeOf, loadTree, type RollupNode } from '../src/server/rollup/tree';
-import { runHqRollup } from '../src/server/rollup/run';
-import { approveHq } from '../src/server/rollup/notices';
-import { runOrgDocument } from '../src/server/rollup/orgrun';
+import { approveHq, freeze, latestHqRun, syncUnit, withUnitLock } from '../src/server/rollup/handoff';
+import { syncAfterUnit, syncHq, syncOrg } from '../src/server/rollup/auto';
+import { fileSha } from '../src/server/rollup/report';
+import { settleLater } from '../src/server/after';
 import { loadSections, uploadSectionFile } from '../src/server/rollup/sections';
 import { currentWeek, deadlineFor, describeWeek, toKstIso } from '../src/lib/week';
 import {
@@ -255,13 +255,19 @@ async function perform(ctx: Ctx, a: Action, at: Date): Promise<void> {
       return;
     }
     case 'approve': {
+      // HM-47 · RU-70 — 부서장 승인 = 위로 제출 (3단계가 켜져 있다). 화면과 같은 길: 불변 사본 → 승인·사본(한 트랜잭션)
       const d = divOf(ctx, a.div);
-      const run = await prisma.mergeRun.findFirst({
-        where: { divisionId: d.id, weekSlotId: slot.id, status: 'succeeded', outputPath: { not: null } },
-        orderBy: { startedAt: 'desc' },
+      const u = who(ctx, a.who);
+      const sub = await withUnitLock(d.id, slot.id, async () => {
+        const run = await prisma.mergeRun.findFirst({
+          where: { divisionId: d.id, weekSlotId: slot.id, status: 'succeeded', outputPath: { not: null } },
+          orderBy: { startedAt: 'desc' },
+        });
+        if (!run?.outputPath) throw new Error(`${a.div} 승인할 병합본이 없습니다`);
+        const frozen = await freeze(d.slug, slot, 'unit', await readStoredFile(run.outputPath));
+        return (await recordReview({ scope: scopeOf(u, d), run, slot, kind: 'approve', changes: [], frozen })).handedOff;
       });
-      if (!run?.outputPath) throw new Error(`${a.div} 승인할 병합본이 없습니다`);
-      await recordReview({ scope: scopeOf(who(ctx, a.who), d), run, slot, kind: 'approve', changes: [], bytes: await readStoredFile(run.outputPath) });
+      if (sub) await syncAfterUnit(d.id, slot, { cause: `unit_handoff:${sub.submissionId}`, causedBy: u.email });
       return;
     }
     case 'upload': {
@@ -269,25 +275,41 @@ async function perform(ctx: Ctx, a: Action, at: Date): Promise<void> {
       if (!sec) throw new Error(`전사 섹션이 없습니다: ${a.section}`);
       const bytes = ctx.build(contentNo(a.section, slot.isoKey, 1), at);
       await uploadSectionFile(scopeOf(who(ctx, a.who), divOf(ctx, PCO)), sec.id, slot, bytes, `${a.section}_${slot.label.replace(/ /g, '_')}.hwp`);
+      await syncOrg(slot, { cause: 'upload', causedBy: who(ctx, a.who).email });
       return;
     }
     case 'report': {
+      // 2026-10-08(ADR-0015 · RU-84) — 사람이 누르는 [제출]은 없다. 부서장이 있는 단위는 승인('approve')이 이미 올렸고,
+      // 부서장이 없는 단위(기획조정실·연구관리실·기후대기)는 마감 뒤 최종본이 저절로 올라간다 — 그 맞추기를 여기서 한 번 돌린다.
+      // (병합 시작 시각은 앞 단계 뒤에 이야기 시각으로 고쳐져 있다 — 그래서 여기서는 「마감 뒤 최종본」으로 읽힌다)
       const u = who(ctx, a.who);
       const d = divOf(ctx, a.div);
-      await submitReport(scopeOf(u, d), a.level, slot, a.level === 'hq' ? await hqNode(ctx) : undefined);
+      if (a.level === 'hq') {
+        await syncHq(await hqNode(ctx), slot, { cause: 'seed', causedBy: u.email });
+        return;
+      }
+      const sub = await syncUnit(d.id, slot, { cause: 'seed', causedBy: u.email });
+      if (sub) await syncAfterUnit(d.id, slot, { cause: `unit_handoff:${sub.id}`, causedBy: u.email });
       return;
     }
-    case 'hqRun': {
-      const r = await runHqRollup(scopeOf(who(ctx, a.who), divOf(ctx, a.div)), await hqNode(ctx), slot);
-      if (r.status !== 'succeeded') throw new Error(`${a.div} 이어 붙이기 실패: ${r.errorText}`);
+    case 'hqRun':
+      // 본부본은 저절로 이어 붙는다 — 맞추기만 (같은 입력이면 아무것도 하지 않는다)
+      await syncHq(await hqNode(ctx), slot, { cause: 'seed', causedBy: who(ctx, a.who).email });
+      return;
+    case 'hqApprove': {
+      // RU-55 — 본부장 승인 = 총괄로 제출. 화면처럼 **지금 본부본**(본 판)에
+      const node = await hqNode(ctx);
+      const run = await latestHqRun(node.node.id, slot.id);
+      if (!run) throw new Error(`${a.div} 승인할 본부본이 없습니다`);
+      await approveHq(scopeOf(who(ctx, a.who), divOf(ctx, a.div)), node, slot, { runId: run.id, sha256: await fileSha(run.outputPath) });
+      await syncOrg(slot, { cause: 'hq_approval', causedBy: who(ctx, a.who).email });
       return;
     }
-    case 'hqApprove':
-      await approveHq(scopeOf(who(ctx, a.who), divOf(ctx, a.div)), await hqNode(ctx), slot);
-      return;
     case 'orgRun': {
-      const r = await runOrgDocument(scopeOf(who(ctx, a.who), divOf(ctx, PCO)), slot);
-      if (r.status !== 'succeeded') throw new Error(`전사 취합본 실패: ${r.errorText}`);
+      // RU-83 — 전사본은 저절로 만들어진다. 맞추기만
+      await syncOrg(slot, { cause: 'seed', causedBy: who(ctx, a.who).email });
+      const r = await prisma.rollupRun.findFirst({ where: { level: 'org', weekSlotId: slot.id }, orderBy: { startedAt: 'desc' } });
+      if (r && r.status !== 'succeeded') throw new Error(`전사본 실패: ${r.errorText}`);
       return;
     }
   }
@@ -313,6 +335,7 @@ async function seedWeek(
   const ctx: Ctx = { org, slot, build, versions: new Map() };
   for (const p of plan) {
     await perform(ctx, p.action, p.at);
+    await settleLater(); // 요청 뒤로 미룬 맞추기(본부본·전사본)도 이 단계의 시각으로 찍히게
     await stampNew(p.at);
   }
   await stampNew(new Date(monday.getTime() + MIN)); // 주차 행 자체(ensureCurrentSlot)

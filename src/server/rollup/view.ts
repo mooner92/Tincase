@@ -7,17 +7,22 @@ import { rollupWeeks } from './run';
 
 export const kst = (d: Date | null | undefined) => (d ? toKstIso(d).slice(5, 16).replace('T', ' ') : null);
 
-export function chipOf(u: Pick<UnitStatus, 'report' | 'merged'>): StatusChip {
-  if (u.report) {
-    return {
-      kind: 'sent',
-      // 칩에는 「제출 시각」만, 낸 사람은 칩 옆에 흐리게 — 칩 하나에 낱말 셋이면 칩이 문장이 된다 (CP-100)
-      label: `제출 ${kst(u.report.submittedAt)}`,
-      by: `${u.report.submittedBy}${u.report.origin === 'import' ? ' (적재)' : ''}`,
-      href: `/api/rollup/report/${u.report.id}`,
-    };
+/**
+ * RU-82 — 산하 칩. 칩에는 상태와 시각만, 누가(승인한 사람·올린 사람)는 칩 옆에 흐리게 — 칩 하나에 낱말 셋이면 칩이 문장이 된다 (CP-100).
+ *   올라옴(승인) · 부서장 없음(자동) · 주황 「부서장 승인 없이」 · 부서장 승인 전 · 미제출
+ */
+export function chipOf(u: Pick<UnitStatus, 'report' | 'merged' | 'final' | 'hasHead'>): StatusChip {
+  const r = u.report;
+  if (r) {
+    const href = `/api/rollup/report/${r.id}`;
+    if (r.origin === 'import') return { kind: 'sent', label: `적재 ${kst(r.submittedAt)}`, href };
+    if (r.basis === 'unapproved') return { kind: 'unapproved', label: `부서장 승인 없이 ${kst(r.submittedAt)}`, by: r.submittedBy, href };
+    if (r.basis === 'no_head') return { kind: 'nohead', label: `부서장 없음 · 자동 ${kst(r.submittedAt)}`, href };
+    if (r.basis === 'approved') return { kind: 'sent', label: `올라옴 ${kst(r.submittedAt)}`, by: r.approvedBy ? `${r.approvedBy} 승인` : undefined, href };
+    return { kind: 'sent', label: `제출 ${kst(r.submittedAt)}`, by: r.submittedBy, href }; // v1.7 전의 [제출]
   }
-  return u.merged ? { kind: 'merged', label: '병합됨 · 미제출' } : { kind: 'waiting', label: '아직 병합 전' };
+  if (u.final && u.hasHead) return { kind: 'pending', label: '부서장 승인 전' };
+  return u.merged ? { kind: 'waiting', label: '미제출' } : { kind: 'waiting', label: '아직 병합 전' };
 }
 
 export function unitRow(u: UnitStatus): DeskRow {
@@ -25,7 +30,10 @@ export function unitRow(u: UnitStatus): DeskRow {
 }
 
 export function runView(r: RunCell | null): RunView | null {
-  return r ? { ...r, finishedAtKst: kst(r.finishedAt) } : null;
+  if (!r) return null;
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const { startedAt, finishedAt, ...rest } = r; // 화면 부품은 Date를 받지 않는다
+  return { ...rest, finishedAtKst: kst(finishedAt) };
 }
 
 /** 주차 목록 — 이번 주 + 제출 기록이 있는 최근 주차 + 지금 보는 주차 */

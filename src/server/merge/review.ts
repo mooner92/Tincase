@@ -2,7 +2,10 @@
 //
 // 담당자가 기다리는 신호는 「실장이 봤다」 하나다. 그 신호가 사람 입으로만 오가면 언제·무엇을 고쳤는지가
 // 사라지고, 제출이 늦어진다(2026-10-07 운영자 요청). 그래서 저장이 곧 승인이고, 승인이 곧 알림이다.
-import type { MergeRun, MergeReview, WeekSlot } from '@prisma/client';
+//
+// 2026-10-08(ADR-0015) — 3단계에서는 **승인이 곧 위로 가는 제출**이다. 승인 기록과 사본은 rollup/handoff.ts가 한 트랜잭션에서
+// 만든다(사본을 만드는 곳은 거기 하나 — TACP-23). 이 파일은 승인의 앞뒤(본 판 확인·알림)를 맡는다.
+import type { Division, MergeRun, MergeReview, WeekSlot } from '@prisma/client';
 import { prisma } from '../db';
 import { audit } from '../audit';
 import { logger } from '../logger';
@@ -14,13 +17,10 @@ import { readWorklog } from '@/lib/hwp/reader';
 import { BUCKETS, type BucketKey } from '@/lib/merge-rows';
 import { describeChange, summarizeChanges, type DiffRow, type RowChange } from '@/lib/merge-diff';
 import { slotKind, toKstIso } from '@/lib/week';
+import { NEWEST_FIRST, UNIT_REVIEW } from './review-scope';
+import type { Frozen } from '../rollup/handoff';
 
-/**
- * HM-47 — **부서 병합본** 승인만 고르는 조건. MergeReview 표에는 본부장의 본부본 승인(`hq_approve`, RU-55)도
- * 같은 부서 id(본부)로 산다. 이 조건 없이 고르면 본부장이 본부본을 승인한 것이 그 본부 **자체 병합본**의
- * 승인으로 보이고, 같은 판 중복 판정이 엉뚱한 행과 비교된다. 부서 병합본 쪽 질의는 전부 이것을 쓴다.
- */
-export const UNIT_REVIEW = { kind: { not: 'hq_approve' } } as const;
+export { UNIT_REVIEW };
 
 /** 병합본 hwp → 표별 행 (비교용) */
 export function worklogRows(buf: Buffer): Record<BucketKey, DiffRow[]> {
@@ -42,7 +42,18 @@ const hhmm = (d: Date) => toKstIso(d).slice(11, 16);
 /** 알림에 적을 바뀐 곳 줄 수. 팝업이라 길면 안 읽힌다 — 나머지는 화면에서 본다 */
 const NOTICE_LINES = 4;
 
-export function approvalMessage(lead: { name: string; employeeNo: string }, reviewer: string, slot: WeekSlot, at: Date, changes: RowChange[]) {
+/**
+ * NT-46 · NT-46′ — 승인 알림. 3단계에서 승인이 곧 제출이면(`handedOffTo`) 끝 줄이 「○○에 자동으로 올라갔어요」다 —
+ * 담당자가 할 일(취합게시판에 올리기)이 없어졌다. 꺼져 있으면 지금 문구 그대로.
+ */
+export function approvalMessage(
+  lead: { name: string; employeeNo: string },
+  reviewer: string,
+  slot: WeekSlot,
+  at: Date,
+  changes: RowChange[],
+  handedOffTo: string | null = null,
+) {
   const label = `${slot.label} ${slotKind(slot) === 'monthly' ? '월간' : '주간'}`;
   const lines = changes.slice(0, NOTICE_LINES).map((c) => `· ${describeChange(c)}`);
   if (changes.length > NOTICE_LINES) lines.push(`· 외 ${changes.length - NOTICE_LINES}곳`);
@@ -54,7 +65,7 @@ export function approvalMessage(lead: { name: string; employeeNo: string }, revi
       changes.length ? `바뀐 곳: ${summarizeChanges(changes)}` : '고친 곳 없이 승인했어요.',
       ...lines,
       '',
-      'Tincase에서 받아 취합게시판에 올려주세요.',
+      handedOffTo ? `${handedOffTo}에 자동으로 올라갔어요.` : 'Tincase에서 받아 취합게시판에 올려주세요.',
     ].join('\n'),
   };
 }
@@ -72,7 +83,7 @@ export interface NotifyResult {
  * **몇 명에게 나갔는지 돌려준다** — 알림이 꺼진 부서에서도 화면이 「담당자에게 알렸습니다」라고
  * 말하던 결함이 있었다(2026-10-07 리뷰). 보내지 않았으면 0이다.
  */
-async function notifyLeads(review: MergeReview, reviewer: string, slot: WeekSlot, changes: RowChange[]): Promise<NotifyResult> {
+async function notifyLeads(review: MergeReview, reviewer: string, slot: WeekSlot, changes: RowChange[], handedOffTo: string | null): Promise<NotifyResult> {
   if (!messengerStatus().enabled) return { sent: 0, targets: 0 };
   const division = await prisma.division.findUnique({ where: { id: review.divisionId } });
   if (!division?.notifyEnabled) return { sent: 0, targets: 0 };
@@ -84,7 +95,11 @@ async function notifyLeads(review: MergeReview, reviewer: string, slot: WeekSlot
   const sent: string[] = [];
   const blocked: string[] = [];
   for (const l of leads) {
-    const r = await sendAlert({ recvIds: [l.employeeNo!], ...approvalMessage({ name: l.name, employeeNo: l.employeeNo! }, reviewer, slot, review.createdAt, changes), url });
+    const r = await sendAlert({
+      recvIds: [l.employeeNo!],
+      ...approvalMessage({ name: l.name, employeeNo: l.employeeNo! }, reviewer, slot, review.createdAt, changes, handedOffTo),
+      url,
+    });
     sent.push(...r.sent);
     blocked.push(...r.blocked);
   }
@@ -127,14 +142,15 @@ export function requireViewedVersion(
 export async function alreadyApproved(run: Pick<MergeRun, 'id' | 'divisionId' | 'weekSlotId'>, sha: string): Promise<boolean> {
   const last = await prisma.mergeReview.findFirst({
     where: { divisionId: run.divisionId, weekSlotId: run.weekSlotId, mergeRunId: run.id, ...UNIT_REVIEW },
-    orderBy: { createdAt: 'desc' },
+    orderBy: NEWEST_FIRST,
   });
   return !!last && last.sha256 === sha;
 }
 
 /**
  * HM-47 — 승인을 남기고 알린다. 알림이 실패해도 승인은 남는다 — 알림은 승인의 결과이지 조건이 아니다.
- * `bytes`는 승인한 판 그대로의 파일이다(저장 직후의 것).
+ * `frozen`은 승인한 판 그대로의 **불변 사본**이다 — 부르는 쪽이 본 판을 확인한 그 바이트로 **맨 먼저** 썼다(RU-73).
+ * 3단계면 같은 트랜잭션에서 위로 가는 사본이 생긴다(`handedOff` — handoff.ts). 부르는 쪽이 `unit:` 잠금을 쥐고 있다.
  */
 export async function recordReview(opts: {
   scope: Scope;
@@ -142,32 +158,98 @@ export async function recordReview(opts: {
   slot: WeekSlot;
   kind: 'edit' | 'approve';
   changes: RowChange[];
-  bytes: Buffer;
-}): Promise<{ review: MergeReview; notified: NotifyResult }> {
-  const { scope, run, slot, kind, changes, bytes } = opts;
-  const review = await prisma.mergeReview.create({
-    data: {
-      divisionId: run.divisionId,
-      weekSlotId: run.weekSlotId,
-      mergeRunId: run.id,
-      reviewerId: scope.user.id,
-      kind,
-      changes: JSON.stringify(changes),
-      sha256: sha256(bytes),
-    },
-  });
+  frozen: Frozen;
+}): Promise<{ review: MergeReview; notified: NotifyResult; handedOff: { target: string; at: Date; submissionId: string } | null }> {
+  const { scope, run, slot, kind, changes, frozen } = opts;
+  // 정적으로 이으면 merge-notices → review → handoff → schedule → slot-deadline → merge-notices 고리가 된다
+  const { commitUnitApproval } = await import('../rollup/handoff');
+  const { review, handoff } = await commitUnitApproval({ scope, run, slot, kind, changes, frozen });
   await audit(scope.user.email, 'merge', run.divisionId, `merged:${slot.isoKey}`, {
     action: 'approve',
     kind,
     summary: summarizeChanges(changes),
+    review: review.id,
+    sha256: frozen.sha256,
   });
   let notified: NotifyResult = { sent: 0, targets: 0 };
   try {
-    notified = await notifyLeads(review, titled(scope.user), slot, changes);
+    notified = await notifyLeads(review, titled(scope.user), slot, changes, handoff?.target ?? null);
   } catch (e) {
     logger.error({ err: (e as Error).message, review: review.id }, '[알림] 승인 알림 실패');
   }
-  return { review, notified };
+  return {
+    review,
+    notified,
+    handedOff: handoff ? { target: handoff.target, at: handoff.submission.submittedAt, submissionId: handoff.submission.id } : null,
+  };
+}
+
+/** NT-52 — 부서장 「다시 승인해 주세요」의 NotifyLog 종류. 새 판(sha)마다 하나 — 마감 뒤 검토 요청(NT-40)도 이것을 보고 겹치지 않는다 */
+export const reapproveKind = (sha: string) => `merge_reapprove:${sha.slice(0, 12)}`;
+
+/** NT-52 — 무엇이 판을 바꿨나 */
+export type ReapproveReason = { kind: 'edit'; places: number } | { kind: 'merge'; late: number };
+
+/** NT-52 — 부서장: 승인 뒤 병합본이 바뀌었다. 다시 승인하면 올라간다 */
+export function reapproveMessage(p: { name: string; employeeNo: string }, slot: WeekSlot, target: string, reason: ReapproveReason) {
+  const label = `${slot.label} ${slotKind(slot) === 'monthly' ? '월간' : '주간'}`;
+  const what =
+    reason.kind === 'edit'
+      ? `담당자가 승인 뒤 병합본을 ${reason.places}곳 고쳤어요.`
+      : `승인 뒤 병합본이 다시 병합됐어요${reason.late > 0 ? `(늦게 낸 ${reason.late}명 포함)` : ''}.`;
+  return {
+    subject: `[Tincase] ${label} 병합본 — 다시 승인해 주세요`,
+    contents: [
+      `[${p.employeeNo}]${p.name}님 ${what}`,
+      `${target}에는 승인한 판이 그대로 있어요.`,
+      '',
+      `Tincase 수합 관리에서 확인하고 다시 승인하면 바로 ${target}에 올라갑니다.`,
+    ].join('\n'),
+  };
+}
+
+/**
+ * NT-52 · HM-47 (2026-10-08) — 3단계에서 **승인 뒤 병합본이 바뀌면**(담당자 수정 저장·다시 병합) 부서장에게 한 번.
+ * 새 판(sha)마다 한 번이다(`merge_reapprove:<sha 앞 12자>`). 담당자의 저장은 위로 가지 않으므로(승인이 아니다), 바뀐 판이
+ * 올라가려면 부서장이 다시 승인해야 한다 — 부서장이 그 사실을 화면을 열기 전에 알아야 한다.
+ * 부서 알림 스위치(NT-30)·3단계 스위치(RU-52)·메신저(RU-41)를 따른다. 보냈으면 나간 사람 수, 아니면 0.
+ */
+export async function notifyReapprove(division: Division, slot: WeekSlot, target: string, reason: ReapproveReason): Promise<number> {
+  if (!messengerStatus().enabled || !division.notifyEnabled) return 0;
+  const review = await prisma.mergeReview.findFirst({ where: { divisionId: division.id, weekSlotId: slot.id, ...UNIT_REVIEW }, orderBy: NEWEST_FIRST });
+  if (!review) return 0; // 승인한 적이 없으면 「다시」가 아니다 — 마감 뒤 검토 요청(NT-40)이 맡는다
+  const run = await prisma.mergeRun.findFirst({
+    where: { divisionId: division.id, weekSlotId: slot.id, status: 'succeeded', outputPath: { not: null } },
+    orderBy: { startedAt: 'desc' },
+  });
+  if (!run?.outputPath) return 0;
+  let sha: string;
+  try {
+    sha = sha256(await readStoredFile(run.outputPath));
+  } catch {
+    return 0;
+  }
+  if (sha === review.sha256) return 0; // 같은 판 — 승인이 그대로 유효하다
+  const kind = reapproveKind(sha);
+  if (await prisma.notifyLog.findFirst({ where: { divisionId: division.id, weekSlotId: slot.id, kind } })) return 0;
+  const heads = await prisma.user.findMany({
+    where: { divisionId: division.id, isActive: true, divisionRole: 'head', notifyEnabled: true, employeeNo: { not: null } },
+    select: { name: true, employeeNo: true },
+  });
+  const url = env.MESSENGER_LINK_BASE ? `${env.MESSENGER_LINK_BASE}/${division.slug}/manage` : undefined;
+  const sent: string[] = [];
+  const blocked: string[] = [];
+  for (const h of heads) {
+    const r = await sendAlert({ recvIds: [h.employeeNo!], ...reapproveMessage({ name: h.name, employeeNo: h.employeeNo! }, slot, target, reason), url });
+    sent.push(...r.sent);
+    blocked.push(...r.blocked);
+  }
+  if (sent.length) {
+    await prisma.notifyLog.create({
+      data: { divisionId: division.id, weekSlotId: slot.id, kind, recipients: JSON.stringify(sent), detail: JSON.stringify({ reason, blocked, targets: heads.length }) },
+    });
+  }
+  return sent.length;
 }
 
 export interface ReviewView {
@@ -182,7 +264,7 @@ export interface ReviewView {
 
 /** 지금 병합본에 대한 가장 최근 승인. 병합본이 없거나 승인 전이면 null */
 export async function latestReview(divisionId: string, weekSlotId: string): Promise<ReviewView | null> {
-  const review = await prisma.mergeReview.findFirst({ where: { divisionId, weekSlotId, ...UNIT_REVIEW }, orderBy: { createdAt: 'desc' } });
+  const review = await prisma.mergeReview.findFirst({ where: { divisionId, weekSlotId, ...UNIT_REVIEW }, orderBy: NEWEST_FIRST });
   if (!review) return null;
   const run = await prisma.mergeRun.findFirst({
     where: { divisionId, weekSlotId, status: 'succeeded', outputPath: { not: null } },
@@ -217,7 +299,7 @@ export async function latestReview(divisionId: string, weekSlotId: string): Prom
 export async function approvalOf(run: Pick<MergeRun, 'id' | 'divisionId' | 'weekSlotId' | 'outputPath'>) {
   const review = await prisma.mergeReview.findFirst({
     where: { divisionId: run.divisionId, weekSlotId: run.weekSlotId, mergeRunId: run.id, ...UNIT_REVIEW },
-    orderBy: { createdAt: 'desc' },
+    orderBy: NEWEST_FIRST,
   });
   if (!review) return null;
   /*
