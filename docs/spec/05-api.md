@@ -302,6 +302,10 @@ lead에게는 이 엔드포인트가 존재하지 않는다(404).
 
 사용자 배정·역할(lead/coordinator)·활성화·onRoster·정렬. 시드 재적용(`sync-seed`) 포함.
 
+### `DELETE /api/ops/notify-sink` — 가짜 알림 수신함 비우기 (2026-10-08 · NT-56 · TACP-26)
+
+수신함이 닫힌 서버(운영)면 누구에게나 404(신원보다 먼저) → `requireOperator`(밖이면 404). `{ ok, removed }`. 감사 기록 없음 — 부서 경계를 넘지 않고, 지우는 것은 시험 서버의 가짜 알림뿐이다(로그 한 줄).
+
 ### ~~`GET /api/overview`~~ — 폐지 2026-10-08
 
 계약만 예약해 두고 만들지 않은 엔드포인트(R21). 총괄의 전 부서 화면은 「전사」(`/org`, PG-49f)가 되었고 그 화면은 서버에서 읽는다.
@@ -322,6 +326,12 @@ v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노�
 - `checks.template` — 활성 부서마다 양식 **파일**이 있는가 (OPS-41 `templateStates`). 행만 있고 파일이 없는 부서가
   하나라도 있으면 `fail: N active division(s) without template file` → `ok:false`. 부서 이름은 적지 않는다 — 누구나 부르는 주소다.
 - `checks.rootDisk` · 맨 위 `warnings[]` — 루트 디스크 여유. 판정은 [OPS-19](09-deployment-ops.md)
+
+### `POST·GET /api/dev/messenger-sink` — 가짜 알림 수신함 (2026-10-08 · NT-56 · TACP-26 · 시험·시연 서버만)
+
+메신저 클라이언트가 사내 메신저에 보내는 요청 그대로 받는다 — `application/x-www-form-urlencoded`, 필드 16개(messenger.md §6), 머리 `x-tincase-kind`(종류).
+응답 `200 text/plain` `send ok` · `CMD=ALERT`·`RecvId`가 없으면 422 · 본문 64KB 넘으면 413. 신원을 묻지 않는다(TACP §6 넷째) — 쓰기만 하고 기록을 내주지 않는다.
+`GET`은 `{ sink: 'on' }`만(리허설이 「열려 있나」를 묻는다). `TINCASE_ENV`가 test·demo이고 `MESSENGER_SINK=on`일 때만 — 그 밖에서는 어느 방법이든 404.
 
 ### API-34 — 속도 제한
 

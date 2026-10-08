@@ -136,11 +136,29 @@ services:
 | `MAX_UPLOAD_BYTES` | `20971520` | | 기본 20MB |
 | `SUBMIT_HWP_UPLOAD` | `off` | | 기본 `on`. `off`면 「전사」 게시판 hwp [올리기]를 닫는다(RU-60a) — 테스트 서버만 `off`. 부서원 제출과는 상관없다: hwp 업로드 제출은 2026-10-08에 코드째 없어졌다(WA-39 · [ADR-0014](../adr/0014-web-only-submission.md)). [올리기]가 걷히면 이 변수도 지운다 |
 | `DEV_IDENTITY` | `me@kei.re.kr` | | **개발 전용** (AU-03) |
+| `TINCASE_ENV` | `test` · `demo` | | 시험(11112 평소)·시연(11112 시연 모드) 서버 표식 — 띠(RU-43·47)·기동 검사(RU-45 · OPS-46)·가짜 알림 수신함(NT-56)이 같은 값을 본다. **운영에는 없다** |
+| `MESSENGER_SINK` | `on` | | 기본 `off`. 가짜 알림 수신함(`/api/dev/messenger-sink` · `/ops/notify-sink`)의 명시 스위치 — `TINCASE_ENV`가 test·demo일 때만 뜻이 있다(NT-56) |
 
 ### OPS-06 — 기동 시 환경변수 검증
 
 zod로 스키마 검증. 누락·형식 오류면 **즉시 종료**하고 무엇이 잘못됐는지 출력한다.
 production에서 `DEV_IDENTITY`가 설정돼 있으면 **거부**한다.
+(2026-10-08) 검증은 **기동할 때** 한다 — `instrumentation.ts`가 맨 먼저 env를 읽는다. 그 전에는 처음 읽힐 때(첫 요청)였고,
+스케줄러가 꺼진 서버(테스트 11112)는 첫 요청 전까지 잘못된 설정으로 「떠 있었다」.
+
+### OPS-46 — 알림이 엉뚱한 곳으로 가는 설정이면 뜨지 않는다 (2026-10-08)
+
+가짜 알림 수신함(NT-56)이 생기면서 메신저 주소가 둘이 됐다. 둘이 바뀌어 꽂히면 **조용히** 틀린다 — 그래서 기동을 거부한다.
+판정은 `src/lib/messenger-sink.ts` `sinkBootProblem` 하나이고, env.ts(앱)와 `scripts/entrypoint.sh`(컨테이너 입구, node보다 먼저 이유를 남긴다)가 같은 규칙을 본다.
+
+| 설정 | 왜 막나 |
+|---|---|
+| 시험·시연 아님(`TINCASE_ENV` 없음) + `MESSENGER_URL`이 수신함 | 운영 알림이 사람 대신 수신함으로 — 아무에게도 안 간다 |
+| `TINCASE_ENV` test·demo + `MESSENGER_URL`이 수신함이 **아닌** 곳 | 운영 사본·가짜 데이터에서 실제 사람 화면에 팝업이 뜬다 (RU-41이 막던 것) |
+| `MESSENGER_URL`이 수신함 + `MESSENGER_SINK=on`이 아님 | 알림마다 404로 실패한다 — 시험한 사람은 「알림이 안 간다」를 앱 잘못으로 읽는다 |
+
+비어 있는 `MESSENGER_URL`은 어디서나 괜찮다(알림 끔). 수신함 주소는 **경로**(`/api/dev/messenger-sink`)로 알아본다 — 호스트·포트는 컨테이너 안팎에서 다르다.
+시험 `[NT-T76]`(`tests/messenger-sink.test.ts`).
 
 ---
 
@@ -417,6 +435,23 @@ sudo sh -c 'du -sh /var/lib/containerd/*/ | sort -rh'
 | OPS-43g | 운영은 `main`에서만 돈다 — 다른 브랜치를 구우면 `repman:latest`가 그 이미지가 되어 다음 재기동이 조용히 그것으로 뜬다. `--no-build`도 같다: 그 체크아웃의 `docker-compose.yml`(환경변수·볼륨)로 운영 컨테이너를 다시 만들고, 프로젝트 이름(`repman`)을 박았으므로 다른 worktree에서 돌려도 운영을 가리킨다. 브랜치를 읽지 못하면(흔히 `sudo bash …` — root에게 git이 답하지 않는다) 막는다. 금지 시간대(OPS-16)면 멈춘다 — `--no-build` 재기동도(재기동이 곧 중단이다). 빌드 직전 `repman:latest` → `repman:rollback`(OPS-15 3단계). `--no-build`는 지금 이미지로 다시 띄우기만 한다(`--force-recreate`) — 롤백 태그를 옮기지 않는다 |
 | OPS-43h | 테스트 서버는 `TINCASE_TEST_MODE`가 있으면 그대로 넘긴다(`sudo` **뒤에** 붙여서 — RU-45의 함정을 스크립트가 대신 피한다). 시연 모드로 떠 있는데 변수 없이 다시 올리려 하면 멈춘다 — 되돌리려면 `TINCASE_TEST_MODE=test`를 적는다. `docs/DEMO.md`의 `sudo TINCASE_TEST_MODE=… docker compose … up -d`는 `feat/org-rollup` 머지(2026-10-08) 때 `TINCASE_TEST_MODE=… bash scripts/deploy.sh test --no-build`로 바꿨다(되돌리기는 `TINCASE_TEST_MODE=test`) — `docker-compose.test.yml` 머리 주석도 같다 |
 | OPS-43i | 시작·끝에 `df -h /`, 끝에 health 결과를 출력한다. health가 `ok:true`가 아니면 0이 아닌 값으로 끝나고 롤백 명령을 보여 준다 |
+
+### OPS-47 — 한 주 리허설 (2026-10-08 · v2 운영 전환 10/12 전 주말)
+
+진짜 스케줄러로 **마감부터 전사본까지** 한 주를 한 번 돌리고, 가짜 알림 수신함(NT-56)에 쌓인 알림이 「각 종류가 맞는 사람에게, 한 번, 제 창 안에」
+갔는지 판정한다. 함수 하나씩 시험한 것은 이미 있다 — 리허설이 보는 것은 그것들이 **한 프로세스에서 1분 주기로 함께 돌 때**다(HM-50 · RU-54·57처럼
+「마감 + n분」·「병합이 끝난 시각」·「다 모인 순간」이 얽히는 곳). 절차 [docs/REHEARSAL.md](../REHEARSAL.md).
+
+| ID | 요구사항 |
+|---|---|
+| OPS-47a | `scripts/rehearsal.ts prepare` — 가짜 조직(fake-org의 사람 + 단위마다 역할 이름의 사람 — 지어낸 이름도 쓰지 않는다), **13개 단위(전사 섹션) 모두 켬**, 사번 `RH001`~(사번 꼴이 아니라 실제 메신저로 새어도 아무도 못 찾는다), 이번 주 제출(단위마다 안 낸 사람, 한 곳은 아무도 안 냄), 마감은 이번 주 일요일 23:00으로 미뤄 둔다. 본부(기획경영본부) 자신은 부서 알림을 끈다 — 문서가 없는 본부에 마감 독촉·「병합본이 아직 없어요」가 가지 않게. 저장소는 `/data/worklog-demo` 또는 임시 디렉터리만(시연 시드와 같은 경계), 실제 계정이 하나라도 있으면 거절. 승인·마감 옮기기용 세션은 여기서 만들어 `rehearsal/sessions.json`(0600)에 둔다 — run은 서버가 쓰는 DB에 쓰지 않는다 |
+| OPS-47b | `run --base=` — 총괄의 [일정 바꾸기]와 같은 API(`POST /api/schedule/deadline`)로 마감을 **지금 + N분**(기본 12)으로 당기고, 3단계 기한은 `--stages`면 총괄 설정 API로. 부서장·본부장은 **받은 알림을 보고** HTTP로 승인한다(검토 요청 뒤 · 기한 임박 뒤 — 각본 `scripts/rehearsal-plan.ts`). 알림이 창이 끝나도록 안 오면 그냥 승인하고 실패로 남긴다. 「본부 → 총괄」 기한 + 14분에 끝나 보고서(`rehearsal/report-*.txt`)를 찍는다 — 종료 코드 0 = 통과. 판정 규칙은 앱 코드를 불러 쓰지 않고 messenger.md 표를 옮겨 적었다 — 같은 함수로 기대값을 만들면 틀린 것도 맞다고 나온다 |
+| OPS-47c | 판정: 기대 알림마다 **창 안에 정확히 한 번**(창 시작 5초 전 ~ 끝 90초 뒤). 두 번·창 밖·안 옴은 실패, 기대하지 않은 알림(다른 사람·다른 종류)도 실패. 리허설 시작 전에 끝난 창은 기대하지 않고, 창 도중에 시작했거나 받는 사람이 그 알림을 보고 움직이는 경우는 「와도 되는」 쪽(한 번 넘으면 실패) |
+| OPS-47d | 테스트 서버(11112)에서 돌릴 때만 스케줄러를 켠다 — **덧붙이는 compose `docker-compose.rehearsal.yml`**(`MERGE_SCHEDULER: "on"` 한 줄). `TINCASE_TEST_MODE=demo TINCASE_REHEARSAL=on bash scripts/deploy.sh test --no-build`로 시작, 변수 없이 다시 올리면 꺼진다. **평소 모드(실명 사본)에서는 스크립트가 멈춘다** — 켜면 그 주가 저절로 병합·넘김된다. `docker-compose.test.yml`의 변수는 그대로 `TINCASE_TEST_MODE` 하나다(RU-45) |
+| OPS-47e | `local` — 로컬 끝까지 한 번에: 임시 저장소 · 가짜 병합 모델(`scripts/fake-model.ts` — ollama `/api/generate` 흉내, 묶을 것 없음·분류는 첫 이름) · `next dev`(수신함·스케줄러 켬) · run. 개발 서버는 경로를 처음 부를 때 컴파일하므로 수신함·승인 경로를 미리 부른다. `next dev`가 고쳐 쓰는 `CLAUDE.md`·`next-env.d.ts`는 끝나면 되돌린다 |
+| OPS-47f | 주차를 넘기지 않는다 — 끝(「본부 → 총괄」 + 14분)이 월요일 00:00을 넘으면 run이 시작하지 않는다(스케줄러가 새 주를 본다). prepare도 이번 주가 3시간 안에 끝나면 거절 |
+
+시험 `[OPS-T30]`~`[OPS-T33]`(`tests/rehearsal.test.ts` — 각본·기대 알림·판정·가짜 모델) · `[OPS-T34]`(`tests/deploy-script.test.ts` — 스케줄러 판정·덧붙이는 compose).
 
 **왜 표식인가 — 공용 서버라서.** 필터 없는 `docker image prune -f`는 **서버 전체**의 태그 없는 이미지를 지운다. 이 서버는 여러
 사람이 도커를 함께 쓴다. 남의 태그 없는 이미지는 그 사람의 빌드 캐시이거나, ID로 잡아 두고 쓰는 이미지일 수 있다. 지워도

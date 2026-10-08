@@ -4,7 +4,7 @@
 > 코드·스펙·UI가 이 문서와 어긋나면 **문서가 아니라 코드가 틀린 것**이다.
 > 규칙을 바꾸려면 §10 절차를 따른다. 코드를 먼저 고치는 것은 위반이다.
 
-버전 1.9 · 2026-10-08 · 대상 코드 v1.41.0 (feat/org-rollup) — v1.6.3·v1.6.4·v1.7~v1.7.2·v1.8을 한 판으로 합쳤다
+버전 1.11 · 2026-10-08 · 대상 코드 v1.41.0 (feat/org-rollup) — v1.9에 TACP-26(가짜 알림 수신함)을 더했다 (v1.10은 병합 줄 작업 — feat/merge-queue)
 관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md) · [ADR-0008](docs/adr/0008-head-principal.md) · [ADR-0012](docs/adr/0012-upward-submission.md) · [ADR-0015](docs/adr/0015-approval-is-handoff.md) · [ADR-0016](docs/adr/0016-division-status-visibility.md) · [ADR-0017](docs/adr/0017-foreign-read-chip.md) · [ADR-0018](docs/adr/0018-manage-settings-trim.md)
 
 변경 이력:
@@ -61,6 +61,12 @@
   양식 픽스처가 있는 체크아웃에서 RU-T23~76이 처음 자동 진행과 함께 돈다 — RU-T71은 본부장이 있는 본부의 자기 몫(rollupSelf)을
   부서장 없는 단위의 맞추기로 올리려 해 실패했다. 그 본부의 head가 곧 그 몫의 부서장이므로 **그 head의 병합본 승인**으로 올리고,
   맞추기는 새 사본을 만들지 않음을 함께 본다(넓어진 칸 없음 — TACP-23 표 그대로). ④ TACP-21 본문의 「[제출]로 보낸」을 v1.7의 뜻으로(문구만)
+
+- v1.11 — **TACP-26 신설: 가짜 알림 수신함은 시험·시연 서버의 운영자만 본다** (2026-10-08 — v2 전환 전 주말 시험, NT-56). 새 Resource 「수신함 기록」과
+  새 경로 셋: 받는 곳 `POST·GET /api/dev/messenger-sink`(신원을 묻지 않는다 — §6에 넷째 공개 경로로, **시험·시연 서버에서만**), 화면 `/ops/notify-sink`, 비우기
+  `DELETE /api/ops/notify-sink`(운영자). 문의 첫 판정은 역할이 아니라 **서버**다 — 수신함이 닫힌 서버(운영)면 신원을 보기 전에 누구에게나 404(§5 `messengerSinkOpen`).
+  새로 허용된 것: 시험·시연 서버의 operator가 수신함을 보고 비운다. 새로 금지된 것: 운영에서는 operator에게도 404 · 시험 서버의 member·lead·head·coordinator는 404.
+  불변식(§4)은 건드리지 않는다 — 공개 경로는 쓰기만 하고 기록을 내주지 않으며(§4 TACP-4 「격리가 기본값」은 읽기에 대한 것이다), 운영에는 없다. 시험 NT-T77·T78
 
 ---
 
@@ -461,6 +467,24 @@ v1.1까지 member는 병합본을 못 받았다. 근거는 "남의 업무 내용
   총괄이 필요한 건 부서의 결론이지 개인의 원본이 아니다 (최소 권한)
 - 타 부서 병합본 내려받기는 **감사 로그에 남는다** (TACP-10)
 
+### TACP-26 — 가짜 알림 수신함은 **시험·시연 서버의 운영자만** 본다 (v1.11 신설)
+
+시험·시연 서버(`TINCASE_ENV` test·demo + `MESSENGER_SINK=on`)는 알림을 실제 메신저 대신 같은 앱의 수신함으로 보낸다(NT-56). 수신함 기록에는
+**받는 사람의 이름·사번과 알림 본문**이 있다 — 테스트 서버(11112 평소 모드)는 운영 사본이라 실명이다. 그래서:
+
+| 경로 | 누가 | 그 밖 |
+|---|---|---|
+| `POST /api/dev/messenger-sink` (받기) | 신원 없음 — 부르는 쪽은 앱 자신(메신저 클라이언트). **쓰기만** 한다 | 수신함이 닫힌 서버: 누구에게나 404 |
+| `GET /api/dev/messenger-sink` | 신원 없음 — `{sink:'on'}`만(리허설이 「열려 있나」를 묻는다). 기록을 내주지 않는다 | 〃 404 |
+| `/ops/notify-sink` (보기) | **operator** | 수신함이 닫힌 서버: 신원을 보기 전에 404 · 운영자 아님: 404 |
+| `DELETE /api/ops/notify-sink` (비우기) | **operator** | 〃 |
+
+- **문의 첫 판정은 서버다**(`messengerSinkOpen` — 역할이 아니라 환경). 운영에는 `TINCASE_ENV`가 없어 이 네 경로가 운영자에게도 404다 — 운영자라도 운영에서 볼 것이 없다.
+  운영이 수신함 주소를 받으면 서버가 뜨지 않는다(OPS-46)
+- 받는 경로가 신원을 묻지 않는 이유: 진짜 메신저도 신원을 받지 않고, 클라이언트는 둘을 구별하지 않는다(그래야 시험이 운영과 같은 길을 탄다).
+  그 대신 **읽기 길이 없다** — 기록은 운영자 화면으로만 나간다. 열린 경로로 할 수 있는 것은 가짜 줄을 적는 것뿐이고, 본문은 64KB까지다
+- coordinator(readAll)에게 열지 않는다 — 전 부서 **읽기**(TACP-8)는 부서 문서에 대한 것이고, 수신함은 사람마다의 알림(본문에 이름·사번)이다
+
 ### 3.3 타 부서 (foreign)
 
 | Resource | member | lead | head | coordinator | operator |
@@ -615,6 +639,7 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | `canSeeHandoff(scope)` | 화면 판정 — 「위로」 카드와 `GET /api/rollup/report`의 **행방**(시각만): 내 부서 lead·head (TACP-21 v1.7, v1.7.1) | 카드·행방 없음 |
 | `canUseHandoffEscape(scope)` | 화면 판정 — 비상구 링크: lead. `requireHandoffEscape`의 사람 부분과 같은 식 (v1.7.1) | 링크 없음 |
 | `unitEditorRole(scope)` | 기록 판정 — 병합본 수정 저장을 한 사람의 역할(`head`·`lead`·`operator`)을 고친 기록(`reviewJson.edits`)에 남긴다. 부서장 없는 단위에서 `operator`의 저장은 위로 가지 않는다(TACP-23 v1.7.2). 라우트가 역할 플래그를 비교하지 않게 (TACP-12) | — |
+| `messengerSinkOpen()` | **서버** 판정(역할 아님) — 가짜 알림 수신함이 열린 서버인가(`TINCASE_ENV` test·demo + `MESSENGER_SINK=on`). 수신함 경로·화면은 이것을 **신원보다 먼저** 본다 — 닫혀 있으면(운영) 누구에게나 404 (TACP-26). 그 뒤 화면은 `canOperate`, 비우기는 `requireOperator`. `authz.ts`가 아니라 `src/server/messenger-sink.ts`에 있다 — 「누가」가 아니라 「이 서버가 길을 여는가」라서 누구에게나 같은 답이다(`submit-mode.ts`와 같은 이유) | **404** |
 | `requireOrgRollup(headers)` | coordinator·operator — **전사 섹션 구성·파일 올리기·실패 때 [다시 시도]** (TACP-21·23) | **404** |
 | `findReadableReport(scope, id)` | 보낸 사본 **읽기** 판정 — 보낸 부서·받는 본부·readAll (TACP-21) | **404** |
 | `findReadableSectionUpload(scope, id)` | 총괄이 올린 섹션 파일 **내려받기** — 전사 취합의 문(`canOpenOrgDesk`), 취소한 파일 제외, `download` 기록 (TACP-21) | **404** |
@@ -643,13 +668,14 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 
 ## 6. 공개 엔드포인트
 
-게이트를 통과하지 않는 경로는 **셋뿐이며, 늘리려면 §10을 거친다.**
+게이트를 통과하지 않는 경로는 **넷뿐이며(넷째는 시험·시연 서버에만 있다), 늘리려면 §10을 거친다.**
 
 | 경로 | 이유 |
 |---|---|
 | `POST /api/auth/login` | 로그인 자체. 사용자 열거 방지·8회 잠금은 별도 규칙 |
 | `POST /api/auth/logout` | 세션 파기는 항상 가능해야 한다 |
 | `GET /api/health` | 컨테이너 헬스체크. 개인정보·부서 정보를 담지 않는다 |
+| `POST·GET /api/dev/messenger-sink` | (v1.11) **시험·시연 서버에서만** — 가짜 알림 수신함(TACP-26 · NT-56). 메신저 클라이언트가 보내는 폼을 받아 적기만 한다. 기록을 내주지 않는다(GET은 「열려 있다」만). 운영에서는 404 |
 
 ---
 
@@ -704,6 +730,8 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | **WA-T44** | **head가 부서원 제출물을 연다 → 200** (§3.1 「남의 제출물 내용」 head=read — 게이트가 lead만 보던 것을 바로잡음) |
 | **AU-T87** | **부서원은 부서 제출 현황(이름·시각)을 받는 길이 없다** — `api/division/status` 라우트 없음 · API 라우트가 `divisionStatus`를 부르지 않음 · 부서원의 수합 관리 404 · 홈 데이터에 남의 이름·id 없음(PG-T97). lead는 수합 관리에서 그대로 (v1.8 — 새로 금지된 것) |
 | **AU-T88** | **타 부서 열람 칩은 어느 화면 폭에서도 그린다** + `내 부서로` (TACP-9 — 본문 띠를 걷은 조건, ADR-0017) |
+| **NT-T77** | **운영(시험·시연 아님)에서 가짜 알림 수신함 경로·화면·비우기는 operator에게도 404** — `MESSENGER_SINK=on`을 줘도 · 시험 서버라도 스위치가 없으면 404 (v1.11 새로 금지된 것) |
+| **NT-T78** | **시험·시연 서버: 수신함 화면·비우기는 operator만 200** — member·head 404 (v1.11 새로 허용된 것 · 그대로 금지인 것) · 받는 경로는 신원 없이 쓰기만 |
 | **AU-T89** | **member는 병합 규칙을 읽지 못한다** — 부서 설정 화면 404 · 규칙 GET 없음 · 저장 404 (v1.6.4 — 작성 안내가 없어진 칸, 새로 금지된 것) |
 
 새 Resource를 추가하면 **그 Resource의 격리 테스트를 같은 커밋에 넣는다.**
