@@ -119,19 +119,28 @@ describe('[PG-T84] 단계 목록 무결성', () => {
     const DYNAMIC: Record<string, RegExp> = {
       '미제출 2명 이름 복사': /`미제출 \$\{[^}]+\}명 이름 복사`/,
       '계획 2줄을 이번 주 실적으로': /계획 \{rows\.plans\.length\}줄을 이번 주 실적으로/,
-      '기획경영본부에 제출': /`\$\{target\}에 제출`/,
-      '총괄(기획조정실)에 제출': /`\$\{target\}에 제출`/,
+      // 2026-10-08 자동 진행(RU-80) — 「위로」 상태 카드의 제목. 받는 곳 이름을 끼운다
+      '기획경영본부에 올라가는 병합본': /\{view\.target\}에 올라가는 병합본/,
     };
     for (const s of shotSteps()) {
       if (DYNAMIC[s.label]) expect(src, s.label).toMatch(DYNAMIC[s.label]);
       else expect(src.includes(s.label), `${s.id}: 「${s.label}」이 화면 소스에 없다`).toBe(true);
     }
-    expect(src).toContain('총괄(기획조정실)');
+  });
+
+  it('[RU-84] 자동 진행 — 없어진 버튼([본부에 제출]·[이어 붙이기]·[총괄에 제출]·[전사 취합본 만들기])을 가리키지 않는다', () => {
+    const names = DECK.flatMap((c) => c.steps).flatMap((s) => [s.label, s.say, s.more ?? '', ...(s.kind === 'buttons' ? s.rows.flatMap((r) => r.buttons) : [])]);
+    for (const gone of ['이어 붙이기', '전사 취합본 만들기', '다시 만들기', '다시 제출', '에 제출', '전사본 만들기']) {
+      expect(names.filter((n) => n.includes(gone)), gone).toEqual([]);
+    }
+    // 본부·총괄 장의 「위로」 단계는 누르는 버튼이 아니라 상태 줄이다 — 손을 그리지 않는다
+    const status = shotSteps().filter((s) => ['head-report', 'hq-run', 'hq-submit', 'org-run'].includes(s.id));
+    expect(status.map((s) => `${s.id}:${s.target}`)).toEqual(['head-report:area', 'hq-run:area', 'hq-submit:area', 'org-run:area']);
   });
 
   it('[PG-57] 버튼 이름은 화면 그대로 — 화면에 없는 줄임 이름을 쓰지 않는다', () => {
     const text = JSON.stringify(DECK);
-    // 화면의 버튼: 「고칠 것 없음 · 승인」 · 「{본부 이름}에 제출」 · 「총괄(기획조정실)에 제출」
+    // 화면의 버튼: 「고칠 것 없음 · 승인」 · 「검토 완료 · 승인」 — 위로 보내는 버튼은 2026-10-08부터 없다(RU-84)
     expect(text).not.toMatch(/\[승인\]|\[본부에 제출\]|\[총괄에 제출\]/);
     // 역할 이름표는 「부서담당자」 — 흐름 그림과 정리 장
     const flow = DECK.flatMap((c) => c.steps).find((s) => s.kind === 'flow');

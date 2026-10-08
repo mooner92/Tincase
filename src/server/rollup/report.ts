@@ -1,20 +1,19 @@
-// RU-01~03 — 위로 **보내기**. 보내는 것은 그 순간 병합본의 사본이다 (ADR-0012).
+// RU-01·02 — 위로 간 **사본**(`ReportSubmission`)을 읽는 기본 도구. 사본을 **만드는** 곳은 handoff.ts 하나다(TACP-23).
+//
+// 2026-10-08(ADR-0015) 전에는 여기에 [제출]·[제출 취소](`submitReport`·`withdrawReport`)가 있었다. 승인이 곧 제출이 되면서
+// 사람이 누르는 제출은 없어졌고, 화면의 상태(「위로」 카드)는 state.ts가 계산한다.
 import path from 'node:path';
-import type { ReportSubmission, WeekSlot } from '@prisma/client';
+import type { WeekSlot } from '@prisma/client';
 import { prisma } from '../db';
-import { audit } from '../audit';
-import { HttpError, notFound, type Scope } from '../authz';
-import { readStoredFile, sanitizeSegment, sha256, writeFileAtomic } from '../storage';
-import { loadTree, submitTarget, type RollupNode } from './tree';
-import { stageCells, stageTimes } from './schedule';
+import { readStoredFile, sanitizeSegment, sha256 } from '../storage';
 
 export type ReportLevel = 'unit' | 'hq';
 
-/** 「지금 제출된 것」 — 가장 최근의 취소되지 않은 행 (RU-01) */
+/** 「지금 올라가 있는 것」 — 가장 최근의 취소되지 않은 행 (RU-01). 취소는 v1.7부터 생기지 않는다(RU-03) */
 export async function currentReport(divisionId: string, weekSlotId: string, level: ReportLevel) {
   return prisma.reportSubmission.findFirst({
     where: { divisionId, weekSlotId, level, withdrawnAt: null },
-    orderBy: { submittedAt: 'desc' },
+    orderBy: [{ submittedAt: 'desc' }, { id: 'desc' }],
   });
 }
 
@@ -29,28 +28,11 @@ export function reportRelPath(divisionSlug: string, slot: Pick<WeekSlot, 'year' 
   );
 }
 
-/** 지금 내 부서의 「보낼 것」 — 실·팀이면 최신 병합본, 본부면 최신 본부 이어 붙이기 결과 */
-async function latestOutput(level: ReportLevel, divisionId: string, weekSlotId: string) {
-  if (level === 'unit') {
-    const run = await prisma.mergeRun.findFirst({
-      where: { divisionId, weekSlotId, status: 'succeeded', outputPath: { not: null } },
-      orderBy: { startedAt: 'desc' },
-    });
-    return run?.outputPath ? { runId: run.id, outputPath: run.outputPath, at: run.finishedAt ?? run.startedAt } : null;
-  }
-  const run = await prisma.rollupRun.findFirst({
-    where: { level: 'hq', divisionId, weekSlotId, status: 'succeeded', outputPath: { not: null } },
-    orderBy: { startedAt: 'desc' },
-  });
-  return run?.outputPath ? { runId: run.id, outputPath: run.outputPath, at: run.finishedAt ?? run.startedAt } : null;
-}
-
 /**
  * RU-02 — 보낸 사본과 지금 결과가 **내용으로** 다른가. 실행 id로 보지 않는다.
  *
- * 다시 병합(이어 붙이기)해도 같은 파일이 나오면 [제출]은 새 행을 만들지 않는다(같은 판 — `submitReport`).
- * 그런데 「바뀜」을 실행 id로 정하면 그 경우 영영 풀리지 않는다 — 다시 내도 「바뀜」이 남는다.
- * 반대로 같은 실행이라도 담당자가 고치면(API-50) 파일이 바뀐다. 그래서 둘 다 내용(sha256) 하나로 본다.
+ * 다시 병합(이어 붙이기)해도 같은 파일이 나오면 새 사본을 만들지 않는다(같은 판). 그런데 「바뀜」을 실행 id로 정하면
+ * 그 경우 영영 풀리지 않는다. 반대로 같은 실행이라도 담당자가 고치면(API-50) 파일이 바뀐다. 그래서 둘 다 내용(sha256) 하나로 본다.
  * 파일을 못 읽으면 「바뀜」 쪽으로 — 보낸 것이 지금 것이라고 말할 근거가 없다.
  */
 export async function outputDiffers(outputPath: string, sentSha256: string): Promise<boolean> {
@@ -61,117 +43,12 @@ export async function outputDiffers(outputPath: string, sentSha256: string): Pro
   }
 }
 
-export interface ReportState {
-  level: ReportLevel;
-  /** 보낼 곳 — 「기획경영본부」 또는 「총괄」 (RU-07) */
-  targetLabel: string;
-  current: { id: string; submittedAt: Date; submittedBy: string; origin: string } | null;
-  /** 보낼 것이 있나 (병합본·본부본) */
-  hasOutput: boolean;
-  /** RU-02 — 제출한 뒤 병합본이 바뀌었다. 다시 내야 위에 간다 */
-  changedSinceSubmit: boolean;
-  /**
-   * RU-30 — **이 단위의** 기한 (「15:00」, 부서 마감과 다른 날이면 날짜까지). 본부로 내면 실·팀 → 본부 기한,
-   * 본부 단계 없이 총괄로 내거나 본부본이면 본부 → 총괄 기한. 실·팀 담당자는 이 시각을 어디서도 볼 수 없었다
-   */
-  dueKo: string;
-}
-
-/** 수합 관리·본부 화면의 「제출」 카드 상태. 쓰지 않는다 */
-export async function reportState(
-  divisionId: string,
-  slot: WeekSlot,
-  level: ReportLevel,
-): Promise<ReportState | null> {
-  let targetLabel = '총괄';
-  let toOrg = true;
-  if (level === 'unit') {
-    const target = submitTarget(await loadTree(), divisionId);
-    if (!target) return null; // 꺼진 부서 — 보낼 곳이 없다
-    if (target.kind === 'hq') {
-      targetLabel = target.node.node.nameKo;
-      toOrg = false;
-    }
+/** 파일의 sha — 못 읽으면 null */
+export async function fileSha(filePath: string | null | undefined): Promise<string | null> {
+  if (!filePath) return null;
+  try {
+    return sha256(await readStoredFile(filePath));
+  } catch {
+    return null;
   }
-  const [current, out, t] = await Promise.all([currentReport(divisionId, slot.id, level), latestOutput(level, divisionId, slot.id), stageTimes(slot)]);
-  const cells = stageCells(t.anchor, t);
-  const changed = current && out ? await outputDiffers(out.outputPath, current.sha256) : false;
-  const who = current ? await prisma.user.findUnique({ where: { id: current.submittedBy }, select: { name: true } }) : null;
-  return {
-    level,
-    targetLabel,
-    current: current
-      ? { id: current.id, submittedAt: current.submittedAt, submittedBy: who?.name ?? '알 수 없음', origin: current.origin }
-      : null,
-    hasOutput: !!out,
-    changedSinceSubmit: changed,
-    // 받는 곳이 총괄이면(본부본, 또는 본부 단계 없는 단위 — RU-07) 본부 → 총괄 기한이 그 단위의 기한이다
-    dueKo: toOrg ? cells.hqDueKo : cells.unitDueKo,
-  };
-}
-
-/**
- * RU-01 — 내 부서의 지금 결과를 위로 보낸다. **쓰기 대상은 신원의 부서다** (TACP-6).
- * 같은 판을 또 보내면 새 행을 만들지 않는다 — 눌러 놓고 또 누르는 일이 기록을 어지럽히지 않게.
- */
-export async function submitReport(
-  scope: Scope,
-  level: ReportLevel,
-  slot: WeekSlot,
-  /** 본부 단계면 그 본부 — 게이트가 이미 확인했다 */
-  hqNode?: RollupNode,
-): Promise<{ report: ReportSubmission; unchanged: boolean }> {
-  const division = scope.division; // TACP-6 — 신원의 부서
-  if (level === 'hq' && hqNode?.node.id !== division.id) throw notFound();
-  if (level === 'unit' && !submitTarget(await loadTree(), division.id)) throw notFound();
-
-  const out = await latestOutput(level, division.id, slot.id);
-  if (!out) {
-    throw new HttpError(
-      409,
-      'no_output',
-      level === 'unit' ? '아직 병합본이 없습니다. 병합을 먼저 실행하세요.' : '아직 이어 붙인 본부본이 없습니다. [이어 붙이기]를 먼저 누르세요.',
-    );
-  }
-  const bytes = await readStoredFile(out.outputPath);
-  const digest = sha256(bytes);
-
-  const current = await currentReport(division.id, slot.id, level);
-  if (current && current.sha256 === digest) return { report: current, unchanged: true };
-
-  const stamp = new Date().toISOString().replace(/[-:.TZ]/g, '').slice(0, 14);
-  const rel = reportRelPath(division.slug, slot, level, `${stamp}_${digest.slice(0, 8)}`);
-  await writeFileAtomic(rel, bytes);
-  const report = await prisma.reportSubmission.create({
-    data: {
-      level,
-      divisionId: division.id,
-      weekSlotId: slot.id,
-      filePath: rel,
-      sha256: digest,
-      byteSize: bytes.length,
-      sourceRunId: out.runId,
-      submittedBy: scope.user.id,
-    },
-  });
-  await audit(scope.user.email, 'report_submit', division.id, `report:${report.id}`, {
-    level,
-    isoKey: slot.isoKey,
-    sha256: digest,
-    replaced: current?.id ?? null,
-  });
-  return { report, unchanged: false };
-}
-
-/** RU-03 — 제출 취소. 내 부서가 보낸 것만 (TACP-6) */
-export async function withdrawReport(scope: Scope, reportId: string): Promise<ReportSubmission> {
-  const r = await prisma.reportSubmission.findUnique({ where: { id: reportId } });
-  if (!r || r.divisionId !== scope.division.id) throw notFound();
-  if (r.withdrawnAt) return r;
-  const done = await prisma.reportSubmission.update({
-    where: { id: r.id },
-    data: { withdrawnAt: new Date(), withdrawnBy: scope.user.id },
-  });
-  await audit(scope.user.email, 'report_withdraw', r.divisionId, `report:${r.id}`, { level: r.level });
-  return done;
 }

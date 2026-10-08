@@ -28,9 +28,9 @@ import { runMergeRecorded } from '../src/server/merge/run';
 import { createSession } from '../src/server/session';
 import { hashPassword } from '../src/server/password';
 import { currentWeek } from '../src/lib/week';
-import { submitReport } from '../src/server/rollup/report';
+import { settleLater } from '../src/server/after';
 import { loadSections, uploadSectionFile } from '../src/server/rollup/sections';
-import { CLOCK_COLS, createFakeOrg, delegate, foreignUserCount, hwpBuilder, scopeOf } from './fake-org';
+import { CLOCK_COLS, UNIT_HEADS, approveAs, createFakeOrg, delegate, foreignUserCount, hwpBuilder, scopeOf } from './fake-org';
 
 const MARK_ACTOR = 'guide-seed@example.invalid';
 const MARK_ACTION = 'guide_seed';
@@ -116,8 +116,6 @@ async function seed() {
   // ── 부서 · 사람 · 양식 ── (scripts/fake-org.ts — 시연 데이터와 같은 사람들)
   const org = await createFakeOrg(template, await hashPassword(randomBytes(18).toString('base64url')));
   const { div, roles, ai, pco, rmo, ca } = org;
-  const rmoLead = org.person['rm-lead'];
-  const caLead = org.person['ca-lead'];
 
   // ── 제출물 ── (지어낸 업무 — scripts/fake-org.ts)
   const build = hwpBuilder(template);
@@ -161,11 +159,15 @@ async function seed() {
     console.log(`merge ${d}: ${r.status}`);
   }
 
-  // ── 3단계 ── 실·팀 → 본부 → 총괄. AI홍보전략실은 아직 안 냈다(찍기가 승인 → 제출을 화면에서 누른다)
+  // ── 3단계 ── 실·팀 → 본부 → 총괄. AI홍보전략실은 아직 승인 전이다(찍기가 실장의 [수정 저장] = 승인을 화면에서 누른다).
+  // 2026-10-08(ADR-0015 · RU-84) — 사람이 누르는 [제출]은 없다. 승인이 곧 위로 가는 제출이다 — 실·팀 셋은 그 부서장이 승인해 둔다
+  // (부서장 없는 단위는 마감 뒤 최종본만 저절로 올라가서, 마감 전날 오후로 맞춘 그림 시계에서는 아무것도 올라가지 않는다).
+  // 본부본은 기획조정실·연구관리실 둘로 저절로 모이고(본부장 승인 전), 기후대기(본부 단계 없음)는 바로 총괄로 — 전사본도 저절로
   await loadSections();
-  await submitReport(scopeOf(roles.coordinator, div['기획조정실']), 'unit', slot);
-  await submitReport(scopeOf(rmoLead, div['연구관리실']), 'unit', slot);
-  await submitReport(scopeOf(caLead, div['기후대기전략연구본부']), 'unit', slot); // 본부 단계 없는 본부 → 총괄로 바로
+  for (const [d, local] of [['기획조정실', UNIT_HEADS.pco], ['연구관리실', UNIT_HEADS.rmo], ['기후대기전략연구본부', UNIT_HEADS.ca]] as const) {
+    await approveAs(org.person[local], div[d], slot);
+  }
+  await settleLater();
   // 아직 Tincase를 안 쓰는 섹션 하나는 총괄이 게시판으로 받은 파일을 올려 두었다 — 「최종본에」 열에 「올린 파일」이 보이게
   try {
     const sec = await prisma.orgSection.findFirst({ where: { title: '국토환경연구본부' } });

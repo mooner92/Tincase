@@ -1,6 +1,6 @@
 // 수합 관리 화면 (서버 컴포넌트) — 현재/과거 주차 공용 (PG §4 · PG-52)
 //
-// 위에서 아래로 담당자가 한 주에 하는 순서 그대로: 제출 현황 → 병합본(검토) → 위로 제출 → 부서원 표.
+// 위에서 아래로 담당자가 한 주에 하는 순서 그대로: 제출 현황 → 병합본(검토·승인) → 위로(상태 — 승인이 곧 제출) → 부서원 표.
 // 2026-10-07 — 요약을 짙은 초록 띠로 칠하던 것을 흰 카드로 바꿨다(CP-100: 큰 초록 면 금지).
 // 긴 표가 맨 위에 있으면 병합본·제출 카드가 스크롤 아래로 밀려 「할 일」이 안 보였다.
 //
@@ -18,8 +18,8 @@ import { CopyMissingButton } from '@/components/CopyMissingButton';
 import { SlotSelector } from '@/components/SlotSelector';
 import { SubmissionTableClient, type MemberRow } from '@/components/SubmissionTableClient';
 import { MergePanel, type MergeGroupView, type MergeStateView } from '@/components/MergePanel';
-import { ReportSubmitCard } from '@/components/ReportSubmitCard';
-import { reportState } from '@/server/rollup/report';
+import { HandoffCard } from '@/components/HandoffCard';
+import { handoffHint, unitHandoffView } from '@/server/rollup/state';
 import { rollupEnabled } from '@/server/rollup/schedule';
 import { latestReview } from '@/server/merge/review';
 import { latestEdits } from '@/server/merge/edits';
@@ -44,7 +44,7 @@ export async function ManageView({
   canDeleteAny,
   canEditMerged,
   canApprove = false,
-  canSendReport = false,
+  handoff = null,
 }: {
   division: Division; // ★ 해석된 부서. scope.division을 쓰면 타 부서 열람 시 어긋난다
   isoKey?: string;
@@ -58,8 +58,11 @@ export async function ManageView({
   canEditMerged: boolean;
   /** HM-47 — 승인 버튼. 내 부서의 head에게만 (TACP-16) */
   canApprove?: boolean;
-  /** RU-30 — 위로 [제출] 카드. 내 부서의 lead·head에게만 (TACP-21 `canSendReport`). 총괄·운영자도 대신 내지 않는다 */
-  canSendReport?: boolean;
+  /**
+   * RU-80 — 「위로」 상태 카드. 내 부서의 lead·head에게만(TACP-21 v1.7 `canSeeHandoff`) — 카드에 행방이 있다.
+   * `escape` — 비상구 링크를 그릴 사람인가(`canUseHandoffEscape` — lead). 없으면 카드가 없다
+   */
+  handoff?: { escape: boolean } | null;
 }) {
   const now = new Date();
   await ensureCurrentSlot(now);
@@ -75,9 +78,11 @@ export async function ManageView({
     divisionWeeks(division.id, slot.id), // PG-72 — 근거 있는 주 + 이번 주 + 보는 주
   ]);
 
-  // RU-30 — 위로 [제출]. 내 부서 lead·head에게만 그린다 (TACP-21·TACP-9). `canMerge`가 아니다 — 거기엔 readAll이
-  // 섞여 있어 총괄에게 누르면 404인 버튼이 보였다. 꺼진 부서면 보낼 곳이 없어 null
-  const report = canSendReport && (await rollupEnabled()) ? await reportState(division.id, slot, 'unit') : null;
+  // RU-80 — 「위로」 상태. 내 부서 lead·head에게만 그린다 (TACP-21 v1.7 · TACP-9). 3단계가 꺼져 있거나 기여 단위가 아니면 null
+  const rollupOn = await rollupEnabled();
+  const handoffView = handoff && rollupOn ? await unitHandoffView(division, slot, { trail: true, canEscape: handoff.escape, now }) : null;
+  // RU-80 — 부서장의 [승인] 옆 「승인하면 바로 ○○에 올라갑니다」 — 승인이 곧 제출일 때만
+  const handoffTo = rollupOn ? await handoffHint(division.id) : null;
 
   // HM-26 — 최신 실행 하나만 본다. 재실행하면 새 기록이 쌓이고 최신이 유효하다
   const lastRun = await prisma.mergeRun.findFirst({
@@ -128,19 +133,6 @@ export async function ManageView({
   // "제출된 파일이 없습니다"라고 하면서 병합은 되는 모순이 생긴다
   const collected = summary.submitted + summary.extras;
 
-  // HM-47 · CP-99 — 부서장이 승인할 판이 있으면 그 화면의 주 버튼은 [승인]이다. 그동안 [위로 제출]은 보조로 물러난다
-  const awaitingMyApproval =
-    canApprove && mergeState.status === 'succeeded' && (!mergeState.review || mergeState.review.changedAfter);
-  // RU-30 — 부서장이 있는 부서에서 지금 판이 아직 승인 전이면 [위로 제출] 카드가 같은 줄에 그렇게 말하고 보조로 물러난다.
-  // 승인 상태가 병합본 카드에만 있으면, 바로 아래 초록 [제출]이 「승인 전에 보내도 된다」로 읽혔다(2026-10-08)
-  const headApproval =
-    mergeState.hasHead && mergeState.status === 'succeeded'
-      ? !mergeState.review
-        ? ('pending' as const)
-        : mergeState.review.changedAfter
-          ? ('changed' as const)
-          : null
-      : null;
   const toRow = (m: (typeof members)[number]): MemberRow => ({
     user: { id: m.user.id, name: m.user.name },
     status: m.status,
@@ -268,24 +260,13 @@ export async function ManageView({
           canRun={canMerge}
           canEditMerged={canEditMerged}
           canApprove={canApprove}
+          handoffTo={handoffTo}
           canDownload={canDownloadMerged}
           submitted={collected}
         />
 
-        {report && (
-          <ReportSubmitCard
-            isoKey={slot.isoKey}
-            primary={!awaitingMyApproval}
-            headApproval={headApproval}
-            state={{
-              ...report,
-              current: report.current && {
-                ...report.current,
-                submittedAtKst: toKstIso(report.current.submittedAt).slice(5, 16).replace('T', ' '),
-              },
-            }}
-          />
-        )}
+        {/* RU-80 — 버튼이 아니라 상태. 부서장의 승인이 곧 위로 가는 제출이다 (ADR-0015) */}
+        {handoffView && <HandoffCard view={handoffView} isoKey={slot.isoKey} />}
 
         {/* SubmissionTable + 드로어 (CP-48~53, PG-19/20). 전체 zip·줄 [받기]·집계 제외 각주는 걷었다 (PG-73) */}
         <SubmissionTableClient

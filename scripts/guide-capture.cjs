@@ -9,7 +9,8 @@
  *   2. `scripts/guide-seed.ts`로 가짜 부서·사람·업무일지를 넣고 표식(nonce)을 남긴다  — 사람이 있는 DB에는 시드하지 않는다
  *   3. `--verify`로 표식을 확인한다. 틀리면 찍지 않는다
  *   4. 이 체크아웃에서 `next dev`를 띄운다 (그 DB · 웹 작성만 · 알림·스케줄러·모델 끔)
- *   5. 역할별 세션으로 로그인해 단계마다 그 상태를 만들고(승인·제출·이어 붙이기는 화면에서 실제로 누른다),
+ *   5. 역할별 세션으로 로그인해 단계마다 그 상태를 만들고(제출·병합·승인은 화면에서 실제로 누른다 — 2026-10-08부터
+ *      위로 올리기·이어 붙이기·전사본은 승인이 일으키는 자동 진행이라 누를 것이 없다, RU-84),
  *      `data-guide` 앵커(무대의 구멍 = 누를 곳)와 카메라 사각형을 재서 `public/guide/deck/<단계>.webp`와 `manifest.json`을 쓴다.
  *      단계 순서는 「누르면 다음 화면」이다 — 한 단계의 구멍을 실제로 누른 결과가 다음 단계의 그림이 되게 찍는다
  *   6. 서버를 끄고, `next dev`가 고쳐 쓴 CLAUDE.md·AGENTS.md·next-env.d.ts를 되돌리고, 임시 디렉터리를 지운다
@@ -306,7 +307,8 @@ async function settle(page, extra = 600) {
 }
 
 /**
- * 단계별 상태 만들기. 순서가 곧 이야기다 — 앞 단계에서 실제로 누른 것(제출·승인·이어 붙이기)이 뒤 단계의 화면이 된다.
+ * 단계별 상태 만들기. 순서가 곧 이야기다 — 앞 단계에서 실제로 누른 것(제출·병합·승인)이 뒤 단계의 화면이 된다.
+ * 실장·본부장의 승인 뒤에는 위로 올라감·본부본·전사본이 저절로 맞춰진다(ADR-0015) — 그 단계들은 누르지 않고 상태 줄을 찍는다.
  *   path   새로 연다 (없으면 그 역할의 지금 화면 그대로)
  *   act    찍기 전에 할 일
  *   after  찍은 뒤에 실제로 누르는 것 — 다음 단계의 상태를 만든다
@@ -412,54 +414,45 @@ function plan(ai, notice) {
       },
     },
     {
+      // RU-80 — 실장의 저장(= 승인)이 그 요청 안에서 본부로 올렸다. 담당자 화면의 「위로」 카드는 상태 줄이다 — 누르지 않는다
       id: 'head-report',
       role: 'lead',
       path: `/${ai}/manage`,
-      after: async (p, fix) => {
-        await p.locator(sel('report-unit-submit')).click();
-        await p.locator(`${sel('report-unit')} >> text=제출함`).waitFor({ timeout: 30_000 });
-        await fix();
+      act: async (p) => {
+        await p.locator(`${sel('report-unit')} >> text=올라감`).first().waitFor({ timeout: 30_000 });
       },
     },
 
+    // RU-82 — 본부본은 연 순간(읽기 수리) 올라온 실·팀으로 저절로 이어 붙어 있다
     { id: 'hq-status', role: 'hqLead', path: '/hq' },
     {
       id: 'hq-run',
       role: 'hqLead',
-      after: async (p, fix) => {
-        await p.locator(sel('hq-run-button')).click();
+      act: async (p, fix) => {
         await p.locator(`${sel('hq-run')} >> text=본부본 받기`).waitFor({ timeout: 60_000 });
         await fix();
       },
     },
     {
+      // RU-55 — 본부장 승인 = 총괄로 제출. 누른 결과(「승인 · 총괄로 감」)가 다음 단계의 그림이다
       id: 'hq-approve',
       role: 'hqHead',
       path: '/hq',
       after: async (p, fix) => {
-        await p.locator(sel('hq-approve')).click();
-        await p.locator(`${sel('hq-run')} >> text=승인 완료`).waitFor({ timeout: 30_000 });
+        await clickFor('hq-approve', '/api/rollup/hq/approve')(p);
+        await p.locator(`${sel('report-hq')} >> text=승인 · 총괄로 감`).waitFor({ timeout: 30_000 });
         await fix();
       },
     },
-    {
-      id: 'hq-submit',
-      role: 'hqLead',
-      path: '/hq',
-      after: async (p, fix) => {
-        await p.locator(sel('report-hq-submit')).click();
-        await p.locator(`${sel('report-hq')} >> text=제출함`).waitFor({ timeout: 30_000 });
-        await fix();
-      },
-    },
+    { id: 'hq-submit', role: 'hqLead', path: '/hq' },
 
     { id: 'org-board', role: 'coordinator', path: '/org' },
     { id: 'org-final', role: 'coordinator' },
     {
+      // RU-83 — 전사본은 본부장 승인 뒤 저절로 다시 만들어져 있다(연 순간 읽기 수리도 맞춘다)
       id: 'org-run',
       role: 'coordinator',
-      after: async (p, fix) => {
-        await p.locator(sel('org-run-button')).click();
+      act: async (p, fix) => {
         await p.locator(sel('org-download')).waitFor({ timeout: 90_000 });
         await fix();
       },
@@ -470,8 +463,8 @@ function plan(ai, notice) {
       role: 'coordinator',
       path: '/org',
       act: async (p) => {
+        // WS-19l — [일정 바꾸기] 한 번에 입력칸이 열린다(예전 [마감 바꾸기]는 없다)
         await click('schedule-open')(p);
-        await click('deadline-edit')(p);
         await p.locator(sel('deadline-paste')).fill(notice);
         await away(p);
       },

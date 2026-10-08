@@ -484,10 +484,10 @@ interface FileDrawerProps {
 | ID | 부품 | 요구사항 |
 |---|---|---|
 | CP-111a | `<WeekSchedule>` | 「전사」 머리글 **그 자체**다 — 다가올 주차 줄 + [일정 바꾸기](`data-guide="schedule-open"`, `aria-controls="schedule"`) + 누르면 바로 열리는 칸(`id="schedule"`). 카드 제목 「주차 일정」·설명 문장·[마감 바꾸기](`deadline-edit`)·알림 시각 표는 없다. 접는 틀 `ScheduleFold`는 지웠다. 미리보기는 주차 줄과 같은 꼴 한 줄(`plan.stages`) + 「표시 문구: …」 + 경고. 3단계 줄은 「3단계 취합 [켜짐/꺼짐] · 실·팀 → 본부 +1시간 · 본부 → 총괄 +2시간 [간격 바꾸기]」(`offsetLabel` — 「+30분」·「+1시간 30분」·「다음 날」). 사용 안내 앵커 `deadline-paste-box`·`deadline-paste`·`deadline-preview`·`deadline-plan`·`deadline-apply`는 그대로 (WS-19l) |
-| CP-111b | `<OrgRunCard>` | 「섹션별 처리」 접기가 없다. 머리 한 줄 「13섹션 중 n개 들어감」, 미제출 섹션 이름 한 줄, 빠지는 사본, [만들기] [전사본 받기], 한글에서 확인할 곳 (RU-34) |
+| CP-111b | `<OrgRunCard>` | 「섹션별 처리」 접기가 없다. 머리 한 줄 「자동 16:02 · 13섹션 중 n개 들어감」(자동 수정 수는 없다), 미제출 섹션 이름 한 줄, 받은 뒤 바뀜(받은 사람에게만), 빠지는 사본, [전사본 받기] · 실패했을 때만 [다시 시도], 한글에서 확인할 곳 (RU-34 · RU-83 — [만들기]는 2026-10-08 자동 진행으로 없어졌다) |
 | CP-111c | `<OrgBoard>` | `canUpload`(페이지가 `orgPageView().desk && hwpUploadOpen()`으로 정한다) — 거짓이면 숨은 파일 입력도 [올리기]·[다시 올리기]도 그리지 않는다. `columns`는 그대로 열 판정만. 「섹션 밖」의 최종본 칸은 「—」, Tincase 밖 팀은 「Tincase 밖」 한 마디 (RU-60a) |
-| CP-111d | `<RunCard>`(`/hq`) | 「자동으로 고친 것 n건」 접기와 「이어 붙인 뒤 제출이 바뀌었습니다…」 상자가 없다 — 칩(「제출이 바뀜」)과 주 버튼이 말한다. 만들기 전 한 줄은 「n곳 제출됨」·「제출된 것 없음」(`title` prop은 지웠다) (RU-19) |
-| CP-111e | `<ReportSubmitCard>` · `<HqApprovalCard>` | 안 냈을 때 설명 문장 없음(낼 것이 없을 때만 「병합본 없음」) · 「제출 뒤 바뀜」 설명 상자 없음 · 취소 확인은 「제출을 취소할까요?」 · 본부장 승인 전은 칩 「승인 전」 |
+| CP-111d | `<RunCard>`(`/hq`) | 「자동으로 고친 것 n건」 접기와 「이어 붙인 뒤 제출이 바뀌었습니다…」 상자가 없다. 2026-10-08 자동 진행(RU-82)으로 버튼은 실패 때 [다시 시도]뿐이고 상태 한 줄(「자동으로 이어 붙임 15:12 · 기획조정실 승인으로 · 산하 2/3」)이 말한다. 아직 없으면 「올라온 것 없음」(`title`·`ready`·`resultWord` prop은 지웠다) (RU-19) |
+| CP-111e | ~~`<ReportSubmitCard>`~~ · `<HqApprovalCard>` | `ReportSubmitCard`는 2026-10-08 자동 진행으로 지웠다 — 수합 관리의 「위로」는 상태 카드 `<HandoffCard>`(RU-80). `HqApprovalCard`: 본부장 승인 전은 칩 「승인 전」(「승인하면 바로 총괄로」는 아래 「총괄」 줄이 한 번 말한다) |
 | CP-111f | 지운 prop | `SubmissionEditor.ownerName` · `SubmissionTableClient.subtitle` · `UploadDropzone.hasPrevious` — 그리던 설명 문장과 함께 |
 
 ## 5. 컴포넌트 테스트
@@ -706,7 +706,7 @@ shadcn/ui 도입 계획은 폐기. `@layer components`의 유틸 클래스
 그때는 `deck.ts`와 함께 고치고 `node scripts/guide-capture.cjs`로 다시 찍는다.
 
 카메라가 카드의 한 부분만 담아야 할 때는 그 부분을 감싸는 `div`에 앵커를 단다 — `merge-review`(병합본 카드의 승인 줄 + 행동 줄),
-`hq-run-head`(본부본 카드의 머리 + [이어 붙이기] 줄), `hq-approval`(본부장 승인 줄), `deadline-paste-box`(공지 붙여넣기 칸 + [미리보기]).
+`hq-run-head`(본부본 카드의 머리 + 상태 줄 · [본부본 받기] — 2026-10-08 [이어 붙이기]는 없다), `hq-approval`(본부장 승인 줄), `deadline-paste-box`(공지 붙여넣기 칸 + [미리보기]).
 감싸기만 하고 모양은 바꾸지 않는다. 표의 몇 줄처럼 감쌀 수 없는 곳은 단계의 `frameClip`(픽셀)로 줄인다.
 
 구멍(누를 곳)은 **누르는 그것 하나**다(코치 마크, 2026-10-08) — 카드·표 전체에 달지 않는다. 같은 날 검토 뒤 단 앵커:

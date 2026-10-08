@@ -12,11 +12,15 @@ import { describeWeek } from '../src/lib/week';
 export const STAGES = ['open', 'ready', 'hq', 'done'] as const;
 export type Stage = (typeof STAGES)[number];
 
+/**
+ * 2026-10-08(ADR-0015 · RU-84) — 승인이 곧 위로 가는 제출이다. 사람이 누르는 것은 실장 [승인]·본부장 [승인] 둘뿐이고,
+ * 올라가기·본부본·전사본은 저절로 맞춰진다. 그래서 단계는 「남은 승인이 무엇인가」로 나눈다(이름은 RU-46 그대로).
+ */
 export const STAGE_NOTE: Record<Stage, string> = {
   open: '이번 주는 비어 있다 — 지난주만 끝까지',
-  ready: '부서원 대부분 제출 · 실·팀 셋 병합·제출 · 기획경영본부는 본부 대기 · AI홍보전략실은 병합 전',
-  hq: 'ready + AI홍보전략실 병합·실장 승인·본부에 제출 + 본부 이어 붙이기·본부장 승인·총괄에 제출 — 남은 것은 [전사 취합본 만들기]',
-  done: 'hq + 전사 취합본까지',
+  ready: '부서원 대부분 제출 · 실·팀 셋 병합·실장 승인(→ 저절로 올라감) · 본부본은 둘로 모여 본부장 승인 전 · AI홍보전략실은 병합 전 — 남은 것은 [지금 병합] → 실장 [승인] → 본부장 [승인]',
+  hq: 'ready + AI홍보전략실 병합·실장 승인 — 본부본은 셋 다 모였고 남은 것은 본부장 [검토 완료 · 승인]',
+  done: 'hq + 본부장 승인 — 총괄로 갔고 전사본까지 저절로',
 };
 
 const MIN = 60_000;
@@ -123,6 +127,10 @@ export interface Cast {
   coordinator: string;
   rmLead: string;
   caLead: string;
+  /** 실·팀 셋의 부서장 — 승인이 곧 위로 가는 제출이다(fake-org `UNIT_HEADS`, RU-84) */
+  pcHead: string;
+  rmHead: string;
+  caHead: string;
 }
 
 export const AI = 'AI홍보전략실';
@@ -138,15 +146,16 @@ export const HISTORY_UPLOADS = OFFLINE.filter((t) => t !== '국가지속가능�
 /** 이번 주(아침): 다섯 곳 도착 — 넷은 아직 「미제출」로 보인다 */
 export const LIVE_UPLOADS = ['임원실', '글로벌대외협력단', '기획경영본부(인사관리실)', '국토환경연구본부', '국가기후위기적응센터'];
 
+/**
+ * 사람이 하는 일만 — 2026-10-08(RU-84)부터 [제출]·[이어 붙이기]·[총괄에 제출]·[전사 취합본 만들기]는 없다.
+ * `approve`(실장)·`hqApprove`(본부장)가 그 요청 안에서 위로 올리고, 본부본·전사본은 시드가 그 뒤에 맞춘다(화면의 `after()`와 같다)
+ */
 export type Action =
   | { kind: 'submit'; who: string; div: string }
   | { kind: 'merge'; div: string; trigger: 'auto' | 'manual' }
   | { kind: 'approve'; div: string; who: string }
   | { kind: 'upload'; section: string; who: string }
-  | { kind: 'report'; div: string; who: string; level: 'unit' | 'hq' }
-  | { kind: 'hqRun'; div: string; who: string }
-  | { kind: 'hqApprove'; div: string; who: string }
-  | { kind: 'orgRun'; who: string };
+  | { kind: 'hqApprove'; div: string; who: string };
 
 export interface Planned {
   at: Date;
@@ -200,24 +209,18 @@ export function planWeek(input: WeekPlanInput): Planned[] {
 
   const after: Action[] = [];
   const trigger = past ? 'auto' : 'manual';
-  const whole = stage === 'hq' || stage === 'done'; // AI홍보전략실·본부까지 가는가
+  const whole = stage === 'hq' || stage === 'done'; // AI홍보전략실까지 승인했나
   for (const div of [PCO, RMO, CA, ...(whole ? [AI] : [])]) after.push({ kind: 'merge', div, trigger });
-  if (whole) after.push({ kind: 'approve', div: AI, who: c.head });
   for (const section of past ? HISTORY_UPLOADS : LIVE_UPLOADS) after.push({ kind: 'upload', section, who: c.coordinator });
+  // RU-70 — 실장 승인 = 위로 제출. 기획조정실·연구관리실은 본부로, 기후대기(본부 단계 없는 본부)는 바로 총괄로(RU-07)
   after.push(
-    { kind: 'report', div: PCO, who: c.coordinator, level: 'unit' },
-    { kind: 'report', div: RMO, who: c.rmLead, level: 'unit' },
-    { kind: 'report', div: CA, who: c.caLead, level: 'unit' }, // 본부 단계 없는 본부 — 바로 총괄로(RU-07)
+    { kind: 'approve', div: PCO, who: c.pcHead },
+    { kind: 'approve', div: RMO, who: c.rmHead },
+    { kind: 'approve', div: CA, who: c.caHead },
   );
-  if (whole) {
-    after.push(
-      { kind: 'report', div: AI, who: c.lead, level: 'unit' },
-      { kind: 'hqRun', div: HQ, who: c.hqLead },
-      { kind: 'hqApprove', div: HQ, who: c.hqHead },
-      { kind: 'report', div: HQ, who: c.hqLead, level: 'hq' },
-    );
-  }
-  if (stage === 'done') after.push({ kind: 'orgRun', who: c.coordinator });
+  if (whole) after.push({ kind: 'approve', div: AI, who: c.head });
+  // RU-55 — 본부장 승인 = 총괄로 제출. 전사본은 그 뒤 저절로
+  if (stage === 'done') after.push({ kind: 'hqApprove', div: HQ, who: c.hqHead });
 
   // ── 언제 ── 제출은 한 구간에 고르게. 그 뒤의 일은 — 오늘 아침이면 다른 구간에 고르게, 지난 주면 실제 하루처럼
   const spread = (n: number, from: number, to: number, k: number) => (n <= 1 ? from : from + ((to - from) * k) / (n - 1));
@@ -238,26 +241,20 @@ export function planWeek(input: WeekPlanInput): Planned[] {
 }
 
 /**
- * 지난 주의 하루 — 마감(D)에서 몇 ms 뒤에. 3단계 기한(RU-51 기본: 실·팀 → 본부 D+60분 · 본부 → 총괄 D+120분) **안에** 낸다 —
- * 고르게 펴면 15:28에 「실·팀 → 본부」를 낸 것처럼 보여 지난주 화면에 기한을 넘긴 제출이 생긴다.
+ * 지난 주의 하루 — 마감(D)에서 몇 ms 뒤에. 3단계 기한(RU-51 기본: 실·팀 → 본부 D+60분 · 본부 → 총괄 D+120분) **안에** 승인한다 —
+ * 승인이 곧 위로 가는 제출이라(RU-70) 고르게 펴면 15:28에 「실·팀 → 본부」로 올라간 것처럼 보여 지난주 화면에 기한을 넘긴 것이 생긴다.
  */
 function pastOffset(a: Action, before: readonly Action[]): number {
-  const k = before.filter((b) => b.kind === a.kind && (a.kind !== 'report' || (b.kind === 'report' && b.level === a.level))).length;
+  const k = before.filter((b) => b.kind === a.kind).length;
   switch (a.kind) {
     case 'merge':
       return MIN + k * 20_000; // 14:01 자동 병합 — 부서마다 몇 초씩
-    case 'approve':
-      return 20 * MIN;
     case 'upload':
-      return 25 * MIN + k * 2 * MIN;
-    case 'report':
-      return a.level === 'unit' ? 40 * MIN + k * 4 * MIN : 105 * MIN; // 14:40~ · 15:45
-    case 'hqRun':
-      return 70 * MIN;
+      return 15 * MIN + k * 2 * MIN; // 14:15~
+    case 'approve':
+      return 35 * MIN + k * 5 * MIN; // 14:35~ 실장 승인 = 위로 (네 곳이면 14:50까지)
     case 'hqApprove':
-      return 90 * MIN;
-    case 'orgRun':
-      return 135 * MIN;
+      return 95 * MIN; // 15:35 본부장 승인 = 총괄로
     case 'submit':
       return 0;
   }

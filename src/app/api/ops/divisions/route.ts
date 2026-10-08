@@ -6,6 +6,7 @@ import { HttpError, notFound, requireOperator } from '@/server/authz';
 import { handler, json } from '@/server/http';
 import { audit } from '@/server/audit';
 import { validateDeadlinePolicy } from '@/lib/week';
+import { laterSyncCurrentWeek } from '@/server/rollup/auto';
 
 export const dynamic = 'force-dynamic';
 
@@ -91,5 +92,7 @@ export const PUT = handler(async (req: NextRequest) => {
 
   const updated = await prisma.division.update({ where: { id: div.id }, data });
   await audit(scope.user.email, 'rule_update', div.id, `ops:division:${div.slug}`, { changed: Object.keys(data) });
+  // RU-72 — 나무(상위부서·켜짐)가 바뀌면 받는 곳·기여 단위가 바뀐다 — 이번 주를 위에서 아래로 맞춘다
+  laterSyncCurrentWeek({ cause: 'tree', causedBy: scope.user.email });
   return json({ ok: true, division: { id: updated.id, isActive: updated.isActive } });
 });

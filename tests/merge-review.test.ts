@@ -77,6 +77,8 @@ let isoKey = '';
 let divId = '';
 
 beforeAll(async () => {
+  // 픽스처(내부 양식 hwp)가 없으면 이 파일의 DB 시험은 모두 건너뛴다 — 순수 시험(알림 고르기)만 돈다
+  if (!hasFixtures) return;
   const root = path.resolve(__dirname, '..');
   rmSync(path.join(root, 'prisma/test-review.db'), { force: true });
   execSync('npx prisma db push --skip-generate', { cwd: root, env: { ...process.env }, stdio: 'pipe' });
@@ -198,7 +200,7 @@ describe('NT-40·47 마감 뒤 알림 고르기 — 회귀', () => {
     expect(pickJobs(false, true, { ok: true, approval: approved })).toEqual([{ kind: 'merge_done', role: 'lead' }]);
   });
 
-  it('[HM-T114] 승인 뒤 담당자가 같은 실행의 파일을 고치면 알림도 「승인 뒤 바뀜」으로 본다', async () => {
+  it.skipIf(!hasFixtures)('[HM-T114] 승인 뒤 담당자가 같은 실행의 파일을 고치면 알림도 「승인 뒤 바뀜」으로 본다', async () => {
     const { prisma } = await import('@/server/db');
     const { approvalOf } = await import('@/server/merge/review');
     const run = await prisma.mergeRun.findFirstOrThrow({ where: { divisionId: divId } });

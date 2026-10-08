@@ -5,7 +5,7 @@
 // 화면에서 보고 고칠 수 있으면 한글을 열 일이 없다.
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
-import { requireScope, requireOwnManager, resolveTargetDivision, requireMergedAccess, isReviewer, HttpError } from '@/server/authz';
+import { requireScope, requireOwnManager, resolveTargetDivision, requireMergedAccess, isReviewer, unitEditorRole, HttpError } from '@/server/authz';
 import { handler, json, rateLimit } from '@/server/http';
 import { audit } from '@/server/audit';
 import { readStoredFile, sha256, writeFileAtomic } from '@/server/storage';
@@ -15,7 +15,10 @@ import { composeMergedHwp } from '@/server/merge';
 import { boardTitle } from '@/lib/docname';
 import { slotKind, toKstIso } from '@/lib/week';
 import { alreadyApproved, latestReview, recordReview, requireViewedVersion, titled, worklogRows } from '@/server/merge/review';
-import { withEdit } from '@/server/merge/edits';
+import { freeze, supersededSince, withUnitLock } from '@/server/rollup/handoff';
+import { laterAfterUnit, onUnitVersionChanged } from '@/server/rollup/auto';
+import { handoffHint } from '@/server/rollup/state';
+import { decidesForUnit, lastEditor, withEdit } from '@/server/merge/edits';
 import { cleanCell } from '@/server/worklog-doc';
 import { diffWorklog } from '@/lib/merge-diff';
 
@@ -108,6 +111,8 @@ export const GET = handler(async (req: NextRequest) => {
     // HM-47 — 승인 상태와 [승인] 버튼. 버튼은 이 부서의 head에게만 (TACP-16)
     review: await latestReview(division.id, slot.id),
     canApprove: division.id === scope.division.id && isReviewer(scope),
+    // RU-80 — 3단계에서 승인이 곧 제출이면 받는 곳(「기획경영본부」·「총괄」). 부서장의 [승인] 옆 설명과, 승인 뒤 담당자가 고칠 때의 한 줄이 이것을 쓴다
+    handoffTo: await handoffHint(division.id),
     title: boardTitle(slot.month, slot.label, division.nameKo, slotKind(slot)),
     slot: { isoKey: slot.isoKey, label: slot.label, year: slot.year, kind: slotKind(slot) },
     editedAt: toKstIso(run.finishedAt ?? run.startedAt),
@@ -164,97 +169,146 @@ export const PUT = handler(async (req: NextRequest) => {
   // TACP-6 — 쓰기는 신원의 부서에만. 슬러그로 남의 부서 병합본을 고칠 수 없다
   const scope = await requireOwnManager(req.headers);
   rateLimit(`merged-edit:${scope.user.email}`, 20, 60_000);
-  const { division, slot, run } = await locate(req, null, body.isoKey ?? null);
-
-  // HM-47 — 연 뒤에 다시 병합했거나 누가 저장했으면 덮어쓰지 않는다. 부서장의 저장은 승인이라 더더욱
-  const current = await readStoredFile(run.outputPath!);
-  const currentSha = sha256(current);
-  requireViewedVersion(run, currentSha, body);
-
-  const template = await prisma.template.findFirst({ where: { divisionId: division.id, isActive: true } });
-  if (!template) throw new HttpError(422, 'no_template', '부서 양식이 없어 다시 쓸 수 없습니다.');
-
-  // 줄바꿈은 남기고, 길면 자르지 않고 422 — 웹 작성·첨삭과 같은 규칙이다 (worklog-doc `cleanCell`)
-  const clean = (v: unknown, key: string, i: number) => cleanCell(v, `${TABLE_NAME[key] ?? ''} ${i + 1}번째 줄`);
-
-  const tableRows = { achievements: [] as string[][], plans: [] as string[][], notes: [] as string[][] };
-  const rowEmphasis = { achievements: [] as boolean[], plans: [] as boolean[], notes: [] as boolean[] };
-  for (const t of body.tables) {
-    const key = BUCKETS.find((b) => b === t.key);
-    if (!key) continue;
-    // ABS-5 — 구분 채번은 언제나 시스템이 다시 만든다. 사람이 고친 번호는 버린다.
-    // 화면도 같은 `rowNo`를 부른다 — 저장 전에 보여준 번호가 저장 후와 어긋나지 않는다
-    /*
-     * HM-37 — 강조를 **행과 같이** 걸러낸다. 빈 행을 버리면서 강조 배열만 그대로 두면
-     * 한 칸씩 밀려서, 담당자가 한 줄 지웠을 뿐인데 엉뚱한 줄이 파랗게 나간다.
-     */
-    const kept = (t.rows ?? [])
-      .slice(0, MAX_ROWS)
-      .map((r, i) => ({
-        cells: [clean(r[1], key, i), clean(r[2], key, i), clean(r[3], key, i), clean(r[4], key, i)],
-        emphasis: t.emphasis?.[i] === true,
-      }))
-      .filter((r) => r.cells.some(Boolean));
-    tableRows[key] = kept.map((r, i) => [rowNo(key, i), ...r.cells]);
-    rowEmphasis[key] = kept.map((r) => r.emphasis);
-  }
-
-  // HM-47 — 무엇이 바뀌었나는 **덮어쓰기 전에** 읽어 둔다.
-  // HM-49 — 담당자 저장도 센다: 다시 병합하면 누가 고쳤든 사라지므로, 덮기 전에 물을 근거가 있어야 한다
+  const located = await locate(req, null, body.isoKey ?? null);
+  const { division, slot } = located;
   const reviewer = isReviewer(scope);
-  const beforeRows = worklogRows(current);
+  // TACP-23 v1.7.2 — 고친 기록에 남길 역할. 부서장 없는 단위에서 operator의 저장은 위로 가지 않는다 (결정 b)
+  const role = unitEditorRole(scope);
 
-  // HM-46 — 고쳐 저장한 병합본에도 부서명이 맨 위에 있어야 한다 (자동 병합과 같은 경로)
-  const composed = composeMergedHwp(
-    await readStoredFile(template.filePath),
-    tableRows,
-    rowEmphasis,
-    division.nameKo,
-  );
-  await writeFileAtomic(run.outputPath!, composed.bytes);
+  // RU-75 — 같은 (부서, 주차)의 승인·수정 저장·비상구는 줄을 선다. 둘이 같은 판을 보고 거의 동시에 저장하면
+  // 뒤의 것이 409를 못 받고 앞의 것을 덮던 틈이 함께 닫힌다(HM-T144)
+  const saved = await withUnitLock(division.id, slot.id, async () => {
+    // 잠금을 쥔 뒤에 다시 본다 — 줄을 서는 사이 앞의 저장·병합이 판을 바꿨을 수 있다
+    const run = (await prisma.mergeRun.findFirst({
+      where: { divisionId: division.id, weekSlotId: slot.id, status: 'succeeded', outputPath: { not: null } },
+      orderBy: { startedAt: 'desc' },
+    })) ?? located.run;
 
-  const rowCounts = {
-    achievements: tableRows.achievements.length,
-    plans: tableRows.plans.length,
-    notes: tableRows.notes.length,
-  };
-  // 바뀐 곳은 저장한 파일을 다시 읽어 계산한다 — 화면이 보낸 것이 아니라 문서에 실제로 들어간 것
-  const changes = diffWorklog(beforeRows, worklogRows(composed.bytes));
-  const savedAt = new Date();
-  await prisma.mergeRun.update({
-    where: { id: run.id },
-    data: {
-      rowCounts: JSON.stringify(rowCounts),
-      finishedAt: savedAt,
-      // HM-49 — 바뀐 곳이 있을 때만 남긴다. 아무것도 안 바꾼 저장으로 [다시 병합]이 멈추면 안 된다
-      ...(changes.length > 0 && {
-        reviewJson: withEdit(run.reviewJson, {
-          by: reviewer ? titled(scope.user) : scope.user.name,
-          role: reviewer ? 'head' : 'lead',
-          at: savedAt.toISOString(),
-          places: changes.length,
-        }),
-      }),
-    },
-  });
-  await audit(scope.user.email, 'merge', division.id, `merged:${slot.isoKey}`, { action: 'edit', rowCounts, places: changes.length });
+    // HM-47 — 연 뒤에 다시 병합했거나 누가 저장했으면 덮어쓰지 않는다. 부서장의 저장은 승인이라 더더욱
+    const current = await readStoredFile(run.outputPath!);
+    const currentSha = sha256(current);
+    requireViewedVersion(run, currentSha, body);
 
-  /*
-   * HM-47 — **부서장의 저장은 곧 승인이다.** 계정의 역할로 판정한다 — 담당자의 저장은 승인이 아니다.
-   */
-  const savedSha = sha256(composed.bytes);
-  /** `notified` — 담당자 몇 명에게 알림이 나갔나 (0이면 화면이 「알렸습니다」라고 하지 않는다) */
-  let approved: { summary: string; notified: number; unchanged?: boolean } | null = null;
-  if (reviewer) {
-    if (savedSha === currentSha && (await alreadyApproved(run, savedSha))) {
-      // 바뀐 것 없이 다시 저장했고 이 판은 이미 승인했다 — 승인·알림을 또 만들지 않는다
-      approved = { summary: (await latestReview(division.id, slot.id))?.summary ?? '', notified: 0, unchanged: true };
-    } else {
-      const { notified } = await recordReview({ scope, run, slot, kind: 'edit', changes, bytes: composed.bytes });
-      approved = { summary: (await latestReview(division.id, slot.id))?.summary ?? '', notified: notified.sent };
+    const template = await prisma.template.findFirst({ where: { divisionId: division.id, isActive: true } });
+    if (!template) throw new HttpError(422, 'no_template', '부서 양식이 없어 다시 쓸 수 없습니다.');
+
+    // 줄바꿈은 남기고, 길면 자르지 않고 422 — 웹 작성·첨삭과 같은 규칙이다 (worklog-doc `cleanCell`)
+    const clean = (v: unknown, key: string, i: number) => cleanCell(v, `${TABLE_NAME[key] ?? ''} ${i + 1}번째 줄`);
+
+    const tableRows = { achievements: [] as string[][], plans: [] as string[][], notes: [] as string[][] };
+    const rowEmphasis = { achievements: [] as boolean[], plans: [] as boolean[], notes: [] as boolean[] };
+    for (const t of body.tables ?? []) {
+      const key = BUCKETS.find((b) => b === t.key);
+      if (!key) continue;
+      // ABS-5 — 구분 채번은 언제나 시스템이 다시 만든다. 사람이 고친 번호는 버린다.
+      // 화면도 같은 `rowNo`를 부른다 — 저장 전에 보여준 번호가 저장 후와 어긋나지 않는다
+      /*
+       * HM-37 — 강조를 **행과 같이** 걸러낸다. 빈 행을 버리면서 강조 배열만 그대로 두면
+       * 한 칸씩 밀려서, 담당자가 한 줄 지웠을 뿐인데 엉뚱한 줄이 파랗게 나간다.
+       */
+      const kept = (t.rows ?? [])
+        .slice(0, MAX_ROWS)
+        .map((r, i) => ({
+          cells: [clean(r[1], key, i), clean(r[2], key, i), clean(r[3], key, i), clean(r[4], key, i)],
+          emphasis: t.emphasis?.[i] === true,
+        }))
+        .filter((r) => r.cells.some(Boolean));
+      tableRows[key] = kept.map((r, i) => [rowNo(key, i), ...r.cells]);
+      rowEmphasis[key] = kept.map((r) => r.emphasis);
     }
+
+    // HM-47 — 무엇이 바뀌었나는 **덮어쓰기 전에** 읽어 둔다.
+    // HM-49 — 담당자 저장도 센다: 다시 병합하면 누가 고쳤든 사라지므로, 덮기 전에 물을 근거가 있어야 한다
+    const beforeRows = worklogRows(current);
+
+    // HM-46 — 고쳐 저장한 병합본에도 부서명이 맨 위에 있어야 한다 (자동 병합과 같은 경로)
+    const composed = composeMergedHwp(
+      await readStoredFile(template.filePath),
+      tableRows,
+      rowEmphasis,
+      division.nameKo,
+    );
+    const savedSha = sha256(composed.bytes);
+    // HM-47 — 바뀐 것 없이 다시 저장했고 이 판은 이미 승인했다 — 승인·알림을 또 만들지 않는다
+    // (그 승인 뒤 비상구로 다른 판이 위에 가 있으면 같은 판이라도 새 결정이다 — RU-T131)
+    const sameApproved =
+      reviewer && savedSha === currentSha && (await alreadyApproved(run, savedSha)) && !(await supersededSince(division.id, slot.id, 'unit', savedSha));
+    /*
+     * RU-73 · HM-47 — **부서장의 저장은 곧 승인이다.** 승인한 바이트는 병합본을 덮기 **전에** 불변 파일로 남긴다 —
+     * 여기서 실패하면 아무것도 바뀌지 않은 채 500이다(승인 없는 수정도, 바이트 없는 승인도 남지 않는다). 병합본 쓰기가 그 뒤에
+     * 실패하면 남는 것은 가리키는 곳 없는 불변 파일 하나다(해가 없다).
+     */
+    const frozen = reviewer && !sameApproved ? await freeze(division.slug, slot, 'unit', composed.bytes) : null;
+    await writeFileAtomic(run.outputPath!, composed.bytes);
+
+    const rowCounts = {
+      achievements: tableRows.achievements.length,
+      plans: tableRows.plans.length,
+      notes: tableRows.notes.length,
+    };
+    // 바뀐 곳은 저장한 파일을 다시 읽어 계산한다 — 화면이 보낸 것이 아니라 문서에 실제로 들어간 것
+    const changes = diffWorklog(beforeRows, worklogRows(composed.bytes));
+    const savedAt = new Date();
+    /*
+     * 2026-10-08 결정 b — 「누가 마지막으로 이 파일을 썼나」를 남긴다. 부서장 없는 단위는 그 판이 그 단위의 결론일 때만 위로 간다(syncUnit).
+     *   · 바뀐 곳이 있으면 지금처럼 한 줄 (HM-49의 「고친 곳」)
+     *   · 바뀐 곳은 없어도 바이트가 바뀌었으면 `places: 0` 한 줄 — 그 바이트를 쓴 사람이 남아야 한다
+     *   · lead가 운영자가 마지막으로 고친 판을 그대로 저장하면 `places: 0` 한 줄 — 그 판을 받아들인 것이다(그래야 올라간다)
+     * `places: 0`은 HM-49의 셈(`editEntries`)에 들지 않는다 — 아무것도 안 바꾼 저장으로 [다시 병합]이 멈추지 않는다.
+     */
+    const adopt = role === 'lead' && !decidesForUnit(lastEditor(run.reviewJson));
+    const record = changes.length > 0 || savedSha !== currentSha || adopt;
+    await prisma.mergeRun.update({
+      where: { id: run.id },
+      data: {
+        rowCounts: JSON.stringify(rowCounts),
+        finishedAt: savedAt,
+        ...(record && {
+          reviewJson: withEdit(run.reviewJson, {
+            by: reviewer ? titled(scope.user) : scope.user.name,
+            role,
+            at: savedAt.toISOString(),
+            places: changes.length,
+          }),
+        }),
+      },
+    });
+    await audit(scope.user.email, 'merge', division.id, `merged:${slot.isoKey}`, { action: 'edit', rowCounts, places: changes.length });
+
+    /*
+     * HM-47 — **부서장의 저장은 곧 승인이다.** 계정의 역할로 판정한다 — 담당자의 저장은 승인이 아니다(위로 가지 않는다, RU-T124).
+     */
+    let approved: { summary: string; notified: number; unchanged?: boolean } | null = null;
+    let handedOff: { target: string; at: Date; submissionId: string } | null = null;
+    if (reviewer) {
+      if (!frozen) {
+        approved = { summary: (await latestReview(division.id, slot.id))?.summary ?? '', notified: 0, unchanged: true };
+      } else {
+        const r = await recordReview({ scope, run, slot, kind: 'edit', changes, frozen });
+        handedOff = r.handedOff;
+        approved = { summary: (await latestReview(division.id, slot.id))?.summary ?? '', notified: r.notified.sent };
+      }
+    }
+    return { run, rowCounts, warnings: composed.warnings, approved, handedOff, savedSha, changed: savedSha !== currentSha || adopt, places: changes.length };
+  });
+
+  if (saved.handedOff) {
+    laterAfterUnit(division.id, slot, { cause: `unit_handoff:${saved.handedOff.submissionId}`, causedBy: scope.user.email });
+  } else if (!reviewer && saved.changed) {
+    // RU-72 — 담당자의 저장은 승인이 아니다. 부서장 없는 단위의 마감 뒤 최종본이면 그것이 곧 넘김(H1), 부서장 있는 단위는 NT-52.
+    // 운영자의 저장도 여기로 오지만 syncUnit이 고친 기록의 역할을 보고 올리지 않는다(H2 — 결정 b). 판정을 한 곳(상태)에 두어야
+    // 스케줄러의 맞추기가 같은 판을 다르게 보지 않는다. 잠금 밖에서 — 맞추기가 같은 잠금을 다시 쥔다
+    await onUnitVersionChanged(division.id, slot, { cause: `edit:${saved.run.id}`, causedBy: scope.user.email, reason: { kind: 'edit', places: saved.places } });
   }
 
   // 저장한 판 — 화면이 이어서 고치거나 승인할 때 이것을 보낸다
-  return json({ ok: true, rowCounts, warnings: composed.warnings, approved, runId: run.id, sha256: savedSha });
+  return json({
+    ok: true,
+    rowCounts: saved.rowCounts,
+    warnings: saved.warnings,
+    approved: saved.approved,
+    handedOff: saved.handedOff ? { target: saved.handedOff.target, at: saved.handedOff.at } : null,
+    runId: saved.run.id,
+    sha256: saved.savedSha,
+  });
 });

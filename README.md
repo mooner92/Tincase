@@ -9,7 +9,7 @@
 Spec Driven Development — 스펙이 먼저, 코드가 나중. 테스트 501개 (격리 게이트 포함) 통과 (2026-10-08).
 
 > **운영(`main`)**: 부서 수합 · 자동 병합 · 웹 작성 · 담당자 첨삭 · 부서장 승인 · 전사 현황.
-> **진행 중**: 3단계 취합(실·팀 → 본부 → 전사) · 웹 작성만 받는 제출 · 「전사」 한 화면 —
+> **진행 중**: 3단계 취합(실·팀 → 본부 → 전사 — 승인이 곧 위로 가는 제출, [ADR-0015](docs/adr/0015-approval-is-handoff.md)) · 웹 작성만 받는 제출 · 「전사」 한 화면 —
 > `feat/org-rollup` 브랜치와 테스트 서버(11112)에만 있다 ([S-12](docs/spec/12-org-rollup.md)).
 > 동작의 정본은 [docs/spec/](docs/spec/), 바뀐 것은 [CHANGELOG](CHANGELOG.md).
 > [docs/STATUS.md](docs/STATUS.md)는 2026-08 기준이라 지금과 다르다.

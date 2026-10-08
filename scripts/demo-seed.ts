@@ -5,13 +5,16 @@
  *   npx tsx scripts/demo-seed.ts [--stage=ready] [--week=2026-W45] [--until=09:40]
  *
  *   --stage  open  이번 주는 비어 있다(지난주만 끝까지)
- *            ready (기본) 부서원 대부분 제출·몇 명 남음 · 실·팀 셋 병합·제출 · 기획경영본부 본부 대기 · AI홍보전략실 병합 전
- *            hq    ready + AI홍보전략실 병합·실장 승인·본부에 제출 + 본부 이어 붙이기·승인·총괄에 제출
- *            done  hq + 전사 취합본까지
+ *            ready (기본) 부서원 대부분 제출·몇 명 남음 · 실·팀 셋 병합·실장 승인(= 저절로 올라감) · 본부본은 둘로 모여
+ *                  본부장 승인 전 · AI홍보전략실 병합 전 — 시연자가 [지금 병합] → 실장 [승인] → 본부장 [승인]을 누른다
+ *            hq    ready + AI홍보전략실 병합·실장 승인 — 남은 것은 본부장 [검토 완료 · 승인]
+ *            done  hq + 본부장 승인 — 총괄로 갔고 전사본까지 저절로
+ *            2026-10-08(ADR-0015 · RU-84) — 승인이 곧 위로 가는 제출이다. [제출]·[이어 붙이기]·[총괄에 제출]·[전사 취합본 만들기]는 없고,
+ *            본부본·전사본은 승인 뒤에 저절로 맞춰진다(시드는 화면의 `after()` 대신 단계마다 `settleLater()`로 기다린다)
  *   --week   그 주차(ISO 키). 기본은 이야기 시각이 든 주. 그 앞 주는 늘 끝까지 간 한 주로 만든다(「지난번에 낸 것」·주차 고르기)
  *   --until  이야기의 「지금」 — 시드가 만든 일이 모두 이 시각 전에 일어난 것으로 찍힌다. 「09:40」(오늘, KST) 또는 ISO.
  *            기본은 지금. 새벽에 시드하면 「03:12 제출」이 강당에 뜨므로 **회의 시작 조금 전**을 준다.
- *            화면에서 누를 일(제출·병합·만들기)은 이 시각 **뒤**여야 한다 — 「가장 최근」을 시각으로 고르는 곳이 있다
+ *            화면에서 누를 일(제출·병합·승인)은 이 시각 **뒤**여야 한다 — 「가장 최근」을 시각으로 고르는 곳이 있다
  *   --keep-open  그 주의 마감을 일요일 20:00으로 미룬다(주차 마감 예외, WS-18 — 화면에 이유가 보인다).
  *            목 14:00 마감이 지난 금요일 리허설에서 부서원 [제출]을 눌러 보려고. 회의 날(월)에는 주지 않는다
  *
@@ -40,19 +43,18 @@ import { env } from '../src/server/env';
 import { prisma } from '../src/server/db';
 import { messengerStatus } from '../src/server/messenger';
 import { hashPassword } from '../src/server/password';
-import { readStoredFile, resolveInRoot } from '../src/server/storage';
+import { resolveInRoot } from '../src/server/storage';
 import { ensureCurrentSlot, uploadSubmission } from '../src/server/worklog';
 import { runMergeRecorded } from '../src/server/merge/run';
-import { recordReview } from '../src/server/merge/review';
-import { submitReport } from '../src/server/rollup/report';
 import { hqNodeOf, loadTree, type RollupNode } from '../src/server/rollup/tree';
-import { runHqRollup } from '../src/server/rollup/run';
-import { approveHq } from '../src/server/rollup/notices';
-import { runOrgDocument } from '../src/server/rollup/orgrun';
+import { approveHq, latestHqRun } from '../src/server/rollup/handoff';
+import { syncOrg } from '../src/server/rollup/auto';
+import { fileSha } from '../src/server/rollup/report';
+import { settleLater } from '../src/server/after';
 import { loadSections, uploadSectionFile } from '../src/server/rollup/sections';
 import { currentWeek, deadlineFor, describeWeek, toKstIso } from '../src/lib/week';
 import {
-  CLOCK_COLS, PEOPLE, ROLES, createFakeOrg, delegate, emailOf, foreignUserCount, hwpBuilder, loadFakeOrg, restoreFakeOrg, scopeOf,
+  CLOCK_COLS, PEOPLE, ROLES, approveAs, createFakeOrg, delegate, emailOf, foreignUserCount, hwpBuilder, loadFakeOrg, restoreFakeOrg, scopeOf, UNIT_HEADS,
   type FakeOrg, type Role,
 } from './fake-org';
 import { AI, CA, HQ, KEEP_OPEN, PCO, RMO, STAGE_NOTE, contentNo, mondayOfIsoKey, parseArgs, pathRefusal, planWeek, type Action, type Cast, type Planned, type Stage } from './demo-plan';
@@ -220,6 +222,9 @@ function castOf(): Cast {
     ...ROLES,
     rmLead: 'rm-lead',
     caLead: 'ca-lead',
+    pcHead: UNIT_HEADS.pco,
+    rmHead: UNIT_HEADS.rmo,
+    caHead: UNIT_HEADS.ca,
   };
 }
 
@@ -255,40 +260,25 @@ async function perform(ctx: Ctx, a: Action, at: Date): Promise<void> {
       if (r.status !== 'succeeded') throw new Error(`${a.div} 병합 실패: ${JSON.stringify(r)}`);
       return;
     }
-    case 'approve': {
-      const d = divOf(ctx, a.div);
-      const run = await prisma.mergeRun.findFirst({
-        where: { divisionId: d.id, weekSlotId: slot.id, status: 'succeeded', outputPath: { not: null } },
-        orderBy: { startedAt: 'desc' },
-      });
-      if (!run?.outputPath) throw new Error(`${a.div} 승인할 병합본이 없습니다`);
-      await recordReview({ scope: scopeOf(who(ctx, a.who), d), run, slot, kind: 'approve', changes: [], bytes: await readStoredFile(run.outputPath) });
+    case 'approve':
+      // HM-47 · RU-70 — 부서장 승인 = 위로 제출 (3단계가 켜져 있다). 화면과 같은 길 — fake-org `approveAs`
+      await approveAs(who(ctx, a.who), divOf(ctx, a.div), slot);
       return;
-    }
     case 'upload': {
       const sec = await prisma.orgSection.findFirst({ where: { title: a.section } });
       if (!sec) throw new Error(`전사 섹션이 없습니다: ${a.section}`);
       const bytes = ctx.build(contentNo(a.section, slot.isoKey, 1), at);
       await uploadSectionFile(scopeOf(who(ctx, a.who), divOf(ctx, PCO)), sec.id, slot, bytes, `${a.section}_${slot.label.replace(/ /g, '_')}.hwp`);
+      await syncOrg(slot, { cause: 'upload', causedBy: who(ctx, a.who).email });
       return;
     }
-    case 'report': {
-      const u = who(ctx, a.who);
-      const d = divOf(ctx, a.div);
-      await submitReport(scopeOf(u, d), a.level, slot, a.level === 'hq' ? await hqNode(ctx) : undefined);
-      return;
-    }
-    case 'hqRun': {
-      const r = await runHqRollup(scopeOf(who(ctx, a.who), divOf(ctx, a.div)), await hqNode(ctx), slot);
-      if (r.status !== 'succeeded') throw new Error(`${a.div} 이어 붙이기 실패: ${r.errorText}`);
-      return;
-    }
-    case 'hqApprove':
-      await approveHq(scopeOf(who(ctx, a.who), divOf(ctx, a.div)), await hqNode(ctx), slot);
-      return;
-    case 'orgRun': {
-      const r = await runOrgDocument(scopeOf(who(ctx, a.who), divOf(ctx, PCO)), slot);
-      if (r.status !== 'succeeded') throw new Error(`전사 취합본 실패: ${r.errorText}`);
+    case 'hqApprove': {
+      // RU-55 — 본부장 승인 = 총괄로 제출. 화면처럼 **지금 본부본**(본 판)에
+      const node = await hqNode(ctx);
+      const run = await latestHqRun(node.node.id, slot.id);
+      if (!run) throw new Error(`${a.div} 승인할 본부본이 없습니다`);
+      await approveHq(scopeOf(who(ctx, a.who), divOf(ctx, a.div)), node, slot, { runId: run.id, sha256: await fileSha(run.outputPath) });
+      await syncOrg(slot, { cause: 'hq_approval', causedBy: who(ctx, a.who).email });
       return;
     }
   }
@@ -314,6 +304,7 @@ async function seedWeek(
   const ctx: Ctx = { org, slot, build, versions: new Map() };
   for (const p of plan) {
     await perform(ctx, p.action, p.at);
+    await settleLater(); // 요청 뒤로 미룬 맞추기(본부본·전사본)도 이 단계의 시각으로 찍히게
     await stampNew(p.at);
   }
   await stampNew(new Date(monday.getTime() + MIN)); // 주차 행 자체(ensureCurrentSlot)
@@ -332,14 +323,14 @@ async function summary(slot: WeekSlot, org: FakeOrg) {
     const merged = await prisma.mergeRun.count({ where: { divisionId: division.id, weekSlotId: slot.id, status: 'succeeded' } });
     const report = await prisma.reportSubmission.count({ where: { divisionId: division.id, weekSlotId: slot.id, level: 'unit', withdrawnAt: null } });
     lines.push(
-      `    ${pad(d, 22)}${ids.size}/${roster.length} 제출${pending.length ? ` (남음: ${pending.join('·')})` : ''} · ${merged ? '병합됨' : '병합 전'} · ${report ? '위로 제출함' : '아직 안 올림'}`,
+      `    ${pad(d, 22)}${ids.size}/${roster.length} 제출${pending.length ? ` (남음: ${pending.join('·')})` : ''} · ${merged ? '병합됨' : '병합 전'} · ${report ? '승인 · 올라감' : '실장 승인 전'}`,
     );
   }
   const hq = await prisma.reportSubmission.count({ where: { divisionId: org.div[HQ].id, weekSlotId: slot.id, level: 'hq', withdrawnAt: null } });
   const uploads = await prisma.orgSectionUpload.count({ where: { weekSlotId: slot.id, withdrawnAt: null } });
   const orgRun = await prisma.rollupRun.count({ where: { level: 'org', weekSlotId: slot.id, status: 'succeeded' } });
-  lines.push(`    ${pad(HQ, 22)}${hq ? '총괄에 제출함' : '본부 대기'}`);
-  lines.push(`    ${pad('전사', 22)}총괄이 올린 섹션 ${uploads}곳 · 전사 취합본 ${orgRun ? '있음' : '아직'}`);
+  lines.push(`    ${pad(HQ, 22)}${hq ? '본부장 승인 · 총괄로 감' : '본부장 승인 전'}`);
+  lines.push(`    ${pad('전사', 22)}총괄이 올린 섹션 ${uploads}곳 · 전사본 ${orgRun ? '있음(저절로)' : '아직'}`);
   return lines.join('\n');
 }
 
@@ -420,7 +411,7 @@ async function main() {
     `demo-seed: ${cur.slot.label} (${cur.slot.isoKey}) · 단계 ${args.stage} — ${STAGE_NOTE[args.stage]}`,
     `  이야기 시각  ${kst(end)} KST — 화면에서 누르는 일은 이 시각 뒤여야 순서가 맞습니다`,
     `  마감        ${kst(cur.deadline)}${args.keepOpen ? ` (${KEEP_OPEN.note})` : ''}${end >= cur.deadline || realNow >= cur.deadline ? '  ⚠ 지났습니다 — 부서원 제출은 화면에서 할 수 없습니다(잠김). 리허설이면 --keep-open' : ''}`,
-    `  지난주      ${prev.slot.label} (${prev.slot.isoKey}) — 끝까지(전사 취합본까지)`,
+    `  지난주      ${prev.slot.label} (${prev.slot.isoKey}) — 끝까지(본부장 승인 · 전사본까지)`,
     ...(reset ? [`  되돌림      ${reset}`] : []),
     `  DB          ${dbFile}`,
     '',

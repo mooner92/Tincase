@@ -44,6 +44,9 @@ const CAST: Cast = {
   coordinator: 'coord',
   rmLead: 'rm-lead',
   caLead: 'ca-lead',
+  pcHead: 'pc-head',
+  rmHead: 'rm-head',
+  caHead: 'ca-head',
 };
 
 // 11/2(월) 운영회의 — W45. 마감 11/5(목) 14:00. 아침 07:00에 시드하고 이야기 시각은 09:40
@@ -110,12 +113,22 @@ describe('[RU-T81] ★ 경로 — 시연 디렉터리나 임시 디렉터리 밖
   });
 });
 
+// 2026-10-08(ADR-0015 · RU-84) — 승인이 곧 위로 가는 제출이다. 계획에는 사람이 하는 일만 있다: 제출·병합·실장 승인·섹션 올리기·
+// 본부장 승인. [제출]·[이어 붙이기]·[총괄에 제출]·[전사 취합본 만들기]는 없고, 본부본·전사본은 시드가 승인 뒤에 맞춘다
 describe('[RU-T82] ★ 단계 — 시연자가 화면에서 누를 것이 남아 있다', () => {
+  it('없어진 버튼의 일은 계획에 없다 — 사람이 하는 일만', () => {
+    for (const stage of ['ready', 'hq', 'done'] as const) {
+      expect([...new Set(kinds(plan(stage)))].sort(), stage).toEqual(
+        stage === 'done' ? ['approve', 'hqApprove', 'merge', 'submit', 'upload'] : ['approve', 'merge', 'submit', 'upload'],
+      );
+    }
+  });
+
   it('open — 이번 주는 비어 있다', () => {
     expect(plan('open')).toEqual([]);
   });
 
-  it('ready — 실·팀마다 한두 명 남음 · 주인공(남시우)은 안 냈다 · AI홍보전략실은 병합 전 · 본부 대기', () => {
+  it('ready — 실·팀마다 한두 명 남음 · 주인공(남시우)은 안 냈다 · 실·팀 셋은 실장 승인(= 올라감) · AI홍보전략실은 병합 전 · 본부장 승인 전', () => {
     const p = plan('ready');
     const subs = submitted(p);
     expect(subs.has('member2')).toBe(false);
@@ -125,22 +138,26 @@ describe('[RU-T82] ★ 단계 — 시연자가 화면에서 누를 것이 남아
     expect(subs.size).toBe(21); // 25명 중
     expect(has(p, (a) => a.kind === 'merge' && a.div === 'AI홍보전략실')).toBe(false);
     expect(has(p, (a) => a.kind === 'merge' && a.div === '기획조정실' && a.trigger === 'manual')).toBe(true);
-    expect(has(p, (a) => a.kind === 'report' && a.div === 'AI홍보전략실')).toBe(false);
-    expect(has(p, (a) => a.kind === 'report' && a.div === '기후대기전략연구본부' && a.level === 'unit')).toBe(true);
-    expect(kinds(p)).not.toContain('hqRun');
-    expect(kinds(p)).not.toContain('orgRun');
+    expect(has(p, (a) => a.kind === 'approve' && a.div === 'AI홍보전략실')).toBe(false); // 실장 [승인]은 시연자가 누른다
+    // 실·팀 셋은 그 부서장이 승인했다 — 승인이 곧 위로 가는 제출이다(부서장 없는 단위는 마감 전 아침에 아무것도 올라가지 않는다, RU-71)
+    expect(p.filter((x) => x.action.kind === 'approve').map((x) => x.action)).toEqual([
+      { kind: 'approve', div: '기획조정실', who: 'pc-head' },
+      { kind: 'approve', div: '연구관리실', who: 'rm-head' },
+      { kind: 'approve', div: '기후대기전략연구본부', who: 'ca-head' }, // 본부 단계 없는 본부 — 바로 총괄로(RU-07)
+    ]);
+    expect(kinds(p)).not.toContain('hqApprove');
   });
 
-  it('hq — 본부까지 총괄에 냈고 [전사 취합본 만들기]만 남았다. 주인공은 여전히 화면에서 낸다', () => {
+  it('hq — AI홍보전략실 실장 승인까지 · 남은 것은 본부장 [검토 완료 · 승인]. 주인공은 여전히 화면에서 낸다', () => {
     const p = plan('hq');
     expect(submitted(p).has('member2')).toBe(false);
     const order = kinds(p).filter((k) => k !== 'submit' && k !== 'upload');
-    expect(order).toEqual(['merge', 'merge', 'merge', 'merge', 'approve', 'report', 'report', 'report', 'report', 'hqRun', 'hqApprove', 'report']);
-    expect(p[p.length - 1].action).toEqual({ kind: 'report', div: '기획경영본부', who: 'hq-lead', level: 'hq' });
+    expect(order).toEqual(['merge', 'merge', 'merge', 'merge', 'approve', 'approve', 'approve', 'approve']);
+    expect(p[p.length - 1].action).toEqual({ kind: 'approve', div: 'AI홍보전략실', who: 'head' });
   });
 
-  it('done — 전사 취합본이 마지막', () => {
-    expect(plan('done').at(-1)?.action).toEqual({ kind: 'orgRun', who: 'coord' });
+  it('done — 본부장 승인이 마지막(전사본은 그 뒤 저절로)', () => {
+    expect(plan('done').at(-1)?.action).toEqual({ kind: 'hqApprove', div: '기획경영본부', who: 'hq-head' });
   });
 
   it('올리는 섹션 제목은 전사 기본 섹션에 있다 — 없는 제목이면 시드가 멈춘다', async () => {
@@ -157,7 +174,7 @@ describe('[RU-T82] ★ 단계 — 시연자가 화면에서 누를 것이 남아
 describe('[RU-T83] ★ 시각 — 강당 화면에 새벽·뒤집힌 순서가 뜨지 않는다', () => {
   const kstHour = (d: Date) => new Date(d.getTime() + 9 * 3600_000).getUTCHours();
 
-  it('아침 시드: 모두 이야기 시각 전, 같은 날 아침 — 제출 → 병합 → 위로 제출 순서', () => {
+  it('아침 시드: 모두 이야기 시각 전, 같은 날 아침 — 제출 → 병합 → 승인(= 위로 제출) 순서', () => {
     const p = plan('hq');
     for (const x of p) {
       expect(x.at.getTime()).toBeLessThan(MORNING.getTime());
@@ -167,6 +184,9 @@ describe('[RU-T83] ★ 시각 — 강당 화면에 새벽·뒤집힌 순서가 �
     const lastSubmit = Math.max(...p.filter((x) => x.action.kind === 'submit').map((x) => x.at.getTime()));
     const firstMerge = Math.min(...p.filter((x) => x.action.kind === 'merge').map((x) => x.at.getTime()));
     expect(lastSubmit).toBeLessThan(firstMerge);
+    const lastMerge = Math.max(...p.filter((x) => x.action.kind === 'merge').map((x) => x.at.getTime()));
+    const firstApprove = Math.min(...p.filter((x) => x.action.kind === 'approve').map((x) => x.at.getTime()));
+    expect(lastMerge).toBeLessThan(firstApprove); // 승인할 병합본이 먼저 있다
     // 시각은 정렬돼 있다 — 시드가 이 순서대로 실행한다
     expect(p.map((x) => x.at.getTime())).toEqual([...p.map((x) => x.at.getTime())].sort((a, b) => a - b));
   });
@@ -181,7 +201,7 @@ describe('[RU-T83] ★ 시각 — 강당 화면에 새벽·뒤집힌 순서가 �
     }
   });
 
-  it('지난주(마감이 지난 주): 제출은 마감 전, 자동 병합은 14:01, 위로 제출은 3단계 기한 안', () => {
+  it('지난주(마감이 지난 주): 제출은 마감 전, 자동 병합은 14:01, 승인(= 위로 제출)은 3단계 기한 안', () => {
     const p = planWeek({ cast: CAST, stage: 'done', monday: W44, deadline: W44_DEADLINE, end: new Date(W45.getTime() - MIN) });
     const D = W44_DEADLINE.getTime();
     for (const x of p.filter((y) => y.action.kind === 'submit')) expect(x.at.getTime()).toBeLessThan(D);
@@ -192,10 +212,15 @@ describe('[RU-T83] ★ 시각 — 강당 화면에 새벽·뒤집힌 순서가 �
       expect(x.at.getTime() - D).toBeLessThan(3 * MIN);
       expect(x.action).toMatchObject({ trigger: 'auto' });
     }
+    // 실장 승인은 「실·팀 → 본부」(D+60분) 안, 본부장 승인은 「본부 → 총괄」(D+120분) 안 — 승인이 곧 위로 가는 제출이다
     for (const x of p) {
-      if (x.action.kind === 'report') expect(x.at.getTime() - D).toBeLessThanOrEqual((x.action.level === 'unit' ? 60 : 120) * MIN);
+      if (x.action.kind === 'approve') expect(x.at.getTime() - D).toBeLessThanOrEqual(60 * MIN);
+      if (x.action.kind === 'hqApprove') expect(x.at.getTime() - D).toBeLessThanOrEqual(120 * MIN);
+      // 승인은 병합 뒤 — 승인할 병합본이 있다
+      if (x.action.kind === 'approve') expect(x.at.getTime() - D).toBeGreaterThan(3 * MIN);
     }
-    expect(p.at(-1)?.action.kind).toBe('orgRun');
+    expect(p.filter((x) => x.action.kind === 'approve')).toHaveLength(4);
+    expect(p.at(-1)?.action.kind).toBe('hqApprove');
   });
 
   it('squeeze — 넘치는 쪽만 줄이고 순서를 지킨다', () => {

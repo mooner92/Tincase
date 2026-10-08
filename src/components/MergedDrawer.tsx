@@ -56,6 +56,8 @@ interface Content {
   /** HM-47 — 지금 보는 판. 저장·승인 때 그대로 돌려보낸다 — 그 사이 바뀌었으면 서버가 409 */
   runId?: string;
   sha256?: string;
+  /** RU-80 — 3단계에서 승인이 곧 제출이면 받는 곳(「기획경영본부」·「총괄」), 아니면 null */
+  handoffTo?: string | null;
 }
 
 /** 헤더 행을 뺀 본문만. 서버가 준 격자는 첫 줄이 열 이름이다 */
@@ -297,6 +299,7 @@ export function MergedDrawer({
     }
     const saved = (await res.json().catch(() => ({}))) as {
       approved?: { summary: string; notified: number; unchanged?: boolean } | null;
+      handedOff?: { target: string } | null;
       runId?: string;
       sha256?: string;
     };
@@ -305,14 +308,19 @@ export function MergedDrawer({
     setDirty(false);
     setBusy(false);
     // HM-47 — 부서장의 저장은 곧 승인이다. 무엇이 일어났는지 그 자리에서, **사실대로** 말한다
+    // RU-80 — 3단계면 승인이 곧 제출이다: 어디로 갔는지를 먼저. 담당자의 저장은 위로 가지 않는다 — 그 사실도 말한다
     flash(
       !saved.approved
-        ? '저장'
+        ? data.handoffTo && data.review
+          ? '저장 — 부서장이 다시 승인해야 올라갑니다'
+          : '저장'
         : saved.approved.unchanged
           ? '저장 — 이미 승인한 판입니다'
-          : saved.approved.notified > 0
-            ? '저장 · 승인 완료 — 담당자에게 알렸습니다'
-            : '저장 · 승인 기록됨 — 알림은 보내지 않았어요',
+          : saved.handedOff
+            ? `저장 · 승인했어요 — ${saved.handedOff.target}에 올라갔어요`
+            : saved.approved.notified > 0
+              ? '저장 · 승인 완료 — 담당자에게 알렸습니다'
+              : '저장 · 승인 기록됨 — 알림은 보내지 않았어요',
     );
     router.refresh();
     // 채번이 다시 매겨지므로 서버가 쓴 결과를 다시 읽는다
@@ -335,13 +343,15 @@ export function MergedDrawer({
       setErr((await res.json().catch(() => ({}))).message ?? '승인하지 못했습니다.');
       return;
     }
-    const r = (await res.json().catch(() => ({}))) as { notified?: number; unchanged?: boolean };
+    const r = (await res.json().catch(() => ({}))) as { notified?: number; unchanged?: boolean; handedOff?: { target: string } | null };
     flash(
       r.unchanged
         ? '이미 승인한 판입니다'
-        : (r.notified ?? 0) > 0
-          ? '승인 완료 — 담당자에게 알렸습니다'
-          : '승인 기록됨 — 알림은 보내지 않았어요',
+        : r.handedOff
+          ? `승인했어요 — ${r.handedOff.target}에 올라갔어요`
+          : (r.notified ?? 0) > 0
+            ? '승인 완료 — 담당자에게 알렸습니다'
+            : '승인 기록됨 — 알림은 보내지 않았어요',
     );
     router.refresh();
     const fresh = await fetch(`/api/division/merged/content?division=${divisionSlug}&isoKey=${isoKey}`);
@@ -398,6 +408,15 @@ export function MergedDrawer({
           </div>
         )}
 
+        {/*
+          RU-80 — 부서장이 승인한 뒤 담당자가 고치려고 열면 맨 위에 한 줄: 담당자의 저장은 승인이 아니라 위로 가지 않는다.
+          고친 판은 부서장이 다시 승인해야 올라간다 — 모르고 고치면 「고쳤는데 위에는 옛 판」이 조용히 생긴다
+        */}
+        {data?.handoffTo && data.review && !data.canApprove && canEdit && (
+          <p className="callout callout-info mx-4 mt-3 text-sm sm:mx-6">
+            고쳐 저장하면 부서장이 다시 승인해야 {data.handoffTo}에 올라갑니다
+          </p>
+        )}
         {/* HM-47 — 승인 상태. 부서장에게는 [고칠 것 없음 · 승인] — 고쳐 저장하면 그 저장이 승인이다 */}
         {data && ctl.reviewBand && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline-soft bg-surface-soft px-4 py-2.5 text-sm sm:px-6">
@@ -414,7 +433,10 @@ export function MergedDrawer({
             ) : (
               <span className="text-muted">
                 {/* CP-110 — 「고쳐서」만으로는 어디를 어떻게 고치는지 모른다. 이 화면에서 바로 된다는 것을 먼저 말한다 */}
-                {canEdit ? '승인 전 · 고쳐 저장하면 승인' : '승인 전'}
+                {/* RU-80 — 부서장의 저장만 승인이다(담당자의 저장은 아니다). 3단계면 그 승인이 곧 위로 가는 제출이다 */}
+                {canEdit && data.canApprove
+                  ? `승인 전 · 고쳐 저장하면 승인${data.handoffTo ? ` — 바로 ${data.handoffTo}에 올라감` : ''}`
+                  : '승인 전'}
               </span>
             )}
             {ctl.approve && (

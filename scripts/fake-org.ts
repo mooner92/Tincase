@@ -7,8 +7,12 @@
  *
  * 혼자 돌리지 않는다 — 시드 스크립트가 부른다.
  */
-import { Prisma, type Division, type User } from '@prisma/client';
+import { Prisma, type Division, type User, type WeekSlot } from '@prisma/client';
 import { prisma } from '../src/server/db';
+import { readStoredFile } from '../src/server/storage';
+import { recordReview } from '../src/server/merge/review';
+import { freeze, withUnitLock } from '../src/server/rollup/handoff';
+import { syncAfterUnit } from '../src/server/rollup/auto';
 import { openHwp } from '../src/lib/hwp/ole';
 import { parseRecords, serializeRecords } from '../src/lib/hwp/record';
 import { fillTable, packHwp } from '../src/lib/hwp/writer';
@@ -101,7 +105,16 @@ export const PEOPLE: PersonSpec[] = [
   ...[['소하윤', 'ca-02'], ['인재희', 'ca-03'], ['좌은결', 'ca-04'], ['곽나래', 'ca-05'], ['맹시안', 'ca-06']].map(
     ([name, local]): PersonSpec => ({ name, local, div: '기후대기전략연구본부', group: 'ca' }),
   ),
+  // 2026-10-08(ADR-0015 · RU-84) — 실·팀 셋의 부서장. 승인이 곧 위로 가는 제출이 되면서, 부서장 없는 단위는 **마감 뒤** 최종본만
+  // 저절로 올라간다(RU-71) — 마감 전 아침의 시연(11/2 월, 마감은 목)·안내 그림에서는 아무것도 올라가지 않는다. 그래서 이 셋의
+  // 승인이 올린다. 맨 뒤에 둔다 — 만드는 순서가 정렬 순서라 앞사람들의 순서(안내 그림의 명단)가 바뀌지 않게. 명단 밖(부서장)
+  { name: '변소율', local: 'pc-head', div: '기획조정실', extra: { divisionRole: 'head', jobTitle: '실장', onRoster: false, rosterNote: '부서장' } },
+  { name: '하도겸', local: 'rm-head', div: '연구관리실', extra: { divisionRole: 'head', jobTitle: '실장', onRoster: false, rosterNote: '부서장' } },
+  { name: '경채윤', local: 'ca-head', div: '기후대기전략연구본부', extra: { divisionRole: 'head', jobTitle: '본부장', onRoster: false, rosterNote: '본부장' } },
 ];
+
+/** RU-84 — 실·팀 셋의 부서장(이메일 앞부분). 시드가 이 사람들로 승인해 위로 올린다 — 시연 계정(`ROLES`)은 아니다 */
+export const UNIT_HEADS = { pco: 'pc-head', rmo: 'rm-head', ca: 'ca-head' } as const;
 
 /** 이야기의 역할 → 그 사람(이메일 앞부분). 안내 그림의 세션과 시연 계정이 이 목록이다 */
 export const ROLES = {
@@ -140,7 +153,7 @@ export function personData(p: PersonSpec, i: number) {
   return { name: p.name, email: emailOf(p.local), mustChangePassword: false, sortOrder: 20 + i * 10, ...p.extra };
 }
 
-/** 빈 DB에 부서 14 · 사람 30 · 켜진 부서의 양식을 만든다. 3단계 취합은 켠다 */
+/** 빈 DB에 부서 14 · 사람 31 · 켜진 부서의 양식을 만든다. 3단계 취합은 켠다 */
 export async function createFakeOrg(template: Buffer, pwHash: string): Promise<FakeOrg> {
   const div: Record<string, Division> = {};
   for (const [i, d] of DIVS.entries()) div[d.ko] = await prisma.division.create({ data: divisionData(d, i) });
@@ -186,7 +199,10 @@ export function schemaDefaults(model: 'Division' | 'User'): Record<string, unkno
   return out;
 }
 
-/** 시연 DB를 되돌릴 때 — 부서·사람 설정을 만든 그대로. 비밀번호·세션은 건드리지 않는다(미리 로그인해 둔 창이 살아 있게) */
+/**
+ * 시연 DB를 되돌릴 때 — 부서·사람 설정을 만든 그대로. 비밀번호·세션은 건드리지 않는다(미리 로그인해 둔 창이 살아 있게).
+ * 이 목록에 나중에 더한 사람(2026-10-08 실·팀 부서장 셋)이 옛 시연 DB에 없으면 만든다 — 비밀번호 없이(로그인하지 않는 사람)
+ */
 export async function restoreFakeOrg(): Promise<void> {
   const divDefaults = schemaDefaults('Division');
   for (const [i, d] of DIVS.entries()) {
@@ -196,10 +212,8 @@ export async function restoreFakeOrg(): Promise<void> {
   const divs = await prisma.division.findMany({ select: { id: true, nameKo: true } });
   const idOf = new Map(divs.map((d) => [d.nameKo, d.id]));
   for (const [i, p] of PEOPLE.entries()) {
-    await prisma.user.update({
-      where: { email: emailOf(p.local) },
-      data: { ...userDefaults, rosterNote: null, jobTitle: null, employeeNo: null, lockedUntil: null, ...personData(p, i), divisionId: idOf.get(p.div)! },
-    });
+    const data = { ...userDefaults, rosterNote: null, jobTitle: null, employeeNo: null, lockedUntil: null, ...personData(p, i), divisionId: idOf.get(p.div)! };
+    await prisma.user.upsert({ where: { email: emailOf(p.local) }, update: data, create: { ...data, createdAt: new Date(Date.UTC(2026, 0, 2)) } });
   }
 }
 
@@ -237,6 +251,25 @@ export function hwpBuilder(template: Buffer): (i: number, when: Date) => Buffer 
     if (i % 4 === 0) fillTable(recs, 2, [['3-1', '차주 수요일 오후 부서 워크숍으로 부재', '', '', '']]);
     return packHwp(template, [serializeRecords(recs)]);
   };
+}
+
+/**
+ * HM-47 · RU-70 — 부서장의 [고칠 것 없음 · 승인] = 위로 제출(3단계가 켜져 있으면). 화면과 같은 길이다: 같은 (부서, 주차) 줄에서
+ * 지금 병합본의 불변 사본 → 승인·사본(한 트랜잭션) → 받는 곳(본부본·전사본) 맞추기. 올라갔으면 true.
+ * 두 시드(시연·안내 그림)가 같이 쓴다 — 2026-10-08(ADR-0015)부터 [제출]이 없어 승인 말고는 위로 보낼 길이 없다
+ */
+export async function approveAs(u: User, d: Division, slot: WeekSlot): Promise<boolean> {
+  const sub = await withUnitLock(d.id, slot.id, async () => {
+    const run = await prisma.mergeRun.findFirst({
+      where: { divisionId: d.id, weekSlotId: slot.id, status: 'succeeded', outputPath: { not: null } },
+      orderBy: { startedAt: 'desc' },
+    });
+    if (!run?.outputPath) throw new Error(`${d.nameKo} 승인할 병합본이 없습니다`);
+    const frozen = await freeze(d.slug, slot, 'unit', await readStoredFile(run.outputPath));
+    return (await recordReview({ scope: scopeOf(u, d), run, slot, kind: 'approve', changes: [], frozen })).handedOff;
+  });
+  if (sub) await syncAfterUnit(d.id, slot, { cause: `unit_handoff:${sub.submissionId}`, causedBy: u.email });
+  return !!sub;
 }
 
 /** 화면의 게이트를 지난 뒤의 신원 — 시드는 라우트를 거치지 않고 서버 함수를 바로 부른다 */

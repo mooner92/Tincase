@@ -6,7 +6,7 @@ import { prisma } from './db';
 import { audit } from './audit';
 import { openingOf } from './deadline';
 import { isSubmissionLocked } from '@/lib/deadline';
-import { hqNodeOf, loadOrgSetting, loadTree, type RollupNode } from './rollup/tree';
+import { hqNodeOf, loadOrgSetting, loadTree, submitTarget, type RollupNode } from './rollup/tree';
 import type { GuideCap } from '@/lib/guide/deck';
 
 export class HttpError extends Error {
@@ -108,6 +108,21 @@ export async function requireOwnManager(headers: Headers): Promise<Scope> {
   const scope = await requireScope(headers);
   if (!scope.isManager && !scope.user.isOperator) throw notFound();
   return scope;
+}
+
+/**
+ * TACP-23 v1.7.2 · RU-71 — 병합본을 고쳐 저장한 사람이 **그 부서에서 무엇인가** — 고친 기록(`reviewJson.edits`)의 `role`.
+ *   head      부서장 — 그 저장이 곧 승인이다(HM-47)
+ *   lead      부서담당자 — 부서장 없는 단위에서는 그 단위의 결론이다(위로 간다)
+ *   operator  그 부서의 lead·head가 아닌 운영자(`requireOwnManager`가 들여보낸 §3.2 「write(자기 부서)」) — 그 부서의 결정이 아니다.
+ *             부서장 없는 단위에서도 위로 가지 않는다(TACP-3 「문서는 부서가」의 자동판)
+ * 역할이 겹치면 부서 역할이 이긴다 — 자기 부서의 lead인 운영자는 lead다(§2 「한 사람이 여러 모자」).
+ * 라우트가 `isHead`·`isLead`를 비교하지 않게 여기 둔다 (TACP-12).
+ */
+export function unitEditorRole(scope: Pick<Scope, 'isHead' | 'isLead'>): 'head' | 'lead' | 'operator' {
+  if (scope.isHead) return 'head';
+  if (scope.isLead) return 'lead';
+  return 'operator';
 }
 
 /**
@@ -366,21 +381,37 @@ async function rollupOn(): Promise<boolean> {
 }
 
 /**
- * TACP-21 — 내 부서 결과를 위로 [제출]·취소할 수 있는가. **내 부서의 lead·head만** — readAll도 대신 내지 않는다.
- * 화면([제출] 카드)과 API(`requireReportSender`)가 이 하나를 본다 — 둘이 갈라지면 누르면 404인 버튼이 생긴다 (TACP-9)
+ * TACP-21 v1.7 · RU-80 — 「위로」 상태 카드와 **내 부서 사본의 행방**(본부 도착 · 본부장 승인 · 총괄 도착 시각)을 보는가.
+ * 내 부서의 lead·head. 예전의 [제출]·취소 권한(`canSendReport`·`requireReportSender`)은 v1.7에서 없어졌다 — 승인이 곧 제출이다(TACP-23).
+ * 화면(카드)과 API(`GET /api/rollup/report`의 행방)가 이 하나를 본다 (TACP-9)
  */
-export function canSendReport(scope: Pick<Scope, 'isManager'>): boolean {
+export function canSeeHandoff(scope: Pick<Scope, 'isManager'>): boolean {
   return scope.isManager;
 }
 
-/** TACP-21 — [제출]·취소 판정 (이미 인증한 scope). 3단계가 꺼져 있으면 문이 없다 (RU-52) */
-export async function assertReportSender(scope: Scope): Promise<Scope> {
-  if (!canSendReport(scope) || !(await rollupOn())) throw notFound();
-  return scope;
+/**
+ * RU-77 · TACP-23 — **비상구 「승인 없이 올리기」**를 쓸 수 있는 사람인가 — 그 단계의 lead만. head는 승인하면 되므로 없다
+ * (TACP-16의 「검토했다」는 기록을 흐리지 않는다). 시간 창·「이미 올라감」·「최종본 아님」은 게이트가 아니라 업무 규칙(409)이다.
+ */
+export function canUseHandoffEscape(scope: Pick<Scope, 'isLead'>): boolean {
+  return scope.isLead;
 }
 
-export async function requireReportSender(headers: Headers): Promise<Scope> {
-  return assertReportSender(await requireScope(headers));
+/**
+ * RU-77 — 비상구 진입점. 3단계가 켜져 있고(RU-52) — `unit`: 내 부서가 기여 단위이고 lead · `hq`: 내 부서가 본부 단계가 있는 본부이고 lead.
+ * 대상은 신원의 부서다(TACP-6). 그 외 404.
+ */
+export async function requireHandoffEscape(headers: Headers, level: 'unit' | 'hq'): Promise<{ scope: Scope; node: RollupNode | null }> {
+  const scope = await requireScope(headers);
+  if (!canUseHandoffEscape(scope) || !(await rollupOn())) throw notFound();
+  const tree = await loadTree();
+  if (level === 'hq') {
+    const node = hqNodeOf(tree, scope.division.id);
+    if (!node) throw notFound();
+    return { scope, node };
+  }
+  if (!submitTarget(tree, scope.division.id)) throw notFound();
+  return { scope, node: null };
 }
 
 /**
@@ -394,10 +425,20 @@ export async function hqNodeOfManager(scope: Scope): Promise<RollupNode> {
   return node;
 }
 
-/** TACP-21 — 본부 단계 **쓰기** 진입점 */
+/** TACP-21 — 본부 단계 **쓰기** 진입점 — 순서·쪽 나누기·자기 문서 포함, 실패 때 [다시 시도] (TACP-23) */
 export async function requireHqManager(headers: Headers): Promise<{ scope: Scope; node: RollupNode }> {
   const scope = await requireScope(headers);
   return { scope, node: await hqNodeOfManager(scope) };
+}
+
+/**
+ * RU-55 · TACP-23 — **본부본 승인 = 총괄로 제출** 진입점. `requireHqManager` + head(이면서 lead 아님) — HM-47과 같은 규칙:
+ * 담당자는 자기가 만든 것을 승인하지 않는다. 라우트가 `isReviewer`를 따로 부르던 것을 대신한다 (TACP-12).
+ */
+export async function requireHqReviewer(headers: Headers): Promise<{ scope: Scope; node: RollupNode }> {
+  const { scope, node } = await requireHqManager(headers);
+  if (!isReviewer(scope)) throw notFound();
+  return { scope, node };
 }
 
 /**
@@ -563,7 +604,7 @@ export async function guideCaps(scope: Scope): Promise<GuideCap[]> {
     ['all', true],
     ['manager', scope.isManager], // 수합 관리·부서 설정의 문 (TACP-16)
     ['head', isReviewer(scope)], // 병합본 승인 (HM-47)
-    ['report', canSendReport(scope) && rollup], // 위로 제출 — assertReportSender와 같은 식 (RU-52)
+    ['report', canSeeHandoff(scope) && rollup], // 위로 — 「위로」 카드와 같은 식 (RU-80 · RU-52)
     ['hq', nav.hqDesk],
     ['org', org.open],
     ['orgDesk', org.desk],

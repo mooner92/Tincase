@@ -139,8 +139,8 @@ export function hqNodeOf(tree: OrgTree, divisionId: string): RollupNode | null {
 }
 
 /**
- * RU-07 — 이 단위의 [제출]이 어디로 가는가. 본부 단계가 있으면 그 본부, 없으면 총괄.
- * 화면의 버튼 글자(「기획경영본부에 제출」 / 「총괄에 제출」)가 여기서 나온다.
+ * RU-07 — 이 단위의 사본(= 그 단위장의 승인, RU-70)이 어디로 가는가. 본부 단계가 있으면 그 본부, 없으면 총괄.
+ * 「위로」 카드의 받는 곳(「기획경영본부에 올라감」 / 「총괄에 올라감」)과 넘김(handoff.ts)이 여기서 나온다.
  */
 export function submitTarget(tree: OrgTree, divisionId: string): { kind: 'hq'; node: RollupNode } | { kind: 'org' } | null {
   const n = nodeOfContributor(tree, divisionId);

@@ -8,6 +8,8 @@ import { requireOrgRollup, HttpError } from '@/server/authz';
 import { handler, json } from '@/server/http';
 import { rollupSlot } from '@/server/rollup/slot';
 import { resolveSections, saveSections } from '@/server/rollup/sections';
+import { later } from '@/server/after';
+import { syncOrg } from '@/server/rollup/auto';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +23,7 @@ export const GET = handler(async (req: NextRequest) => {
   return json({
     slot: { isoKey: slot.isoKey, label: slot.label },
     sections: sources.map((s) => ({
+      flag: s.flag ?? null,
       id: s.section.id,
       title: s.section.title,
       divisionId: s.section.divisionId,
@@ -43,5 +46,7 @@ export const PUT = handler(async (req: NextRequest) => {
   const parsed = body.safeParse(await req.json().catch(() => null));
   if (!parsed.success) throw new HttpError(422, 'invalid_request', '요청 형식이 맞지 않습니다.');
   await saveSections(scope, parsed.data.sections);
+  // RU-72 — 섹션 구성(순서·제목·부서)이 바뀌면 전사본을 다시 만든다(전사본은 늘 준비돼 있다, RU-83)
+  later('syncOrg', async () => syncOrg(await rollupSlot(null), { cause: 'sections', causedBy: scope.user.email }));
   return json({ ok: true });
 });

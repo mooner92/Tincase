@@ -14,6 +14,10 @@
 // 그 한 시간이 검토에 쓸 수 있는 전부다:
 //   14:10 부서장이 본다 → 20분 검토 → 14:30 담당자가 반영해 제출 → 15:00까지 30분 여유.
 // 병합 자체가 모델 호출까지 수십 초~수 분 걸리므로 10분보다 이르면 «아직 병합 중»에 걸린다.
+//
+// **3단계에서는(RU-52 켜짐) +30분 안내가 바뀐다 (NT-47′ · 2026-10-08 · ADR-0015).** 부서장의 승인이 곧 위로 가는 제출이라
+// 담당자가 누를 [제출]이 없다. 승인돼 올라갔으면 보내지 않고(승인 순간 NT-46′이 이미 말했다), 승인 전·승인 뒤 바뀜이면
+// 「승인되면 저절로 ○○에 올라갑니다(기한)」, 부서장이 없는 부서면 「올라갔어요 — 고치면 다시 올라갑니다」 (submitLines).
 import { prisma } from '../db';
 import { logger } from '../logger';
 import { env } from '../env';
@@ -21,7 +25,8 @@ import { sendAlert, messengerStatus } from '../messenger';
 import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
 import { slotKind } from '@/lib/week';
 import { describeFlagged, type FlaggedRow } from '@/lib/empty-content';
-import { approvalOf } from '../merge/review';
+import { approvalOf, reapproveKind } from '../merge/review';
+import { NEWEST_FIRST, UNIT_REVIEW } from '../merge/review-scope';
 import { loadOrgSetting, loadTree, submitTarget } from '../rollup/tree';
 import type { MergeEdits } from '../merge/edits';
 import { toKstIso } from '@/lib/week';
@@ -76,21 +81,29 @@ export interface MergeFacts {
    */
   approval: { by: string; at: Date; summary: string; changedAfter: boolean } | null;
   hasHead: boolean;
-  /** RU-53 — 3단계를 쓰면 보낼 곳(「기획경영본부」·「총괄(기획조정실)」). 안 쓰면 null — 게시판 문구 그대로 */
+  /** RU-53 — 3단계를 쓰면 올라가는 곳(「기획경영본부」·「총괄」). 안 쓰면 null — 게시판 문구 그대로 */
   submitTo?: string | null;
-  /** RU-53 · RU-30 — 그 단위의 기한 (「15:00」 — 수합 관리 [제출] 카드와 같은 값). 3단계를 안 쓰면 null */
+  /** RU-53 · RU-80 — 그 단위의 기한 (「15:00」 — 수합 관리 「위로」 카드와 같은 값). 3단계를 안 쓰면 null */
   submitDue?: string | null;
   /** HM-49 — 자동 재병합을 멈추게 한 사람 수정 (NT-51 `merge_held`에서만) */
   edits?: MergeEdits | null;
 }
 
 /**
- * RU-53 — 담당자 마지막 알림의 할 일 한 줄. 3단계를 쓰면 **언제까지** 어느 버튼인지 — 시각이 없으면 실·팀 담당자는
- * 자기 기한(실·팀 → 본부)을 화면에서도 알림에서도 본 적이 없다(2026-10-08). 안 쓰면 게시판 문구 그대로
+ * RU-53 · NT-47′ (2026-10-08 개정) — 담당자 마지막 알림의 끝 줄. 3단계를 쓰면 **누를 버튼이 없다** — 부서장의 승인이 곧 제출이다(ADR-0015).
+ * 그래서 「무엇을 기다리나」를 기한과 함께 말한다. 안 쓰면 게시판 문구 그대로.
+ *   승인 전           「아직 부서장 승인 전이에요 — 승인되면 저절로 ○○에 올라갑니다(기한 15:00).」
+ *   승인 뒤 바뀜      「부서장이 승인한 뒤 병합본이 바뀌었어요 — 다시 승인되면 저절로 ○○에 올라갑니다(기한 15:00).」
+ *   부서장 없는 부서  「병합본이 ○○에 올라갔어요 — 고칠 곳은 고쳐 저장하면 다시 올라갑니다.」
+ * (승인돼 올라갔으면 이 알림 자체를 보내지 않는다 — pickJobs)
  */
-export function submitLines(f: Pick<MergeFacts, 'submitTo' | 'submitDue'>): string[] {
+export function submitLines(f: Pick<MergeFacts, 'submitTo' | 'submitDue'> & Partial<Pick<MergeFacts, 'hasHead' | 'approval'>>): string[] {
   if (!f.submitTo) return ['Tincase에서 hwp로 받아 취합게시판에 올리고', '웹디스크에 업로드해주세요.'];
-  return [`${f.submitDue ? `${f.submitDue}까지 ` : ''}Tincase 수합 관리에서 [${f.submitTo}에 제출]을 눌러주세요.`];
+  const due = f.submitDue ? `(기한 ${f.submitDue})` : '';
+  if (f.hasHead === false) return [`병합본이 ${f.submitTo}에 올라갔어요 — 고칠 곳은 고쳐 저장하면 다시 올라갑니다.`];
+  if (f.approval && !f.approval.changedAfter) return [`부서장이 승인해 ${f.submitTo}에 올라갔어요.`];
+  if (f.approval?.changedAfter) return [`부서장이 승인한 뒤 병합본이 바뀌었어요 — 다시 승인되면 저절로 ${f.submitTo}에 올라갑니다${due}.`];
+  return [`아직 부서장 승인 전이에요 — 승인되면 저절로 ${f.submitTo}에 올라갑니다${due}.`];
 }
 
 /** NT-47 — 승인 한 줄 */
@@ -142,7 +155,7 @@ function staleBlock(stale: number, action: string): string[] {
 export function pickJobs(
   atReview: boolean,
   atSubmit: boolean,
-  facts: Pick<MergeFacts, 'ok' | 'approval'>,
+  facts: Pick<MergeFacts, 'ok' | 'approval'> & Partial<Pick<MergeFacts, 'submitTo' | 'hasHead'>>,
 ): { kind: NoticeKind; role: 'lead' | 'head' }[] {
   const jobs: { kind: NoticeKind; role: 'lead' | 'head' }[] = [];
   if (atReview) {
@@ -150,7 +163,9 @@ export function pickJobs(
       if (!facts.approval || facts.approval.changedAfter) jobs.push({ kind: 'merge_review', role: 'head' });
     } else jobs.push({ kind: 'merge_missing', role: 'lead' });
   }
-  if (atSubmit) jobs.push({ kind: 'merge_done', role: 'lead' });
+  // NT-47′ · RU-53 — 3단계에서 부서장이 승인해 이미 올라갔으면 담당자에게 할 일이 없다 — NT-46′이 그 순간 이미 말했다
+  const handedOff = !!facts.submitTo && facts.hasHead === true && facts.ok && !!facts.approval && !facts.approval.changedAfter;
+  if (atSubmit && !handedOff) jobs.push({ kind: 'merge_done', role: 'lead' });
   return jobs;
 }
 
@@ -241,13 +256,19 @@ function compose(kind: NoticeKind, who: Person, slotLabel: string, monthly: bool
       ].join('\n'),
     };
   }
+  // NT-47′ — 3단계에서는 누를 버튼이 없다. 승인 줄(approvalBlock)은 끝 줄(submitLines)이 대신 말한다 — 두 줄이 서로 다른 말을 하지 않게
+  const staged = !!f.submitTo;
   return {
-    subject: `[Tincase] ${label} 병합본 제출해주세요`,
+    subject: staged
+      ? f.hasHead
+        ? `[Tincase] ${label} 병합본 — 부서장 승인을 기다려요`
+        : `[Tincase] ${label} 병합본이 ${f.submitTo}에 올라갔어요`
+      : `[Tincase] ${label} 병합본 제출해주세요`,
     contents: [
       `${head} ${label} 병합본이 준비됐어요.`,
       '',
       rowsLine(f),
-      ...approvalBlock(f),
+      ...(staged ? [] : approvalBlock(f)),
       ...staleBlock(f.stale, 'Tincase 수합 관리에서 [다시 병합]을 눌러주세요.'),
       ...flagBlock(f.flagged),
       '',
@@ -451,10 +472,8 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
         ...(() => {
           const t = tree ? submitTarget(tree, division.id) : null;
           if (!t || !stages) return { submitTo: null, submitDue: null };
-          // 본부로 내면 실·팀 → 본부 기한, 본부 단계 없이 총괄로 내면 본부 → 총괄 기한 (reportState와 같은 규칙)
-          return t.kind === 'hq'
-            ? { submitTo: t.node.node.nameKo, submitDue: stages.unitDueKo }
-            : { submitTo: '총괄(기획조정실)', submitDue: stages.hqDueKo };
+          // 본부로 가면 실·팀 → 본부 기한, 본부 단계 없이 총괄로 가면 본부 → 총괄 기한 (「위로」 카드와 같은 규칙 — RU-80)
+          return t.kind === 'hq' ? { submitTo: t.node.node.nameKo, submitDue: stages.unitDueKo } : { submitTo: '총괄', submitDue: stages.hqDueKo };
         })(),
         hasHead: (await prisma.user.count({ where: { divisionId: division.id, isActive: true, divisionRole: 'head' } })) > 0,
         ok: !!run,
@@ -471,6 +490,20 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
 
       for (const j of jobs) {
         if (await alreadySent(division.id, slot.id, j.kind)) continue;
+        /*
+         * NT-52 ↔ NT-40 — 부서장의 **가장 최근 승인**에 대해 이미 「다시 승인해 주세요」(NT-52, 바뀐 순간)를 보냈으면 +10분 검토 요청을
+         * 또 보내지 않는다 — 실장이 14:03에 승인하고 담당자가 14:06에 고치면 같은 할 일이 4분 사이에 두 번 가던 틈 (2026-10-08 검증).
+         * NT-52가 승인마다 한 번이 되면서(결정 e) 판(sha)이 아니라 그 승인으로 본다 — 그 뒤 또 바뀌어도 할 일은 같다(다시 승인).
+         * 기록을 남기지 않고 건너뛴다.
+         */
+        if (j.kind === 'merge_review') {
+          const last = await prisma.mergeReview.findFirst({
+            where: { divisionId: division.id, weekSlotId: slot.id, ...UNIT_REVIEW },
+            orderBy: NEWEST_FIRST,
+            select: { id: true },
+          });
+          if (last && (await prisma.notifyLog.findFirst({ where: { divisionId: division.id, weekSlotId: slot.id, kind: reapproveKind(last.id) } }))) continue;
+        }
         const r = await deliver(
           division.id,
           slot.id,

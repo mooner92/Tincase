@@ -33,11 +33,6 @@ export function AppHeader({
   /** RU-32 · PG-49f — 「전사」 화면의 취합 부분 (TACP-21). 이것만 있어도 `전사` 메뉴가 생긴다 */
   orgDesk?: boolean;
   viaCloudflare: boolean;
-  /**
-   * @deprecated 2026-10-08 — 쓰지 않는다. 드롭다운의 「알림 받기」 스위치(NT-21)를 걷었다: 끈 사람이 0명이었고,
-   * 알림 끄기는 운영자 인원 드로어 한 곳이다(NT-22). `/hq`·`/org`가 아직 넘기고 있어(3단계 작업 줄이 고치는 중) 타입만 남긴다
-   */
-  notifyEnabled?: boolean;
   /** 내 부서가 아닌 부서를 열람 중 (AU-15·16) — 칩으로 명시한다 (TACP-9 · AU-17c) */
   foreign?: boolean;
   /** 타 부서 열람 중일 때 [내 부서로]의 행선지 — 신원의 부서 슬러그 */

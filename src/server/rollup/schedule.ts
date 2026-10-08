@@ -56,6 +56,18 @@ export async function stageTimes(slot: WeekSlot): Promise<StageTimes & { enabled
   };
 }
 
+/**
+ * RU-72 · RU-77 — 그 주를 **아직 맞추는** 창의 끝: 「본부 → 총괄」 기한 + 이만큼.
+ * 읽기 수리(`isLiveSlot`)·스케줄러 안전망(`runDueRollupSync`)·비상구(2026-10-08 결정 a)가 같은 끝을 쓴다 — 셋이 따로 적히면
+ * 「화면은 옛 주를 맞추는데 비상구는 닫혔다」 같은 어긋남이 조용히 생긴다.
+ */
+export const LIVE_WINDOW_HOURS = 24;
+
+/** 그 주의 창이 닫히는 시각 (순수) */
+export function liveUntil(t: Pick<StageTimes, 'hqDue'>): Date {
+  return new Date(t.hqDue.getTime() + LIVE_WINDOW_HOURS * 3600_000);
+}
+
 /** RU-52 — 3단계를 쓰는가. 꺼져 있으면 카드·메뉴·알림이 나타나지 않는다 */
 export async function rollupEnabled(): Promise<boolean> {
   return (await loadOrgSetting()).enabled;

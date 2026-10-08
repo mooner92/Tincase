@@ -8,7 +8,8 @@ import { prisma } from './db';
 import { progressNodes } from './monitor';
 import { resolveSections, sectionList, uncoveredCopies, type SectionItem, type SectionSource } from './rollup/sections';
 import { loadTree, type OrgTree } from './rollup/tree';
-import { lastOrgRun } from './rollup/orgrun';
+import { orgRunState } from './rollup/orgrun';
+import { fileSha } from './rollup/report';
 import { kst } from './rollup/view';
 import { groupBySection, OUTSIDE } from '@/lib/org-groups';
 import type { OrgBoardRow } from '@/components/OrgBoard';
@@ -20,11 +21,30 @@ function hqOf(tree: OrgTree, divisionId: string | null) {
   return n?.hasHqStep ? n.node : null;
 }
 
+/**
+ * RU-57a · RU-83 — 이 사람이 이 주의 전사본을 받은(`download`) 뒤 전사본이 다시 만들어져 **바이트가 다르면** 그 받은 시각.
+ * 받은 사람에게만 주황 「16:20에 받은 뒤 바뀜」 — NAMS에 이미 올렸을 수 있다.
+ */
+async function changedSinceDownload(slot: WeekSlot, email: string, currentSha: string | null): Promise<string | null> {
+  if (!currentSha) return null;
+  const runs = await prisma.rollupRun.findMany({ where: { level: 'org', weekSlotId: slot.id, status: 'succeeded' }, select: { id: true, outputPath: true } });
+  if (runs.length === 0) return null;
+  const got = await prisma.auditLog.findFirst({
+    where: { actor: email, action: 'download', target: { in: runs.map((r) => `rollup:${r.id}`) } },
+    orderBy: { at: 'desc' },
+  });
+  if (!got?.target) return null;
+  const run = runs.find((r) => `rollup:${r.id}` === got.target);
+  return run && (await fileSha(run.outputPath)) !== currentSha ? kst(got.at) : null;
+}
+
 export async function orgBoard(
   slot: WeekSlot,
   can: { progress: boolean; desk: boolean },
   /** 지난 주차를 볼 때 링크에 붙일 `isoKey=…` (이번 주면 빈 글자) */
   weekQuery: string,
+  /** RU-57a — 보는 사람 (「받은 뒤 바뀜」은 받은 사람에게만) */
+  viewer?: { email: string },
 ) {
   const divisions = await prisma.division.findMany({ orderBy: { createdAt: 'asc' }, select: { id: true, nameKo: true, isActive: true } });
   const nameOf = new Map(divisions.map((d) => [d.id, d.nameKo]));
@@ -56,7 +76,7 @@ export async function orgBoard(
       title: s.title,
       offline: !s.divisionName,
       progress: grouped ? grouped.sections[i] : null,
-      final: src ? { sectionId: s.id, source: src.kind, label: src.label, refId: src.refId ?? null } : null,
+      final: src ? { sectionId: s.id, source: src.kind, label: src.label, refId: src.refId ?? null, flag: src.flag ?? null } : null,
       hq: hq ? { name: hq.nameKo, href: hqLink(hq.slug) } : null,
     };
   });
@@ -66,7 +86,9 @@ export async function orgBoard(
   }
 
   const all = grouped ? [...grouped.sections, grouped.outside] : null;
-  const run = sources ? await lastOrgRun(slot, sources) : null;
+  // RU-83 — 전사본은 늘 준비돼 있다: 가장 최근 성공한 것(받을 판)과, 그 뒤 시도가 실패했으면 그 실패(그때만 [다시 시도])
+  const state = sources ? await orgRunState(slot, sources) : null;
+  const run = state?.current ?? null;
   // RU-64 「누락」 — 지금 상태로 본다(만든 뒤에 섹션을 고치면 바로 사라져야 한다). 취합을 여는 사람에게만
   const coverage = sources ? await uncoveredCopies(slot, sources, tree!) : null;
   return {
@@ -82,6 +104,9 @@ export async function orgBoard(
     /** 최종본에 들어올 것이 있는 섹션 수 (취합을 여는 사람에게만) */
     ready: sources ? sources.filter((x) => x.kind === 'tincase' || x.kind === 'upload').length : null,
     run: run && { ...run, finishedAtKst: kst(run.finishedAt) },
+    failed: state?.failed ? { errorText: state.failed.errorText, atKst: kst(state.failed.finishedAt) } : null,
+    /** RU-57a — 이 사람이 받은 뒤 바뀌었으면 그 받은 시각 */
+    changedSinceDownload: run && viewer ? await changedSinceDownload(slot, viewer.email, run.sha256) : null,
     /** 도착했는데 어느 섹션에도 안 들어가는 사본 — 최종본에서 빠진다 (취합을 여는 사람에게만) */
     coverage,
     /** 섹션 구성 편집기에 넘길 것 (취합을 여는 사람에게만) */

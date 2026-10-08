@@ -15,12 +15,16 @@
 
 import type { Division, WeekSlot } from '@prisma/client';
 import { prisma } from '../db';
+import { writeFileAtomic } from '../storage';
 import { runMerge, MergeUnavailable, MergeFailed, type MergeOutcome } from './index';
+// 잠금 표 옆의 줄 이름만 가져온다 — rollup/handoff를 정적으로 이으면 고리가 된다(lock.ts는 아무것도 잇지 않는다)
+import { withUnitLock } from '../rollup/lock';
 import { mergeGateOf } from '../deadline';
 import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
 import { latestEdits } from './edits';
 import { ruleSnapshotOf } from './rule-snapshot';
 import { noticeMergeHeld } from '../notify/merge-notices';
+import { NEWEST_FIRST, UNIT_REVIEW } from './review-scope';
 
 /** HM-35 — 마감 후 이만큼 지나서 시작한다. 마감 정각에 들어온 제출이 커밋될 시간 */
 export const MERGE_DELAY_MINUTES = 1;
@@ -35,17 +39,25 @@ export interface MergeRunResult {
   runId: string;
   status: 'succeeded' | 'failed';
   errorText: string | null;
-  outcome: MergeOutcome | null;
+  /** 바이트(`output`)는 뺀다 — 이미 파일로 썼고, [지금 병합] 응답(JSON)에 병합본 전체가 실려 나가지 않게 */
+  outcome: Omit<MergeOutcome, 'output'> | null;
 }
 
 /**
  * 병합 1회 + `MergeRun` 기록.
  * 던지지 않는다 — 실패도 결과다. 화면이 원인을 보여주고 담당자가 재실행할 수 있어야 한다.
+ *
+ * RU-75 (2026-10-08 결정 c) — **파일 쓰기와 성공 기록은 승인·수정 저장과 같은 줄(`unit:` 잠금)에서 한 덩어리로.**
+ * 병합본은 주차마다 같은 자리라, 엔진이 파일을 쓰고 기록하기 전 틈에 수정 저장이 끼면 새 실행이 담당자가 고친 바이트를 가리키고
+ * 고친 기록은 옛 실행에 남았다(또는 고친 것이 기록 없이 덮였다 — HM-49가 지키지 못한다). 모델 호출·조립은 잠금 **밖에서** — 잠금이
+ * 모델을 기다리면 그동안 승인·저장이 1분씩 멈춘다. 병합 뒤 맞추기(`afterMerged`)도 잠금 밖 — 같은 줄을 다시 쥔다(재진입 없음).
  */
 export async function runMergeRecorded(
   divisionId: string,
   weekSlotId: string,
   trigger: 'auto' | 'manual',
+  /** RU-78 — [지금 병합]·[다시 병합]을 누른 사람 (자동이면 없다). 부서장 없는 단위의 사본 기록에 「일으킨 사람」으로 붙는다 */
+  actorEmail: string | null = null,
 ): Promise<MergeRunResult> {
   const division = await prisma.division.findUniqueOrThrow({ where: { id: divisionId } });
   const run = await prisma.mergeRun.create({
@@ -65,38 +77,9 @@ export async function runMergeRecorded(
 
   try {
     const outcome = await runMerge(divisionId, weekSlotId);
-    await prisma.mergeRun.update({
-      where: { id: run.id },
-      data: {
-        status: 'succeeded',
-        outputPath: outcome.outputRelPath,
-        sourceIds: JSON.stringify(outcome.sourceIds),
-        rowCounts: JSON.stringify(outcome.rowCounts),
-        warnings: JSON.stringify(outcome.warnings),
-        // HM-26 — 화면이 "볼 곳"을 알려주려면 무엇을 합쳤는지 남아 있어야 한다
-        reviewJson: JSON.stringify({
-          groups: outcome.mergedGroups.map((g) => ({
-            authors: g.authors,
-            category: g.category,
-            reason: g.reason,
-            sources: g.sources,
-            kept: g.row.content,
-            // HM-36 — 화면이 «어느 줄이 들어갔나»를 글자 비교로 짐작하지 않게 한다
-            keptIndex: g.keptIndex,
-            identical: g.identical,
-          })),
-          model: outcome.model,
-          categories: outcome.categories,
-          missing: outcome.missing,
-          // TACP-17 — 행 순서와 나란한 작성자. 화면에서만 쓰고 문서에는 넣지 않는다
-          rowAuthors: outcome.rowAuthors,
-          // HM-33 — 확인이 필요한 행. 알림과 화면이 같은 것을 읽는다
-          flagged: outcome.flagged,
-        }),
-        finishedAt: new Date(),
-      },
-    });
-    return { runId: run.id, status: 'succeeded', errorText: null, outcome };
+    await withUnitLock(divisionId, weekSlotId, () => recordSucceeded(run.id, outcome));
+    await afterMerged(divisionId, weekSlotId, run.id, outcome.sourceIds, actorEmail);
+    return { runId: run.id, status: 'succeeded', errorText: null, outcome: withoutBytes(outcome) };
   } catch (e) {
     const known = e instanceof MergeUnavailable || e instanceof MergeFailed;
     const errorText = known ? (e as Error).message : `예상치 못한 오류 (${(e as Error).message})`;
@@ -106,6 +89,84 @@ export async function runMergeRecorded(
     });
     if (!known) console.error('[merge] 예상치 못한 실패', e);
     return { runId: run.id, status: 'failed', errorText, outcome: null };
+  }
+}
+
+/** 결과 요약에서 병합본 바이트를 뺀다 — 이미 파일로 썼다 */
+function withoutBytes({ output, ...rest }: MergeOutcome): Omit<MergeOutcome, 'output'> {
+  void output;
+  return rest;
+}
+
+/** 결정 c — 잠금 안의 짧은 두 걸음: 병합본 쓰기 → 성공 기록. 쓰기가 실패하면 기록하지 않는다(부르는 쪽이 실패로 남긴다) */
+async function recordSucceeded(runId: string, outcome: MergeOutcome): Promise<void> {
+  await writeFileAtomic(outcome.outputRelPath, outcome.output);
+  await prisma.mergeRun.update({
+    where: { id: runId },
+    data: {
+      status: 'succeeded',
+      outputPath: outcome.outputRelPath,
+      sourceIds: JSON.stringify(outcome.sourceIds),
+      rowCounts: JSON.stringify(outcome.rowCounts),
+      warnings: JSON.stringify(outcome.warnings),
+      // HM-26 — 화면이 "볼 곳"을 알려주려면 무엇을 합쳤는지 남아 있어야 한다
+      reviewJson: JSON.stringify({
+        groups: outcome.mergedGroups.map((g) => ({
+          authors: g.authors,
+          category: g.category,
+          reason: g.reason,
+          sources: g.sources,
+          kept: g.row.content,
+          // HM-36 — 화면이 «어느 줄이 들어갔나»를 글자 비교로 짐작하지 않게 한다
+          keptIndex: g.keptIndex,
+          identical: g.identical,
+        })),
+        model: outcome.model,
+        categories: outcome.categories,
+        missing: outcome.missing,
+        // TACP-17 — 행 순서와 나란한 작성자. 화면에서만 쓰고 문서에는 넣지 않는다
+        rowAuthors: outcome.rowAuthors,
+        // HM-33 — 확인이 필요한 행. 알림과 화면이 같은 것을 읽는다
+        flagged: outcome.flagged,
+      }),
+      finishedAt: new Date(),
+    },
+  });
+}
+
+/** NT-52 — 승인한 판 뒤에 새로 들어온 제출 수 (「늦게 낸 n명 포함」) */
+async function lateSinceApproval(divisionId: string, weekSlotId: string, sourceIds: readonly string[]): Promise<number> {
+  const review = await prisma.mergeReview.findFirst({ where: { divisionId, weekSlotId, ...UNIT_REVIEW }, orderBy: NEWEST_FIRST, select: { mergeRunId: true } });
+  if (!review) return 0;
+  const prev = await prisma.mergeRun.findUnique({ where: { id: review.mergeRunId }, select: { sourceIds: true } });
+  let before: string[] = [];
+  try {
+    before = JSON.parse(prev?.sourceIds ?? '[]') as string[];
+  } catch {
+    before = [];
+  }
+  const seen = new Set(before);
+  return sourceIds.filter((id) => !seen.has(id)).length;
+}
+
+/**
+ * RU-72 · HM-47 (2026-10-08) — 병합이 판을 바꿨다. 3단계에서 부서장 없는 단위는 마감 뒤 최종본이 곧 넘김이고,
+ * 부서장 있는 단위는 승인이 있었으면 부서장에게 NT-52 「다시 승인해 주세요」 — 병합은 승인이 아니므로 위로 가지 않는다.
+ * 스케줄러의 자동 병합(테스트 서버에서는 꺼져 있다)이든 [지금 병합]이든 같은 길이다. 실패해도 병합 결과는 그대로다.
+ */
+async function afterMerged(divisionId: string, weekSlotId: string, runId: string, sourceIds: readonly string[], actorEmail: string | null) {
+  try {
+    const slot = await prisma.weekSlot.findUnique({ where: { id: weekSlotId } });
+    if (!slot) return;
+    // 정적으로 이으면 rollup/schedule → slot-deadline → 이 파일 고리가 된다
+    const { onUnitVersionChanged } = await import('../rollup/auto');
+    await onUnitVersionChanged(divisionId, slot, {
+      cause: `merge_final:${runId}`,
+      causedBy: actorEmail,
+      reason: { kind: 'merge', late: await lateSinceApproval(divisionId, weekSlotId, sourceIds) },
+    });
+  } catch (e) {
+    console.error('[merge] 병합 뒤 자동 진행 오류', e);
   }
 }
 

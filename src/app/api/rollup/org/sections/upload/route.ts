@@ -10,6 +10,8 @@ import { env } from '@/server/env';
 import { assertHwpUploadOpen } from '@/server/submit-mode';
 import { rollupSlot } from '@/server/rollup/slot';
 import { uploadSectionFile, withdrawSectionFile } from '@/server/rollup/sections';
+import { later } from '@/server/after';
+import { syncOrg } from '@/server/rollup/auto';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,6 +26,8 @@ export const POST = handler(async (req: NextRequest) => {
   if (file.size > env.MAX_UPLOAD_BYTES) throw new HttpError(422, 'invalid_file', '파일이 너무 큽니다.');
   const slot = await rollupSlot(String(fd?.get('isoKey') ?? '') || null);
   const row = await uploadSectionFile(scope, sectionId, slot, Buffer.from(await file.arrayBuffer()), file.name);
+  // RU-72 — 섹션 출처가 바뀌었다 → 전사본을 다시 만든다 (그 주차 그대로)
+  later('syncOrg', () => syncOrg(slot, { cause: 'upload', causedBy: scope.user.email }));
   return json({ ok: true, id: row.id });
 });
 
@@ -31,6 +35,7 @@ export const DELETE = handler(async (req: NextRequest) => {
   const scope = await requireOrgRollup(req.headers);
   const id = req.nextUrl.searchParams.get('id');
   if (!id) throw new HttpError(422, 'invalid_request', '취소할 파일을 지정하세요.');
-  await withdrawSectionFile(scope, id);
+  const slot = await withdrawSectionFile(scope, id);
+  if (slot) later('syncOrg', () => syncOrg(slot, { cause: 'upload', causedBy: scope.user.email }));
   return json({ ok: true });
 });
