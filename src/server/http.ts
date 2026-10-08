@@ -100,3 +100,12 @@ export function rateLimit(key: string, limit: number, perMs: number): void {
   b.tokens -= 1;
   buckets.set(key, b);
 }
+
+/**
+ * 시험 전용 — 버킷을 비운다. 한 파일 안의 시험들이 같은 사람으로 승인을 여러 번 하면(tests/rollup-auto — 본부장 18번)
+ * 분당 10번 한도에 걸려 429가 난다. 걸리는지는 파일이 얼마나 빨리 도느냐에 달려 있어(양식 픽스처가 있는 체크아웃 · 병합 줄을 합친 뒤
+ * 빨라졌다) 시험이 그날그날 달라진다. 한도 자체를 보는 시험은 따로 있다
+ */
+export function resetRateLimitsForTest(): void {
+  buckets.clear();
+}

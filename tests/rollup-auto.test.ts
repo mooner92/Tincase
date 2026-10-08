@@ -6,7 +6,7 @@
 // 픽스처 hwp(내부 문서)가 없어도 돈다(CI). hwp를 실제로 조립하는 엔진(orgdoc·병합·읽기)은 **흉내**로 바꾼다 — 여기서 보는 것은
 // 문서의 꼴이 아니라 「무엇이 언제 누구 이름으로 위로 가나」다. 꼴은 tests/rollup.test.ts·docmerge.test.ts(픽스처)가 본다.
 // 사람·부서 이름은 지어낸 것이다.
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from 'node:fs';
@@ -289,6 +289,12 @@ async function node(key: 'hq' | 'hq2') {
   const { hqNodeOf, loadTree } = await import('@/server/rollup/tree');
   return hqNodeOf(await loadTree(), divId[key])!;
 }
+
+// 승인 한도(분당 10번 — API-34)는 사람마다 프로세스 메모리에 있다. 이 파일은 같은 본부장 · 부서장으로 시험마다 승인해 파일이 빨리 돌면
+// 한도에 걸린다(429) — 이 파일이 보는 것은 한도가 아니라 넘김이라 시험마다 비운다
+beforeEach(async () => {
+  (await import('@/server/http')).resetRateLimitsForTest();
+});
 
 beforeAll(async () => {
   const root = path.resolve(__dirname, '..');
