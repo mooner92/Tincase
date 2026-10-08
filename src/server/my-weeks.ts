@@ -83,6 +83,7 @@ export async function loadMemberHome(view: DivisionView, now: Date): Promise<Mem
     mergedWeekIds: new Set(w.mergedAt.keys()),
     divisionId: division.id,
     joinedMonday: mondayOf(me.createdAt),
+    onRoster: me.onRoster, // 68e — 명단 밖이면 빈 줄을 두지 않는다
   });
 
   const nextMonday = new Date(slot.opensAt.getTime() + 7 * 86_400_000);

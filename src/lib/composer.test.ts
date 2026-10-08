@@ -1,6 +1,6 @@
 // WA-35 · WA-36a — 웹 작성의 시작점과 일자 예시.
 import { describe, expect, it } from 'vitest';
-import { composerStart, dateHint, sameRows } from './composer';
+import { composerStart, dateHint, sameRows, submitBlocked } from './composer';
 
 type Row = { content: string; date: string; place: string; attendee: string; emphasis?: boolean };
 const blank = (): Row => ({ content: '', date: '', place: '', attendee: '', emphasis: false });
@@ -94,5 +94,18 @@ describe('WA-37 — 「바뀌었나」는 내용으로', () => {
     const moved = clone();
     moved.achievements.reverse();
     expect(sameRows(start, moved)).toBe(false); // 순서도 문서다
+  });
+
+  it('[WA-T51] [제출] 꺼짐 — 보내는 중 · 낸 뒤 닫히기까지 · 내용 없음 · 낸 판 그대로 (submitBlocked)', () => {
+    const ok = { busy: false, done: false, filled: 2, from: 'blank' as const, unchanged: false };
+    expect(submitBlocked(ok)).toBe(false);
+    expect(submitBlocked({ ...ok, busy: true })).toBe(true);
+    // 응답이 와서 busy가 풀려도 닫히기 전에는 다시 못 낸다 — 같은 내용의 판이 하나 더 생기지 않게
+    expect(submitBlocked({ ...ok, done: true })).toBe(true);
+    expect(submitBlocked({ ...ok, filled: 0 })).toBe(true);
+    expect(submitBlocked({ ...ok, from: 'submission', unchanged: true })).toBe(true);
+    expect(submitBlocked({ ...ok, from: 'submission', unchanged: false })).toBe(false);
+    // 임시본·빈 표에서 시작했으면 「그대로」여도 낼 수 있다(아직 안 낸 내용이다)
+    expect(submitBlocked({ ...ok, from: 'draft', unchanged: true })).toBe(false);
   });
 });

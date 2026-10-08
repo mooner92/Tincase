@@ -10,7 +10,7 @@ import { flagWordOf, parseFlagWords } from '@/lib/empty-content';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { parseClipboardTable } from '@/lib/paste-table';
-import { composerStart, dateHint, sameRows, type ComposerFrom } from '@/lib/composer';
+import { composerStart, dateHint, sameRows, submitBlocked, type ComposerFrom } from '@/lib/composer';
 import { PreviousWeekPanel, type PrevRow } from './PreviousWeekPanel';
 
 export interface ComposerRow {
@@ -505,11 +505,11 @@ export function WebComposer({
             {msg?.text}
           </span>
           <div className="ml-auto flex items-center gap-3 sm:gap-4">
-            {/* WA-37 — 낸 판으로 연 화면은 내용이 바뀌기 전에는 꺼져 있다. 2026-10-08 — [전체 지우기]·합계는 걷었다(R15) */}
+            {/* WA-37 — 낸 판으로 연 화면은 내용이 바뀌기 전에는 꺼져 있다 · 낸 뒤 닫히기까지도 꺼져 있다. 2026-10-08 — [전체 지우기]·합계는 걷었다(R15) */}
             <button
               data-guide="compose-submit"
               onClick={submit}
-              disabled={busy || total === 0 || (from === 'submission' && unchanged)}
+              disabled={submitBlocked({ busy, done, filled: total, from, unchanged })}
               className="btn-primary"
             >
               {busy ? '제출 중…' : '제출'}

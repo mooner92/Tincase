@@ -79,3 +79,13 @@ export function sameRows<R extends Comparable>(a: Buckets<R> | null | undefined,
       .map((r) => [r.content.trim(), (r.date ?? '').trim(), (r.place ?? '').trim(), (r.attendee ?? '').trim(), r.emphasis === true]);
   return BUCKETS.every((k) => JSON.stringify(norm(a?.[k])) === JSON.stringify(norm(b?.[k])));
 }
+
+/**
+ * WA-37 — [제출]이 꺼져 있는가. 화면은 이 식 하나로 정한다(WA-T51).
+ *
+ * `done`: 낸 뒤 작성 화면이 닫히기까지(0.9초) 다시 누르지 못하게 한다. 예전에는 응답이 오면 `busy`가 풀리면서
+ * [제출]이 다시 켜졌다 — 「제출되었습니다」를 보고 한 번 더 누르면 같은 내용의 판이 하나 더 생겼다(2026-10-08 UX 리뷰).
+ */
+export function submitBlocked(s: { busy: boolean; done: boolean; filled: number; from: ComposerFrom; unchanged: boolean }): boolean {
+  return s.busy || s.done || s.filled === 0 || (s.from === 'submission' && s.unchanged);
+}

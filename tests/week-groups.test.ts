@@ -88,6 +88,20 @@ describe('[PG-T92] pickPastWeeks — 줄이 되는 주 (PG-68a)', () => {
     const r = pickPastWeeks({ ...base, mine: slots.slice(1).map((s) => mineOf(s.id)) });
     expect(r.filter((w) => w.monthly).map((w) => w.label)).toEqual(['9월 4주차', '8월 5주차']);
   });
+
+  it('⑨ 명단 밖(부서장·휴직)에게는 내 제출도 병합본도 없는 주가 줄이 아니다 — 상태도 버튼도 없는 빈 줄 (PG-68e)', () => {
+    const input = {
+      ...base,
+      mine: [mineOf('2026-W36')],
+      deptWeekIds: new Set(['2026-W38', '2026-W37']),
+      mergedWeekIds: new Set(['2026-W37']),
+    };
+    // 명단 안: 병합이 실패한 W38도 「미제출」 줄이다(③)
+    expect(keys(pickPastWeeks(input))).toEqual(['2026-W38', '2026-W37', '2026-W36']);
+    expect(keys(pickPastWeeks({ ...input, onRoster: true }))).toEqual(['2026-W38', '2026-W37', '2026-W36']);
+    // 명단 밖: W38은 말할 것이 없다 — 병합본이 있는 주와 내가 낸 주만
+    expect(keys(pickPastWeeks({ ...input, onRoster: false }))).toEqual(['2026-W37', '2026-W36']);
+  });
 });
 
 /** 한 사람이 매주 낸 기록 — from 부터 now 주까지(now 주는 빼고). skip은 안 낸 주 */

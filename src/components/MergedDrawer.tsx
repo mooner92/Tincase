@@ -20,6 +20,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { moveItem, rowNo } from '@/lib/merge-rows';
 import { drawerControls, type DrawerVariant } from '@/lib/merged-drawer';
+import { fitTextarea, fitTextareas } from '@/lib/fit-textarea';
 
 interface TableView {
   key: string;
@@ -118,27 +119,24 @@ export function MergedDrawer({
   const titleRef = useRef<HTMLHeadingElement>(null);
   const router = useRouter();
 
-  /**
-   * 칸 높이를 **내용에 맞춘다.**
+  /*
+   * 칸 높이를 **내용에 맞춘다** (CP-119 — `fitTextarea`·`fitTextareas`).
    *
    * `rows={1}` 고정이면 «본원 소회의실»처럼 줄바꿈되는 값이 아래로 잘려서,
    * 확인하려면 칸마다 클릭해 스크롤해야 한다. 확인하려고 여는 화면인데 그러면 안 된다.
    * 세로로 길어지더라도 **한눈에 다 보이는 편**이 낫다.
    *
-   * CSS `field-sizing: content`가 같은 일을 하지만 사내 PC 브라우저 버전을 장담할 수 없어
-   * scrollHeight로 직접 맞춘다 — 어디서나 동작한다.
+   * 값이 밖에서 바뀌는 경우(불러오기·저장 후 재조회·줄 지우기·옮기기)는 모든 칸을 다시 맞추되 **한꺼번에** 한다.
+   * 칸마다 따로 맞추면 112칸에 한 글자 1초였다 — 부서장이 고쳐 저장(= 승인)하는 바로 그 화면이다(2026-10-08).
+   * 한 칸에 글자를 친 것이면 그 칸은 onChange가 이미 맞췄고 다른 칸의 내용은 그대로다 — 다시 재지 않는다.
    */
-  const fit = (el: HTMLTextAreaElement | null) => {
-    if (!el) return;
-    el.style.height = 'auto';
-    // border-box이므로 테두리 두께를 더해야 한다 — scrollHeight는 테두리를 뺀 값이다
-    const border = el.offsetHeight - el.clientHeight;
-    el.style.height = `${el.scrollHeight + border}px`;
-  };
-
-  // 값이 밖에서 바뀌는 경우(불러오기·저장 후 재조회)도 다시 맞춘다
+  const typedRef = useRef(false);
   useLayoutEffect(() => {
-    bodyRef.current?.querySelectorAll('textarea').forEach((el) => fit(el as HTMLTextAreaElement));
+    if (typedRef.current) {
+      typedRef.current = false;
+      return;
+    }
+    if (bodyRef.current) fitTextareas(bodyRef.current.querySelectorAll('textarea'));
   }, [data]);
 
   useLayoutEffect(() => {
@@ -526,9 +524,10 @@ export function MergedDrawer({
                                     data-guide={ti === 0 && ri === 0 && ci === 1 ? 'merged-cell' : undefined}
                                     value={cell}
                                     rows={1}
-                                    ref={fit}
+                                    ref={fitTextarea}
                                     onChange={(e) => {
-                                      fit(e.target);
+                                      fitTextarea(e.target);
+                                      typedRef.current = true; // CP-119 — 이 칸만 바뀌었다
                                       edit(ti, ri, ci, e.target.value);
                                     }}
                                     /*

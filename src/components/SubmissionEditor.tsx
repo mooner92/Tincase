@@ -5,6 +5,7 @@
 // 원래 판은 그대로 남는다 — 저장 버튼이 「고쳐서 저장 (vN)」으로 새 판 번호를 말한다.
 // 2026-10-08 (사용자: 주석 걷기) — 위의 설명 callout과 버튼 옆 [다시 병합] 안내를 걷었다. 저장 뒤 한 줄(FileDrawer)이 말한다.
 import { useLayoutEffect, useRef, useState } from 'react';
+import { fitTextarea, fitTextareas } from '@/lib/fit-textarea';
 
 type Bucket = 'achievements' | 'plans' | 'notes';
 export interface EditRow {
@@ -22,17 +23,12 @@ const SECTIONS: { key: Bucket; no: number; title: string }[] = [
 ];
 const blank = (): EditRow => ({ content: '', date: '', place: '', attendee: '', emphasis: false });
 
-/**
- * 칸 높이를 내용에 맞춘다 — MergedDrawer와 같은 방식 (`field-sizing`은 사내 PC 브라우저를 장담할 수 없다).
+/*
+ * 칸 높이를 내용에 맞춘다 — MergedDrawer와 같은 함수(CP-119, `src/lib/fit-textarea.ts`).
  * 한 칸에 두 줄을 적는 것은 정상이다(HM-39). `<input>`은 값의 줄바꿈을 **조용히 지운다** —
  * 그래서 고치지도 않은 칸의 줄바꿈이 저장하는 순간 사라졌다 (2026-10-07 리뷰). 그래서 textarea다.
  */
-const fit = (el: HTMLTextAreaElement | null) => {
-  if (!el) return;
-  el.style.height = 'auto';
-  const border = el.offsetHeight - el.clientHeight;
-  el.style.height = `${el.scrollHeight + border}px`;
-};
+const fit = fitTextarea;
 
 export function SubmissionEditor({
   submissionId,
@@ -60,11 +56,11 @@ export function SubmissionEditor({
   /*
    * 줄을 지우면 아래 줄의 값이 위 칸(같은 textarea)으로 올라온다 — 칸 높이는 그대로라서
    * 여러 줄 값이 한 줄 높이 칸에 들어가면 `overflow-hidden`에 가려 안 보인다. 값이 바뀔 때마다 다시 맞춘다
-   * (MergedDrawer와 같은 방식)
+   * (MergedDrawer와 같은 방식 — 칸마다 따로 맞추면 칸 수만큼 레이아웃을 다시 계산하므로 한꺼번에, CP-119)
    */
   const rootRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    rootRef.current?.querySelectorAll('textarea').forEach((el) => fit(el as HTMLTextAreaElement));
+    if (rootRef.current) fitTextareas(rootRef.current.querySelectorAll('textarea'));
   }, [data]);
 
   const touch = () => onDirtyChange?.(true);
@@ -156,9 +152,13 @@ export function SubmissionEditor({
                 {field(s.key, i, 'date', '일자', 'order-2 ml-[2.375rem] w-16 shrink-0 sm:order-none sm:ml-0 sm:placeholder:text-transparent', '일자')}
                 {field(s.key, i, 'place', '장소', 'order-2 min-w-0 flex-1 sm:order-none sm:w-20 sm:flex-none sm:shrink-0 sm:placeholder:text-transparent', '장소')}
                 {field(s.key, i, 'attendee', '참석자', 'order-2 min-w-0 flex-1 sm:order-none sm:w-20 sm:flex-none sm:shrink-0 sm:placeholder:text-transparent', '참석자')}
-                <span className="order-2 flex w-9 shrink-0 justify-center pt-2 sm:order-none">
+                {/* 좁은 화면은 머리 행을 감추므로 체크 하나로는 무엇인지 모른다 — 아랫줄 칸 이름처럼 「공유」를 붙인다(WA-20a) */}
+                <label className="order-2 flex shrink-0 items-center justify-center gap-1 pt-2 text-xs text-muted sm:order-none sm:w-9">
                   <input type="checkbox" aria-label="공유(파란색)" checked={!!r.emphasis} onChange={(e) => set(s.key, i, 'emphasis', e.target.checked)} />
-                </span>
+                  <span aria-hidden className="sm:hidden">
+                    공유
+                  </span>
+                </label>
                 <button onClick={() => remove(s.key, i)} aria-label="이 줄 지우기" className="w-5 shrink-0 pt-1.5 text-muted-soft hover:text-error">
                   ×
                 </button>

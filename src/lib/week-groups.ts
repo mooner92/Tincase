@@ -46,6 +46,9 @@ export interface PastWeek {
  *
  * 달력의 주를 전부 늘어놓지 않는 이유: 연휴·사용 전의 주가 「미제출」로 찍히면 기록이 거짓말을 한다.
  * 병합이 실패한 주도 이 부서에 제출이 있었으면 남는다 — 내가 안 냈다는 사실이 사라지지 않게.
+ *
+ * 68e — 명단 밖인 사람(부서장·휴직, `onRoster=false`)에게는 「미제출」이 없다(68c). 그 사람에게 내 제출도 병합본도
+ * 없는 주는 주차 글자만 있는 빈 줄이라 줄로 두지 않는다 — 부서장 홈이 버튼 없는 줄로 채워졌다(2026-10-08 UX 리뷰).
  */
 export function pickPastWeeks(i: {
   /** opensAt 내림차순, 이번 주 포함 */
@@ -57,6 +60,8 @@ export function pickPastWeeks(i: {
   divisionId: string;
   /** mondayOf(user.createdAt) */
   joinedMonday: Date;
+  /** 68e — user.onRoster. 빠지면 명단 안으로 본다 */
+  onRoster?: boolean;
 }): PastWeek[] {
   const current = i.slots.find((s) => s.id === i.currentId);
   const before = (s: SlotLite) => s.id !== i.currentId && (!current || s.opensAt.getTime() < current.opensAt.getTime());
@@ -67,6 +72,9 @@ export function pickPastWeeks(i: {
     const m = mineOf.get(s.id) ?? null;
     const evidence = i.deptWeekIds.has(s.id) || i.mergedWeekIds.has(s.id);
     if (!m && !(evidence && s.opensAt.getTime() >= i.joinedMonday.getTime())) continue;
+    // 옛 부서 시절에 낸 주의 [병합본]은 지금 부서의 것이라 내 글이 없다 — 두지 않는다
+    const doc = i.mergedWeekIds.has(s.id) && (!m || m.divisionId === i.divisionId);
+    if (i.onRoster === false && !m && !doc) continue; // 68e — 상태도 버튼도 없는 줄
     out.push({
       isoKey: s.isoKey,
       label: s.label,
@@ -75,8 +83,7 @@ export function pickPastWeeks(i: {
       weekOfMonth: s.weekOfMonth,
       monthly: slotKind(s) === 'monthly',
       mine: m && { id: m.id, edited: m.editedById !== null },
-      // 옛 부서 시절에 낸 주의 [병합본]은 지금 부서의 것이라 내 글이 없다 — 두지 않는다
-      doc: i.mergedWeekIds.has(s.id) && (!m || m.divisionId === i.divisionId),
+      doc,
     });
   }
   return out.sort((a, b) => b.year - a.year || b.month - a.month || b.weekOfMonth - a.weekOfMonth);
