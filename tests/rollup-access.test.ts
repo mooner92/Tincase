@@ -1103,7 +1103,11 @@ describe('TACP-23 자동 진행의 경계 (RU-T118~123)', () => {
     expect(await prisma.auditLog.count({ where: { action: 'rollup', actor: P.u5Head } })).toBe(0);
     // 비상구 — 승인 뒤 바뀐 판을 담당자가 (기한 15분 전부터) 올린다
     await fakeMerged('u5', '실다섯 승인 뒤 바뀜');
-    await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { unitDueMinutes: -60, hqDueMinutes: -30 } });
+    // 기한을 「지금」 둘레로 — 실·팀 → 본부 = 지금 - 60분, 본부 → 총괄 = 지금. 비상구는 「본부 → 총괄」 + 24시간에 닫히므로(RU-77 · 결정 a)
+    // 그 주 월 00:00 기준의 고정 분으로 두면 시험을 돌리는 요일에 따라 창이 이미 닫혀 있다
+    const { weekAnchor } = await import('@/server/slot-deadline');
+    const sinceAnchor = Math.floor((Date.now() - (await weekAnchor(await prisma.weekSlot.findUniqueOrThrow({ where: { isoKey } }))).getTime()) / 60_000);
+    await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { unitDueMinutes: sinceAnchor - 60, hqDueMinutes: sinceAnchor } });
     try {
       const r = await (await report()).POST(nx('/api/rollup/report', P.u5Lead, jsonInit('POST', { level: 'unit', isoKey, withoutApproval: true })));
       expect(r.status).toBe(200);

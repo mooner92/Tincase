@@ -29,13 +29,13 @@ vi.mock('@/server/merge', async (importOriginal) => {
     composeMergedHwp: (_tpl: Buffer, rows: Record<string, string[][]>) => ({ bytes: Buffer.from(JSON.stringify(rows)), tableCount: 3, warnings: [] }),
     runMerge: async (divisionId: string, weekSlotId: string) => {
       const { prisma } = await import('@/server/db');
-      const { writeFileAtomic } = await import('@/server/storage');
       const division = await prisma.division.findUniqueOrThrow({ where: { id: divisionId } });
       const slot = await prisma.weekSlot.findUniqueOrThrow({ where: { id: weekSlotId } });
       const rel = orig.mergedRelPath(division.slug, slot.year, slot.label);
-      await writeFileAtomic(rel, Buffer.from(JSON.stringify({ achievements: [['1-1', nextMerge.get(divisionId) ?? division.nameKo, '', '', '']], plans: [], notes: [] })));
+      // 엔진은 쓰지 않는다 — 바이트를 돌려주면 runMergeRecorded가 잠금 안에서 쓰고 기록한다 (2026-10-08 결정 c)
       return {
         outputRelPath: rel,
+        output: Buffer.from(JSON.stringify({ achievements: [['1-1', nextMerge.get(divisionId) ?? division.nameKo, '', '', '']], plans: [], notes: [] })),
         bytes: 1,
         rowCounts: { achievements: 1, plans: 0, notes: 0 },
         mergedGroups: [],
@@ -113,6 +113,8 @@ const inbox: Got[] = [];
 /** 지금까지 받은 것을 꺼낸다(비운다) */
 const take = () => inbox.splice(0, inbox.length);
 const to = (gs: Got[]) => gs.map((g) => g.to).sort();
+/** 가짜 메신저의 상태 — 느리게(`delayMs`) · 고장(`fail` — 500, 아무에게도 안 감) (RU-T143) */
+const mailbox = { delayMs: 0, fail: false };
 let server: Server;
 
 function nx(url: string, identity?: string, init?: RequestInit) {
@@ -179,10 +181,19 @@ beforeAll(async () => {
     let body = '';
     req.on('data', (c) => (body += c));
     req.on('end', () => {
-      const f = new URLSearchParams(body);
-      for (const r of (f.get('RecvId') ?? '').split(',')) inbox.push({ to: r, subject: f.get('Subject') ?? '', contents: f.get('Contents') ?? '' });
-      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('send ok\n');
+      const reply = () => {
+        if (mailbox.fail) {
+          res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+          res.end('down\n');
+          return;
+        }
+        const f = new URLSearchParams(body);
+        for (const r of (f.get('RecvId') ?? '').split(',')) inbox.push({ to: r, subject: f.get('Subject') ?? '', contents: f.get('Contents') ?? '' });
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('send ok\n');
+      };
+      if (mailbox.delayMs > 0) setTimeout(reply, mailbox.delayMs);
+      else reply();
     });
   });
   await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
@@ -314,8 +325,10 @@ describe('RU-53~57b · NT-52 — 3단계 알림은 막고 있는 사람에게만
     expect(to(got)).toEqual([P.hqHead.no]);
   });
 
-  it('[NT-T65] NT-52 — 승인 뒤 병합본이 바뀌면 부서장에게 새 판마다 한 번 · 담당자 저장은 위로 가지 않는다 · 3단계 꺼짐이면 없음', async () => {
+  it('[NT-T65] NT-52 — 승인 뒤 병합본이 바뀌면 부서장에게 그 승인마다 한 번(또 바뀌어도 더 안 감) · 다시 승인한 뒤 바뀌면 다시 한 번 · 담당자 저장은 위로 가지 않는다 · 3단계 꺼짐이면 없음', async () => {
     const prisma = await db();
+    const latestApproval = () =>
+      prisma.mergeReview.findFirstOrThrow({ where: { divisionId: divId.u1, kind: { not: 'hq_approve' } }, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }] });
     take();
     expect((await save(P.u1Lead.email, 'u1', '실하나 담당자 고침')).status).toBe(200);
     await settle();
@@ -323,20 +336,31 @@ describe('RU-53~57b · NT-52 — 3단계 알림은 막고 있는 사람에게만
     expect(to(got)).toEqual([P.u1Head.no]);
     expect(got[0].contents).toContain('담당자가 승인 뒤 병합본을 1곳 고쳤어요');
     expect(got[0].contents).toContain('다시 승인하면 바로 본부가에 올라갑니다');
+    // 종류는 승인 id — 판(sha)이 아니다 (2026-10-08 결정 e)
     const kind = (await prisma.notifyLog.findFirstOrThrow({ where: { kind: { startsWith: 'merge_reapprove:' } } })).kind;
-    expect(kind).toBe(`merge_reapprove:${(await viewed('u1')).sha256.slice(0, 12)}`);
-    // 같은 판으로 다시 저장 — 새 판이 아니다
+    expect(kind).toBe(`merge_reapprove:${(await latestApproval()).id}`);
+    // 같은 판으로 다시 저장 — 아무것도 없다
     expect((await save(P.u1Lead.email, 'u1', '실하나 담당자 고침')).status).toBe(200);
     await settle();
     expect(take()).toEqual([]);
-    // 다시 병합(늦게 낸 사람) — 새 판
+    // 다시 병합(늦게 낸 사람) — 판은 또 바뀌었지만 부서장의 할 일(다시 승인)은 같다. 그 승인에 대해서는 이미 알렸다
     nextMerge.set(divId.u1, '실하나 다시 병합');
     expect((await mergeNow(P.u1Lead.email)).status).toBe(200);
     await settle();
+    expect(take().filter((g) => g.to === P.u1Head.no)).toEqual([]);
+    // 부서장이 다시 승인한 뒤 또 바뀌면 — 새 승인이므로 한 번 더
+    expect((await approve(P.u1Head.email, 'u1')).status).toBe(200);
+    await settle();
+    take();
+    expect((await save(P.u1Lead.email, 'u1', '실하나 다시 승인 뒤 고침')).status).toBe(200);
+    await settle();
     got = take();
     expect(to(got)).toEqual([P.u1Head.no]);
-    expect(got[0].contents).toContain('다시 병합됐어요');
-    // 3단계 꺼짐 — 없음
+    expect(await prisma.notifyLog.count({ where: { divisionId: divId.u1, kind: { startsWith: 'merge_reapprove:' } } })).toBe(2);
+    // 3단계 꺼짐 — 없음 (새 승인을 두고 꺼진 동안 고친다 — 켜져 있었으면 NT-52가 갔을 상태)
+    expect((await approve(P.u1Head.email, 'u1')).status).toBe(200);
+    await settle();
+    take();
     await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { enabled: false } });
     try {
       expect((await save(P.u1Lead.email, 'u1', '실하나 꺼진 동안 고침')).status).toBe(200);
@@ -463,5 +487,109 @@ describe('검증 — NT-52(바뀐 순간)와 NT-40(+10분 검토 요청)이 겹�
     await runDueMergeNotices(plus(deadline, 12));
     expect(take().filter((g) => g.to === P.u1Head.no)).toHaveLength(1);
     expect(await prisma.notifyLog.count({ where: { divisionId: divId.u1, weekSlotId: s.id, kind: 'merge_review' } })).toBe(1);
+  });
+});
+
+// ── 결정 f (2026-10-08) — 알림 기록을 보내기 전에 잡는다 ─────────────────
+describe('결정 f — 같은 알림을 둘이 같은 순간에 판정해도 한 번', () => {
+  it('[RU-T143] ★ 「실·팀 → 본부」 기한의 RU-54(스케줄러)와 다 모인 순간의 RU-54(조립 직후)가 같은 순간 → 본부장에게 한 번, 기록 한 줄 · 못 보냈으면 줄을 놓아 다음에 다시', async () => {
+    const prisma = await db();
+    const { writeFileAtomic } = await import('@/server/storage');
+    const { ensureCurrentSlot } = await import('@/server/worklog');
+    const { noticeHqBuilt } = await import('@/server/rollup/notices');
+    const { stageTimes } = await import('@/server/rollup/schedule');
+    const { hqNodeOf, loadTree } = await import('@/server/rollup/tree');
+    // 다음 주 — 아직 아무 알림도 없는 주차. 산하 둘 다 올라와 있고 본부본은 승인 전
+    const next = await ensureCurrentSlot(new Date((await slot()).opensAt.getTime() + 10 * 86400_000));
+    for (const k of ['u1', 'u2'] as const) {
+      const rel = `divisions/${DIV[k].slug}/reports/next-${k}.hwp`;
+      await writeFileAtomic(rel, Buffer.from(`${k} 다음 주`));
+      await prisma.reportSubmission.create({
+        data: { level: 'unit', divisionId: divId[k], weekSlotId: next.id, filePath: rel, sha256: sha(`${k} 다음 주`), byteSize: 1, submittedBy: 'system', basis: 'no_head' },
+      });
+    }
+    const out = 'divisions/NT_HQ/rollup/next.hwp';
+    await writeFileAtomic(out, Buffer.from('본부가 다음 주 본부본'));
+    const run = await prisma.rollupRun.create({ data: { level: 'hq', divisionId: divId.hq, weekSlotId: next.id, status: 'succeeded', outputPath: out, inputIds: '[]', createdBy: 'system' } });
+    const node = hqNodeOf(await loadTree(), divId.hq)!;
+    const t = await stageTimes(next);
+    const logs = () => prisma.notifyLog.count({ where: { divisionId: divId.hq, weekSlotId: next.id, kind: { in: ['ru_hq_ready', 'ru_hq_complete'] } } });
+    take();
+    // 메신저가 느리다 — 둘 다 「아직 안 보냄」을 본 뒤에야 첫 전송이 끝난다. 예전(보낸 뒤 기록)에는 여기서 두 번 갔다
+    mailbox.delayMs = 150;
+    try {
+      await Promise.all([due(plus(t.unitDue, 1)), noticeHqBuilt(node, next, run, '')]);
+    } finally {
+      mailbox.delayMs = 0;
+    }
+    expect(take().filter((g) => g.to === P.hqHead.no)).toHaveLength(1);
+    expect(await logs()).toBe(1);
+    expect(JSON.parse((await prisma.notifyLog.findFirstOrThrow({ where: { divisionId: divId.hq, weekSlotId: next.id, kind: 'ru_hq_ready' } })).recipients)).toEqual([P.hqHead.no]);
+
+    // 못 보냈으면(메신저 고장) 잡은 줄을 놓는다 — 「실제로 나간 것만 기록한다」. 다음 판정이 다시 보낸다
+    await prisma.notifyLog.deleteMany({ where: { divisionId: divId.hq, weekSlotId: next.id } });
+    mailbox.fail = true;
+    try {
+      expect(await noticeHqBuilt(node, next, run, '')).toEqual([expect.objectContaining({ kind: 'ru_hq_ready', sent: 0 })]);
+    } finally {
+      mailbox.fail = false;
+    }
+    expect(await logs()).toBe(0);
+    expect((await noticeHqBuilt(node, next, run, '')).map((r) => r.sent)).toEqual([1]);
+    expect(take().filter((g) => g.to === P.hqHead.no)).toHaveLength(1);
+    expect(await logs()).toBe(1);
+
+    // 엇갈림 (검증 2026-10-08) — 기한 판정(스케줄러)이 일부(1/2)를 보고 먼저 잡았는데, 다 모인 순간의 판정은 그 잡기 **전에** 「아직 안 보냄」을 봤다.
+    // 잡기에 진 쪽이 그대로 물러나면 본부장은 「1/2 준비」만 받고 「다 모였어요」는 끝내 못 받는다(예전에는 둘 다 보내 겹쳤다).
+    // 진 쪽은 잡힌 줄을 다시 읽어, 일부였으면 「다 모였어요」를 보낸다
+    await prisma.notifyLog.deleteMany({ where: { divisionId: divId.hq, weekSlotId: next.id } });
+    take();
+    const { claimNotice } = await import('@/server/notify/claim');
+    const realFindFirst = prisma.notifyLog.findFirst.bind(prisma.notifyLog);
+    let raced = false;
+    const spy = vi.spyOn(prisma.notifyLog, 'findFirst').mockImplementation((async (args: Parameters<typeof realFindFirst>[0]) => {
+      const seen = await realFindFirst(args);
+      if (!raced && (args?.where as { kind?: unknown } | undefined)?.kind === 'ru_hq_ready') {
+        raced = true; // 「아직 안 보냄」을 본 바로 뒤 — 스케줄러가 일부로 잡는다(보내는 중이라 받은 사람은 아직 비어 있다)
+        await claimNotice(divId.hq, next.id, 'ru_hq_ready', { complete: false });
+      }
+      return seen;
+    }) as never);
+    try {
+      await noticeHqBuilt(node, next, run, '');
+    } finally {
+      spy.mockRestore();
+    }
+    expect(raced).toBe(true);
+    expect(take().filter((g) => g.to === P.hqHead.no).map((g) => g.subject)).toEqual([expect.stringContaining('다 모였어요')]);
+    expect(await prisma.notifyLog.count({ where: { divisionId: divId.hq, weekSlotId: next.id, kind: 'ru_hq_complete' } })).toBe(1);
+  });
+
+  it('[RU-T143] (NT-52) 병합 뒤 맞추기와 저장 뒤 맞추기가 같은 승인에 대해 같은 순간 「다시 승인해 주세요」를 판정 → 부서장에게 한 번', async () => {
+    const prisma = await db();
+    const { notifyReapprove } = await import('@/server/merge/review');
+    const s = await slot();
+    const division = await prisma.division.findUniqueOrThrow({ where: { id: divId.u1 } });
+    // 승인한 판 → 담당자가 고친다(승인 뒤 바뀜). 그 승인에 대한 NT-52 기록은 지우고 같은 순간 둘이 판정하게 한다
+    await merged('u1', '실하나 NT-52 동시 승인한 판');
+    expect((await approve(P.u1Head.email, 'u1')).status).toBe(200);
+    await settle();
+    expect((await save(P.u1Lead.email, 'u1', '실하나 NT-52 동시 담당자 고침')).status).toBe(200);
+    await settle();
+    await prisma.notifyLog.deleteMany({ where: { divisionId: divId.u1, weekSlotId: s.id, kind: { startsWith: 'merge_reapprove:' } } });
+    take();
+    mailbox.delayMs = 150;
+    let counts: number[];
+    try {
+      counts = await Promise.all([
+        notifyReapprove(division, s, '본부가', { kind: 'merge', late: 1 }),
+        notifyReapprove(division, s, '본부가', { kind: 'edit', places: 1 }),
+      ]);
+    } finally {
+      mailbox.delayMs = 0;
+    }
+    expect(counts.sort()).toEqual([0, 1]);
+    expect(take().filter((g) => g.to === P.u1Head.no)).toHaveLength(1);
+    expect(await prisma.notifyLog.count({ where: { divisionId: divId.u1, weekSlotId: s.id, kind: { startsWith: 'merge_reapprove:' } } })).toBe(1);
   });
 });

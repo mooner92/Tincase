@@ -15,7 +15,10 @@
 
 import type { Division, WeekSlot } from '@prisma/client';
 import { prisma } from '../db';
+import { writeFileAtomic } from '../storage';
 import { runMerge, MergeUnavailable, MergeFailed, type MergeOutcome } from './index';
+// 잠금 표 옆의 줄 이름만 가져온다 — rollup/handoff를 정적으로 이으면 고리가 된다(lock.ts는 아무것도 잇지 않는다)
+import { withUnitLock } from '../rollup/lock';
 import { mergeGateOf } from '../deadline';
 import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
 import { latestEdits } from './edits';
@@ -36,12 +39,18 @@ export interface MergeRunResult {
   runId: string;
   status: 'succeeded' | 'failed';
   errorText: string | null;
-  outcome: MergeOutcome | null;
+  /** 바이트(`output`)는 뺀다 — 이미 파일로 썼고, [지금 병합] 응답(JSON)에 병합본 전체가 실려 나가지 않게 */
+  outcome: Omit<MergeOutcome, 'output'> | null;
 }
 
 /**
  * 병합 1회 + `MergeRun` 기록.
  * 던지지 않는다 — 실패도 결과다. 화면이 원인을 보여주고 담당자가 재실행할 수 있어야 한다.
+ *
+ * RU-75 (2026-10-08 결정 c) — **파일 쓰기와 성공 기록은 승인·수정 저장과 같은 줄(`unit:` 잠금)에서 한 덩어리로.**
+ * 병합본은 주차마다 같은 자리라, 엔진이 파일을 쓰고 기록하기 전 틈에 수정 저장이 끼면 새 실행이 담당자가 고친 바이트를 가리키고
+ * 고친 기록은 옛 실행에 남았다(또는 고친 것이 기록 없이 덮였다 — HM-49가 지키지 못한다). 모델 호출·조립은 잠금 **밖에서** — 잠금이
+ * 모델을 기다리면 그동안 승인·저장이 1분씩 멈춘다. 병합 뒤 맞추기(`afterMerged`)도 잠금 밖 — 같은 줄을 다시 쥔다(재진입 없음).
  */
 export async function runMergeRecorded(
   divisionId: string,
@@ -68,39 +77,9 @@ export async function runMergeRecorded(
 
   try {
     const outcome = await runMerge(divisionId, weekSlotId);
-    await prisma.mergeRun.update({
-      where: { id: run.id },
-      data: {
-        status: 'succeeded',
-        outputPath: outcome.outputRelPath,
-        sourceIds: JSON.stringify(outcome.sourceIds),
-        rowCounts: JSON.stringify(outcome.rowCounts),
-        warnings: JSON.stringify(outcome.warnings),
-        // HM-26 — 화면이 "볼 곳"을 알려주려면 무엇을 합쳤는지 남아 있어야 한다
-        reviewJson: JSON.stringify({
-          groups: outcome.mergedGroups.map((g) => ({
-            authors: g.authors,
-            category: g.category,
-            reason: g.reason,
-            sources: g.sources,
-            kept: g.row.content,
-            // HM-36 — 화면이 «어느 줄이 들어갔나»를 글자 비교로 짐작하지 않게 한다
-            keptIndex: g.keptIndex,
-            identical: g.identical,
-          })),
-          model: outcome.model,
-          categories: outcome.categories,
-          missing: outcome.missing,
-          // TACP-17 — 행 순서와 나란한 작성자. 화면에서만 쓰고 문서에는 넣지 않는다
-          rowAuthors: outcome.rowAuthors,
-          // HM-33 — 확인이 필요한 행. 알림과 화면이 같은 것을 읽는다
-          flagged: outcome.flagged,
-        }),
-        finishedAt: new Date(),
-      },
-    });
+    await withUnitLock(divisionId, weekSlotId, () => recordSucceeded(run.id, outcome));
     await afterMerged(divisionId, weekSlotId, run.id, outcome.sourceIds, actorEmail);
-    return { runId: run.id, status: 'succeeded', errorText: null, outcome };
+    return { runId: run.id, status: 'succeeded', errorText: null, outcome: withoutBytes(outcome) };
   } catch (e) {
     const known = e instanceof MergeUnavailable || e instanceof MergeFailed;
     const errorText = known ? (e as Error).message : `예상치 못한 오류 (${(e as Error).message})`;
@@ -111,6 +90,48 @@ export async function runMergeRecorded(
     if (!known) console.error('[merge] 예상치 못한 실패', e);
     return { runId: run.id, status: 'failed', errorText, outcome: null };
   }
+}
+
+/** 결과 요약에서 병합본 바이트를 뺀다 — 이미 파일로 썼다 */
+function withoutBytes({ output, ...rest }: MergeOutcome): Omit<MergeOutcome, 'output'> {
+  void output;
+  return rest;
+}
+
+/** 결정 c — 잠금 안의 짧은 두 걸음: 병합본 쓰기 → 성공 기록. 쓰기가 실패하면 기록하지 않는다(부르는 쪽이 실패로 남긴다) */
+async function recordSucceeded(runId: string, outcome: MergeOutcome): Promise<void> {
+  await writeFileAtomic(outcome.outputRelPath, outcome.output);
+  await prisma.mergeRun.update({
+    where: { id: runId },
+    data: {
+      status: 'succeeded',
+      outputPath: outcome.outputRelPath,
+      sourceIds: JSON.stringify(outcome.sourceIds),
+      rowCounts: JSON.stringify(outcome.rowCounts),
+      warnings: JSON.stringify(outcome.warnings),
+      // HM-26 — 화면이 "볼 곳"을 알려주려면 무엇을 합쳤는지 남아 있어야 한다
+      reviewJson: JSON.stringify({
+        groups: outcome.mergedGroups.map((g) => ({
+          authors: g.authors,
+          category: g.category,
+          reason: g.reason,
+          sources: g.sources,
+          kept: g.row.content,
+          // HM-36 — 화면이 «어느 줄이 들어갔나»를 글자 비교로 짐작하지 않게 한다
+          keptIndex: g.keptIndex,
+          identical: g.identical,
+        })),
+        model: outcome.model,
+        categories: outcome.categories,
+        missing: outcome.missing,
+        // TACP-17 — 행 순서와 나란한 작성자. 화면에서만 쓰고 문서에는 넣지 않는다
+        rowAuthors: outcome.rowAuthors,
+        // HM-33 — 확인이 필요한 행. 알림과 화면이 같은 것을 읽는다
+        flagged: outcome.flagged,
+      }),
+      finishedAt: new Date(),
+    },
+  });
 }
 
 /** NT-52 — 승인한 판 뒤에 새로 들어온 제출 수 (「늦게 낸 n명 포함」) */

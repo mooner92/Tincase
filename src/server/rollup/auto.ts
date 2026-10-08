@@ -17,7 +17,7 @@ import { composeHq, hqInputKey, hqInputs, causeLabel, type BuildCause } from './
 import { composeOrg, orgInputKey, orgTemplateRef } from './orgrun';
 import { resolveSections } from './sections';
 import { hqNodeOf, loadTree, type RollupNode } from './tree';
-import { rollupEnabled, stageTimes } from './schedule';
+import { liveUntil, rollupEnabled, stageTimes } from './schedule';
 import { coalesce, settled, withLock } from './lock';
 import { hasHead, hqLockKey, syncHqHandoffLocked, syncUnit, targetLabel, unitTarget, type AutoCause } from './handoff';
 import { notifyReapprove, type ReapproveReason } from '../merge/review';
@@ -228,8 +228,7 @@ export function laterSyncCurrentWeek(opts: SyncOptions): void {
  */
 export async function isLiveSlot(slot: WeekSlot, now = new Date()): Promise<boolean> {
   if (slot.isoKey === currentWeek(now).isoKey) return true;
-  const t = await stageTimes(slot);
-  return now.getTime() <= t.hqDue.getTime() + 24 * 3600_000;
+  return now.getTime() <= liveUntil(await stageTimes(slot)).getTime();
 }
 
 /** RU-72 — `/hq`를 그리기 **전에**. 열쇠가 같으면 질의 몇 번으로 끝난다. 보는 사람과 상관없이 같은 결과다(조립은 `system`의 것) */
@@ -262,7 +261,7 @@ export async function runDueRollupSync(now = new Date()): Promise<boolean> {
   const { ensureCurrentSlot } = await import('../worklog');
   const slot = await ensureCurrentSlot(now);
   const t = await stageTimes(slot);
-  if (now < t.anchor || now.getTime() > t.hqDue.getTime() + 24 * 3600_000) return false;
+  if (now < t.anchor || now.getTime() > liveUntil(t).getTime()) return false;
   await syncAll(slot, { cause: 'scheduler', causedBy: null });
   return true;
 }

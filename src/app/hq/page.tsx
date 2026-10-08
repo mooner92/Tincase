@@ -11,7 +11,7 @@ import { WeekPicker } from '@/components/WeekPicker';
 import { HqApprovalCard } from '@/components/HqApprovalCard';
 import { hqBoard } from '@/server/rollup/run';
 import { readRepairHq } from '@/server/rollup/auto';
-import { escapeOpensAt } from '@/server/rollup/handoff';
+import { escapeClosesAt, escapeOpensAt } from '@/server/rollup/handoff';
 import { rollupSlot } from '@/server/rollup/slot';
 import { stageTimes } from '@/server/rollup/schedule';
 import { kst, runView, unitRow, weekOptions } from '@/server/rollup/view';
@@ -44,9 +44,13 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
   const baseHref = canWrite ? '/hq' : `/hq?node=${encodeURIComponent(node.node.slug)}`;
   // RU-55 — [검토 완료 · 승인]은 본부의 head에게만 (requireHqReviewer와 같은 판정 — TACP-9)
   const canApprove = canWrite && isReviewer(scope);
-  // RU-77 — 본부 lead의 비상구. 「본부 → 총괄」 기한 15분 전부터만 그린다
+  // RU-77 — 본부 lead의 비상구. 「본부 → 총괄」 기한 15분 전부터 그 기한 + 24시간까지만 그린다 (닫힌 뒤·지난 주차는 없음 — 결정 a)
   const opens = escapeOpensAt(times.hqDue);
-  const escape = canWrite && canUseHandoffEscape(scope) && board.hasHead ? { open: new Date() >= opens, opensAtKst: toKstIso(opens).slice(11, 16) } : null;
+  const now = new Date();
+  const escape =
+    canWrite && canUseHandoffEscape(scope) && board.hasHead && now <= escapeClosesAt(times)
+      ? { open: now >= opens, opensAtKst: toKstIso(opens).slice(11, 16) }
+      : null;
   const current = runView(board.current);
 
   return (
@@ -112,6 +116,7 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
               <HqApprovalCard
                 isoKey={slot.isoKey}
                 state={board.state}
+                lastGood={board.lastGood}
                 approval={board.approval}
                 viewed={current.sha256 ? { runId: current.id, sha256: current.sha256 } : null}
                 canApprove={canApprove}

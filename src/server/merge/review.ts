@@ -11,6 +11,7 @@ import { audit } from '../audit';
 import { logger } from '../logger';
 import { env } from '../env';
 import { messengerStatus, sendAlert } from '../messenger';
+import { claimNotice, settleNotice } from '../notify/claim';
 import { readStoredFile, sha256 } from '../storage';
 import { HttpError, type Scope } from '../authz';
 import { readWorklog } from '@/lib/hwp/reader';
@@ -184,8 +185,13 @@ export async function recordReview(opts: {
   };
 }
 
-/** NT-52 — 부서장 「다시 승인해 주세요」의 NotifyLog 종류. 새 판(sha)마다 하나 — 마감 뒤 검토 요청(NT-40)도 이것을 보고 겹치지 않는다 */
-export const reapproveKind = (sha: string) => `merge_reapprove:${sha.slice(0, 12)}`;
+/**
+ * NT-52 — 부서장 「다시 승인해 주세요」의 NotifyLog 종류. **승인마다 하나** (2026-10-08 결정 e — 예전에는 새 판(sha)마다).
+ * 다시 승인하기 전에 담당자가 또 고치거나 늦게 낸 사람으로 다시 병합해도 부서장이 할 일은 하나(다시 승인)다 — 판마다 보내면 같은 할 일이
+ * 여러 번 가고, 같은 할 일을 여러 번 알리는 알림은 곧 무시된다. 본부장의 RU-55a(`ru_hq_reapprove:<승인 id>`)와 같은 단위다.
+ * 마감 뒤 검토 요청(NT-40)도 가장 최근 승인의 이 기록을 보고 겹치지 않는다(NT-T66).
+ */
+export const reapproveKind = (reviewId: string) => `merge_reapprove:${reviewId}`;
 
 /** NT-52 — 무엇이 판을 바꿨나 */
 export type ReapproveReason = { kind: 'edit'; places: number } | { kind: 'merge'; late: number };
@@ -210,8 +216,9 @@ export function reapproveMessage(p: { name: string; employeeNo: string }, slot: 
 
 /**
  * NT-52 · HM-47 (2026-10-08) — 3단계에서 **승인 뒤 병합본이 바뀌면**(담당자 수정 저장·다시 병합) 부서장에게 한 번.
- * 새 판(sha)마다 한 번이다(`merge_reapprove:<sha 앞 12자>`). 담당자의 저장은 위로 가지 않으므로(승인이 아니다), 바뀐 판이
- * 올라가려면 부서장이 다시 승인해야 한다 — 부서장이 그 사실을 화면을 열기 전에 알아야 한다.
+ * **승인마다 한 번**이다(`merge_reapprove:<승인 id>` — 결정 e). 담당자의 저장은 위로 가지 않으므로(승인이 아니다), 바뀐 판이
+ * 올라가려면 부서장이 다시 승인해야 한다 — 부서장이 그 사실을 화면을 열기 전에 알아야 한다. 다시 승인한 뒤 또 바뀌면 그 새 승인에 대해 한 번.
+ * 기록은 보내기 전에 잡는다(결정 f — 병합 뒤 맞추기와 저장 뒤 맞추기가 겹쳐도 한 번).
  * 부서 알림 스위치(NT-30)·3단계 스위치(RU-52)·메신저(RU-41)를 따른다. 보냈으면 나간 사람 수, 아니면 0.
  */
 export async function notifyReapprove(division: Division, slot: WeekSlot, target: string, reason: ReapproveReason): Promise<number> {
@@ -230,24 +237,26 @@ export async function notifyReapprove(division: Division, slot: WeekSlot, target
     return 0;
   }
   if (sha === review.sha256) return 0; // 같은 판 — 승인이 그대로 유효하다
-  const kind = reapproveKind(sha);
+  const kind = reapproveKind(review.id);
   if (await prisma.notifyLog.findFirst({ where: { divisionId: division.id, weekSlotId: slot.id, kind } })) return 0;
   const heads = await prisma.user.findMany({
     where: { divisionId: division.id, isActive: true, divisionRole: 'head', notifyEnabled: true, employeeNo: { not: null } },
     select: { name: true, employeeNo: true },
   });
+  if (heads.length === 0) return 0;
+  const claim = await claimNotice(division.id, slot.id, kind, { reason, sha: sha.slice(0, 12) });
+  if (!claim) return 0; // 다른 맞추기가 이 승인에 대해 이미 보냈거나 보내는 중
   const url = env.MESSENGER_LINK_BASE ? `${env.MESSENGER_LINK_BASE}/${division.slug}/manage` : undefined;
   const sent: string[] = [];
   const blocked: string[] = [];
-  for (const h of heads) {
-    const r = await sendAlert({ recvIds: [h.employeeNo!], ...reapproveMessage({ name: h.name, employeeNo: h.employeeNo! }, slot, target, reason), url });
-    sent.push(...r.sent);
-    blocked.push(...r.blocked);
-  }
-  if (sent.length) {
-    await prisma.notifyLog.create({
-      data: { divisionId: division.id, weekSlotId: slot.id, kind, recipients: JSON.stringify(sent), detail: JSON.stringify({ reason, blocked, targets: heads.length }) },
-    });
+  try {
+    for (const h of heads) {
+      const r = await sendAlert({ recvIds: [h.employeeNo!], ...reapproveMessage({ name: h.name, employeeNo: h.employeeNo! }, slot, target, reason), url });
+      sent.push(...r.sent);
+      blocked.push(...r.blocked);
+    }
+  } finally {
+    await settleNotice(claim, sent, { reason, sha: sha.slice(0, 12), blocked, targets: heads.length });
   }
   return sent.length;
 }

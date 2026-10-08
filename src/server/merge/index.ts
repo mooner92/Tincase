@@ -1,11 +1,11 @@
 // HM-19 — 병합 절차. 이 파일이 "목요일 14:10에 다 되어 있다"를 만든다.
 //
-// 순서: 제출물 수집 → 규칙 적용 → (모델) 중복 묶기 → 조립 → 자체 점검 → 저장
+// 순서: 제출물 수집 → 규칙 적용 → (모델) 중복 묶기 → 조립 → 자체 점검 → (저장은 부르는 쪽 — run.ts, 잠금 안에서 기록과 함께)
 // 어느 단계가 실패해도 **병합본은 나온다** (HM-21 부분 실패 허용, HM-24 폴백).
 
 import path from 'node:path';
 import { prisma } from '../db';
-import { readStoredFile, writeFileAtomic, sanitizeSegment } from '../storage';
+import { readStoredFile, sanitizeSegment } from '../storage';
 import { readWorklog } from '@/lib/hwp/reader';
 import { openHwp } from '@/lib/hwp/ole';
 import { parseRecords, serializeRecords } from '@/lib/hwp/record';
@@ -42,7 +42,13 @@ export interface MergedGroup {
 }
 
 export interface MergeOutcome {
+  /** 병합본을 쓸 자리 — 주차마다 하나(다시 병합하면 덮인다, HM-49) */
   outputRelPath: string;
+  /**
+   * 병합본 바이트. **엔진은 쓰지 않는다** (2026-10-08 결정 c) — 쓰기와 `MergeRun` 성공 기록을 승인·수정 저장과 같은 잠금 안에서
+   * 한 덩어리로 하려고 `runMergeRecorded`가 쓴다. 엔진이 쓰면 그 순간부터 기록 전까지 다른 저장이 끼어 새 실행이 엉뚱한 바이트를 가리킬 수 있다
+   */
+  output: Buffer;
   bytes: number;
   rowCounts: { achievements: number; plans: number; notes: number };
   /** HM-26 — 검토 화면이 "볼 곳"으로 쓰는 정보 */
@@ -386,8 +392,8 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
   const check = verifyMerged(out, grouped, tableCount);
   if (check) throw new MergeFailed(`결과 검증 실패 — ${check}`);
 
+  // 쓰지 않는다 — 부르는 쪽(runMergeRecorded)이 잠금 안에서 쓰고 기록한다 (결정 c)
   const rel = mergedRelPath(division.slug, slot.year, slot.label);
-  await writeFileAtomic(rel, out);
 
   const roster = await prisma.user.findMany({
     where: { divisionId, isActive: true, onRoster: true },
@@ -397,6 +403,7 @@ export async function runMerge(divisionId: string, weekSlotId: string): Promise<
 
   return {
     outputRelPath: rel,
+    output: out,
     bytes: out.length,
     rowCounts: {
       achievements: grouped.achievements.length,

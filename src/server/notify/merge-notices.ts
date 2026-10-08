@@ -26,7 +26,7 @@ import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
 import { slotKind } from '@/lib/week';
 import { describeFlagged, type FlaggedRow } from '@/lib/empty-content';
 import { approvalOf, reapproveKind } from '../merge/review';
-import { readStoredFile, sha256 } from '../storage';
+import { NEWEST_FIRST, UNIT_REVIEW } from '../merge/review-scope';
 import { loadOrgSetting, loadTree, submitTarget } from '../rollup/tree';
 import type { MergeEdits } from '../merge/edits';
 import { toKstIso } from '@/lib/week';
@@ -490,18 +490,18 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
       for (const j of jobs) {
         if (await alreadySent(division.id, slot.id, j.kind)) continue;
         /*
-         * NT-52 ↔ NT-40 — 승인 뒤 바뀐 **같은 판**을 부서장에게 이미 「다시 승인해 주세요」(NT-52, 바뀐 순간)로 알렸으면 +10분 검토 요청을
+         * NT-52 ↔ NT-40 — 부서장의 **가장 최근 승인**에 대해 이미 「다시 승인해 주세요」(NT-52, 바뀐 순간)를 보냈으면 +10분 검토 요청을
          * 또 보내지 않는다 — 실장이 14:03에 승인하고 담당자가 14:06에 고치면 같은 할 일이 4분 사이에 두 번 가던 틈 (2026-10-08 검증).
-         * 기록을 남기지 않고 건너뛴다 — 그 뒤 판이 또 바뀌면 NT-52가 새 판으로 다시 알린다.
+         * NT-52가 승인마다 한 번이 되면서(결정 e) 판(sha)이 아니라 그 승인으로 본다 — 그 뒤 또 바뀌어도 할 일은 같다(다시 승인).
+         * 기록을 남기지 않고 건너뛴다.
          */
-        if (j.kind === 'merge_review' && facts.approval?.changedAfter && run?.outputPath) {
-          let now: string | null = null;
-          try {
-            now = sha256(await readStoredFile(run.outputPath));
-          } catch {
-            now = null;
-          }
-          if (now && (await prisma.notifyLog.findFirst({ where: { divisionId: division.id, weekSlotId: slot.id, kind: reapproveKind(now) } }))) continue;
+        if (j.kind === 'merge_review') {
+          const last = await prisma.mergeReview.findFirst({
+            where: { divisionId: division.id, weekSlotId: slot.id, ...UNIT_REVIEW },
+            orderBy: NEWEST_FIRST,
+            select: { id: true },
+          });
+          if (last && (await prisma.notifyLog.findFirst({ where: { divisionId: division.id, weekSlotId: slot.id, kind: reapproveKind(last.id) } }))) continue;
         }
         const r = await deliver(
           division.id,

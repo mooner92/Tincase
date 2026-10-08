@@ -5,7 +5,7 @@
 // 화면에서 보고 고칠 수 있으면 한글을 열 일이 없다.
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
-import { requireScope, requireOwnManager, resolveTargetDivision, requireMergedAccess, isReviewer, HttpError } from '@/server/authz';
+import { requireScope, requireOwnManager, resolveTargetDivision, requireMergedAccess, isReviewer, unitEditorRole, HttpError } from '@/server/authz';
 import { handler, json, rateLimit } from '@/server/http';
 import { audit } from '@/server/audit';
 import { readStoredFile, sha256, writeFileAtomic } from '@/server/storage';
@@ -18,7 +18,7 @@ import { alreadyApproved, latestReview, recordReview, requireViewedVersion, titl
 import { freeze, supersededSince, withUnitLock } from '@/server/rollup/handoff';
 import { laterAfterUnit, onUnitVersionChanged } from '@/server/rollup/auto';
 import { handoffHint } from '@/server/rollup/state';
-import { withEdit } from '@/server/merge/edits';
+import { decidesForUnit, lastEditor, withEdit } from '@/server/merge/edits';
 import { cleanCell } from '@/server/worklog-doc';
 import { diffWorklog } from '@/lib/merge-diff';
 
@@ -172,6 +172,8 @@ export const PUT = handler(async (req: NextRequest) => {
   const located = await locate(req, null, body.isoKey ?? null);
   const { division, slot } = located;
   const reviewer = isReviewer(scope);
+  // TACP-23 v1.7.2 — 고친 기록에 남길 역할. 부서장 없는 단위에서 operator의 저장은 위로 가지 않는다 (결정 b)
+  const role = unitEditorRole(scope);
 
   // RU-75 — 같은 (부서, 주차)의 승인·수정 저장·비상구는 줄을 선다. 둘이 같은 판을 보고 거의 동시에 저장하면
   // 뒤의 것이 409를 못 받고 앞의 것을 덮던 틈이 함께 닫힌다(HM-T144)
@@ -247,16 +249,24 @@ export const PUT = handler(async (req: NextRequest) => {
     // 바뀐 곳은 저장한 파일을 다시 읽어 계산한다 — 화면이 보낸 것이 아니라 문서에 실제로 들어간 것
     const changes = diffWorklog(beforeRows, worklogRows(composed.bytes));
     const savedAt = new Date();
+    /*
+     * 2026-10-08 결정 b — 「누가 마지막으로 이 파일을 썼나」를 남긴다. 부서장 없는 단위는 그 판이 그 단위의 결론일 때만 위로 간다(syncUnit).
+     *   · 바뀐 곳이 있으면 지금처럼 한 줄 (HM-49의 「고친 곳」)
+     *   · 바뀐 곳은 없어도 바이트가 바뀌었으면 `places: 0` 한 줄 — 그 바이트를 쓴 사람이 남아야 한다
+     *   · lead가 운영자가 마지막으로 고친 판을 그대로 저장하면 `places: 0` 한 줄 — 그 판을 받아들인 것이다(그래야 올라간다)
+     * `places: 0`은 HM-49의 셈(`editEntries`)에 들지 않는다 — 아무것도 안 바꾼 저장으로 [다시 병합]이 멈추지 않는다.
+     */
+    const adopt = role === 'lead' && !decidesForUnit(lastEditor(run.reviewJson));
+    const record = changes.length > 0 || savedSha !== currentSha || adopt;
     await prisma.mergeRun.update({
       where: { id: run.id },
       data: {
         rowCounts: JSON.stringify(rowCounts),
         finishedAt: savedAt,
-        // HM-49 — 바뀐 곳이 있을 때만 남긴다. 아무것도 안 바꾼 저장으로 [다시 병합]이 멈추면 안 된다
-        ...(changes.length > 0 && {
+        ...(record && {
           reviewJson: withEdit(run.reviewJson, {
             by: reviewer ? titled(scope.user) : scope.user.name,
-            role: reviewer ? 'head' : 'lead',
+            role,
             at: savedAt.toISOString(),
             places: changes.length,
           }),
@@ -279,14 +289,15 @@ export const PUT = handler(async (req: NextRequest) => {
         approved = { summary: (await latestReview(division.id, slot.id))?.summary ?? '', notified: r.notified.sent };
       }
     }
-    return { run, rowCounts, warnings: composed.warnings, approved, handedOff, savedSha, changed: savedSha !== currentSha, places: changes.length };
+    return { run, rowCounts, warnings: composed.warnings, approved, handedOff, savedSha, changed: savedSha !== currentSha || adopt, places: changes.length };
   });
 
   if (saved.handedOff) {
     laterAfterUnit(division.id, slot, { cause: `unit_handoff:${saved.handedOff.submissionId}`, causedBy: scope.user.email });
   } else if (!reviewer && saved.changed) {
     // RU-72 — 담당자의 저장은 승인이 아니다. 부서장 없는 단위의 마감 뒤 최종본이면 그것이 곧 넘김(H1), 부서장 있는 단위는 NT-52.
-    // 잠금 밖에서 — 맞추기가 같은 잠금을 다시 쥔다
+    // 운영자의 저장도 여기로 오지만 syncUnit이 고친 기록의 역할을 보고 올리지 않는다(H2 — 결정 b). 판정을 한 곳(상태)에 두어야
+    // 스케줄러의 맞추기가 같은 판을 다르게 보지 않는다. 잠금 밖에서 — 맞추기가 같은 잠금을 다시 쥔다
     await onUnitVersionChanged(division.id, slot, { cause: `edit:${saved.run.id}`, causedBy: scope.user.email, reason: { kind: 'edit', places: saved.places } });
   }
 

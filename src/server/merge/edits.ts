@@ -10,10 +10,20 @@ import type { MergeRun } from '@prisma/client';
 import { prisma } from '../db';
 import { toKstIso } from '@/lib/week';
 
-/** 저장 한 번. `places`는 그 저장에서 바뀐 곳 수 (HM-47과 같은 비교) */
+/**
+ * 저장한 사람의 역할 (authz `unitEditorRole`). `operator` — 그 부서의 lead·head가 아닌 운영자(§3.2 「수정 — write(자기 부서)」).
+ * 2026-10-08 전의 기록에는 `head`·`lead`뿐이다(그때는 운영자도 `lead`로 적혔다 — 가려낼 수 없으니 그대로 lead로 읽는다).
+ */
+export type EditorRole = 'head' | 'lead' | 'operator';
+
+/**
+ * 저장 한 번. `places`는 그 저장에서 바뀐 곳 수 (HM-47과 같은 비교).
+ * `places: 0`인 줄도 있다(2026-10-08 결정 b) — 바뀐 곳은 없지만 바이트가 바뀐 저장, 또는 lead가 운영자의 판을 그대로 받아들인 저장.
+ * 「누가 마지막으로 이 파일을 썼나」를 남기려는 것이라 HM-49의 「고친 곳」 셈(`editEntries`)에는 들지 않는다.
+ */
 export interface EditEntry {
   by: string;
-  role: 'head' | 'lead';
+  role: EditorRole;
   at: string;
   places: number;
 }
@@ -45,6 +55,29 @@ export function editEntries(reviewJson: string | null): EditEntry[] {
   return list.filter(
     (e): e is EditEntry => !!e && typeof e === 'object' && typeof (e as EditEntry).places === 'number' && (e as EditEntry).places > 0,
   );
+}
+
+/**
+ * RU-71 (2026-10-08 결정 b) — 이 실행의 파일을 **마지막으로 쓴 사람**. 병합 뒤 아무도 저장하지 않았으면 null(파일 = 병합 결과).
+ * `places: 0`인 줄까지 본다 — HM-49와 달리 「얼마나 고쳤나」가 아니라 「누구의 판인가」를 묻는다.
+ */
+export function lastEditor(reviewJson: string | null): EditEntry | null {
+  const list = parse(reviewJson).edits;
+  if (!Array.isArray(list)) return null;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const e = list[i] as Partial<EditEntry> | null;
+    if (e && typeof e === 'object' && typeof e.role === 'string') return e as EditEntry;
+  }
+  return null;
+}
+
+/**
+ * RU-71 · TACP-23 v1.7.2 — 부서장 없는 단위에서 이 판이 **그 단위의 결론**인가. 병합 결과(마지막 저장 없음)이거나 그 단위의
+ * lead(·head)가 마지막으로 저장했으면 참. 운영자가 마지막으로 고친 판은 그 단위의 결정이 아니다(TACP-3 「문서는 부서가」) —
+ * 다음 병합이나 lead의 저장이 그때의 판을 올린다.
+ */
+export function decidesForUnit(last: Pick<EditEntry, 'role'> | null): boolean {
+  return !last || last.role === 'lead' || last.role === 'head';
 }
 
 /** 이 실행을 사람이 고쳤나. 고친 기록이 없으면 null */

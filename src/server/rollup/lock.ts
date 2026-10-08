@@ -71,6 +71,18 @@ export function coalesce<C>(key: string, arg: C, fn: (arg: C) => Promise<void>, 
   return f.promise;
 }
 
+/** RU-75 — 같은 (부서, 주차)의 줄 이름. 승인·수정 저장·비상구·따라잡기, 그리고 병합의 「파일 쓰기 → 성공 기록」이 이 줄에 선다 */
+export const unitLockKey = (divisionId: string, slotId: string) => `unit:${divisionId}:${slotId}`;
+
+/**
+ * RU-75 — 같은 (부서, 주차)의 일은 줄을 선다. 여기(잠금 표 옆)에 두는 이유: 병합 기록(`merge/run.ts`)도 이 줄에 서야 하는데
+ * handoff.ts를 정적으로 이으면 merge/run → rollup → schedule → slot-deadline → merge/run 고리가 된다. 이 파일은 아무것도 잇지 않는다.
+ * **다시 들어가지 못한다**(재진입 없음) — 이 줄 안에서 같은 줄을 쥐는 함수(`syncUnit` 등)를 부르면 멈춘다. 그런 일은 잠금 밖에서 한다.
+ */
+export function withUnitLock<T>(divisionId: string, slotId: string, fn: () => Promise<T>): Promise<T> {
+  return withLock(unitLockKey(divisionId, slotId), fn);
+}
+
 /** 돌고 있는 조립이 있으면 끝날 때까지 기다린다(없으면 바로). 읽기 수리가 반쯤 만든 상태를 그리지 않게 */
 export async function settled(key: string): Promise<void> {
   const cur = flights.get(key);

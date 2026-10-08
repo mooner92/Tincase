@@ -13,6 +13,7 @@ import { prisma } from '../db';
 import { logger } from '../logger';
 import { env } from '../env';
 import { messengerStatus, sendAlert } from '../messenger';
+import { claimNotice, settleNotice } from '../notify/claim';
 import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
 import { weekAnchor } from '../slot-deadline';
 import { HQ_REVIEW, NEWEST_FIRST, UNIT_REVIEW } from '../merge/review-scope';
@@ -56,7 +57,12 @@ async function sentBefore(divisionId: string, weekSlotId: string, kind: string) 
   return prisma.notifyLog.findFirst({ where: { divisionId, weekSlotId, kind } });
 }
 
-/** 한 종류를 한 번 (NT-42). 실제로 나간 사람이 있을 때만 기록한다 — 그래야 메신저가 꺼진 동안의 「보냄」이 남지 않는다 */
+/**
+ * 한 종류를 한 번 (NT-42). 실제로 나간 사람이 있을 때만 기록이 남는다 — 그래야 메신저가 꺼진 동안의 「보냄」이 남지 않는다.
+ * **기록을 먼저 잡고 보낸다** (2026-10-08 결정 f) — RU-54처럼 사건(조립 직후)과 시각(스케줄러)이 같은 종류를 같은 순간에 판정해도
+ * (부서·주차·종류) 유일 키가 하나만 들여보낸다. 예전에는 「보냈나 → 보내기 → 기록」이라 둘 다 보냈다. 아무에게도 안 나갔으면 줄을 놓는다.
+ * 잡을 때 `detail`을 같이 적는다 — 보내는 중에도 다른 판정이 「일부로 보냈나(`complete`)」를 읽는다(RU-54 「다 모였어요」).
+ */
 async function deliver(
   kind: string,
   divisionId: string,
@@ -66,19 +72,20 @@ async function deliver(
   url?: string,
   detail: Record<string, unknown> = {},
 ): Promise<RollupNoticeOutcome | null> {
-  if (await sentBefore(divisionId, slot.id, kind)) return null;
   if (to.length === 0) return null;
+  if (await sentBefore(divisionId, slot.id, kind)) return null; // 흔한 경우를 싸게 — 판정은 아래 잡기가 한다
+  const claim = await claimNotice(divisionId, slot.id, kind, detail);
+  if (!claim) return null;
   const sent: string[] = [];
   const blocked: string[] = [];
-  for (const p of to) {
-    const r = await sendAlert({ recvIds: [p.employeeNo], ...msg(p), url });
-    sent.push(...r.sent);
-    blocked.push(...r.blocked);
-  }
-  if (sent.length) {
-    await prisma.notifyLog.create({
-      data: { divisionId, weekSlotId: slot.id, kind, recipients: JSON.stringify(sent), detail: JSON.stringify({ ...detail, blocked, targets: to.length }) },
-    });
+  try {
+    for (const p of to) {
+      const r = await sendAlert({ recvIds: [p.employeeNo], ...msg(p), url });
+      sent.push(...r.sent);
+      blocked.push(...r.blocked);
+    }
+  } finally {
+    await settleNotice(claim, sent, { ...detail, blocked, targets: to.length });
   }
   return { kind, sent: sent.length, targets: to.length };
 }
@@ -232,11 +239,18 @@ export async function noticeHqBuilt(node: RollupNode, slot: WeekSlot, run: Rollu
   }
   const { arrived, missing } = await hqArrivals(node, slot);
   if (missing.length > 0) return out; // 일부는 기한(스케줄러)에
-  const ready = await sentBefore(node.node.id, slot.id, 'ru_hq_ready');
+  let ready = await sentBefore(node.node.id, slot.id, 'ru_hq_ready');
   if (!ready) {
     const r = await deliver('ru_hq_ready', node.node.id, slot, heads, (p) => hqReadyMessage(p, slot, node.node.nameKo, arrived, missing), link('/hq'), { complete: true });
-    if (r) out.push(r);
-  } else if (!JSON.parse(ready.detail ?? '{}').complete) {
+    if (r) {
+      out.push(r);
+      return out;
+    }
+    // 잡기에 졌다 — 같은 순간 기한 판정(스케줄러)이 먼저 잡았다. 그것이 일부(1/2)였으면 그대로 물러나는 순간 「다 모였어요」가 영영 빠진다
+    // (잡기 전에는 둘 다 보내 겹쳤고, 잡기만 하면 빠진다). 잡힌 줄을 다시 읽어 아래에서 순서대로 돌았을 때와 같게 한다 (12 §8 결정 f)
+    ready = await sentBefore(node.node.id, slot.id, 'ru_hq_ready');
+  }
+  if (ready && !JSON.parse(ready.detail ?? '{}').complete) {
     const r = await deliver('ru_hq_complete', node.node.id, slot, heads, (p) => hqReadyMessage(p, slot, node.node.nameKo, arrived, missing, true), link('/hq'));
     if (r) out.push(r);
   }
@@ -266,13 +280,20 @@ export async function noticeOrgBuilt(
   const { arrived, missing } = orgArrivals(sources);
   if (missing.length === 0) {
     for (const c of coords) {
-      const ready = await sentBefore(c.divisionId, slot.id, orgReadyKind(c.id));
-      const r = !ready
-        ? await deliver(orgReadyKind(c.id), c.divisionId, slot, [c], (p) => orgReadyMessage(p, slot, arrived, missing), link('/org'), { complete: true })
-        : !JSON.parse(ready.detail ?? '{}').complete
-          ? await deliver(orgCompleteKind(c.id), c.divisionId, slot, [c], (p) => orgReadyMessage(p, slot, arrived, missing, true), link('/org'))
-          : null;
-      if (r) out.push(r);
+      let ready = await sentBefore(c.divisionId, slot.id, orgReadyKind(c.id));
+      if (!ready) {
+        const r = await deliver(orgReadyKind(c.id), c.divisionId, slot, [c], (p) => orgReadyMessage(p, slot, arrived, missing), link('/org'), { complete: true });
+        if (r) {
+          out.push(r);
+          continue;
+        }
+        // 잡기에 졌다 — 본부와 같다(noticeHqBuilt). 기한 판정이 일부로 먼저 잡았으면 「다 들어왔어요」가 빠지지 않게 잡힌 줄을 다시 읽는다
+        ready = await sentBefore(c.divisionId, slot.id, orgReadyKind(c.id));
+      }
+      if (ready && !JSON.parse(ready.detail ?? '{}').complete) {
+        const r = await deliver(orgCompleteKind(c.id), c.divisionId, slot, [c], (p) => orgReadyMessage(p, slot, arrived, missing, true), link('/org'));
+        if (r) out.push(r);
+      }
     }
   }
   // RU-57a — 받은 사람만. NAMS에 이미 올렸을 수 있다 — 화면만으로는 늦게 안다

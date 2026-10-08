@@ -18,12 +18,13 @@ import { HttpError, notFound, type Scope } from '../authz';
 import { readStoredFile, sha256, writeFileAtomic } from '../storage';
 import { effectiveDeadline } from '../worklog';
 import { HQ_REVIEW, NEWEST_FIRST, UNIT_REVIEW } from '../merge/review-scope';
+import { decidesForUnit, lastEditor } from '../merge/edits';
 import type { RowChange } from '@/lib/merge-diff';
 import { toKstIso } from '@/lib/week';
 import { currentReport, reportRelPath, type ReportLevel } from './report';
 import { loadTree, submitTarget, type OrgTree, type RollupNode } from './tree';
-import { rollupEnabled, stageTimes, type StageTimes } from './schedule';
-import { withLock } from './lock';
+import { liveUntil, rollupEnabled, stageTimes, type StageTimes } from './schedule';
+import { withLock, withUnitLock } from './lock';
 
 /** RU-78 · TACP-23 — 사람이 아닌 기록의 주체. 이메일이 아니어서(`@` 없음) 로그인 신원과 섞이지 않는다. 화면은 「자동」 */
 export const SYSTEM = 'system';
@@ -55,13 +56,10 @@ export interface Handoff {
   target: string;
 }
 
-export const unitLockKey = (divisionId: string, slotId: string) => `unit:${divisionId}:${slotId}`;
 export const hqLockKey = (nodeId: string, slotId: string) => `hq:${nodeId}:${slotId}`;
 
-/** RU-75 — 같은 (부서, 주차)의 승인·수정 저장·비상구·따라잡기는 줄을 선다 */
-export function withUnitLock<T>(divisionId: string, slotId: string, fn: () => Promise<T>): Promise<T> {
-  return withLock(unitLockKey(divisionId, slotId), fn);
-}
+// RU-75 — 같은 (부서, 주차)의 줄. 병합 기록도 이 줄에 서야 해서 잠금 표 옆(lock.ts)에 산다 — 부르는 쪽은 그대로 여기서 가져간다
+export { unitLockKey, withUnitLock } from './lock';
 
 /** RU-71 — 「부서장(본부장)이 있다」 = 그 부서에 켜진 head 계정이 있다. 사건마다 다시 본다(계정이 생기거나 꺼질 수 있다) */
 export async function hasHead(divisionId: string): Promise<boolean> {
@@ -81,6 +79,25 @@ export function unitDue(t: Pick<StageTimes, 'unitDue' | 'hqDue'>, target: UnitTa
 /** RU-77 — 비상구가 열리는 시각 */
 export function escapeOpensAt(due: Date): Date {
   return new Date(due.getTime() - ESCAPE_MINUTES * 60_000);
+}
+
+/**
+ * RU-77 (2026-10-08 결정 a) — 비상구가 **닫히는** 시각: 「본부 → 총괄」 기한 + 24시간. 실·팀·본부가 같은 끝이고, 읽기 수리·스케줄러가 그 주를
+ * 맞추는 창의 끝(`liveUntil`)과 같다. 그 주의 보고는 이미 총괄을 지나 NAMS로 갔다 — 그 뒤에 승인 없는 판을 올려 받은 전사본을 바꾸는 길을
+ * 남기지 않는다. 승인은 닫지 않는다(사람의 결정이다). 이번 주라도 이 시각이 지나면 닫힌다 — 비상구는 결정 없이 올리는 길이라 더 좁게 둔다.
+ */
+export function escapeClosesAt(t: Pick<StageTimes, 'hqDue'>): Date {
+  return liveUntil(t);
+}
+
+/** RU-77 — 창 밖이면 409. 열리기 전 `too_early`, 닫힌 뒤 `too_late` (게이트가 아니라 업무 규칙이다 — 사람은 이미 `requireHandoffEscape`가 봤다) */
+function requireEscapeWindow(due: Date, t: Pick<StageTimes, 'hqDue'>, now: Date): void {
+  if (now < escapeOpensAt(due)) {
+    throw new HttpError(409, 'too_early', `승인 없이 올리기는 기한(${toKstIso(due).slice(11, 16)}) ${ESCAPE_MINUTES}분 전부터 열립니다.`);
+  }
+  if (now > escapeClosesAt(t)) {
+    throw new HttpError(409, 'too_late', '이 주차는 「본부 → 총괄」 기한이 하루 넘게 지나 승인 없이 올릴 수 없습니다 — 승인하면 올라갑니다.');
+  }
 }
 
 /**
@@ -279,7 +296,8 @@ async function verifiedSize(filePath: string, expected: string): Promise<number 
 /**
  * RU-71 — 실·팀 단위 **맞추기**. 같은 상태에서 몇 번을 돌려도 결과가 같다(RU-74) — 그래서 시키는 곳이 여럿이어도 된다.
  *   부서장 있음  가장 최근 승인이 아직 안 넘어갔으면 넘긴다(3단계를 켤 때 · 요청 안의 넘김이 어긋났을 때). 기록은 `system` + 일으킨 것
- *   부서장 없음  마감 뒤 최종본(HM-34)의 **지금 파일**을 넘긴다 — 담당자의 저장이 그 단위의 마지막 판단이다(§12 Q8). `basis=no_head`
+ *   부서장 없음  마감 뒤 최종본(HM-34)의 **지금 파일**을 넘긴다 — 담당자의 저장이 그 단위의 마지막 판단이다(§12 Q8). `basis=no_head`.
+ *                단, 그 파일을 마지막으로 쓴 것이 운영자(그 단위 lead 아님)면 넘기지 않는다 — 그 단위의 결론이 아니다(결정 b)
  * 3단계가 꺼져 있거나 기여 단위가 아니면 아무것도 하지 않는다(RU-79). 넘겼으면 그 사본.
  */
 export async function syncUnit(divisionId: string, slot: WeekSlot, ctx: AutoCause): Promise<ReportSubmission | null> {
@@ -313,6 +331,9 @@ export async function syncUnit(divisionId: string, slot: WeekSlot, ctx: AutoCaus
       orderBy: { startedAt: 'desc' },
     });
     if (!run?.outputPath) return null;
+    // 2026-10-08 결정 b (TACP-23 v1.7.2) — 그 판이 그 단위의 결론일 때만: 병합 결과이거나 그 단위 lead가 마지막으로 저장한 판.
+    // 운영자가 마지막으로 고친 판은 올리지 않는다(H2) — 다음 병합이나 lead의 저장이 올린다. 요청이 아니라 상태로 보므로 스케줄러·켜기도 같다
+    if (!decidesForUnit(lastEditor(run.reviewJson))) return null;
     let bytes: Buffer;
     try {
       bytes = await readStoredFile(run.outputPath);
@@ -345,7 +366,7 @@ export async function syncUnit(divisionId: string, slot: WeekSlot, ctx: AutoCaus
 
 /**
  * RU-77 — **비상구: 승인 없이 올리기** (실·팀 lead). 승인할 사람이 자리에 없는 날의 길이다. 게이트(`requireHandoffEscape`)는 사람을,
- * 여기는 업무 규칙(409)을 본다: 기한 15분 전부터 · 마감 뒤 최종본만 · 지금 판이 이미 올라가 있지 않을 때만.
+ * 여기는 업무 규칙(409)을 본다: 기한 15분 전부터 「본부 → 총괄」 기한 + 24시간까지 · 마감 뒤 최종본만 · 지금 판이 이미 올라가 있지 않을 때만.
  * 위에서는 주황 「부서장 승인 없이」로 보인다(`basis=unapproved`). 나중에 부서장이 승인하면 승인한 판이 대신한다.
  */
 export async function escapeUnit(scope: Scope, slot: WeekSlot, now = new Date()): Promise<Handoff> {
@@ -357,11 +378,7 @@ export async function escapeUnit(scope: Scope, slot: WeekSlot, now = new Date())
       throw new HttpError(409, 'no_head', '부서장 승인 단계가 없는 부서입니다 — 마감 뒤 병합본이 저절로 올라갑니다.');
     }
     const t = await stageTimes(slot);
-    const due = unitDue(t, target);
-    const opens = escapeOpensAt(due);
-    if (now < opens) {
-      throw new HttpError(409, 'too_early', `승인 없이 올리기는 기한(${toKstIso(due).slice(11, 16)}) ${ESCAPE_MINUTES}분 전부터 열립니다.`);
-    }
+    requireEscapeWindow(unitDue(t, target), t, now);
     const run = await prisma.mergeRun.findFirst({
       where: { divisionId: division.id, weekSlotId: slot.id, status: 'succeeded', outputPath: { not: null } },
       orderBy: { startedAt: 'desc' },
@@ -529,7 +546,7 @@ export async function syncHqHandoffLocked(node: RollupNode, slot: WeekSlot, ctx:
 }
 
 /**
- * RU-77 — 본부 비상구 「본부장 승인 없이 총괄로」(본부 lead). 「본부 → 총괄」 기한 15분 전부터, 지금 본부본이 승인되지 않았고
+ * RU-77 — 본부 비상구 「본부장 승인 없이 총괄로」(본부 lead). 「본부 → 총괄」 기한 15분 전부터 그 기한 + 24시간까지, 지금 본부본이 승인되지 않았고
  * 아직 올라가 있지 않을 때만. 총괄 화면에 주황 「본부장 승인 없이」. 나중에 본부장이 승인하면 승인한 판이 대신한다.
  */
 export async function escapeHq(scope: Scope, node: RollupNode, slot: WeekSlot, now = new Date()): Promise<Handoff> {
@@ -538,9 +555,7 @@ export async function escapeHq(scope: Scope, node: RollupNode, slot: WeekSlot, n
       throw new HttpError(409, 'no_head', '본부장 승인 단계가 없는 본부입니다 — 본부본이 저절로 총괄에 올라갑니다.');
     }
     const t = await stageTimes(slot);
-    if (now < escapeOpensAt(t.hqDue)) {
-      throw new HttpError(409, 'too_early', `승인 없이 올리기는 기한(${toKstIso(t.hqDue).slice(11, 16)}) ${ESCAPE_MINUTES}분 전부터 열립니다.`);
-    }
+    requireEscapeWindow(t.hqDue, t, now);
     const run = await latestHqRun(node.node.id, slot.id);
     const file = run ? await runSha(run) : null;
     if (!run || !file) throw new HttpError(409, 'no_rollup', '아직 이어 붙인 본부본이 없습니다.');

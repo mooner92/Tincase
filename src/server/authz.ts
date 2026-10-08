@@ -111,6 +111,21 @@ export async function requireOwnManager(headers: Headers): Promise<Scope> {
 }
 
 /**
+ * TACP-23 v1.7.2 · RU-71 — 병합본을 고쳐 저장한 사람이 **그 부서에서 무엇인가** — 고친 기록(`reviewJson.edits`)의 `role`.
+ *   head      부서장 — 그 저장이 곧 승인이다(HM-47)
+ *   lead      부서담당자 — 부서장 없는 단위에서는 그 단위의 결론이다(위로 간다)
+ *   operator  그 부서의 lead·head가 아닌 운영자(`requireOwnManager`가 들여보낸 §3.2 「write(자기 부서)」) — 그 부서의 결정이 아니다.
+ *             부서장 없는 단위에서도 위로 가지 않는다(TACP-3 「문서는 부서가」의 자동판)
+ * 역할이 겹치면 부서 역할이 이긴다 — 자기 부서의 lead인 운영자는 lead다(§2 「한 사람이 여러 모자」).
+ * 라우트가 `isHead`·`isLead`를 비교하지 않게 여기 둔다 (TACP-12).
+ */
+export function unitEditorRole(scope: Pick<Scope, 'isHead' | 'isLead'>): 'head' | 'lead' | 'operator' {
+  if (scope.isHead) return 'head';
+  if (scope.isLead) return 'lead';
+  return 'operator';
+}
+
+/**
  * TACP-16 · HM-47 — **병합본 승인 진입점.** head(실장·팀장·본부장…)만, 그것도 **자기 부서**만.
  * lead는 자기가 만든 문서를 승인하지 않는다 — 「검토했다」는 기록은 검토할 사람만 남긴다.
  * 대상 부서는 신원의 부서다 (TACP-6). 한 사람이 lead이면서 head일 수는 없다(역할 하나).

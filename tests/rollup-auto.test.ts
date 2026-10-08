@@ -30,7 +30,12 @@ vi.mock('next/headers', () => ({ headers: async () => new Headers(pageAs.who ? {
 // ── 엔진 흉내 ─────────────────────────────────────────────
 // 병합본·본부본·전사본을 JSON 글자로 — 무엇이 들어갔는지 읽을 수 있게. 조립 결과에는 섹션 제목과 원본 글자만 넣는다
 // (쪽 나누기·양식은 넣지 않는다 — 「다시 만들어졌는데 바이트가 같다」를 만들 수 있게, RU-T104)
-const hooks: { beforeWrite?: (rel: string) => Promise<void> | void; nextMerge: Map<string, string> } = { nextMerge: new Map() };
+const hooks: {
+  beforeWrite?: (rel: string) => Promise<void> | void;
+  /** 병합 엔진이 바이트를 만든 뒤(모델 호출이 끝난 순간) — 끼어들기 시험(RU-T141) */
+  duringMerge?: (divisionId: string) => Promise<void> | void;
+  nextMerge: Map<string, string>;
+} = { nextMerge: new Map() };
 
 vi.mock('@/server/storage', async (importOriginal) => {
   const orig = await importOriginal<typeof import('@/server/storage')>();
@@ -50,14 +55,15 @@ vi.mock('@/server/merge', async (importOriginal) => {
     composeMergedHwp: (_tpl: Buffer, rows: Record<string, string[][]>) => ({ bytes: Buffer.from(JSON.stringify(rows)), tableCount: 3, warnings: [] }),
     runMerge: async (divisionId: string, weekSlotId: string) => {
       const { prisma } = await import('@/server/db');
-      const storage = await import('@/server/storage');
       const division = await prisma.division.findUniqueOrThrow({ where: { id: divisionId } });
       const slot = await prisma.weekSlot.findUniqueOrThrow({ where: { id: weekSlotId } });
       const rel = orig.mergedRelPath(division.slug, slot.year, slot.label);
       const text = hooks.nextMerge.get(divisionId) ?? `${division.nameKo} 병합`;
-      await storage.writeFileAtomic(rel, Buffer.from(JSON.stringify({ achievements: [['1-1', text, '', '', '']], plans: [], notes: [] })));
+      // 엔진은 쓰지 않는다 — 바이트를 돌려주면 runMergeRecorded가 잠금 안에서 쓰고 기록한다 (2026-10-08 결정 c)
+      await hooks.duringMerge?.(divisionId);
       return {
         outputRelPath: rel,
+        output: Buffer.from(JSON.stringify({ achievements: [['1-1', text, '', '', '']], plans: [], notes: [] })),
         bytes: 1,
         rowCounts: { achievements: 1, plans: 0, notes: 0 },
         mergedGroups: [],
@@ -255,6 +261,17 @@ async function unitState(key: Key) {
   return (await unitHandoffView(d, await slot(), { trail: true, canEscape: true }))!;
 }
 
+/**
+ * RU-77 (2026-10-08 결정 a) — 기한을 「지금」 둘레로: 실·팀 → 본부 = 지금 - 60분, 본부 → 총괄 = 지금. 그 주의 기준 시각(마감 예외 반영)에서 센다.
+ * 비상구는 「본부 → 총괄」 + 24시간에 닫히므로, 마감을 그 주 월 00:00에 두고 기한을 +60·+120분에 두면 목요일에 돌린 시험에서는 창이 이미 닫혀 있다.
+ * 시험이 무슨 요일·시각에 돌든 비상구 창(열림 ~ 닫힘) 안에 있게 한다
+ */
+async function dueNow(offsetMinutes = 0) {
+  const { weekAnchor } = await import('@/server/slot-deadline');
+  const m = Math.floor((Date.now() - (await weekAnchor(await slot())).getTime()) / 60_000) + offsetMinutes;
+  await (await db()).orgRollupSetting.update({ where: { id: 'org' }, data: { unitDueMinutes: m - 60, hqDueMinutes: m } });
+}
+
 async function node(key: 'hq' | 'hq2') {
   const { hqNodeOf, loadTree } = await import('@/server/rollup/tree');
   return hqNodeOf(await loadTree(), divId[key])!;
@@ -307,6 +324,7 @@ beforeAll(async () => {
   });
   // RU-52 — 3단계를 켠 상태에서 (꺼짐은 RU-T98이 따로)
   await prisma.orgRollupSetting.create({ data: { id: 'org', enabled: true, unitDueMinutes: 60, hqDueMinutes: 120 } });
+  await dueNow(); // 비상구 창 안에서 시작한다 (결정 a — 창은 「본부 → 총괄」 + 24시간에 닫힌다)
 }, 60_000);
 
 afterAll(() => {
@@ -818,7 +836,7 @@ describe('RU-77 비상구 — 승인 없이 올리기', () => {
     expect((await unitState('u1')).escape?.open).toBe(false);
     // 게이트 — head·member·총괄은 404 (head는 승인하면 된다)
     for (const who of [ID.u1Head, ID.u1Member, ID.coord]) expect((await escape(who, 'unit')).status, who).toBe(404);
-    await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { unitDueMinutes: 60, hqDueMinutes: 120 } });
+    await dueNow();
     expect((await unitState('u1')).escape?.open).toBe(true);
     r = await escape(ID.u1Lead, 'unit');
     expect(r.status).toBe(200);
@@ -845,13 +863,13 @@ describe('RU-77 비상구 — 승인 없이 올리기', () => {
     try {
       r = await escape(ID.u1Lead, 'unit');
       expect([r.status, (await r.json()).error]).toEqual([409, 'too_early']);
-      // 기한은 지났는데 지금 판이 마감 전 미리보기면 not_final
-      await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { unitDueMinutes: -14 * 24 * 60, hqDueMinutes: -13 * 24 * 60 } });
+      // 기한은 지났는데(창 안) 지금 판이 마감 전 미리보기면 not_final — 기준 시각이 옮겨졌으니 그 둘레로 다시 잡는다
+      await dueNow();
       r = await escape(ID.u1Lead, 'unit');
       expect([r.status, (await r.json()).error]).toEqual([409, 'not_final']);
     } finally {
       await prisma.weekSlot.update({ where: { isoKey }, data: { deadlineDowOverride: null, deadlineTimeOverride: null } });
-      await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { unitDueMinutes: 60, hqDueMinutes: 120 } });
+      await dueNow();
     }
     // 부서장 없는 단위에는 비상구가 없다 — 저절로 올라간다
     r = await escape(ID.u2Lead, 'unit');
@@ -867,7 +885,7 @@ describe('RU-77 비상구 — 승인 없이 올리기', () => {
     await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { hqDueMinutes: 15 * 24 * 60 } });
     let r = await escape(ID.hqLead, 'hq');
     expect([r.status, (await r.json()).error]).toEqual([409, 'too_early']);
-    await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { hqDueMinutes: 120 } });
+    await dueNow();
     for (const who of [ID.hqHead, ID.hqMember, ID.u1Lead, ID.coord]) expect((await escape(who, 'hq')).status, who).toBe(404);
     expect((await escape(ID.hq2Lead, 'hq')).status).toBe(409); // 본부장 없는 본부 — 저절로 간다 (no_head)
     r = await escape(ID.hqLead, 'hq');
@@ -1200,6 +1218,320 @@ describe('검증 — 비상구 뒤 되돌림 · 같은 바이트 · 동시 승�
       expect((await (await hqApprove(ID.hqHead)).json()).unchanged).toBe(true);
     } finally {
       expect((await order.PUT(nx('/api/rollup/hq/order', ID.hqLead, jsonInit('PUT', { order: [divId.u1, divId.u2], self: false })))).status).toBe(200);
+      await settle();
+    }
+  });
+});
+
+// ── 운영자 결정 a~d (2026-10-08) — 「더 쉽게, 빠르게, 정확하게」, 비상구는 최소로 ─────────────────────────
+// 위 이야기가 지나간 뒤의 상태에서 시작한다. 시험마다 필요한 상태를 먼저 만들고, 바꾼 설정(양식·사람)은 되돌린다.
+describe('운영자 결정 a~d — 비상구 창 · 운영자 수정 · 병합 기록의 잠금 · 실패 상태의 승인', () => {
+  type El = { type: unknown; props: Record<string, unknown> };
+  const elements = (n: unknown, out: El[] = []): El[] => {
+    if (Array.isArray(n)) n.forEach((x) => elements(x, out));
+    else if (n && typeof n === 'object' && 'type' in n && 'props' in n) {
+      out.push(n as El);
+      for (const v of Object.values((n as El).props ?? {})) elements(v, out);
+    }
+    return out;
+  };
+  const props = (els: El[], name: string) =>
+    els.find((e) => typeof e.type === 'function' && (e.type as { name: string }).name === name)?.props as Record<string, never> | undefined;
+
+  it('[RU-T139] ★ (결정 a) 「본부 → 총괄」 기한 + 24시간이 지나면 비상구가 닫힌다 — 실·팀·본부 409 too_late · 링크 없음 · 지난 주차도 · 창 안이면 그대로', async () => {
+    const { hqBoard } = await import('@/server/rollup/run');
+    const { ensureCurrentSlot } = await import('@/server/worklog');
+    const report = await import('@/app/api/rollup/report/route');
+    // 실하나: 승인 안 된 지금 판(U1·U3) · 본부가: 실둘이 바뀌어 승인 안 된 본부본 — 창 안이면 둘 다 비상구를 쓸 수 있는 상태
+    await merged('u1', '실하나 창 시험');
+    expect(['U1', 'U3']).toContain((await unitState('u1')).state);
+    expect((await save(ID.u2Lead, 'u2', '실둘 창 시험')).status).toBe(200);
+    await settle();
+    expect(['Q1', 'Q3']).toContain((await hqBoard(await node('hq'), await slot())).state);
+    await dueNow(-25 * 60); // 「본부 → 총괄」 기한이 25시간 전 — 창은 1시간 전에 닫혔다
+    try {
+      let r = await escape(ID.u1Lead, 'unit');
+      expect([r.status, (await r.json()).error]).toEqual([409, 'too_late']);
+      r = await escape(ID.hqLead, 'hq');
+      expect([r.status, (await r.json()).error]).toEqual([409, 'too_late']);
+      // 화면 — 「위로」 카드도 /hq도 링크를 그리지 않는다 (열리기 전의 `open: false`와 달리 아예 없다)
+      expect((await unitState('u1')).escape).toBeNull();
+      expect((await (await report.GET(nx(`/api/rollup/report?level=unit&isoKey=${isoKey}`, ID.u1Lead))).json()).state.escape).toBeNull();
+      pageAs.who = ID.hqLead;
+      const { default: HqPage } = await import('@/app/hq/page');
+      expect(props(elements(await HqPage({ searchParams: Promise.resolve({}) })), 'HqApprovalCard')!.escape).toBeNull();
+    } finally {
+      pageAs.who = '';
+      await dueNow();
+    }
+    // 지난 주차 — 그 주의 「본부 → 총괄」 기한은 일주일 전이다
+    const prev = await ensureCurrentSlot(new Date((await slot()).opensAt.getTime() - 3 * 86400_000));
+    const old = await report.POST(nx('/api/rollup/report', ID.u1Lead, jsonInit('POST', { level: 'unit', isoKey: prev.isoKey, withoutApproval: true })));
+    expect([old.status, (await old.json()).error]).toEqual([409, 'too_late']);
+    // 창 안이면 그대로 — 실·팀·본부 모두 200
+    expect((await escape(ID.u1Lead, 'unit')).status).toBe(200);
+    expect((await escape(ID.hqLead, 'hq')).status).toBe(200);
+    await settle();
+  });
+
+  it('[RU-T139] (경계 — 검증) 닫히는 시각 그 순간까지는 열려 있고 1ms 뒤에 닫힌다 · 열리는 시각도 · API·「위로」 카드·읽기 수리가 같은 끝 · 지난 주차도', async () => {
+    const prisma = await db();
+    const { requireScope } = await import('@/server/authz');
+    const { escapeUnit, escapeHq, escapeOpensAt, escapeClosesAt, unitDue, unitTarget } = await import('@/server/rollup/handoff');
+    const { liveUntil, stageTimes } = await import('@/server/rollup/schedule');
+    const { isLiveSlot } = await import('@/server/rollup/auto');
+    const { unitHandoffView } = await import('@/server/rollup/state');
+    const { ensureCurrentSlot } = await import('@/server/worklog');
+    const at = (d: Date, ms: number) => new Date(d.getTime() + ms);
+    // 창 판정을 지났는지만 본다 — 창 밖이면 too_early/too_late, 창 안이면 그 뒤의 업무 규칙(already_sent·no_merge…)이나 성공
+    const outcome = async (p: Promise<unknown>) => {
+      try {
+        await p;
+        return 'ok';
+      } catch (e) {
+        return (e as { code?: string }).code ?? String(e);
+      }
+    };
+    const inside = (c: string) => c !== 'too_early' && c !== 'too_late';
+    const s = await slot();
+    const t = await stageTimes(s);
+    const closes = escapeClosesAt(t);
+    // 셋이 같은 끝이다 — 따로 적히면 「화면은 옛 주를 맞추는데 비상구는 닫혔다」가 조용히 생긴다
+    expect(closes.getTime()).toBe(liveUntil(t).getTime());
+    expect(closes.getTime()).toBe(t.hqDue.getTime() + 24 * 3600_000);
+    const unitScope = await requireScope(new Headers({ 'x-test-identity': ID.u1Lead }));
+    const hqScope = await requireScope(new Headers({ 'x-test-identity': ID.hqLead }));
+    const opens = escapeOpensAt(unitDue(t, (await unitTarget(divId.u1))!));
+
+    // API — 닫히는 시각 그 순간은 창 안, 1ms 뒤는 too_late. 열리는 시각 1ms 전은 too_early, 그 순간은 창 안
+    expect(await outcome(escapeUnit(unitScope, s, at(closes, 1)))).toBe('too_late');
+    expect(inside(await outcome(escapeUnit(unitScope, s, closes)))).toBe(true);
+    expect(await outcome(escapeUnit(unitScope, s, at(opens, -1)))).toBe('too_early');
+    expect(inside(await outcome(escapeUnit(unitScope, s, opens)))).toBe(true);
+    expect(await outcome(escapeHq(hqScope, await node('hq'), s, at(closes, 1)))).toBe('too_late');
+    expect(await outcome(escapeHq(hqScope, await node('hq'), s, at(escapeOpensAt(t.hqDue), -1)))).toBe('too_early');
+    expect(inside(await outcome(escapeHq(hqScope, await node('hq'), s, closes)))).toBe(true);
+    await settle();
+
+    // 「위로」 카드 — 지금 판이 승인 안 된 상태(U3)에서 같은 경계
+    await merged('u1', '실하나 경계 시험');
+    const d = await prisma.division.findUniqueOrThrow({ where: { id: divId.u1 } });
+    const view = async (now: Date) => (await unitHandoffView(d, s, { trail: false, canEscape: true, now }))!;
+    expect((await view(closes)).state).toBe('U3');
+    expect((await view(closes)).escape).toEqual({ open: true, opensAtKst: expect.any(String) });
+    expect((await view(at(closes, 1))).escape).toBeNull();
+    expect((await view(at(opens, -1))).escape?.open).toBe(false);
+    expect((await view(opens)).escape?.open).toBe(true);
+
+    // 지난 주차 — 비상구는 그 주의 같은 끝에서 닫힌다. 읽기 수리(isLiveSlot)는 그 주가 「이번 주」인 동안은 끝이 지나도 계속 맞춘다 —
+    // 결정 a의 의도된 차이다(이미 내린 결정의 결과를 맞추는 일과, 결정 없이 올리는 길은 다르다). 그 주가 지나고 끝도 지나면 둘 다 닫혀 있다
+    const prev = await ensureCurrentSlot(new Date(s.opensAt.getTime() - 3 * 86400_000));
+    const prevCloses = liveUntil(await stageTimes(prev));
+    expect(inside(await outcome(escapeUnit(unitScope, prev, prevCloses)))).toBe(true);
+    expect(await outcome(escapeUnit(unitScope, prev, at(prevCloses, 1)))).toBe('too_late');
+    expect(await isLiveSlot(prev)).toBe(false);
+  });
+
+  it('[RU-T140] ★ (결정 b) 부서장 없는 단위 — 운영자의 수정 저장은 위로 가지 않는다(H2) · 스케줄러도 · lead의 저장·다시 병합은 올라간다 · lead가 그대로 받아들인 저장도', async () => {
+    const prisma = await db();
+    const { syncAll } = await import('@/server/rollup/auto');
+    const { lastEditor, editsOf } = await import('@/server/merge/edits');
+    const OP = 'a-u2-op@test.local';
+    // 그 부서의 lead·head가 아닌 운영자 — §3.2 「수정 — write(자기 부서)」로 병합본을 고칠 수 있다
+    const op = await prisma.user.create({ data: { email: OP, name: 'u2Op', divisionId: divId.u2, isOperator: true, mustChangePassword: false } });
+    const lastOf = async () => lastEditor((await prisma.mergeRun.findUniqueOrThrow({ where: { id: (await viewed('u2')).runId } })).reviewJson);
+    try {
+      hooks.nextMerge.set(divId.u2, '실둘 결정b 병합');
+      expect((await mergeNow(ID.u2Lead, { overwriteEdits: true })).status).toBe(200);
+      await settle();
+      const fromMerge = (await current('u2'))!;
+      expect([fromMerge.basis, (await unitState('u2')).state]).toEqual(['no_head', 'H1']);
+
+      // 운영자가 고친다 — 그 단위의 결론이 아니다: 사본 그대로, 화면은 H2, 기록에 역할
+      expect((await save(OP, 'u2', '실둘 운영자 고침')).status).toBe(200);
+      await settle();
+      expect((await current('u2'))!.id).toBe(fromMerge.id);
+      expect((await unitState('u2')).state).toBe('H2');
+      expect((await lastOf())?.role).toBe('operator');
+      // 스케줄러의 맞추기도 올리지 않는다 — 판정이 요청이 아니라 상태(고친 기록)에 있다
+      await syncAll(await slot(), { cause: 'scheduler', causedBy: null });
+      expect((await current('u2'))!.id).toBe(fromMerge.id);
+
+      // 그 단위 lead가 그 위에 고쳐 저장 → 올라간다
+      expect((await save(ID.u2Lead, 'u2', '실둘 담당자 확인')).status).toBe(200);
+      const byLead = (await current('u2'))!;
+      expect([byLead.basis, byLead.sha256]).toEqual(['no_head', (await viewed('u2')).sha256]);
+      expect((await unitState('u2')).state).toBe('H1');
+
+      // 운영자가 또 고친 뒤 [다시 병합] → 병합 결과가 올라간다
+      expect((await save(OP, 'u2', '실둘 운영자 또 고침')).status).toBe(200);
+      expect((await current('u2'))!.id).toBe(byLead.id);
+      hooks.nextMerge.set(divId.u2, '실둘 결정b 다시 병합');
+      expect((await mergeNow(ID.u2Lead, { overwriteEdits: true })).status).toBe(200);
+      const remerged = (await current('u2'))!;
+      expect(remerged.id).not.toBe(byLead.id);
+      expect((await stored(remerged.filePath)).toString()).toContain('실둘 결정b 다시 병합');
+
+      // 운영자가 고친 판을 lead가 바꾼 것 없이 그대로 저장 → 받아들인 것이다: 올라가고, 기록은 lead · places 0
+      expect((await save(OP, 'u2', '실둘 운영자 판')).status).toBe(200);
+      const opSha = (await viewed('u2')).sha256;
+      expect((await current('u2'))!.id).toBe(remerged.id);
+      expect((await save(ID.u2Lead, 'u2', '실둘 운영자 판')).status).toBe(200);
+      const adopted = (await current('u2'))!;
+      expect([adopted.sha256, adopted.basis]).toEqual([opSha, 'no_head']);
+      const last = await lastOf();
+      expect([last?.role, last?.places]).toEqual(['lead', 0]);
+      // HM-49 — places 0 줄은 「고친 곳」에 세지 않는다(아무것도 안 바꾼 저장으로 [다시 병합]이 멈추지 않게)
+      const edits = editsOf(await prisma.mergeRun.findUniqueOrThrow({ where: { id: (await viewed('u2')).runId } }))!;
+      expect(edits.saves).toBe(1);
+      await settle();
+    } finally {
+      await prisma.user.update({ where: { id: op.id }, data: { isActive: false } });
+    }
+  });
+
+  it('[RU-T141] ★ (결정 c) 수정 저장이 병합본을 쓰려는 순간 병합이 끝난다 → 병합의 쓰기·기록은 저장 뒤로 줄을 선다 · 모델이 도는 동안에는 줄을 잡지 않는다', async () => {
+    const prisma = await db();
+    const { mergedRelPath } = await import('@/server/merge');
+    const { runMergeRecorded } = await import('@/server/merge/run');
+    const { editsOf } = await import('@/server/merge/edits');
+    const s = await slot();
+    const rel = mergedRelPath(DIV.u1.slug, s.year, s.label);
+    const before = await merged('u1', '실하나 끼어들기 전');
+    const v = await viewed('u1');
+    hooks.nextMerge.set(divId.u1, '실하나 끼어든 병합');
+    const box: { merge?: ReturnType<typeof runMergeRecorded> } = {};
+    hooks.beforeWrite = async (p) => {
+      if (p !== rel || box.merge) return;
+      // 저장이 본 판을 확인하고 병합본을 쓰려는 순간 — 병합이 끝나 쓰고 기록하려 한다.
+      // 잠금이 없으면 이 기다림 사이에 병합이 쓰고 성공을 기록하고, 곧이어 저장이 그 파일을 덮는다 — 새 실행이 담당자가 고친 바이트를 가리킨다
+      box.merge = runMergeRecorded(divId.u1, s.id, 'manual', ID.u1Lead);
+      await new Promise((r) => setTimeout(r, 200));
+    };
+    let res: Response;
+    try {
+      res = await save(ID.u1Lead, 'u1', '실하나 담당자가 고친 판', v);
+    } finally {
+      hooks.beforeWrite = undefined;
+    }
+    expect(res.status).toBe(200);
+    const m = await box.merge!;
+    expect(m.status).toBe('succeeded');
+    const latest = await prisma.mergeRun.findFirstOrThrow({ where: { divisionId: divId.u1, weekSlotId: s.id, status: 'succeeded' }, orderBy: { startedAt: 'desc' } });
+    expect(latest.id).toBe(m.runId);
+    // 가장 최근 실행이 가리키는 파일 = 그 병합의 바이트, 고친 기록은 옛 실행에 (새 실행은 병합 결과 그대로)
+    expect((await stored(rel)).toString()).toContain('실하나 끼어든 병합');
+    expect(editsOf(await prisma.mergeRun.findUniqueOrThrow({ where: { id: before.id } }))?.saves).toBe(1);
+    expect(editsOf(latest)).toBeNull();
+    await settle();
+
+    // 모델이 도는 동안(엔진이 바이트를 만드는 중)에는 줄을 잡지 않는다 — 같은 부서의 저장이 병합을 기다리지 않고 끝난다
+    const w = await viewed('u1');
+    const during: { status?: number } = {};
+    hooks.duringMerge = async (d) => {
+      if (d !== divId.u1 || during.status !== undefined) return;
+      during.status = (await save(ID.u1Lead, 'u1', '실하나 모델이 도는 동안 고침', w)).status;
+    };
+    try {
+      expect((await runMergeRecorded(divId.u1, s.id, 'manual', ID.u1Lead)).status).toBe('succeeded');
+    } finally {
+      hooks.duringMerge = undefined;
+    }
+    expect(during.status).toBe(200);
+    await settle();
+  });
+
+  it('[RU-T141] (엇갈림 — 검증) 병합이 줄 안에서 쓰고 기록하는 사이에 온 담당자 저장·부서장 승인은 그 뒤로 줄을 서고, 옛 판을 본 것이라 409 — 병합 결과를 덮지도, 옛 판을 승인하지도 않는다', async () => {
+    const prisma = await db();
+    const { mergedRelPath } = await import('@/server/merge');
+    const { runMergeRecorded } = await import('@/server/merge/run');
+    const { editsOf } = await import('@/server/merge/edits');
+    const s = await slot();
+    const rel = mergedRelPath(DIV.u1.slug, s.year, s.label);
+    await merged('u1', '실하나 엇갈림 전');
+    const v = await viewed('u1');
+    const reviews = () => prisma.mergeReview.count({ where: { divisionId: divId.u1, weekSlotId: s.id } });
+    const reviewsBefore = await reviews();
+    hooks.nextMerge.set(divId.u1, '실하나 줄 안에서 쓴 병합');
+    let engineDone = false;
+    const box: { save?: Promise<Response>; approve?: Promise<Response> } = {};
+    hooks.duringMerge = (d) => {
+      if (d === divId.u1) engineDone = true;
+    };
+    hooks.beforeWrite = async (p) => {
+      if (!engineDone || p !== rel || box.save) return;
+      // 병합이 줄을 쥐고 병합본을 쓰려는 순간 — 그 전 판(v)을 본 담당자의 저장과 부서장의 승인이 도착한다.
+      // 잠금이 없던 때는 이 틈에 저장이 병합본을 덮고(새 실행 = 담당자 바이트), 승인이 옛 실행·새 바이트를 엇갈려 보았다
+      box.save = save(ID.u1Lead, 'u1', '실하나 옛 판을 보고 고침', v);
+      box.approve = approve(ID.u1Head, 'u1', v);
+      await new Promise((r) => setTimeout(r, 200));
+    };
+    let m: Awaited<ReturnType<typeof runMergeRecorded>>;
+    try {
+      m = await runMergeRecorded(divId.u1, s.id, 'manual', ID.u1Lead);
+    } finally {
+      hooks.beforeWrite = undefined;
+      hooks.duringMerge = undefined;
+    }
+    expect(m.status).toBe('succeeded');
+    expect(box.save && box.approve).toBeTruthy();
+    const [rs, ra] = await Promise.all([box.save!, box.approve!]);
+    expect([rs.status, (await rs.json()).error]).toEqual([409, 'merged_changed']);
+    expect([ra.status, (await ra.json()).error]).toEqual([409, 'merged_changed']);
+    const latest = await prisma.mergeRun.findFirstOrThrow({ where: { divisionId: divId.u1, weekSlotId: s.id, status: 'succeeded' }, orderBy: { startedAt: 'desc' } });
+    expect(latest.id).toBe(m.runId);
+    expect((await stored(rel)).toString()).toContain('실하나 줄 안에서 쓴 병합');
+    expect(editsOf(latest)).toBeNull();
+    expect(await reviews()).toBe(reviewsBefore);
+    await settle();
+  });
+
+  it('[RU-T142] ★ (결정 d) 본부본 다시 만들기가 실패해도(Qf) 본부장은 마지막 본부본(본 판)을 승인한다 — 화면에 [승인] · 본부 사본 = 그 실행 · 승인 뒤에는 없다', async () => {
+    const prisma = await db();
+    const { writeFileAtomic } = await import('@/server/storage');
+    const { hqBoard } = await import('@/server/rollup/run');
+    const { hqApprovable } = await import('@/lib/hq-state');
+    // 승인 전인 본부본 — 실둘이 바뀌어 다시 이어 붙는다
+    expect((await save(ID.u2Lead, 'u2', '실둘 실패 전 마지막 판')).status).toBe(200);
+    await settle();
+    let board = await hqBoard(await node('hq'), await slot());
+    expect(['Q1', 'Q3', 'Q4']).toContain(board.state);
+    const good = (await hqViewed('hq'))!;
+    // 양식이 깨진 뒤 실둘이 또 바뀐다 → 다시 이어 붙이기 실패(Qf). 마지막 본부본은 그대로 good
+    const tpl = await prisma.template.findFirstOrThrow({ where: { divisionId: divId.hq, isActive: true } });
+    await prisma.template.updateMany({ where: { divisionId: divId.hq }, data: { isActive: false } });
+    await writeFileAtomic('divisions/AUTO_HQ/template/broken-d.hwp', Buffer.from('BROKEN'));
+    const broken = await prisma.template.create({ data: { divisionId: divId.hq, filePath: 'divisions/AUTO_HQ/template/broken-d.hwp', sha256: 'broken-d', version: 9, uploadedBy: 'seed' } });
+    try {
+      expect((await save(ID.u2Lead, 'u2', '실둘 실패할 판')).status).toBe(200);
+      await settle();
+      board = await hqBoard(await node('hq'), await slot());
+      expect([board.state, board.current?.id]).toEqual(['Qf', good.runId]);
+      expect(hqApprovable(board)).toBe(true);
+      // 화면 — 본부장에게 [승인]이 그대로 있고, 실어 보낼 판은 마지막 본부본
+      pageAs.who = ID.hqHead;
+      const { default: HqPage } = await import('@/app/hq/page');
+      const card = props(elements(await HqPage({ searchParams: Promise.resolve({}) })), 'HqApprovalCard')!;
+      expect([card.state, card.canApprove, card.viewed]).toEqual(['Qf', true, good]);
+      expect(hqApprovable({ state: card.state, lastGood: card.lastGood })).toBe(true);
+      pageAs.who = '';
+      // 본 판이 아니면 409 그대로 (RU-55)
+      expect((await hqApprove(ID.hqHead, { runId: good.runId, sha256: 'f'.repeat(64) })).status).toBe(409);
+      const res = await hqApprove(ID.hqHead, good);
+      expect(res.status).toBe(200);
+      expect((await res.json()).handedOff?.target).toBe('총괄');
+      const sub = (await current('hq', 'hq'))!;
+      expect([sub.sourceRunId, sub.sha256, sub.basis, sub.submittedBy]).toEqual([good.runId, good.sha256, 'approved', userId.hqHead]);
+      // 실패는 실패대로 보이고(Qf), 마지막 본부본은 이제 승인돼 총괄에 있다 — [승인]은 없다
+      board = await hqBoard(await node('hq'), await slot());
+      expect([board.state, board.lastGood, hqApprovable(board)]).toEqual(['Qf', 'Q2', false]);
+      await settle();
+    } finally {
+      pageAs.who = '';
+      await prisma.template.update({ where: { id: broken.id }, data: { isActive: false } });
+      await prisma.template.update({ where: { id: tpl.id }, data: { isActive: true } });
+      const { syncHq } = await import('@/server/rollup/auto');
+      await syncHq(await node('hq'), await slot(), { cause: 'template', causedBy: null });
       await settle();
     }
   });

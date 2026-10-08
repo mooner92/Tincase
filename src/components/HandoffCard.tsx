@@ -12,7 +12,7 @@ export interface HandoffCardView {
   toHq: boolean;
   dueKo: string;
   hasHead: boolean;
-  state: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'Uf' | 'H0' | 'H1' | 'Hf';
+  state: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'Uf' | 'H0' | 'H1' | 'H2' | 'Hf';
   sent: { id: string; atKst: string; basis: string; by: string } | null;
   trail: { hqArrivedKst: string | null; hqApprovedKst: string | null; orgArrivedKst: string | null } | null;
   escape: { open: boolean; opensAtKst: string } | null;
@@ -27,6 +27,7 @@ const CHIP: Record<HandoffCardView['state'], { cls: string; word: string; dot?: 
   Uf: { cls: 'chip-muted', word: '병합본 없음' },
   H0: { cls: 'chip-muted', word: '받는 중' },
   H1: { cls: 'chip-ok', word: '올라감', dot: true },
+  H2: { cls: 'chip-warn', word: '운영자 수정 · 안 올라감' },
   Hf: { cls: 'chip-muted', word: '병합본 없음' },
 };
 
@@ -57,6 +58,14 @@ function line(v: HandoffCardView): ReactNode {
       return <>마감 뒤 병합본이 저절로 {v.target}에 올라갑니다 — 이 부서는 부서장 승인 단계가 없습니다</>;
     case 'H1':
       return <>{v.target}에 올라감 {v.sent?.atKst} · 자동(부서장 없음) — 고쳐 저장하면 다시 올라갑니다</>;
+    case 'H2':
+      // 결정 b — 운영자의 저장은 이 부서의 결론이 아니라 올라가지 않는다. 담당자가 할 일(확인해 저장 · 다시 병합)을 그대로 말한다
+      return (
+        <span className="text-warning">
+          운영자가 고친 판은 아직 올라가지 않았어요 — 담당자가 확인해 저장하거나 다시 병합하면 올라갑니다
+          {v.sent ? ` · 지금 ${v.target}에는 ${v.sent.atKst} 판` : ''}
+        </span>
+      );
     default:
       return <>아직 마감 뒤 병합본이 없습니다 — 위 병합본 카드에서 [지금 병합]을 눌러 주세요 · {due}</>;
   }

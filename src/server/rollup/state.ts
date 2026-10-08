@@ -8,16 +8,17 @@ import { effectiveDeadline } from '../worklog';
 import { NEWEST_FIRST, UNIT_REVIEW, HQ_REVIEW } from '../merge/review-scope';
 import { toKstIso } from '@/lib/week';
 import { currentReport, fileSha } from './report';
-import { escapeOpensAt, hasHead, targetLabel, unitDue, unitTarget } from './handoff';
+import { escapeClosesAt, escapeOpensAt, hasHead, targetLabel, unitDue, unitTarget } from './handoff';
+import { decidesForUnit, lastEditor } from '../merge/edits';
 import { rollupEnabled, stageCells, stageTimes } from './schedule';
 import { parseOrder } from './tree';
 
 /**
  * 12 §2a 실·팀 상태 기계.
  *   부서장 있음  U0 받는 중 · U1 승인 기다림 · U2 올라감 · U3 승인 뒤 바뀜 · U4 승인 없이 올라감 · Uf 병합본 없음
- *   부서장 없음  H0 받는 중(마감 뒤 저절로) · H1 올라감 · Hf 병합본 없음
+ *   부서장 없음  H0 받는 중(마감 뒤 저절로) · H1 올라감 · H2 운영자가 고친 판(안 올라감 — 2026-10-08 결정 b) · Hf 병합본 없음
  */
-export type UnitHandoffState = 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'Uf' | 'H0' | 'H1' | 'Hf';
+export type UnitHandoffState = 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'Uf' | 'H0' | 'H1' | 'H2' | 'Hf';
 
 export interface HandoffTrail {
   /** 본부 도착 (본부 단계가 있을 때) */
@@ -40,7 +41,10 @@ export interface HandoffView {
   sent: { id: string; atKst: string; basis: string; by: string } | null;
   /** RU-80 · TACP-21 v1.7 — 내 사본의 행방, **시각만**. 볼 수 없는 사람에게는 null */
   trail: HandoffTrail | null;
-  /** RU-77 — 비상구. 이 사람이 쓸 수 있고 지금 상태가 맞을 때만(U1·U3). `open`이 거짓이면 아직 창 전이다 — 화면은 그리지 않는다 */
+  /**
+   * RU-77 — 비상구. 이 사람이 쓸 수 있고 지금 상태가 맞을 때만(U1·U3), 그리고 창이 닫히기 전(「본부 → 총괄」 + 24시간 — 결정 a)까지만.
+   * `open`이 거짓이면 아직 창 전이다 — 화면은 그리지 않는다. 닫힌 뒤(지난 주차 포함)에는 null
+   */
   escape: { open: boolean; opensAtKst: string } | null;
 }
 
@@ -111,6 +115,8 @@ export async function unitHandoffView(
   if (!head) {
     if (sentRow && sha && sentRow.sha256 === sha) state = 'H1';
     else if (past && !final) state = 'Hf';
+    // 결정 b — 마감 뒤 최종본을 운영자가 마지막으로 고쳤다. 그 판은 그 단위의 결론이 아니라 올라가지 않는다(syncUnit과 같은 판정)
+    else if (run && final && !decidesForUnit(lastEditor(run.reviewJson))) state = 'H2';
     else state = sentRow ? 'H1' : 'H0';
   } else if (sentRow && sha && sentRow.sha256 === sha) {
     state = sentRow.basis === 'unapproved' ? 'U4' : 'U2';
@@ -131,7 +137,8 @@ export async function unitHandoffView(
       by = sentRow.basis === 'no_head' ? '자동 (부서장 없음)' : await nameOf(sentRow.submittedBy);
     }
   }
-  const escapable = opts.canEscape && head && final && (state === 'U1' || state === 'U3');
+  // 결정 a — 닫힌 뒤에는 그리지 않는다(API는 409 too_late). 열리기 전은 `open: false`로 내려 화면이 숨긴다
+  const escapable = opts.canEscape && head && final && (state === 'U1' || state === 'U3') && now <= escapeClosesAt(t);
   const opens = escapeOpensAt(due);
   return {
     target: targetLabel(target),

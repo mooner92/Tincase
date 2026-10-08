@@ -119,11 +119,12 @@ beforeAll(async () => {
   await prisma.user.create({ data: { email: ID.head, name: '머리', divisionId: div.id, divisionRole: 'head', jobTitle: '실장' } });
   await prisma.user.create({ data: { email: ID.lead, name: '담당', divisionId: div.id, divisionRole: 'lead' } });
 
-  // 다시 병합 — 같은 경로에 새로 쓴다 (실제 병합과 같은 모양). 사람이 고친 것은 그래서 사라진다
+  // 다시 병합 — 같은 경로에 새로 쓴다 (실제 병합과 같은 모양). 사람이 고친 것은 그래서 사라진다.
+  // 엔진은 바이트만 돌려주고 쓰기는 runMergeRecorded가 잠금 안에서 한다 (2026-10-08 결정 c)
   runMergeMock.mockImplementation(async () => {
-    await writeFileAtomic(MERGED, bytes);
     return {
       outputRelPath: MERGED,
+      output: bytes,
       bytes: bytes.length,
       rowCounts: { achievements: 2, plans: 1, notes: 0 },
       mergedGroups: [],

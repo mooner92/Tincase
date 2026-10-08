@@ -17,6 +17,7 @@ import { HQ_REVIEW, NEWEST_FIRST } from '../merge/review-scope';
 import { composeOrgDocument, type OrgSectionOutcome } from '@/lib/hwp/orgdoc';
 import { readUnits, BUCKETS } from '@/lib/hwp/rollup';
 import { toKstIso } from '@/lib/week';
+import type { HqStateCode } from '@/lib/hq-state';
 import { currentReport, fileSha } from './report';
 import { sectionTitles } from './sections';
 import { type RollupNode, type TreeDivision } from './tree';
@@ -383,8 +384,9 @@ export interface HqApprovalView {
 /**
  * RU-82 — 본부 상태 (12 §2a 본부 상태 기계).
  *   Q0 비어 있음 · Q1 준비됨·승인 전 · Q2 승인·총괄로 감 · Q3 보낸 뒤 바뀜 · Q4 승인 없이 감 · Qf 만들기 실패
+ * 이름은 화면과 같이 쓰므로 lib에 있다(`hqApprovable`도 거기)
  */
-export type HqState = 'Q0' | 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Qf';
+export type HqState = HqStateCode;
 
 export interface HqBoard {
   node: { id: string; slug: string; nameKo: string; note: string; pageBreak: boolean; self: boolean };
@@ -398,6 +400,11 @@ export interface HqBoard {
   hqReport: ReportCell | null;
   hasHead: boolean;
   state: HqState;
+  /**
+   * RU-55 (2026-10-08 결정 d) — **마지막으로 만든 본부본**(`current`)만 놓고 본 상태 — 그 뒤의 시도가 실패했어도(Qf) 그 판이
+   * 승인 전(Q1·Q3·Q4)인지 이미 승인돼 총괄에 갔는지(Q2). 실패가 아니면 `state`와 같다. 화면은 Qf에서도 이것으로 [승인]을 그린다
+   */
+  lastGood: HqState;
 }
 
 /** RU-55 — 가장 최근 본부장 승인. 「승인 뒤 바뀜」은 **내용(sha)**으로 본다 */
@@ -466,7 +473,8 @@ export async function hqBoard(node: RollupNode, slot: WeekSlot): Promise<HqBoard
     hqReport,
     hasHead: head > 0,
   };
-  return { ...board, state: hqStateOf(board) };
+  // 결정 d — 실패한 시도를 빼고(마지막 시도 = 마지막으로 만든 판) 본 상태. 실패가 아니면 state와 같다
+  return { ...board, state: hqStateOf(board), lastGood: hqStateOf({ ...board, lastRun: current }) };
 }
 
 /** 주차 고르기 — 이어 붙일 것이 있는 최근 주차들 (지난 자료 재현에 쓴다) */

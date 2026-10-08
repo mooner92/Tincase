@@ -94,6 +94,7 @@ beforeAll(async () => {
     vi.setSystemTime(Date.now() + MERGE_MS.value); // 모델이 그만큼 걸린다
     return {
       outputRelPath: 'm.hwp',
+      output: Buffer.from('m'), // 2026-10-08 결정 c — 엔진은 쓰지 않고 바이트만 돌려준다(쓰기는 runMergeRecorded가 잠금 안에서)
       bytes: 1,
       rowCounts: { achievements: 1, plans: 1, notes: 0 },
       mergedGroups: [],

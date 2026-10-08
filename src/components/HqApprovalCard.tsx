@@ -5,12 +5,14 @@
 // 2026-10-08(ADR-0015) 전에는 승인 뒤에 본부 담당자가 [총괄에 제출]을 눌렀다. 이제 승인이 곧 제출이라 그 버튼과 알림이 없다.
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { hqApprovable, type HqStateCode } from '@/lib/hq-state';
 
-export type HqStateView = 'Q0' | 'Q1' | 'Q2' | 'Q3' | 'Q4' | 'Qf';
+export type HqStateView = HqStateCode;
 
 export function HqApprovalCard({
   isoKey,
   state,
+  lastGood,
   approval,
   viewed,
   canApprove,
@@ -21,6 +23,11 @@ export function HqApprovalCard({
 }: {
   isoKey: string;
   state: HqStateView;
+  /**
+   * RU-55 (2026-10-08 결정 d) — 마지막으로 만든 본부본만 놓고 본 상태. 다시 이어 붙이기가 실패해도(Qf) 그 판이 승인 전이면 [승인]을 그린다 —
+   * 승인은 화면이 그린 그 판(`viewed`)에 붙는다. 실패가 아니면 `state`와 같다
+   */
+  lastGood: HqStateView;
   approval: { by: string; atKst: string; changedAfter: boolean } | null;
   /** RU-55 — 화면이 그린 본부본의 판. 승인은 이 판에만 붙는다(다르면 409) */
   viewed: { runId: string; sha256: string } | null;
@@ -63,7 +70,9 @@ export function HqApprovalCard({
   const escapeNow = () =>
     post('/api/rollup/report', { level: 'hq', isoKey, withoutApproval: true }, () => '본부장 승인 없이 총괄로 올렸어요 — 총괄에는 주황으로 보입니다');
 
-  const awaiting = state === 'Q1' || state === 'Q3' || state === 'Q4';
+  // 결정 d — Qf면 「총괄」 구역과 [승인]은 마지막으로 만든 본부본의 상태로 그린다(실패 이유는 위 RunCard가 말한다)
+  const shown = state === 'Qf' ? lastGood : state;
+  const awaiting = hqApprovable({ state, lastGood });
   const showApprove = canApprove && hasHead && awaiting && !!viewed;
 
   return (
@@ -86,6 +95,10 @@ export function HqApprovalCard({
             {busy ? '승인 중…' : '검토 완료 · 승인'}
           </button>
         )}
+        {/* 결정 d — 다시 이어 붙이기가 실패했어도 마지막 본부본은 승인할 수 있다. 무엇이 빠졌는지 누르기 전에 */}
+        {showApprove && state === 'Qf' && (
+          <p className="w-full text-xs text-warning">승인하면 이 판이 총괄로 갑니다 — 새로 올라온 것은 이어 붙이지 못해 빠져 있어요</p>
+        )}
         {/* §12 Q11 — 일부만 모인 본부본도 승인할 수 있다. 늦게 온 단위가 붙으면 승인이 풀린다는 것을 누르기 전에 */}
         {showApprove && missing.length > 0 && (
           <p className="w-full text-xs text-muted">
@@ -99,7 +112,7 @@ export function HqApprovalCard({
         <div data-guide="report-hq" className="card-section text-sm">
           <p data-guide="report-hq-submit" className="flex flex-wrap items-center gap-x-2 gap-y-1">
             <span className="font-semibold text-ink">총괄</span>
-            {state === 'Q2' && hqReport ? (
+            {shown === 'Q2' && hqReport ? (
               <>
                 <span className="chip chip-ok">
                   <span aria-hidden className="dot" />
@@ -107,11 +120,11 @@ export function HqApprovalCard({
                 </span>
                 <span className="text-muted">{hqReport.atKst}</span>
               </>
-            ) : state === 'Q3' && hqReport ? (
+            ) : shown === 'Q3' && hqReport ? (
               <span className="text-warning">
                 승인 뒤 본부본이 바뀌었어요 — 총괄에는 {hqReport.atKst}에 {hqReport.basis === 'unapproved' ? '승인 없이 올린' : '승인한'} 판이 있어요
               </span>
-            ) : state === 'Q4' && hqReport ? (
+            ) : shown === 'Q4' && hqReport ? (
               <span className="text-warning">
                 본부장 승인 없이 총괄로 감 · {hqReport.atKst} · {hqReport.by}
               </span>
@@ -120,6 +133,7 @@ export function HqApprovalCard({
             )}
           </p>
           {/* RU-77 — 비상구. 기한 15분 전부터 본부 lead에게만, 글자 링크로. 누르면 그 자리에서 한 번 더 묻는다 */}
+          {/* 비상구는 실패 상태(Qf)에 넓히지 않는다 — 결정 d는 본부장의 승인만이다(비상구는 최소로) */}
           {escape?.open && (state === 'Q1' || state === 'Q3') && (
             <div className="mt-2 flex flex-wrap items-center gap-2">
               {confirmEscape ? (
