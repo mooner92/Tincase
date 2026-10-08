@@ -544,6 +544,12 @@ main() {
   fi
   printf '[deploy] 실패: health가 %s초 안에 ok:true가 아니다. checks를 읽는다 — checks.template만 fail이면 배포 탓이 아니다(OPS-41).\n' \
     "$HEALTH_TIMEOUT_SEC" >&2
+  # 본문이 JSON이 아니면 앱이 기동하다 멈춘 것이다 — 이유는 로그의 FATAL 줄에 있다(스키마 OPS-48 · 메신저 설정 OPS-46 · 빈 DB OPS-05).
+  # 스키마면 되돌리지 않는다 — db push 뒤 --no-build로 다시 띄운다(DEPLOY.md 2b-4 표)
+  if [[ $HEALTH_BODY != *'"ok"'* ]]; then
+    printf '         health에 닿지 못했다 — 앱이 기동하다 멈췄다. 이유: sudo docker %s logs --tail 60 | grep -A8 FATAL  (db push를 빠뜨렸으면 push 뒤 --no-build)\n' \
+      "${compose_args[*]}" >&2
+  fi
   if [[ $target == prod ]]; then
     printf '         되돌리기(OPS-17): sudo docker tag %s %s && bash scripts/deploy.sh prod --no-build --ignore-window\n' \
       "$ROLLBACK_IMAGE" "$PROD_IMAGE" >&2

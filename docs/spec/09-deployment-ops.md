@@ -160,6 +160,26 @@ production에서 `DEV_IDENTITY`가 설정돼 있으면 **거부**한다.
 비어 있는 `MESSENGER_URL`은 어디서나 괜찮다(알림 끔). 수신함 주소는 **경로**(`/api/dev/messenger-sink`)로 알아본다 — 호스트·포트는 컨테이너 안팎에서 다르다.
 시험 `[NT-T76]`(`tests/messenger-sink.test.ts`).
 
+### OPS-48 — DB 스키마가 이 판보다 오래됐으면 뜨지 않는다 (2026-10-09)
+
+배포 절차(DEPLOY §2b-3)의 `prisma db push`를 빠뜨리면 **조용히** 틀린다 — 2026-10-09 운영 main(v1.39.0) 스키마 DB 사본에 v2를 띄워 실측:
+기동은 되고 health는 `ok:true`(DB 연결·저장소·양식만 본다)라 `deploy.sh`가 성공으로 끝나는데, 부서를 읽는 화면은 모두 500(`Division.rollupOrder` 없음),
+병합 줄은 로그에 오류만 남긴다(`MergeJob` 없음) — 목요일 자동 병합이 하나도 돌지 않는 것을 15:00에야 안다.
+
+그래서 기동할 때(`instrumentation.ts`, 환경 검사 OPS-06·46 바로 뒤 · 회수와 스케줄러 앞) DB의 표·열을 **이 판의 Prisma 클라이언트**(`Prisma.dmmf` — schema.prisma에서
+생성된 것, 손으로 적은 목록이 아니다)와 견준다. 모자라면 `[boot] FATAL:` 아래에 **없는 표 · 없는 열 이름과 할 일**(스냅샷 뒤 `db push` → 다시 띄우기)을 찍고 종료 코드 1로 멈춘다.
+컨테이너는 health에 닿지 못하고 deploy.sh가 health 단계에서 멈춘다. 판정은 `src/server/schema-check.ts` 하나.
+
+- **모자란 것만** 본다 — DB에만 있는 표·열(지난 판 · 롤백한 옛 앱이 남긴 것)은 문제가 아니다
+- 관계 필드(`Division.reportSubmissions` 등)는 열이 아니므로 보지 않는다
+- 검사 질의 자체가 실패하면(잠김 등) 경고 한 줄 뒤 그대로 뜬다 — 검사를 못 한 것을 「모자람」으로 치면 멀쩡한 서버가 뜨지 않는다
+- 엔트리포인트(OPS-05)의 「빈 DB」 검사는 그대로 둔다 — 빈 DB는 시드 안내가 다르다
+
+`deploy.sh`는 health에 닿지 못하면(본문이 JSON이 아니면) 「앱이 기동하다 멈췄다 — 로그의 FATAL 줄」을 덧붙인다 — 운영자가 곧장 롤백하지 않고 이유부터 보게(스키마면 push 뒤 `--no-build`).
+
+시험 `[OPS-T35]`(`tests/schema-check.test.ts` — 판정 · v2로 더해지는 표 7·열 6이 기준에 있음 · 표 하나·열 하나를 지운 DB에서 이름으로 말하고 멈춤 · push하면 뜸 · 기동 순서) ·
+`[OPS-T35b]`(`tests/deploy-script.test.ts` — health에 닿지 못할 때만 FATAL 안내).
+
 ---
 
 ## 4. Cloudflare
@@ -295,7 +315,7 @@ Phase 3 리마인드의 밑거름이 되고, 그 전에도 Sean이 로그만 봐
 | 1 | 디스크: `df -h /` 여유 5G 이상. 모자라면 `deploy.sh prune`(우리 찌꺼기만) · npm/pip 캐시. `deploy.sh`도 빌드 전에 보고, 모자라면 빌드하지 않는다 | 빌드가 루트 디스크에 쌓인다(OPS-42·43). 2G대에서 빌드하면 도중에 ENOSPC로 죽는다 |
 | 2 | DB 스냅샷 — 컨테이너 안에서 `sqlite3 .backup` → `/data/db/worklog.db.predeploy-시각` | `cp` 금지(OPS-07). `tmp/`는 기동 때 지워지므로 거기 두지 않는다. 야간본(`backup.sh db`)을 손으로 돌리면 **그날 야간본을 덮는다**. 4단계(`db push`)보다 먼저여야 하므로 스크립트에 넣지 않았다 |
 | 3 | 지금 이미지를 `repman:rollback`으로 태그 — `deploy.sh prod`가 빌드 직전에 한다 | 빌드가 `repman:latest`를 덮으면 옛 이미지는 태그 없는(dangling) 이미지가 되고 배포 끝 청소(OPS-43)에 지워진다. 그 뒤 롤백은 재빌드뿐이다 |
-| 4 | `git pull` → 스키마가 바뀌었으면 `prisma db push` (**chown 없이**) | 아래 「chown 하지 않는다」 |
+| 4 | `git pull` → 스키마가 바뀌었으면 `prisma db push` (**chown 없이**) | 아래 「chown 하지 않는다」. 빠뜨리면 6단계의 새 앱이 뜨지 않고 없는 표·열을 로그 첫 FATAL 줄에 적는다(OPS-48) — push한 뒤 `deploy.sh prod --no-build` |
 | 5 | 권한 확인: `stat` → `10001:mhchoi drwxrws---` · DB `-rw-rw----` | 틀어졌으면 백업이 조용히 멈춘다 |
 | 6 | `bash scripts/deploy.sh prod` — 빌드 → 기동 → health `ok:true` → 우리 빌드 찌꺼기 청소 | OPS-43 |
 
@@ -307,6 +327,9 @@ Phase 3 리마인드의 밑거름이 되고, 그 전에도 Sean이 로그만 봐
 
 **스키마는 「추가만」인지 본다.** `db push`가 데이터 손실 경고나 확인을 물으면 **멈춘다** — `--accept-data-loss`를 붙이지
 않는다. 추가만인 변경(새 표·기본값 있는 열)은 프롬프트 없이 끝나고, 돌고 있는 옛 앱도 그대로 동작한다.
+SQLite에서 Prisma는 **NOT NULL + 기본값 열**을 더할 때 표를 새로 만들어 옮긴다(`new_Division` → 옛 표 지움 → 이름 바꿈, 외래 키 검사를 잠시 끈 채) —
+v2 전환의 `Division`이 그렇다. 행·열·외래 키는 그대로다(2026-10-09 main 스키마 DB 사본으로 확인: 옮긴 뒤 원래 열 값 같음 · `foreign_key_check` 0 ·
+`Division`을 가리키는 외래 키가 계속 막는다). 그래서 2단계 스냅샷이 4단계보다 먼저다.
 
 ### OPS-16 — 배포 금지 시간대 ★ (2026-10-08 개정 — 목요일 마감 기준)
 

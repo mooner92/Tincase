@@ -381,7 +381,7 @@ describe('OPS-47 리허설 — 스케줄러는 시연 모드에서만, 덧붙이
 describe('OPS-43b·g·h 입구에서 끝까지 — main을 가짜 dk로 돌린다', () => {
   // 판정 함수가 옳아도 main이 그것을 부르지 않으면 소용없다 — 롤백 태그를 빼먹거나 순서가 바뀌는 사고는 여기서만 보인다.
   // docker·sudo·curl·df는 셸 함수로 바꿔 끼운다. 저장소는 임시 git(브랜치를 고를 수 있게)으로 REPO_ROOT를 바꾼다
-  function runMain(args: string, opts: { branch?: string | null; env?: Record<string, string> } = {}) {
+  function runMain(args: string, opts: { branch?: string | null; env?: Record<string, string>; curl?: string } = {}) {
     state = mkdtempSync(path.join(os.tmpdir(), 'deploy-test-'));
     const repo = path.join(state, 'repo');
     const branch = opts.branch === undefined ? 'main' : opts.branch;
@@ -393,7 +393,7 @@ describe('OPS-43b·g·h 입구에서 끝까지 — main을 가짜 dk로 돌린�
       `${git}
        REPO_ROOT="${repo}"; LOCK_FILE="$STATE/lock"; HEALTH_TIMEOUT_SEC=1
        sudo() { :; }
-       curl() { printf '{"ok":true}\\n200'; }
+       curl() { ${opts.curl ?? `printf '{"ok":true}\\n200'`}; }
        root_avail_kib() { echo 52428800; }
        dk() {
          printf '%s\\n' "$*" >> "$STATE/calls"
@@ -453,6 +453,19 @@ describe('OPS-43b·g·h 입구에서 끝까지 — main을 가짜 dk로 돌린�
       expect(r.calls, `${branch} ${args}`).toEqual([]);
     }
   });
+
+  it('[OPS-T35b] health에 닿지 못하면(앱이 기동하다 멈춤 — 스키마 OPS-48 등) 로그의 FATAL 줄을 보라고 말한다 · 본문이 있으면 말하지 않는다', () => {
+    // 컨테이너가 기동하다 끝나면 curl은 연결 실패와 000을 낸다
+    const down = runMain('prod --no-build', { curl: `printf 'curl: (7) Failed to connect\\n000'` });
+    expect(down.code).toBe(1);
+    expect(down.err).toContain('health에 닿지 못했다');
+    expect(down.err).toContain('sudo docker compose -f docker-compose.yml -p repman logs --tail 60 | grep -A8 FATAL');
+    // 앱은 떴는데 판정이 실패한 것(양식 파일 없음 등)은 본문의 checks를 읽는다 — FATAL 안내는 없다
+    const up = runMain('prod --no-build', { curl: `printf '{"ok":false,"checks":{"template":"fail"}}\\n503'` });
+    expect(up.code).toBe(1);
+    expect(up.err).toContain('ok:true가 아니다');
+    expect(up.err).not.toContain('health에 닿지 못했다');
+  }, 30_000); // health 대기(1초) 뒤 3초 쉼이 두 번
 
   it('[OPS-T34c] test + TINCASE_REHEARSAL=on — 시연 모드면 덧붙이는 compose로 다시 만든다 · 평소 모드면 docker를 부르기 전에 멈춘다', () => {
     const r = runMain('test --no-build', { branch: 'feat/x', env: { TINCASE_TEST_MODE: 'demo', TINCASE_REHEARSAL: 'on' } });
