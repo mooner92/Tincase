@@ -12,10 +12,14 @@ Division ──1───∞── User ──1───∞── Submission ─
     │                                  │
     ├──1───∞── Template                └ divisionId (비정규화 — 격리 인덱스)
     ├──1───∞── MergeRun (Phase 2)
+    ├──1───∞── MergeJob (병합 줄 — HM-59, 2026-10-08. 외래 키 없이 divisionId · weekSlotId)
     └──1───1── 병합 규칙/마감 정책 (Division 컬럼)
 
 AuditLog (독립)
 ```
+
+> 아래 스키마는 처음 설계의 발췌다 — 정본은 `prisma/schema.prisma`. 2026-10-08 2단계에 더한 것: `MergeJob`(병합 줄의 작업 — 대기 · 병합 중 ·
+> 끝 · lease, HM-59) · `MergeRun.outputSha`(병합이 쓴 바이트의 sha — 점검 요약이 파일과 기록이 같은지 본다, HM-56e). 둘 다 더하기만 한다(`prisma db push`).
 
 ## 2. Prisma 스키마
 

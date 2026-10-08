@@ -36,7 +36,7 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 | `upload_closed` | 410 | hwp 올리기가 닫힘 — 「전사」 섹션 [올리기](RU-60a)만 낸다. 부서원 업로드 라우트(API-54)는 2026-10-08에 없어졌다(WA-39) |
 | `no_submissions` | 409 | 대상 0건 |
 | `edited` | 409 | 사람이 고친 병합본 — 확인 없이 다시 병합하지 않는다 (API-55 · HM-49) |
-| `merging` | 409 | 같은 부서·주차 병합이 이미 돌고 있다 — 「이미 병합 중입니다」 (API-31 · HM-58) |
+| `merging` | 409 | 같은 부서·주차 병합을 **다른 프로세스**가 돌리고 있다 — 「이미 병합 중입니다」 (API-31 · HM-58, 2026-10-08 2단계부터 같은 프로세스 안은 줄에 합류 — HM-60b) |
 | `too_large` | 413 | 본문이 너무 큼 — 읽기 전에 `Content-Length`로 거른다 (ST-04) |
 | `invalid_file` | 422 | 파일 검증 실패 (reason: ST-09) |
 | `invalid_rule` | 422 | 병합 규칙 검증 실패 (Phase 2) |
@@ -269,18 +269,24 @@ lead에게는 이 엔드포인트가 존재하지 않는다(404).
 | API-40 | 검증 = 제출물과 동일 + 표 구조 파싱 필수. 성공 시 새 active, 이전 버전 보관 |
 | API-41 | 응답에 파싱된 표 구조 요약(`{tables:[{rows,cols}…]}`) 포함 — 담당자가 즉시 확인 |
 
-### `POST /api/division/merge` — **Phase 2** (계약 예약)
+### `POST /api/division/merge` · `GET /api/division/merge?jobId=` — 병합 줄 (2026-10-08 2단계 · HM-59·60)
 
 ```jsonc
-// 202: { "mergeRunId": "c…" }   → GET /api/division/merge/:id 폴링
-// 완료: { "status":"succeeded", "rowCounts":{…}, "warnings":[…],
-//        "downloadUrl":"/api/division/merge/:id/download" }
+// POST { "isoKey": "2026-W42", "overwriteEdits"?: true }
+// 202 — 줄에 넣었다(또는 같은 부서·주차 작업에 합류했다). 병합을 기다리지 않는다
+{ "jobId": "c…", "position": 3, "joined": false, "status": "queued", "etaMinutes": 2 }
+// GET ?jobId=c…  — 대기 → 병합 중 → 끝
+{ "jobId": "c…", "status": "running", "position": 1, "etaMinutes": 1, "startedAt": "…+09:00", "finishedAt": null, "run": null }
+{ "jobId": "c…", "status": "done", "position": null, "run": { "id": "c…", "status": "succeeded", "errorText": null } }
+{ "jobId": "c…", "status": "failed", "position": null, "errorText": "병합하는 동안 고친 판이 있어 덮지 않았어요", "run": { "id": "c…", "status": "failed", "errorText": "…" } }
 ```
 
 | ID | 요구사항 |
 |---|---|
 | API-30 | Phase 1: 501. 버튼 비활성 + `준비 중 (Phase 2)` |
 | API-31 | 부서·슬롯당 동시 실행 1개 · 원본 불변 (HM-20) · `ruleSnapshot` 저장 (DM-13). **2026-10-08 — 실제로 막는다 (HM-58):** 멈추지 않은 running(기본 10분 안, HM-55)이 있거나 같은 프로세스에서 시작 중이면 409 `merging` 「이미 병합 중입니다」 · `detail: { runId, startedAt }`. `edited`(API-55)보다 먼저 본다. 시작하지 않으므로 기록·감사 로그가 없다 |
+| API-31a | **(2026-10-08 2단계 — HM-60b) 202로 줄에 넣는다.** 409 `edited`(API-55)를 먼저 묻고, 그 뒤 `enqueueMerge`(HM-59b) — 같은 부서·주차 작업이 대기 중이면 합류(`joined: true`), 병합 중이면 합류하거나(바뀐 것 없음) 대기 하나를 더 세운다(새 제출 · `overwriteEdits`). 응답 `{ jobId, position, joined, status, etaMinutes }` — `position`은 병합 중인 작업이 1, 대기가 2, 3 …(HM-59f). 감사 로그(`merge`)는 넣을 때 `{ status: 'queued', jobId, joined }`(+ 덮은 곳 수). 409 `merging`은 다른 프로세스가 돌리는 running이 있고 줄에 작업이 없을 때만. 병합 실패는 이제 422가 아니라 상태 조회의 `failed`다 |
+| API-65 | **`GET /api/division/merge?jobId=`** (2026-10-08 — HM-59f) — 그 작업의 `status`(`queued` · `running` · `done` · `failed` · `cancelled`) · `position` · `etaMinutes` · 시각 · 끝났으면 `run: { id, status, errorText }`. 게이트는 실행과 같다(`requireManager`) · 작업은 **신원의 부서**(`resolveTargetDivision` — 슬러그 없음)의 것이어야 한다 — 남의 부서 작업 id · 없는 id는 404(TACP-5 · TACP-30). 화면(CP-130)이 2초마다 묻는다 |
 | API-55 | 그 주차의 최신 병합본을 **사람이 고쳤으면** 409 `edited` — 본문에 `overwriteEdits: true`가 있을 때만 다시 병합한다 (HM-49). 감사 로그에 덮은 곳 수 |
 
 ```jsonc
@@ -384,7 +390,8 @@ v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노�
 | API-T12 | 양식 교체: 깨진 파일 → 422, active 유지 (ST-T17와 연동) |
 | API-T13 | health — 활성 부서의 양식 파일이 없으면 `checks.template` fail · 503, 응답에 부서명 없음 · `warnings` 배열은 늘 있다 |
 | API-T14 | 병합 재실행 — 고친 병합본이면 409 `edited` + `detail.edits`, `overwriteEdits: true`면 실행 (API-55, HM-T136) |
-| API-T18 | 병합 실행 중이면 409 `merging` 「이미 병합 중입니다」(기록 없음) · 10분 넘은 running은 막지 않음 · 같은 순간 두 요청은 하나만 실행 (API-31, HM-T157) |
+| API-T18 | 병합 실행 중이면 409 `merging` 「이미 병합 중입니다」(기록 없음) · 10분 넘은 running은 막지 않음 · 같은 순간 두 요청은 하나만 실행 (API-31, HM-T157). 2026-10-08 2단계부터 409는 **다른 프로세스**의 running일 때만 — 같은 프로세스의 겹침은 줄에 합류한다(API-T25) |
+| API-T25 | [지금 병합] → 202 `{ jobId, position, joined }` · `GET ?jobId=`로 끝까지 · 같은 순간 두 요청은 작업 하나(둘째 `joined`) · 남의 부서 작업 id · member → 404 (API-31a · API-65, HM-T165 · HM-T171) |
 | API-T15 | 제출물 열람 — 빈 번호 줄은 `rows`에 없고 머리행은 남는다 · `rowsByTable`은 그대로 (API-57) |
 | API-T16 | 병합본 보기 — member는 `review`가 `null`(승인자 이름이 응답에 없다)·`canApprove` 거짓, lead는 `review`를 받는다 · 「위로」 상태의 `sent.by`는 member에게 `null`, lead에게는 이름 (API-58) |
 | API-T17 | 규칙 PUT — `categories`만 저장 · 옛 키(`ruleText`·`guideText`·`emptyWords`·`sort` …)는 열을 바꾸지 않는다 · `categories`가 없거나 500B 초과면 422 · member 404 · 쓰기는 신원의 부서 (API-59, `tests/sprint2.test.ts`) |
