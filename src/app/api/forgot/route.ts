@@ -64,6 +64,7 @@ export const POST = handler(async (req: NextRequest) => {
       // 본인이 요청하지 않았는데 왔다면 알아야 한다 — 링크는 아직 아무것도 바꾸지 않았다
       '요청하지 않으셨다면 이 쪽지를 지워 주세요. 지금 비밀번호는 그대로입니다.',
     ].join('\n'),
+    kind: 'forgot', // NT-56 — 가짜 수신함이 종류를 안다 (NotifyLog에는 남지 않는 알림)
   });
 
   await audit(email, 'setup_link', user.divisionId, `user:${user.id}`, { self: true });

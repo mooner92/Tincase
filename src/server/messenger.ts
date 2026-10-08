@@ -15,6 +15,7 @@
 // 「HTML이라 본문으로 판정할 수 없다」고 적혀 있었는데 사실이 아니었다.
 import { env } from './env';
 import { logger } from './logger';
+import { isSinkUrl, SINK_KIND_HEADER } from '@/lib/messenger-sink';
 
 export interface AlertInput {
   /** 수신자 사번. 메신저는 이메일이 아니라 사번으로만 사람을 찾는다 */
@@ -23,6 +24,11 @@ export interface AlertInput {
   contents: string;
   /** 누르면 열릴 주소. 없으면 메신저 보관함이 열린다 */
   url?: string;
+  /**
+   * NT-56 — 알림 종류(`NotifyLog.kind`와 같은 값). **가짜 알림 수신함으로 갈 때만** 머리(`x-tincase-kind`)로 실린다 —
+   * 진짜 메신저가 받는 요청은 그대로다(폼 16개 필드, messenger.md §6). 수신함 화면·리허설이 「무슨 알림이 누구에게」를 이것으로 가른다
+   */
+  kind?: string;
 }
 
 export interface SendResult {
@@ -118,9 +124,11 @@ export async function sendAlert(input: AlertInput): Promise<SendResult> {
   for (let i = 0; i < targets.length; i += CHUNK) {
     const chunk = targets.slice(i, i + CHUNK);
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' };
+      if (input.kind && isSinkUrl(env.MESSENGER_URL)) headers[SINK_KIND_HEADER] = input.kind;
       const res = await fetch(env.MESSENGER_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+        headers,
         body: buildForm(chunk, input).toString(),
         signal: AbortSignal.timeout(10_000),
       });

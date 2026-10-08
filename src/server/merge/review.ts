@@ -100,6 +100,7 @@ async function notifyLeads(review: MergeReview, reviewer: string, slot: WeekSlot
       recvIds: [l.employeeNo!],
       ...approvalMessage({ name: l.name, employeeNo: l.employeeNo! }, reviewer, slot, review.createdAt, changes, handedOffTo),
       url,
+      kind: `merge_approved:${review.id}`, // 아래 NotifyLog와 같은 종류 (NT-56)
     });
     sent.push(...r.sent);
     blocked.push(...r.blocked);
@@ -251,7 +252,7 @@ export async function notifyReapprove(division: Division, slot: WeekSlot, target
   const blocked: string[] = [];
   try {
     for (const h of heads) {
-      const r = await sendAlert({ recvIds: [h.employeeNo!], ...reapproveMessage({ name: h.name, employeeNo: h.employeeNo! }, slot, target, reason), url });
+      const r = await sendAlert({ recvIds: [h.employeeNo!], ...reapproveMessage({ name: h.name, employeeNo: h.employeeNo! }, slot, target, reason), url, kind });
       sent.push(...r.sent);
       blocked.push(...r.blocked);
     }

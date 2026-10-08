@@ -80,7 +80,7 @@ async function deliver(
   const blocked: string[] = [];
   try {
     for (const p of to) {
-      const r = await sendAlert({ recvIds: [p.employeeNo], ...msg(p), url });
+      const r = await sendAlert({ recvIds: [p.employeeNo], ...msg(p), url, kind });
       sent.push(...r.sent);
       blocked.push(...r.blocked);
     }

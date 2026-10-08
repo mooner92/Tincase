@@ -73,6 +73,7 @@ export const POST = handler(async (req: NextRequest) => {
         `${SETUP_TOKEN_DAYS}일 안에 설정해 주세요. 한 번 쓰면 이 링크는 사라집니다.`,
         '설정한 뒤에는 이 쪽지를 지워 주세요.',
       ].join('\n'),
+      kind: 'setup_link', // NT-56
     });
 
     if (r.sent.length > 0) sent.push(u.name);

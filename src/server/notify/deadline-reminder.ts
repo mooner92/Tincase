@@ -280,6 +280,7 @@ export async function runDueReminders(now = new Date()): Promise<ReminderOutcome
             deadline,
           ),
           url,
+          kind: stage.kind, // NT-56 — 가짜 수신함이 종류를 안다
         });
         sent.push(...r.sent);
         blocked.push(...r.blocked);

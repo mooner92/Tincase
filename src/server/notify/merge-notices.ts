@@ -316,7 +316,7 @@ async function deliver(
   const sent: string[] = [];
   const blocked: string[] = [];
   for (const p of people) {
-    const r = await sendAlert({ recvIds: [p.employeeNo], ...compose(kind, p, slotLabel, monthly, facts), url });
+    const r = await sendAlert({ recvIds: [p.employeeNo], ...compose(kind, p, slotLabel, monthly, facts), url, kind });
     sent.push(...r.sent);
     blocked.push(...r.blocked);
   }
@@ -566,7 +566,7 @@ export async function noticeMergeHeld(opts: {
   const sent: string[] = [];
   const blocked: string[] = [];
   for (const p of people) {
-    const r = await sendAlert({ recvIds: [p.employeeNo], ...compose('merge_held', p, slot.label, monthly, facts), url });
+    const r = await sendAlert({ recvIds: [p.employeeNo], ...compose('merge_held', p, slot.label, monthly, facts), url, kind: logKind });
     sent.push(...r.sent);
     blocked.push(...r.blocked);
   }
