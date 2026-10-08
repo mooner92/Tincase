@@ -12,6 +12,7 @@ import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
 import { toKstIso } from '@/lib/week';
+import { getTour } from '@/server/tour';
 import { ClearButton } from './ClearButton';
 
 export const dynamic = 'force-dynamic';
@@ -56,6 +57,7 @@ export default async function NotifySinkPage({ searchParams }: { searchParams: P
         readAll={scope.readAll}
         {...(await rollupNav(scope))}
         viaCloudflare={scope.source === 'cloudflare'}
+        tour={await getTour(scope, false)}
       />
       <main className="mx-auto w-full max-w-[1120px] flex-1 px-5 pt-8 pb-8">
         <div className="page-head">

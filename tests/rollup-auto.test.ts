@@ -1132,6 +1132,58 @@ describe('검증 — 비상구 뒤 되돌림 · 같은 바이트 · 동시 승�
     await settle();
   });
 
+  it('[RU-T145 · HM-T167] (세 갈래를 합친 뒤) 줄로 [다시 병합]해 같은 바이트 → 사본 · 승인 그대로, 「다시 승인해 주세요」(NT-52) 없음 — 다르면 같은 길에서 한 번', async () => {
+    // RU-T132는 실행을 손으로 만들어 병합 뒤 맞추기를 거치지 않고, HM-T167은 3단계가 꺼진 채 본다. 여기는 둘이 만나는 길 —
+    // 줄의 일꾼 → runMergeRecorded → afterMerged → onUnitVersionChanged(3단계 켬) → notifyReapprove의 sha 비교. 알림이 실제로 나갈 수 있게
+    // 메신저·부서 알림·사번을 켠다(꺼져 있으면 sha를 보기 전에 빠져나가 「안 보냄」이 저절로 참이 된다)
+    const prisma = await db();
+    const messenger = await import('@/server/messenger');
+    const sent: { kind?: string; recvIds: string[] }[] = [];
+    const st = vi.spyOn(messenger, 'messengerStatus').mockReturnValue({ enabled: true, reason: '', allow: '전원' });
+    const sa = vi.spyOn(messenger, 'sendAlert').mockImplementation(async (m) => {
+      sent.push(m);
+      return { requested: m.recvIds.length, sent: m.recvIds, blocked: [], disabled: false, errors: [] };
+    });
+    const reapprovals = () => sent.filter((m) => m.kind?.startsWith('merge_reapprove:'));
+    await prisma.division.update({ where: { id: divId.solo }, data: { notifyEnabled: true } });
+    await prisma.user.update({ where: { id: userId.soloHead }, data: { employeeNo: 'T145' } });
+    try {
+      hooks.nextMerge.set(divId.solo, '단독단 줄 같은 판');
+      expect((await mergeNow(ID.soloLead)).status).toBe(202);
+      expect((await approve(ID.soloHead, 'solo')).status).toBe(200);
+      await settle();
+      const sub = (await current('solo'))!;
+      const reviews = await prisma.mergeReview.count({ where: { divisionId: divId.solo } });
+      const subs = await prisma.reportSubmission.count({ where: { divisionId: divId.solo } });
+      const before = reapprovals().length;
+
+      // 같은 입력으로 [다시 병합] — 새 실행, 같은 바이트
+      const again = (await (await mergeNow(ID.soloLead)).json()) as { jobStatus: string };
+      expect(again.jobStatus).toBe('done');
+      await settle();
+      expect(reapprovals()).toHaveLength(before); // 같은 판 — 승인이 그대로 유효하다
+      expect((await current('solo'))!.id).toBe(sub.id);
+      expect(await prisma.mergeReview.count({ where: { divisionId: divId.solo } })).toBe(reviews);
+      expect(await prisma.reportSubmission.count({ where: { divisionId: divId.solo } })).toBe(subs);
+      expect((await unitState('solo')).state).toBe('U2');
+
+      // 대조 — 바이트가 다르면 같은 길에서 부서장에게 한 번, 위에는 승인한 판이 그대로
+      hooks.nextMerge.set(divId.solo, '단독단 줄 다른 판');
+      expect((await mergeNow(ID.soloLead)).status).toBe(202);
+      await settle();
+      expect(reapprovals()).toHaveLength(before + 1);
+      expect(reapprovals().at(-1)!.recvIds).toEqual(['T145']);
+      expect((await current('solo'))!.id).toBe(sub.id);
+      expect((await unitState('solo')).state).toBe('U3');
+    } finally {
+      st.mockRestore();
+      sa.mockRestore();
+      hooks.nextMerge.delete(divId.solo);
+      await prisma.division.update({ where: { id: divId.solo }, data: { notifyEnabled: false } });
+      await prisma.user.update({ where: { id: userId.soloHead }, data: { employeeNo: null } });
+    }
+  });
+
   it('[RU-T133] 비상구 사본을 부서장이 같은 바이트로 승인 → 본부본이 같은 바이트로 다시 만들어져 본부장 승인 유지 → 「전사」 칩은 「본부장 재승인 대기」가 아니다', async () => {
     const { hqBoard } = await import('@/server/rollup/run');
     const { resolveSections } = await import('@/server/rollup/sections');

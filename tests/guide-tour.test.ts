@@ -177,15 +177,25 @@ describe('[PG-T152] 실제 동작은 일어나지 않는다 — 소스로 지키
     expect(offer).toMatch(/role="region"/);
   });
 
-  it('머리를 그리는 여섯 곳이 모두 tour를 넘긴다 — 한 곳이라도 빠지면 그 화면에서 카드·메뉴가 없다', () => {
-    const sites = [
+  it('머리를 그리는 곳이 모두 tour를 넘긴다 — 한 곳이라도 빠지면 그 화면에서 카드·메뉴가 없다', () => {
+    // 목록을 손으로 적지 않는다 — 2026-10-09 세 갈래를 합칠 때 다른 갈래가 더한 화면(/ops/notify-sink)이 적은 목록 밖에서 빠져 있었다
+    const tsx = (dir: string): string[] =>
+      readdirSync(path.join(ROOT, dir)).flatMap((n) => {
+        const rel = path.posix.join(dir, n);
+        return statSync(path.join(ROOT, rel)).isDirectory() ? tsx(rel) : rel.endsWith('.tsx') ? [rel] : [];
+      });
+    const sites = tsx('src/app').filter((f) => /<AppHeader\b/.test(read(f)));
+    for (const known of [
       'src/app/[division]/layout.tsx',
       'src/app/guide/page.tsx',
       'src/app/hq/page.tsx',
       'src/app/org/page.tsx',
       'src/app/ops/page.tsx',
       'src/app/ops/audit/page.tsx',
-    ];
+      'src/app/ops/notify-sink/page.tsx',
+    ]) {
+      expect(sites, known).toContain(known); // 찾기가 옳은지 — 아는 곳은 다 잡아야 한다
+    }
     for (const f of sites) {
       const src = read(f);
       expect(src, f).toMatch(/<AppHeader/);
