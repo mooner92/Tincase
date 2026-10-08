@@ -56,6 +56,7 @@ Excel에서 한글이 깨지면 인코딩 문제다 — `--bom`으로 다시 뽑
 
 - [ ] `main` 최신 (`git pull`)
 - [ ] 로컬 검증: `npm test` **전부** 통과, `npx tsc --noEmit -p .` 통과
+- [ ] 사용 안내·무대·둘러보기를 만진 판이면: `PLAYWRIGHT=<…/node_modules/playwright> node scripts/guide-check.cjs` 통과 (가짜 앱에서 도크·구멍·둘러보기를 잰다 — PG-T140·141·153)
 - [ ] **재배포면 §2b부터** — §1·§2는 첫 설치 한 번뿐이다
 
 ## 1. 호스트 준비 (1회, sudo 필요)
