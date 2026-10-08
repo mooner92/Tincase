@@ -246,9 +246,11 @@ d('HM-48 일자 순 정렬 — 병합 끝에서 끝까지', () => {
   it('[HM-T131] 일자 순 — 표 셋 모두, 날짜 없는 줄은 뒤, 묶인 줄은 묶음의 일자로', async () => {
     const res = await putRule(ID.lead, { sort: 'date' });
     expect(res.status).toBe(200);
-    const { GET } = await import('@/app/api/division/rule/route');
-    const got = await (await GET(nx('/api/division/rule', ID.lead))).json();
-    expect(got).toMatchObject({ sort: 'date', undated: 'last' });
+    // 규칙 GET은 지웠다(R2) — 엔진이 읽는 해석(`toPlan`)으로 본다
+    const { prisma } = await import('@/server/db');
+    const { toPlan } = await import('@/server/merge/rules');
+    const lead = await prisma.user.findUniqueOrThrow({ where: { email: ID.lead }, include: { division: true } });
+    expect(toPlan(lead.division)).toMatchObject({ sort: 'date', undated: 'last' });
 
     const { bytes, snapshot } = await mergeNow();
     const { readWorklog } = await import('@/lib/hwp/reader');

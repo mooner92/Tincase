@@ -254,7 +254,7 @@ describe('WA-30·32 스위치는 한 곳에서 읽고, 화면은 그 판정으�
     expect(src('src/app/org/page.tsx')).toContain('const uploadOpen = hwpUploadOpen();');
   });
 
-  it('[WA-T33c] 부서원 화면·안내는 hwpUploadOpen()으로 그린다 (PG-11)', () => {
+  it('[WA-T33c] 부서원 화면은 hwpUploadOpen()으로 그린다 — 안내에는 업로드 이야기가 없다 (PG-11)', () => {
     const page = src('src/app/[division]/page.tsx');
     expect(page).toContain('hwpUploadOpen()');
     expect(page).toMatch(/<SubmitChoice[^>]*uploadOpen=\{uploadOpen\}/);
@@ -268,10 +268,11 @@ describe('WA-30·32 스위치는 한 곳에서 읽고, 화면은 그 판정으�
     expect(choice.indexOf('{uploadOpen && (')).toBeLessThan(choice.indexOf('파일 올리기'));
     expect(choice).toMatch(/uploadOpen && mode === 'upload' \? \(\s*<UploadDropzone/);
 
-    // 안내(PG-57)는 웹 작성만 보여 준다 — 업로드 단계가 없다. 업로드가 아직 열린 서버에서만 그 길이 있다는 한 줄
+    // 안내(PG-57)는 웹 작성만 보여 준다 — 업로드 단계가 없다. 「업로드가 열린 서버에서는…」 한 줄도 걷었다(2026-10-08, R18):
+    // 업로드는 곧 모든 서버에서 닫힌다
     const guide = src('src/app/guide/page.tsx');
-    expect(guide).toContain('hwpUploadOpen()');
-    expect(guide).toMatch(/\{uploadOpen && \(\s*<p className="callout/);
+    expect(guide).not.toContain('hwpUploadOpen');
+    expect(guide).not.toMatch(/파일 올리기/);
     expect(src('src/lib/guide/deck.ts')).not.toMatch(/파일 올리기|드롭존|양식 다운로드/);
   });
 });

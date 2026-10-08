@@ -124,23 +124,24 @@ async function del(identity: string, id: string) {
 
 const d = hasFixtures ? describe : describe.skip;
 
+// 신원 판정은 모든 API의 첫 관문(requireScope)이라 어느 GET으로 봐도 같다. 예전에는 `GET /api/me`로 봤는데,
+// 화면이 부르지 않는 API라 지웠다(2026-10-08, R2) — 부서원이 실제로 쓰는 `GET /api/my/previous`로 본다
 d('인증 (AU-T01/T06/T10)', () => {
+  const probe = async (identity?: string, init?: Parameters<typeof nx>[2]) => {
+    const { GET } = await import('@/app/api/my/previous/route');
+    return GET(nx('/api/my/previous', identity, init));
+  };
   it('[AU-T01] 신원 없음 → 401', async () => {
-    const { GET } = await import('@/app/api/me/route');
-    const res = await GET(nx('/api/me'));
+    const res = await probe();
     expect(res.status).toBe(401);
   });
   it('[AU-T06] 미등록 이메일 → 403 not_registered', async () => {
-    const { GET } = await import('@/app/api/me/route');
-    const res = await GET(nx('/api/me', ID.ghost));
+    const res = await probe(ID.ghost);
     expect(res.status).toBe(403);
     expect((await res.json()).error).toBe('not_registered');
   });
   it('[AU-T10 상당] Cf 헤더만 있고 검증 경로 아님 → 401 (test 모드에선 x-test-identity만 인정)', async () => {
-    const { GET } = await import('@/app/api/me/route');
-    const res = await GET(
-      nx('/api/me', undefined, { headers: { 'Cf-Access-Authenticated-User-Email': ID.aMember } }),
-    );
+    const res = await probe(undefined, { headers: { 'Cf-Access-Authenticated-User-Email': ID.aMember } });
     expect(res.status).toBe(401);
   });
 });
@@ -576,8 +577,9 @@ describe('AU-33 같은 출처 — 다른 포트의 페이지가 대신 보내는
   it('[AU-T86] 출처 헤더가 하나도 없으면(스크립트·curl) 통과 · GET은 출처를 보지 않는다', async () => {
     expect((await put('스크립트', {})).status).toBe(200);
     expect(await guide()).toBe('스크립트');
-    const { GET } = await rule();
-    const res = await GET(nx('/api/division/rule', ID.aLead, { headers: { origin: 'http://test.local:11112', 'sec-fetch-site': 'same-site' } }));
+    // 규칙 GET은 지웠다(R2) — 같은 래퍼(handler)를 지나는 다른 GET으로 본다
+    const { GET } = await import('@/app/api/my/previous/route');
+    const res = await GET(nx('/api/my/previous', ID.aLead, { headers: { origin: 'http://test.local:11112', 'sec-fetch-site': 'same-site' } }));
     expect(res.status).toBe(200);
   });
 });
@@ -1113,16 +1115,15 @@ d('WS-19 주차 마감 예외 — 총괄이 정한다', () => {
   });
 
   it('[WS-T70b] 운영자도 정할 수 있다', async () => {
-    const { GET } = await route();
-    expect((await GET(nx('/api/schedule/deadline', ID.op))).status).toBe(200);
+    expect((await post(ID.op, { mode: 'preview', external: await externalIn(50) })).status).toBe(200);
   });
 
   it('[WS-T71] ★ 부서 쪽(담당자·부서원)은 404 — 한 부서가 전 부서의 마감을 움직이지 못한다', async () => {
     const external = await externalIn(50);
     for (const who of [ID.aLead, ID.bLead, ID.aMember]) {
       expect((await post(who, { mode: 'apply', external })).status, who).toBe(404);
-      const { GET } = await route();
-      expect((await GET(nx('/api/schedule/deadline', who))).status, who).toBe(404);
+      // 미리보기도 문 안쪽이다 — 무엇이 바뀔지조차 보여 주지 않는다
+      expect((await post(who, { mode: 'preview', external })).status, who).toBe(404);
     }
   });
 
@@ -1141,18 +1142,17 @@ d('WS-19 주차 마감 예외 — 총괄이 정한다', () => {
 
   // WS-19l · RU-58 — 「주차 일정」 카드 하나: 주차 줄마다 부서 마감과 (3단계를 쓰면) 단계 기한이 같이 있다
   type Week = { isoKey: string; deadline: string; stages: { unitDue: string; hqDue: string; unitDueKo: string } | null };
-  const weeks = async (who: string): Promise<Week[]> => {
-    const { GET } = await route();
-    const res = await GET(nx('/api/schedule/deadline', who));
-    expect(res.status).toBe(200);
-    return (await res.json()).weeks;
+  // GET /api/schedule/deadline은 지웠다(R2) — 「전사」 화면이 부르는 서버 함수를 그대로 본다. 시각은 화면과 같은 ISO 문자열로
+  const weeks = async (): Promise<Week[]> => {
+    const { deadlineStatus } = await import('@/server/slot-deadline');
+    return JSON.parse(JSON.stringify((await deadlineStatus()).weeks));
   };
   const gap = (a: string, b: string) => (new Date(b).getTime() - new Date(a).getTime()) / 60_000;
 
   it('[WS-T74] 3단계가 꺼져 있으면 줄에 단계 기한이 없다 — 아무도 쓰지 않는 기한을 그리지 않는다 (RU-52)', async () => {
     const { prisma } = await import('@/server/db');
     await prisma.orgRollupSetting.deleteMany({});
-    const ws = await weeks(ID.coord);
+    const ws = await weeks();
     expect(ws).toHaveLength(2);
     expect(ws.map((w) => w.stages)).toEqual([null, null]);
   });
@@ -1165,7 +1165,7 @@ d('WS-19 주차 마감 예외 — 총괄이 정한다', () => {
       update: { enabled: true, unitDueMinutes: 60, hqDueMinutes: 120 },
     });
     try {
-      const before = await weeks(ID.op);
+      const before = await weeks();
       for (const w of before) {
         expect(gap(w.deadline, w.stages!.unitDue), w.isoKey).toBe(60);
         expect(gap(w.deadline, w.stages!.hqDue), w.isoKey).toBe(120);
@@ -1177,7 +1177,7 @@ d('WS-19 주차 마감 예외 — 총괄이 정한다', () => {
       const applied = await post(ID.coord, { mode: 'apply', external: await externalIn(50) });
       expect(applied.status).toBe(200);
       const { plan } = await applied.json();
-      const moved = (await weeks(ID.coord)).find((w) => w.isoKey === plan.isoKey)!;
+      const moved = (await weeks()).find((w) => w.isoKey === plan.isoKey)!;
       expect(moved.deadline).toBe(plan.department);
       expect(gap(moved.deadline, moved.stages!.unitDue)).toBe(60);
       expect(gap(moved.deadline, moved.stages!.hqDue)).toBe(120);
@@ -1251,31 +1251,8 @@ d('WS-19 주차 마감 예외 — 총괄이 정한다', () => {
     }
   });
 
-  it('[PG-T80] ★ 옛 주소 /ops/monitor → /org — 보던 주차를 들고 간다. 못 여는 사람에게는 보내지 않고 예전처럼 404', async () => {
-    const { prisma } = await import('@/server/db');
-    const { default: MonitorRedirect } = await import('@/app/ops/monitor/page');
-    const go = async (who: string, sp: Record<string, string> = {}) => {
-      pageAs.who = who;
-      try {
-        await MonitorRedirect({ searchParams: Promise.resolve(sp) });
-        return 'rendered';
-      } catch (e) {
-        return String((e as { digest?: string }).digest);
-      }
-    };
-    await prisma.user.updateMany({ where: { email: { in: [ID.coord, ID.op, ID.aLead] } }, data: { mustChangePassword: false } });
-    try {
-      expect(await go(ID.coord, { isoKey: '2026-W40' })).toBe('NEXT_REDIRECT;replace;/org?isoKey=2026-W40;307;');
-      expect(await go(ID.op)).toBe('NEXT_REDIRECT;replace;/org;307;');
-      // 주차 꼴이 아닌 값은 넘기지 않는다 — 받은 글자를 그대로 주소에 붙이지 않는다
-      expect(await go(ID.coord, { isoKey: '2026-W40&edit=sections' })).toBe('NEXT_REDIRECT;replace;/org;307;');
-      expect(await go(ID.aLead, { isoKey: '2026-W40' })).toBe('NEXT_HTTP_ERROR_FALLBACK;404');
-      // 로그인 전이면 로그인으로 (다른 보호 페이지와 같다 — AU-22)
-      expect(await go('')).toBe('NEXT_REDIRECT;replace;/login;307;');
-    } finally {
-      await prisma.user.updateMany({ where: { email: { in: [ID.coord, ID.op, ID.aLead] } }, data: { mustChangePassword: true } });
-    }
-  });
+  // [PG-T80] 옛 주소 /ops/monitor → /org 보내기 — 폐지 2026-10-08 (R17). 보내기 페이지째 지웠다. 알림이 이 주소를 건 적이 없고,
+  // 「전사」로 가는 길은 상단 메뉴 하나다. 지운 것은 org-page.test(RU-T46)가 본다
 
   it('[PG-T83] 섹션 설정이 없으면 읽기만 — 기본 13개를 부서 이름으로 맞춰 보여 주고, 어느 섹션에도 안 닿는 집계 부서는 「섹션 밖」', async () => {
     const { prisma } = await import('@/server/db');

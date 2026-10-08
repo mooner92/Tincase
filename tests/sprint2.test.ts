@@ -217,8 +217,10 @@ d('template 교체 (API-40/41, ST-19)', () => {
 });
 
 d('rule 저장 (API-28/29)', () => {
-  it('lead 저장 → GET 반영 · member 404', async () => {
-    const { GET, PUT } = await import('@/app/api/division/rule/route');
+  // GET은 지웠다(2026-10-08, R2) — 설정 화면은 서버에서 그린다. 저장 결과는 DB로 본다
+  it('lead 저장 → 내 부서에 반영 · member 404', async () => {
+    const { PUT } = await import('@/app/api/division/rule/route');
+    const { prisma } = await import('@/server/db');
     const put = await PUT(
       nx('/api/division/rule', ID.lead, {
         method: 'PUT',
@@ -227,13 +229,19 @@ d('rule 저장 (API-28/29)', () => {
       }),
     );
     expect(put.status).toBe(200);
-    const get = await GET(nx('/api/division/rule', ID.lead));
-    const body = await get.json();
-    expect(body.ruleText).toBe('순서: m, l');
-    expect(body.guideText).toBe('한 줄 안내');
+    const saved = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
+    expect(saved.mergeRuleText).toBe('순서: m, l');
+    expect(saved.guideText).toBe('한 줄 안내');
 
-    const m = await GET(nx('/api/division/rule', ID.member));
+    const m = await PUT(
+      nx('/api/division/rule', ID.member, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ruleText: '부서원' }),
+      }),
+    );
     expect(m.status).toBe(404);
+    expect((await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } })).mergeRuleText).toBe('순서: m, l');
   });
   it('10KB 초과 → 422', async () => {
     const { PUT } = await import('@/app/api/division/rule/route');

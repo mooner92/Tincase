@@ -117,7 +117,6 @@ export default async function AuditPage({
         readAll={scope.readAll}
         {...(await rollupNav(scope))}
         viaCloudflare={scope.source === 'cloudflare'}
-        notifyEnabled={ps.scope.user.notifyEnabled}
       />
       <div className="mx-auto w-full max-w-[1120px] flex-1 px-5 pt-8 pb-8">
         {/* 제목은 다른 화면과 같은 크기 — 「60 건」 같은 큰 숫자가 제목 자리에 있으면 무슨 화면인지 한 번 더 읽어야 한다 */}

@@ -168,11 +168,6 @@ export function dayBeforeAt(deadline: Date, hhmm: string): Date {
   return dayOffsetAt(deadline, -1, hhmm);
 }
 
-/** NT-45 — 마감 **당일**의 어느 시각(KST). 「당일 아침 알림」이 나갈 순간을 구한다 */
-export function sameDayAt(deadline: Date, hhmm: string): Date {
-  return dayOffsetAt(deadline, 0, hhmm);
-}
-
 /** 마감 날짜에서 달력으로 `days`일 떨어진 날의 hh:mm (KST) — 뺄셈이 아니라 날짜로 센다 */
 function dayOffsetAt(deadline: Date, days: number, hhmm: string): Date {
   const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(hhmm);

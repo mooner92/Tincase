@@ -12,7 +12,6 @@ import { copyText } from '@/lib/clipboard';
 interface DivisionRow {
   id: string;
   slug: string;
-  shortSlug: string | null;
   nameKo: string;
   isActive: boolean;
   deadlineDow: number;
@@ -303,7 +302,6 @@ export function OpsClient() {
             <thead>
               <tr>
                 <th>부서</th>
-                <th>별칭</th>
                 <th>인원</th>
                 <th>양식</th>
                 <th>마감</th>
@@ -321,7 +319,6 @@ export function OpsClient() {
                       <span className={`font-medium ${d.isActive ? 'text-ink' : 'text-muted'}`}>{d.nameKo}</span>
                       {d.boardNote && <p className="mt-0.5 max-w-md text-xs leading-4 text-muted">{d.boardNote}</p>}
                     </td>
-                    <td className="font-mono text-xs whitespace-nowrap text-muted">{d.shortSlug ? `/${d.shortSlug}` : '—'}</td>
                     <td className="tabular-nums">{d.memberCount}</td>
                     <td>
                       {/*
@@ -422,7 +419,7 @@ export function OpsClient() {
               {/* PG-64 — 「없습니다」는 불러온 뒤 정말 없을 때만 */}
               {shown.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="py-6 text-center text-sm text-muted">
+                  <td colSpan={7} className="py-6 text-center text-sm text-muted">
                     {divisions
                       ? '이 분류에 해당하는 부서가 없습니다.'
                       : loadErr

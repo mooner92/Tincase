@@ -57,28 +57,16 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 
 ## 2. 공통 (member + lead)
 
-### `GET /api/me`
+### ~~`GET /api/me`~~ — 폐지 2026-10-08
 
-```jsonc
-// 200
-{
-  "user": { "id","name","divisionRole":"member|lead","isOperator":false },
-  "division": { "slug","nameKo","deadlineDow":2,"deadlineTime":"14:00" },
-  "slot": {
-    "isoKey":"2026-W33","label":"8월 2주차","year":2026,
-    "opensAt":"2026-08-10T00:00:00+09:00",
-    "deadlineAt":"2026-08-11T14:00:00+09:00",   // 이 부서의 유효 마감 (계산값)
-    "locked":false,"msUntilDeadline":81234000,
-    "nextOpensAt":"2026-08-17T00:00:00+09:00"
-  },
-  "mySubmission": { "id","version":2,"uploadedAt","originalName","byteSize" } | null
-}
-```
+신원·부서·현재 슬롯·본인 제출을 한 번에 주던 엔드포인트. **화면이 부른 적이 없어** 지웠다(기능 정리 R2) — 페이지는 서버에서
+`requirePageScope`·`getDivisionView`로 같은 것을 직접 읽는다. 시험이 「세션으로 신원이 풀리나」를 이것으로 봤는데,
+그 시험은 게이트(`requireScope`)를 직접 부르거나 `GET /api/my/previous`로 본다.
 
 | ID | 요구사항 |
 |---|---|
-| API-07 | 슬롯은 호출 시점 upsert 보장 (WS-11). `deadlineAt`은 부서 정책 계산값 |
-| API-08 | 응답에 타인 정보 없음. member 화면의 부서 현황은 `/api/division/status` 축소판을 따로 쓴다 |
+| ~~API-07~~ | ~~슬롯은 호출 시점 upsert 보장 (WS-11)~~ — 폐지 2026-10-08 (엔드포인트와 함께) |
+| ~~API-08~~ | ~~응답에 타인 정보 없음~~ — 폐지 2026-10-08 (엔드포인트와 함께). 「본인 것만」은 `GET /api/my/previous`가 같은 식으로 지킨다 |
 
 ### `POST /api/submissions` — 업로드
 
@@ -155,9 +143,9 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 | API-18 | 파일명 `{주차라벨}_{부서명}_주간업무.hwp` — 주차 주입 |
 | API-19 | 잠김 상태에서도 다운로드 가능 (다음 주 대비) |
 
-### `GET /api/my/history`
+### ~~`GET /api/my/history`~~ — 폐지 2026-10-08
 
-최근 26주 본인 제출 이력. 본인 것만 (API-08 원칙).
+최근 26주 본인 제출 이력. 화면(내 이력)은 서버에서 읽었고 이 API를 부른 적이 없다 — 지웠다(R2).
 
 ---
 
@@ -226,9 +214,9 @@ member 응답은 축소판: `members[].{user.name, status, uploadedAt}` 만 —
 
 ST-16. `?slot=` 지원, 0건 409, 스트리밍, 감사 로그.
 
-### `GET /api/division/slots`
+### ~~`GET /api/division/slots`~~ — 폐지 2026-10-08
 
-부서 관점 주차 목록 (최신 26개): `{isoKey, label, submitted, roster, locked}`.
+부서 관점 주차 목록. 수합 관리의 주차 고르기는 서버 함수(`divisionSlots`)를 직접 부르고 이 API를 부른 적이 없다 — 지웠다(R2).
 
 ### ~~`PUT /api/division/roster`~~ → **`PUT /api/ops/roster`로 이동 (v2.1)**
 
@@ -240,10 +228,11 @@ lead에게는 이 엔드포인트가 존재하지 않는다(404).
 | API-26 | `PUT /api/ops/roster` — operator만. `{updates:[{userId,onRoster?,sortOrder?}]}` |
 | API-27 | 부분 적용 없음(하나라도 무효면 전체 409) · 감사 로그 |
 
-### `GET·PUT /api/division/rule` — 병합 규칙 (Phase 2 활성)
+### `PUT /api/division/rule` — 병합 규칙 (Phase 2 활성)
+
+`GET`은 폐지 2026-10-08 — 부서 설정 화면은 서버에서 그리고 이 GET을 부르지 않았다(R2).
 
 ```jsonc
-// GET 200: { "ruleText": "...", "updatedAt": "..." }
 // PUT 요청: { "ruleText": "..." }
 // PUT 200:  { "ok": true, "parsed": {…} }        // 검증 결과 에코
 // PUT 422:  { "error": "invalid_rule", "problems": ["3행: 알 수 없는 지시어 …"] }
@@ -253,7 +242,7 @@ lead에게는 이 엔드포인트가 존재하지 않는다(404).
 |---|---|
 | API-28 | 저장 전 문법 검증 (S-08 §6). 절대 규칙과 충돌하는 지시는 저장 거부 |
 | API-29 | Phase 1에서는 GET/PUT 모두 동작하되(저장만), 병합에는 쓰이지 않음을 UI에 명시 |
-| HM-48 | `sort: "input"\|"date"`, `undated: "last"\|"first"` — 그 밖의 값은 422. GET도 같은 이름으로 돌려준다. 감사 로그에 바꾼 값이 남는다 |
+| HM-48 | `sort: "input"\|"date"`, `undated: "last"\|"first"` — 그 밖의 값은 422. 감사 로그에 바꾼 값이 남는다 (「GET도 같은 이름으로」는 GET과 함께 폐지 2026-10-08) |
 
 ### `POST /api/division/template` — 부서 양식 교체
 
@@ -297,9 +286,9 @@ lead에게는 이 엔드포인트가 존재하지 않는다(404).
 
 사용자 배정·역할(lead/coordinator)·활성화·onRoster·정렬. 시드 재적용(`sync-seed`) 포함.
 
-### `GET /api/overview` — coordinator·operator 전용 (Phase 3 UI, 계약만 예약)
+### ~~`GET /api/overview`~~ — 폐지 2026-10-08
 
-전 부서 × 현재 주차: `{division, submitted, roster, locked, mergedFile?}` 목록. 읽기 전용.
+계약만 예약해 두고 만들지 않은 엔드포인트(R21). 총괄의 전 부서 화면은 「전사」(`/org`, PG-49f)가 되었고 그 화면은 서버에서 읽는다.
 
 | ID | 요구사항 |
 |---|---|
@@ -322,6 +311,23 @@ v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노�
 
 업로드 5분당 10회/사용자 · zip 분당 3회 · preview 분당 30회 · 그 외 분당 120회.
 
+### 지운 엔드포인트 (2026-10-08 기능 정리)
+
+화면이 부르지 않는 경로는 지운다 — 남겨 두면 게이트를 하나 더 지켜야 하고, 아무도 쓰지 않으니 깨져도 모른다.
+같은 파일의 쓰기(`PUT`·`POST`·`DELETE`)는 남겼다.
+
+| 경로 | 무엇이었나 | 대신 |
+|---|---|---|
+| `GET /api/me` | 신원·슬롯·본인 제출 | 페이지가 서버에서 읽는다 |
+| `PUT /api/me/notify` | 본인 알림 켜고 끄기 (NT-21) | 운영자 인원 드로어의 알림 칸 (NT-22, `PUT /api/ops/roster`) |
+| `GET /api/my/history` | 본인 이력 26주 | 페이지가 서버에서 읽는다 |
+| `GET /api/division/slots` | 부서 주차 목록 | 서버 함수 `divisionSlots` |
+| `GET /api/division/rule` | 병합 설정 읽기 | 부서 설정 페이지가 서버에서 읽는다 |
+| `GET /api/schedule/deadline` | 이번 주·다음 주 마감 상태 (WS-19l) | 「전사」 화면이 `deadlineStatus()`를 직접 부른다 |
+
+남긴 것: `/api/rollup/*`의 GET(3단계 흐름을 다시 짜는 중이라 그 작업에서 정한다), `GET /api/health`, `POST /api/template/standard`
+(운영자가 화면 없이 쓴다). `GET /api/division/status`는 이 표에서 다루지 않는다 — 부서원에게 남의 제출 현황을 보이느냐(TACP-11)와 한 묶음이다.
+
 ---
 
 ## 6. 계약 테스트
@@ -335,7 +341,7 @@ v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노�
 | API-T05 | member가 `/api/division/status` → 200 축소판(링크·크기 없음) · zip/preview → 404 |
 | API-T06 | lead 현황에 미제출자 `missing` 포함, `onRoster=false`는 분모 제외 |
 | API-T07 | preview 응답의 rows가 픽스처 실측값과 일치 (`sample-filled-w2` → 실적 9행) |
-| API-T08 | coordinator가 PUT 계열 호출 → 404 · GET /api/overview → 200 |
+| API-T08 | coordinator가 PUT 계열 호출 → 404 (「GET /api/overview → 200」은 엔드포인트와 함께 폐지 2026-10-08) |
 | API-T09 | 전 엔드포인트 `no-store` · 시각 `+09:00` |
 | API-T10 | health 200/503 + 민감정보 없음 |
 | API-T11 | 규칙 PUT: 절대 규칙 위반 지시 → 422 `invalid_rule` (Phase 2) |

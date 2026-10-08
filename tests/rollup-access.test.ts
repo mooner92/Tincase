@@ -423,7 +423,8 @@ d('RU-50~58 단계 일정 · 스위치 · 본부장 승인', () => {
     // 페이지가 canRunOrgRollup만 보면 스위치를 건너뛴다 — 판정을 복사하지 않고 게이트를 부른다 (TACP-12).
     // 「전사」 화면은 orgPageView를 부르고, 그 안의 「취합 부분」(desk)이 이 게이트다 (PG-49f·51e)
     const src = (f: string) => readFileSync(path.resolve(__dirname, '..', f), 'utf8');
-    for (const f of ['src/app/org/page.tsx', 'src/app/ops/monitor/page.tsx']) {
+    // 옛 주소 /ops/monitor의 보내기 페이지는 지웠다(2026-10-08, R17) — 문은 「전사」 화면 하나다
+    for (const f of ['src/app/org/page.tsx']) {
       expect(src(f), f).toContain('orgPageView(');
       expect(src(f), f).not.toMatch(/canRunOrgRollup\(/);
     }

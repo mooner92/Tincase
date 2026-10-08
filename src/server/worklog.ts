@@ -281,7 +281,8 @@ export async function divisionStatus(divisionId: string, slotId: string): Promis
    */
   const notified = new Map<string, string>();
   // NT-31 — 「알림 받음」은 **마감 재촉 알림**만 센다. 승인 알림(NT-46)·병합 안내·3단계 알림까지 세면
-  // 그것을 받은 담당자가 「재촉받은 사람」으로 보인다 (2026-10-07 리뷰)
+  // 그것을 받은 담당자가 「재촉받은 사람」으로 보인다 (2026-10-07 리뷰).
+  // `deadline_day`(당일 아침, NT-45)는 2026-10-08에 걷었지만 지난 주차에는 그 기록이 있다 — 그 주를 열면 여전히 센다
   const logs = await prisma.notifyLog.findMany({
     where: { divisionId, weekSlotId: slotId, kind: { in: ['deadline_1d', 'deadline_day', 'deadline_1h', 'deadline_10m'] } },
   });

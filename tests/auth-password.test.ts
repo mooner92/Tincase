@@ -40,6 +40,24 @@ function nx(url: string, init?: RequestInit & { cookie?: string }) {
 const jsonReq = (url: string, body: unknown, cookie?: string) =>
   nx(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body), cookie });
 
+/**
+ * 쿠키 → 신원. 모든 API가 처음 지나는 게이트(`requireScope`)를 직접 부른다 — 200·401이 곧 그 게이트의 판정이다.
+ * 예전에는 `GET /api/me`로 봤는데, 화면이 부르지 않는 API라 지웠다(2026-10-08, R2).
+ */
+async function whoami(cookie?: string): Promise<{ status: number; name?: string }> {
+  const { requireScope, HttpError } = await import('@/server/authz');
+  const { AuthError } = await import('@/server/auth');
+  try {
+    const scope = await requireScope(new Headers(cookie ? { cookie } : {}));
+    return { status: 200, name: scope.user.name };
+  } catch (e) {
+    // 라우트 래퍼(handler)와 같은 대응 — 신원 없음·무효는 AuthError → 401, 그 밖의 판정은 HttpError의 상태
+    if (e instanceof AuthError) return { status: 401 };
+    if (e instanceof HttpError) return { status: e.status };
+    throw e;
+  }
+}
+
 /** Set-Cookie에서 세션 쿠키만 추출 */
 function sessionCookie(res: Response): string {
   const sc = res.headers.get('set-cookie') ?? '';
@@ -141,24 +159,17 @@ describe('[AU-21/23] 로그인', () => {
 });
 
 describe('[AU-21] 세션으로 신원 해석', () => {
-  it('세션 쿠키만으로 /api/me 200 · 쿠키 없으면 401', async () => {
+  it('세션 쿠키만으로 신원이 풀린다 · 쿠키 없으면 401', async () => {
     const login = await import('@/app/api/auth/login/route');
-    const me = await import('@/app/api/me/route');
     const res = await login.POST(jsonReq('/api/auth/login', { email: EMAIL, password: INITIAL }));
     const cookie = sessionCookie(res);
     expect(cookie).toContain('repman_session=');
 
-    const ok = await me.GET(nx('/api/me', { cookie }));
-    expect(ok.status).toBe(200);
-    expect((await ok.json()).user.name).toBe('가나다');
-
-    const anon = await me.GET(nx('/api/me'));
-    expect(anon.status).toBe(401);
+    expect(await whoami(cookie)).toEqual({ status: 200, name: '가나다' });
+    expect((await whoami()).status).toBe(401);
   });
   it('위조 토큰 → 401', async () => {
-    const me = await import('@/app/api/me/route');
-    const res = await me.GET(nx('/api/me', { cookie: 'repman_session=forged-token-value' }));
-    expect(res.status).toBe(401);
+    expect((await whoami('repman_session=forged-token-value')).status).toBe(401);
   });
   it('세션 TTL은 약 한 달 (재로그인 피로도 완화)', async () => {
     const { SESSION_TTL_MS } = await import('@/server/session');
@@ -188,7 +199,6 @@ describe('[AU-22/25] 비밀번호 변경', () => {
   it('변경 성공 → mustChangePassword 해제 · 기존 세션 무효화 · 새 쿠키 발급', async () => {
     const login = await import('@/app/api/auth/login/route');
     const pw = await import('@/app/api/auth/password/route');
-    const me = await import('@/app/api/me/route');
     const { prisma } = await import('@/server/db');
 
     // 세션 2개 (다른 기기 흉내)
@@ -206,8 +216,8 @@ describe('[AU-22/25] 비밀번호 변경', () => {
     expect(u.mustChangePassword).toBe(false);
 
     // 다른 기기 세션은 죽어야 한다 (AU-25)
-    expect((await me.GET(nx('/api/me', { cookie: c2 }))).status).toBe(401);
-    expect((await me.GET(nx('/api/me', { cookie: c1b }))).status).toBe(200);
+    expect((await whoami(c2)).status).toBe(401);
+    expect((await whoami(c1b)).status).toBe(200);
 
     // 새 비밀번호로 로그인되고 옛 비밀번호는 거부
     expect((await login.POST(jsonReq('/api/auth/login', { email: EMAIL, password: NEW }))).status).toBe(200);
@@ -252,7 +262,6 @@ describe('[AU-27] 운영자 비밀번호 초기화', () => {
     const { prisma } = await import('@/server/db');
     const ops = await import('@/app/api/ops/password-reset/route');
     const login = await import('@/app/api/auth/login/route');
-    const me = await import('@/app/api/me/route');
 
     const target = await prisma.user.findUniqueOrThrow({ where: { email: OTHER } });
     // 대상이 로그인해 둔 상태를 만든다
@@ -264,14 +273,14 @@ describe('[AU-27] 운영자 비밀번호 초기화', () => {
     );
     const pw1 = (await reset1.json()).password;
     const victimCookie = sessionCookie(await login.POST(jsonReq('/api/auth/login', { email: OTHER, password: pw1 })));
-    expect((await me.GET(nx('/api/me', { cookie: victimCookie }))).status).toBe(200);
+    expect((await whoami(victimCookie)).status).toBe(200);
 
     // 운영자가 다시 초기화 → 기존 세션 무효
     await ops.POST(
       jsonReq('/api/ops/password-reset', { userId: target.id },
         sessionCookie(await login.POST(jsonReq('/api/auth/login', { email: EMAIL, password: INITIAL })))),
     );
-    expect((await me.GET(nx('/api/me', { cookie: victimCookie }))).status).toBe(401);
+    expect((await whoami(victimCookie)).status).toBe(401);
   });
 
   it('잠긴 계정도 초기화로 풀린다 · 감사 로그 기록', async () => {
@@ -301,11 +310,10 @@ describe('로그아웃', () => {
   it('세션 파기 후 401', async () => {
     const login = await import('@/app/api/auth/login/route');
     const out = await import('@/app/api/auth/logout/route');
-    const me = await import('@/app/api/me/route');
     const cookie = sessionCookie(await login.POST(jsonReq('/api/auth/login', { email: EMAIL, password: INITIAL })));
-    expect((await me.GET(nx('/api/me', { cookie }))).status).toBe(200);
+    expect((await whoami(cookie)).status).toBe(200);
     await out.POST(nx('/api/auth/logout', { method: 'POST', cookie }));
-    expect((await me.GET(nx('/api/me', { cookie }))).status).toBe(401);
+    expect((await whoami(cookie)).status).toBe(401);
   });
 });
 

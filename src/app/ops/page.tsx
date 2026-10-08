@@ -28,7 +28,6 @@ export default async function OpsPage() {
         isOperator
         readAll
         viaCloudflare={ps.scope.source === 'cloudflare'}
-        notifyEnabled={ps.scope.user.notifyEnabled}
       />
       <main className="mx-auto w-full max-w-[1120px] flex-1 px-5 pt-8 pb-8">
         <div className="page-head">
@@ -36,16 +35,11 @@ export default async function OpsPage() {
             {/* 「테넌시 · 인원 배치」는 개발자 말이었다 — 이 화면에서 하는 일 그대로 (PG-55) */}
             <h1 className="page-title">부서 · 인원</h1>
           </div>
-          {/* 전사 화면으로 가는 길 — 없으면 만들어도 아무도 못 간다. 이름은 상단 메뉴와 같게 (PG-49f — 「전사」 한 화면).
-              「조직도」는 뺐다 — 원형 조직도 그래프는 걷어 냈다(2026-10-07, PG-50e) */}
-          <div className="flex shrink-0 gap-2">
-            <Link href="/org" className="btn-secondary btn-sm">
-              전사
-            </Link>
-            <Link href="/ops/audit" className="btn-secondary btn-sm">
-              감사 로그
-            </Link>
-          </div>
+          {/* [감사 로그]는 운영자가 감사 기록으로 가는 유일한 길이라 둔다. [전사]는 걷었다 — 상단 메뉴 `전사`와 같은 곳이다
+              (2026-10-08, R17) */}
+          <Link href="/ops/audit" className="btn-secondary btn-sm shrink-0">
+            감사 로그
+          </Link>
         </div>
         {/* PG-34는 v2.1에서 개정 — 운영자는 전체 열람 가능 (AU-15) */}
         <div className="mt-6">

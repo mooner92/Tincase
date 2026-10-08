@@ -1,22 +1,19 @@
 // /api/schedule/deadline — 주차 마감 예외 (WS-19 · TACP-20). 총괄·운영자 전용.
 //
-//   GET                          이번 주·다음 주 마감 상태 — 3단계를 쓰면 실·팀·본부 제출 기한도 (WS-19l · RU-58)
 //   POST {mode:'preview', …}     미리보기 — 쓰지 않는다
 //   POST {mode:'apply', …}       적용 — 서버가 다시 계산해서 쓴다
 //   DELETE ?isoKey=              해제 — 평소 마감으로
+//
+// GET(이번 주·다음 주 상태)은 지웠다(2026-10-08, R2) — 「전사」 화면이 서버에서 `deadlineStatus()`를 직접 부르고,
+// 이 GET을 부르는 화면이 없었다.
 //
 // 입력은 공지 원문(noticeText) 또는 대외 마감 직접 입력(external, `YYYY-MM-DDTHH:mm` KST).
 import { NextRequest } from 'next/server';
 import { requireScheduler, HttpError } from '@/server/authz';
 import { handler, json, rateLimit } from '@/server/http';
-import { applyDeadline, clearDeadline, deadlineStatus, planDeadline } from '@/server/slot-deadline';
+import { applyDeadline, clearDeadline, planDeadline } from '@/server/slot-deadline';
 
 export const dynamic = 'force-dynamic';
-
-export const GET = handler(async (req: NextRequest) => {
-  await requireScheduler(req.headers);
-  return json(await deadlineStatus());
-});
 
 export const POST = handler(async (req: NextRequest) => {
   const scope = await requireScheduler(req.headers);

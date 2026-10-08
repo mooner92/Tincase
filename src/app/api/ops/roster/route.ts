@@ -51,7 +51,7 @@ interface RosterUpdate {
   rosterNote?: string | null;
   /** NT-22 — 사내 메신저 사번. 없으면 알림이 가지 않는다 */
   employeeNo?: string | null;
-  /** NT-22 — 운영자도 남의 알림을 끌 수 있다. 본인은 프로필 메뉴에서 (NT-21) */
+  /** NT-22 — 알림을 끄는 유일한 자리다. 본인 스위치(NT-21)는 2026-10-08에 걷었다 — 끈 사람이 0명이었다 */
   notifyEnabled?: boolean;
   sortOrder?: number;
   divisionRole?: 'member' | 'lead' | 'head';

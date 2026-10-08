@@ -98,11 +98,8 @@ describe('PG-49f 「전사」 한 화면 · WS-19l 일정은 머리글 한 곳',
     }
     // 알림·병합 시각 표는 화면에서 걷었다 — 놓치는 알림은 서버 경고(plan.warnings)가 말한다
     expect(card).not.toContain('plan.schedule');
-    // 옛 [현황] 주소는 보내기만 한다 — 화면을 따로 그리지 않는다
-    const monitor = src('src/app/ops/monitor/page.tsx');
-    expect(monitor).not.toMatch(/<(WeekSchedule|AppHeader|OrgBoard)\b/);
-    expect(monitor).toContain('redirect(');
-    expect(monitor).toContain('orgPageView(ps.scope)');
+    // 옛 [현황] 주소(/ops/monitor)는 보내기 페이지까지 지웠다(2026-10-08, R17) — 「전사」로 가는 길은 상단 메뉴 하나다
+    expect(existsSync(path.join(root, 'src/app/ops/monitor'))).toBe(false);
   });
 
   it('[PG-T78f] 머리글 첫 그림 — 주차마다 한 줄, 예외 주차는 문구와 [평소대로], 버튼 하나. 입력칸은 누르기 전에는 없다', () => {

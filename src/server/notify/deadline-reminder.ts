@@ -1,9 +1,12 @@
-// NT-10~14 · NT-41 · NT-45 — 마감 전 미제출자 알림. **단계마다 이유가 다르다.**
+// NT-10~14 · NT-41 · NT-42 — 마감 전 미제출자 알림. **단계마다 이유가 다르다.**
 //
 //   마감 전날 11:45  «내일이 마감이에요»   — 준비할 시간을 준다     (NT-41)
-//   마감 당일 09:00  «오늘 마감이에요»     — 그날 일정에 끼워 넣게  (NT-45)
 //   마감 1시간 전    «아직 안 냈어요»      — 마지막으로 손쓸 시점   (NT-10)
 //   마감 10분 전     «10분 뒤 마감입니다»  — 최후. 지금 아니면 못 낸다 (NT-42)
+//
+// 당일 09:00 «오늘 마감이에요»(NT-45)는 2026-10-08에 걷었다. 같은 사람에게 한 주에 네 번이었고, 실측으로 그 단계가
+// 따로 잡은 사람이 드물었다(1주 9명 — 전날 44명·1시간 전 25명은 5~6주 내내 돌았다). 10분 전은 남긴다 — 마감 직전에
+// 실제로 사람을 잡았다(사용자 확인). 옛 `NotifyLog.kind = 'deadline_day'` 행은 지우지 않는다 — 지난 주의 기록이다.
 //
 // **왜 1시간 전인가.** 그때가 아직 손쓸 수 있는 마지막 시점이다. 마감 후 독촉은 늦었다는
 // 통보일 뿐이다. AI홍보전략실 기준 목 14:00 마감이니 **목 13:00**에 나간다.
@@ -21,7 +24,7 @@ import { logger } from '../logger';
 import { env } from '../env';
 import { sendAlert, messengerStatus } from '../messenger';
 import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
-import { dayBeforeAt, formatDeadlineKo, sameDayAt, slotKind } from '@/lib/week';
+import { dayBeforeAt, formatDeadlineKo, slotKind } from '@/lib/week';
 
 /** 마감 몇 분 전에 보낼 것인가 */
 const LEAD_MINUTES = 60;
@@ -35,15 +38,10 @@ export const LAST_CALL_MINUTES = 10;
 export const LAST_CALL_WINDOW = 3;
 /** NT-41 — 마감 전날 이 시각(KST)에. 점심으로 자리를 뜨기 직전이라 아무것도 끊지 않는다 */
 const DAY_BEFORE_TIME = '11:45';
-/**
- * NT-45 — 마감 당일 이 시각(KST). 출근 직후라 번쩍여도 하던 일을 끊지 않는다.
- * 전날 알림을 놓친 주(연휴로 마감이 전날 오후에 당겨진 주 — WS-18)의 안전망이기도 하다
- */
-const MORNING_TIME = '09:00';
 /** 창을 스케줄러 주기보다 넓게 잡는다 — 반드시 한 번은 이 창을 지난다 */
 const WINDOW_MINUTES = 12;
 
-export type ReminderKind = 'deadline_1d' | 'deadline_day' | 'deadline_1h' | 'deadline_10m';
+export type ReminderKind = 'deadline_1d' | 'deadline_1h' | 'deadline_10m';
 
 /**
  * 단계 표. **시각 계산을 한곳에 모은다** — 예전에는 «1시간 전»이 조건문 안에 숫자로
@@ -60,17 +58,8 @@ const STAGES: {
   kind: ReminderKind;
   at: (deadline: Date) => Date;
   window?: number;
-  /** 이 마감에 이 단계가 의미가 있나. 없으면 아예 보내지 않는다 */
-  applies?: (deadline: Date) => boolean;
 }[] = [
   { kind: 'deadline_1d', at: (d) => dayBeforeAt(d, DAY_BEFORE_TIME) },
-  {
-    kind: 'deadline_day',
-    at: (d) => sameDayAt(d, MORNING_TIME),
-    // NT-45 — 09:00이 1시간 전 알림보다 늦거나 같으면(마감 10:00 이전) 보내지 않는다.
-    // 같은 날 연달아 두 번 받는 것은 소음이다
-    applies: (d) => sameDayAt(d, MORNING_TIME).getTime() < d.getTime() - LEAD_MINUTES * 60_000,
-  },
   { kind: 'deadline_1h', at: (d) => new Date(d.getTime() - LEAD_MINUTES * 60_000) },
   {
     kind: 'deadline_10m',
@@ -84,12 +73,11 @@ const STAGES: {
  * 단계 표(STAGES)를 그대로 읽으므로, 미리보기와 실제 발송이 갈라질 수 없다.
  */
 export function reminderTimes(deadline: Date): { kind: ReminderKind; at: Date }[] {
-  return STAGES.filter((s) => !s.applies || s.applies(deadline)).map((s) => ({ kind: s.kind, at: s.at(deadline) }));
+  return STAGES.map((s) => ({ kind: s.kind, at: s.at(deadline) }));
 }
 
 export const REMINDER_LABEL: Record<ReminderKind, string> = {
   deadline_1d: '하루 전 알림',
-  deadline_day: '당일 아침 알림',
   deadline_1h: '1시간 전 알림',
   deadline_10m: '최후 알림 (10분 전)',
 };
@@ -151,23 +139,6 @@ function buildMessage(
   }
 
   /*
-   * NT-45 — **당일 아침.** 전날 알림처럼 독촉이 아니라 일정 알림이다. 「아직 안 냈어요」는
-   * 1시간 전의 몫이다. 마감 시각만 분명히 적는다 — 아침에 그것 하나면 오후 일정에 끼운다.
-   */
-  if (kind === 'deadline_day') {
-    return {
-      subject: `[Tincase] ${slotLabel} ${종류} 업무일지 오늘 마감이에요`,
-      contents: [
-        `[${user.employeeNo}]${user.name}님 업무일지 마감이 오늘이에요.`,
-        '',
-        `${formatDeadlineKo(deadline)}까지 Tincase에서 제출해주세요.`,
-        월간줄,
-      ]
-        .filter((l) => l !== '')
-        .join('\n'),
-    };
-  }
-  /*
    * NT-42 — **최후 알림.** 같은 사람에게 가는 세 번째다(전날 11:45 · 1시간 전 · 지금).
    * 같은 말을 세 번 하면 세 번째는 안 읽힌다. 그래서 이것만 다르게 만든다:
    *
@@ -220,7 +191,6 @@ function buildMessage(
 export function dueStages(now: Date, deadline: Date): ReminderKind[] {
   const out: ReminderKind[] = [];
   for (const stage of STAGES) {
-    if (stage.applies && !stage.applies(deadline)) continue;
     const passed = (now.getTime() - stage.at(deadline).getTime()) / 60_000;
     if (passed >= 0 && passed <= (stage.window ?? WINDOW_MINUTES)) out.push(stage.kind);
   }

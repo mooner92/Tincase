@@ -4,7 +4,6 @@ import { getPageScope, getDivisionView } from '@/server/page-scope';
 import { HttpError, rollupNav } from '@/server/authz';
 import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
-import { ForeignDivisionBanner } from '@/components/ForeignDivisionBanner';
 import { AppFooter } from '@/components/AppFooter';
 
 export const dynamic = 'force-dynamic';
@@ -45,13 +44,11 @@ export default async function DivisionLayout({
         readAll={view.scope.readAll}
         {...nav}
         viaCloudflare={view.scope.source === 'cloudflare'}
-        notifyEnabled={view.scope.user.notifyEnabled}
         foreign={!view.isOwn}
+        // [내 부서로]의 행선지 — 읽을 대상이 아니라 「돌아갈 곳」이라 신원의 부서다 (TACP-7의 읽기 해석과 무관)
+        ownSlug={view.scope.division.slug}
       />
       <div className="mx-auto w-full max-w-[1120px] flex-1 px-5 pb-8">
-        {!view.isOwn && (
-          <ForeignDivisionBanner divisionName={view.division.nameKo} ownSlug={view.scope.division.slug} />
-        )}
         {children}
       </div>
       <AppFooter />
