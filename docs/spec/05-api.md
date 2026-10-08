@@ -140,7 +140,7 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 
 | ID | 요구사항 |
 |---|---|
-| API-58 | **(뒤로 — 2026-10-08 채택, 구현은 `feat/auto-flow`의 같은 GET 수정과 함께)** `GET` 응답의 `review`(승인자 이름·바뀐 줄)와 `canApprove`는 lead·head(내 부서)·readAll에게만 담는다. TACP-17이 작성자를 보내지 않는 것과 같은 방식이다. 응답이 줄어드는 쪽이라 TACP 표는 고치지 않는다. 그때까지는 부서원 홈의 읽기 전용 드로어(`variant="view"`, CP-114)가 화면에서 그리지 않는다. 시험 API-T16 |
+| API-58 | **(2026-10-08 채택 · `feat/auto-flow` 합친 뒤 구현)** `GET` 응답의 `review`(승인자 이름·바뀐 줄)는 lead·head(내 부서)·readAll에게만 담는다 — 그 밖에는 `null`. TACP-17이 작성자를 보내지 않는 것과 같은 판정(`canSeeAuthors`)이다. `canApprove`는 처음부터 그 부서의 head에게만 참이다. 같은 이유로 3단계 「위로」 상태(`GET /api/rollup/report?level=unit`)의 `sent.by`(승인한 부서장·비상구로 올린 담당자의 이름)도 행방을 보는 사람(`canSeeHandoff` — 내 부서 lead·head)에게만 담고 member에게는 `null`이다(상태·시각은 그대로, TACP-21 「제출 상태 보기」). 응답이 줄어드는 쪽이라 TACP 표는 고치지 않는다. 부서원 홈의 읽기 전용 드로어(`variant="view"`, CP-114)는 받은 것과 상관없이 승인 띠를 그리지 않는다. 시험 API-T16 |
 
 ### `GET /api/template` — 부서 양식 다운로드
 
@@ -384,4 +384,5 @@ v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노�
 | API-T13 | health — 활성 부서의 양식 파일이 없으면 `checks.template` fail · 503, 응답에 부서명 없음 · `warnings` 배열은 늘 있다 |
 | API-T14 | 병합 재실행 — 고친 병합본이면 409 `edited` + `detail.edits`, `overwriteEdits: true`면 실행 (API-55, HM-T136) |
 | API-T15 | 제출물 열람 — 빈 번호 줄은 `rows`에 없고 머리행은 남는다 · `rowsByTable`은 그대로 (API-57) |
+| API-T16 | 병합본 보기 — member는 `review`가 `null`(승인자 이름이 응답에 없다)·`canApprove` 거짓, lead는 `review`를 받는다 · 「위로」 상태의 `sent.by`는 member에게 `null`, lead에게는 이름 (API-58) |
 | API-T17 | 규칙 PUT — `categories`만 저장 · 옛 키(`ruleText`·`guideText`·`emptyWords`·`sort` …)는 열을 바꾸지 않는다 · `categories`가 없거나 500B 초과면 422 · member 404 · 쓰기는 신원의 부서 (API-59, `tests/sprint2.test.ts`) |

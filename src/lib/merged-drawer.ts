@@ -24,7 +24,7 @@ export function drawerControls(
   canEdit: boolean,
   data: { review?: DrawerReviewLike | null; canApprove?: boolean } | null,
 ): DrawerControls {
-  // 서버가 `canApprove=true`를 보내도(API-58 전까지는 보낸다) view에서는 그리지 않는다 — 판정 기준은 변형이다
+  // 서버가 `canApprove=true`·`review`를 보내도(부서장·담당자에게는 보낸다 — API-58) view에서는 그리지 않는다 — 판정 기준은 변형이다
   if (variant === 'view') return { edit: false, reviewBand: false, approve: false };
   return {
     edit: canEdit,

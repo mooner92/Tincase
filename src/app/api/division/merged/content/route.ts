@@ -108,8 +108,9 @@ export const GET = handler(async (req: NextRequest) => {
     // HM-47 — 지금 보는 **판**. 저장·승인할 때 그대로 돌려보낸다 — 그 사이 바뀌었으면 409 (requireViewedVersion)
     runId: run.id,
     sha256: sha256(bytes),
-    // HM-47 — 승인 상태와 [승인] 버튼. 버튼은 이 부서의 head에게만 (TACP-16)
-    review: await latestReview(division.id, slot.id),
+    // HM-47 — 승인 상태와 [승인] 버튼. 버튼은 이 부서의 head에게만 (TACP-16).
+    // API-58 — 승인자 이름·바뀐 줄은 작성자(TACP-17)와 같은 사람에게만 담는다. 부서원 홈의 읽기 전용 드로어는 어차피 그리지 않는다
+    review: canSeeAuthors ? await latestReview(division.id, slot.id) : null,
     canApprove: division.id === scope.division.id && isReviewer(scope),
     // RU-80 — 3단계에서 승인이 곧 제출이면 받는 곳(「기획경영본부」·「총괄」). 부서장의 [승인] 옆 설명과, 승인 뒤 담당자가 고칠 때의 한 줄이 이것을 쓴다
     handoffTo: await handoffHint(division.id),

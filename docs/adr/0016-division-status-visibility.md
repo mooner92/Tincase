@@ -46,3 +46,5 @@
 - **API-58** — `GET /api/division/merged/content`의 `review`(승인자 이름)·`canApprove`를 관리자에게만 담는 일. 승인자 이름은 이번 변경 전에도
   보관함에서 보였으므로 이 ADR이 새로 만드는 문제가 아니다. `feat/auto-flow`가 같은 GET을 고치는 중이라 그 커밋과 함께 넣는다.
   그때까지는 홈의 읽기 전용 드로어가 승인 띠를 그리지 않는다.
+  → **2026-10-08 합친 뒤 구현**: `review`는 작성자와 같은 사람(lead·head·readAll)에게만, 같은 이름이 들어 있던 3단계 「위로」 상태의
+  `sent.by`도 member에게는 `null`(05 API-58 · 시험 API-T16).

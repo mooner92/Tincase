@@ -151,6 +151,16 @@ d('HM-47 부서장 승인', () => {
     expect(view.canApprove).toBe(false); // 담당자에게는 [승인]이 없다
   });
 
+  it('[API-T16] ★ API-58 — 승인자 이름·바뀐 줄은 member에게 보내지 않는다 (작성자 TACP-17과 같은 판정) · lead·head는 그대로', async () => {
+    const { GET } = await import('@/app/api/division/merged/content/route');
+    const get = async (who: string) => (await GET(nx(`/api/division/merged/content?isoKey=${isoKey}`, who))).json();
+    const member = await get(ID.member);
+    expect([member.review, member.canApprove, member.canSeeAuthors]).toEqual([null, false, false]);
+    expect(JSON.stringify(member)).not.toContain('r-head'); // 응답 어디에도 승인자 이름이 없다
+    expect((await get(ID.lead)).review).toMatchObject({ by: 'r-head 실장' });
+    expect(await get(ID.head)).toMatchObject({ review: { by: 'r-head 실장' }, canApprove: true });
+  });
+
   it('[HM-T111] ★ [고칠 것 없음 · 승인]은 head만 — lead·member 404, 다른 부서 head는 자기 부서만', async () => {
     const { POST } = await import('@/app/api/division/merged/approve/route');
     const v = await view(ID.head, isoKey);

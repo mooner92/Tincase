@@ -33,8 +33,11 @@ export const GET = handler(async (req: NextRequest) => {
     return json({ state: { level: 'hq', target: '총괄', dueKo: stageCells(t.anchor, t).hqDueKo, hqState: board.state } });
   }
   // 내 부서의 상태만 — 대상은 신원의 부서다 (TACP-6·7). 행방(시각)은 lead·head에게만 (TACP-21 v1.7 · RU-T122)
-  const view = await unitHandoffView(scope.division, slot, { trail: canSeeHandoff(scope), canEscape: canUseHandoffEscape(scope) });
-  return json({ state: view && { level: 'unit', ...view } });
+  const trail = canSeeHandoff(scope);
+  const view = await unitHandoffView(scope.division, slot, { trail, canEscape: canUseHandoffEscape(scope) });
+  // API-58 — 승인한 부서장·비상구로 올린 담당자의 이름은 행방을 보는 사람(lead·head)에게만. member는 상태·시각만 (TACP-21 「제출 상태 보기」)
+  const sent = view?.sent && (trail ? view.sent : { ...view.sent, by: null });
+  return json({ state: view && { level: 'unit', ...view, sent } });
 });
 
 const body = z.object({ level: z.enum(['unit', 'hq']), isoKey: z.string().optional(), withoutApproval: z.literal(true).optional() });

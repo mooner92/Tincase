@@ -18,6 +18,8 @@
   — `prisma db push`. 주소: `DELETE /api/rollup/report`는 누구에게나 404, `POST /api/rollup/report`는 비상구 본문(`withoutApproval: true`)만,
   `POST /api/rollup/hq`·`/org`는 실패 때 [다시 시도]만(입력을 고르지 못한다), `POST /api/rollup/hq/approve`는 화면이 본 판(`runId`·`sha256`)에만(다르면 409)
 - 시험: 양식 픽스처가 있는 체크아웃에서 RU-T23~76이 자동 진행과 함께 처음 돌았다 — RU-T71(본부장이 있는 본부의 자기 몫은 그 head의 승인으로 올린다)을 고쳤다
+- 합친 뒤 검증: 부서원 홈 작업이 「auto-flow와 함께」로 미뤄 둔 API-58을 넣었다 — 병합본 보기의 `review`(승인자 이름·바뀐 줄)와
+  「위로」 상태의 `sent.by`(승인한 부서장·비상구로 올린 담당자)를 member에게 보내지 않는다(응답만 줄어든다, API-T16)
 
 ## 미출시 — 부서원 홈 하나 (2026-10-08, `feat/member-home`)
 

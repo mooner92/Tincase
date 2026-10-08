@@ -948,6 +948,9 @@ describe('RU-72 스케줄러 없이 끝까지 · RU-T130 메신저 꺼짐', () =
     const member = (await (await report.GET(nx(`/api/rollup/report?level=unit&isoKey=${isoKey}`, ID.u1Member))).json()).state;
     expect(member.trail).toBeNull();
     expect(member.escape).toBeNull();
+    // [API-T16] API-58 — 승인한 부서장의 이름은 lead·head에게만. member는 상태·시각만 받는다
+    expect(lead.sent.by).toMatch(/승인$/);
+    expect([member.state, member.sent.atKst, member.sent.by]).toEqual([lead.state, lead.sent.atKst, null]);
   });
 
   it('[RU-T130] 메신저가 꺼진 동안 흐름은 끝까지 갔고, 알림 기록은 하나도 없다', async () => {
