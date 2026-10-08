@@ -1,8 +1,11 @@
-// RU-45~47 — 운영회의 시연 서버. 시드의 **계획**(어느 주를 어디까지, 몇 시에)과 경로 경계, 화면 맨 위의 띠.
+// RU-45~47 — 운영회의 시연(테스트 서버 11112의 시연 모드). 시드의 **계획**(어느 주를 어디까지, 몇 시에)과 경로 경계,
+// 화면 맨 위의 띠, 그리고 11112 하나로 평소·시연을 오가는 compose 스위치.
 //
 // 시드 자체는 DB·양식 hwp가 있어야 돌아서 여기서 돌리지 않는다(docs/DEMO.md의 절차로 확인). 대신 시드가 무엇을 할지
 // 정하는 순수 함수를 고정한다 — 강당에서 틀어지는 것은 대개 「새벽 3시 제출」·「병합이 제출보다 먼저」·「실명 DB에 시드」다.
 import { describe, expect, it, vi } from 'vitest';
+import path from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
   DEMO_ROOT,
@@ -88,7 +91,7 @@ describe('[RU-T80] 주차·시각 읽기', () => {
 
 describe('[RU-T81] ★ 경로 — 시연 디렉터리나 임시 디렉터리 밖에는 시드하지 않는다', () => {
   const tmp = '/tmp';
-  it('시연 서버 볼륨 · 임시 디렉터리는 받는다', () => {
+  it('시연 데이터 볼륨 · 임시 디렉터리는 받는다', () => {
     expect(pathRefusal(`${DEMO_ROOT}/db/worklog.db`, DEMO_ROOT, tmp)).toBeNull();
     expect(pathRefusal('/tmp/demo-test/db/worklog.db', '/tmp/demo-test', tmp)).toBeNull();
   });
@@ -225,14 +228,74 @@ describe('[RU-T84] 화면 맨 위의 띠 (RU-43 · RU-47)', () => {
     expect(await banner(undefined)).toBe('');
     expect(await banner('')).toBe('');
   });
-  it('시연 서버 — 「지어낸 것」을 알린다. 경고색이 아니고 「테스트」라고 하지 않는다', async () => {
+  it('시연 — 「지어낸 것」을 알린다. 경고색이 아니고 「테스트」라고 하지 않는다', async () => {
     const html = await banner('demo');
-    expect(html).toContain('시연 서버');
+    expect(html).toContain('시연 —');
+    expect(html).not.toContain('시연 서버'); // 따로 된 시연 서버는 없다 — 11112의 시연 모드다(2026-10-08)
     expect(html).toContain('지어낸 것');
     expect(html).not.toContain('테스트');
     expect(html).not.toContain('bg-warning');
   });
   it('테스트 서버는 그대로', async () => {
     expect(await banner('test')).toContain('테스트 서버입니다');
+  });
+});
+
+describe('[RU-T85] ★ 11112 하나 — 스위치 하나가 저장소·띠·쿠키를 함께 바꾼다 (2026-10-08 「11113은 쓰지마」)', () => {
+  const ROOT = path.resolve(__dirname, '..');
+  // 주석은 뺀다 — 설명에 옛 포트·명령이 나와도 설정은 아니다
+  const COMPOSE = readFileSync(path.join(ROOT, 'docker-compose.test.yml'), 'utf8')
+    .split('\n')
+    .filter((l) => !/^\s*#/.test(l))
+    .join('\n');
+
+  /** docker compose의 `${VAR:-기본}` 치환만 흉내 낸다 — 이 파일은 그것만 쓴다(아래 첫 시험이 지킨다). 다른 변수는 기본값 */
+  function render(mode: string | undefined) {
+    const text = COMPOSE.replace(/\$\{(\w+):-([^}]*)\}/g, (_m, name: string, dflt: string) =>
+      name === 'TINCASE_TEST_MODE' && mode ? mode : dflt,
+    );
+    const one = (re: RegExp) => {
+      const m = [...text.matchAll(re)];
+      expect(m, String(re)).toHaveLength(1);
+      return m[0][1];
+    };
+    return {
+      volume: one(/^\s+- (\S+):\/data\s*(?:#.*)?$/gm),
+      env: one(/^\s+TINCASE_ENV: (\S+)/gm),
+      cookie: one(/^\s+SESSION_COOKIE_NAME: (\S+)/gm),
+      ports: [...text.matchAll(/^\s+- "([\d.]+:\d+:\d+)"/gm)].map((m) => m[1]),
+    };
+  }
+
+  it('변수는 TINCASE_TEST_MODE 하나뿐 — 저장소와 띠를 따로 고를 길이 없다(실명 DB 위에 「지어낸 것」 띠)', () => {
+    const vars = new Set([...COMPOSE.matchAll(/\$\{([^}]*)\}/g)].map((m) => m[1]));
+    expect([...vars]).toEqual(['TINCASE_TEST_MODE:-test']);
+  });
+
+  it('평소(변수 없음·빈 값) — 테스트 데이터 · 테스트 띠 · 테스트 쿠키', () => {
+    for (const mode of [undefined, '']) {
+      expect(render(mode)).toEqual({
+        volume: '/data/worklog-test',
+        env: 'test',
+        cookie: 'repman_test_session',
+        ports: ['0.0.0.0:11112:3000'],
+      });
+    }
+  });
+
+  it('시연 모드 — 같은 포트, 시드가 만드는 저장소(DEMO_ROOT), 시연 띠, 쿠키는 따로', () => {
+    expect(render('demo')).toEqual({
+      volume: DEMO_ROOT,
+      env: 'demo',
+      cookie: 'repman_demo_session',
+      ports: ['0.0.0.0:11112:3000'],
+    });
+    // 평소 저장소(운영 사본)는 시드가 받지 않는 곳이다 — 둘이 겹치면 시드 거절이 무의미해진다
+    expect(pathRefusal(`${render(undefined).volume}/db/worklog.db`, render(undefined).volume, '/tmp')).not.toBeNull();
+  });
+
+  it('시연용 compose·포트가 따로 없다', () => {
+    expect(existsSync(path.join(ROOT, 'docker-compose.demo.yml'))).toBe(false);
+    expect(COMPOSE).not.toMatch(/11113/);
   });
 });

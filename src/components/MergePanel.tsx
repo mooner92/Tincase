@@ -211,7 +211,8 @@ export function MergePanel({
           )}
         </div>
         {done ? (
-          <span className="chip chip-ok">
+          // CP-104 — 사용 안내의 「준비됨」 단계(마감 뒤 저절로 합쳐진다)가 이 칩을 가리킨다
+          <span data-guide="merge-ready" className="chip chip-ok">
             <span aria-hidden className="dot" />
             준비됨{state.finishedAtKst && ` ${state.finishedAtKst}`}
           </span>

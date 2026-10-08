@@ -266,16 +266,15 @@ body {
   /*
    * CP-101 — 사용 안내 무대. 카메라는 그림을 얹은 판(.guide-layer)을 옮기고 키운다.
    * 600ms ease-out — 「어디로 가는지」를 눈이 따라갈 만큼만. 줄이기를 원하는 사람에게는 움직이지 않는다.
-   * 판은 그림 밖을 잘라 낸다 — 어둡게 하는 그림자가 그림 아래 빈 곳(BOTTOM_SLACK)까지 칠하지 않게.
    *
    * 겹쳐 바뀌는 시간: 같은 화면 320ms(카메라와 함께 흐른다) · 다른 화면 200ms(오래 겹치면 두 화면이 한 장에 보인다) ·
    * 여러 장을 건너뛸 때(목차·번호 이동)는 겹치지 않고 바로 바꾼다 — 건너뛰는 동안의 화면은 볼 이유가 없다.
+   * 판은 그림 밖을 자르지 않는다 — 어둡게 덮는 그늘(.coach-dim)이 그림 아래 빈 곳까지 무대 전체를 덮어야 한다(무대가 자른다).
    */
   .guide-layer {
     position: absolute;
     left: 0;
     top: 0;
-    overflow: hidden;
     transform-origin: 0 0;
     transition:
       transform 600ms cubic-bezier(0.22, 1, 0.36, 1),
@@ -289,73 +288,327 @@ body {
   .guide-layer[data-swap='cut'] {
     transition: none;
   }
+
   /*
-   * 스포트라이트는 두 겹이다 (2026-10-08 검토):
-   *   .guide-frame  카메라가 담는 곳 **밖**만 어둡게 — 누를 버튼의 앞뒤(표·안내 문구)는 밝게 남긴다.
-   *                 예전에는 버튼 하나만 밝고 나머지가 다 어두워, 「지난번에 낸 것」 목록처럼 버튼이 무엇을 할지 알려 주는
-   *                 곳까지 회색이 됐다. 발표 0.62 · 혼자 보기·인쇄 0.45 (--frame-dim)
-   *   .guide-spot   누를 곳의 테두리만 — 흰(canvas) 3px 틈 + 초록(brand-tint) 5px. 어두운 화면에서도 밝은 화면에서도 보인다
-   * 판과 같이 움직이므로 굵기는 배율(--cam-scale)로 나눠 화면에서 늘 같게 둔다.
+   * 2026-10-08 — **게임 튜토리얼식 코치 마크** (사용자: 「누를 버튼만 빼고 검은 필터를 씌우고, 옆에 팝업 말풍선으로」).
+   *   .coach-dim     누를 곳(구멍)만 남기고 무대 전체를 검정으로 덮는 그늘(--coach-dim: 발표 78% · 혼자 보기 70%).
+   *                  구멍 자체가 그늘을 드리우는 상자다 — 판과 같이 움직이므로 카메라가 옮겨 가는 동안에도 구멍이
+   *                  버튼에서 어긋나지 않는다. 판 안에서는 cqw가 배율만큼 커 보이므로 둥글기·여백은 배율(--cam-scale)로 나눈다
+   *   .coach-ring    구멍 둘레의 흰 실선 + 2초마다 밖으로 퍼지며 사라지는 흰 고리 — 「여기」를 말한다
+   *   .coach-hand    누르라는 손 — 버튼 모서리를 세 번 두드리고(손끝에 흰 물결) 멈춘다
+   *   .coach-bubble  말풍선 「이름: 한 문장」 + 꼬리말 「버튼을 눌러 계속」 + [다음]. 흰 바탕 · 검은 글자 —
+   *                  어두운 그늘 위에서 가장 먼저 눈이 가는 면이다
+   *   .coach-press   눌린 모양 — 구멍을 누른 자리(키로 넘기면 손끝)에 흰 물결, 구멍이 살짝 들어간다(data-press)
+   * 고리·손·말풍선은 무대 좌표에 놓고 카메라가 도착한 뒤(--coach-delay) 나타난다 — 움직이는 동안 같이 미끄러지면
+   * 눈이 그것을 쫓느라 화면을 못 본다. 어두운 곳을 누르면(PG-T90) 셋이 처음부터 다시 움직인다.
+   * 글자는 무대 폭 기준(cqw) × 말풍선 배율(--k) — 1920px 무대에서 이름 40px · 문장 31px · 꼬리말 21px. 숫자는 coach.ts BUBBLE과 같다.
    */
-  .guide-frame {
-    position: absolute;
-    pointer-events: none;
-    border-radius: calc(12px / var(--cam-scale, 1));
-    box-shadow: 0 0 0 calc(4000px / var(--cam-scale, 1)) rgb(0 0 0 / var(--frame-dim, 0.45));
-  }
-  /*
-   * 테두리는 카메라가 **도착한 뒤에** 나타난다 — 260ms에 걸쳐 1.06배에서 제자리로(420ms 기다린 뒤).
-   * 움직이는 동안 테두리가 같이 미끄러지면 눈이 테두리를 쫓느라 화면을 못 본다. 떠나는 판의 테두리는 120ms에 사라진다.
-   */
-  .guide-spot {
-    position: absolute;
-    pointer-events: none;
-    border-radius: calc(12px / var(--cam-scale, 1));
-    box-shadow:
-      0 0 0 calc(3px / var(--cam-scale, 1)) var(--color-canvas),
-      0 0 0 calc(8px / var(--cam-scale, 1)) var(--color-brand-tint);
-    opacity: 0;
-    transform: scale(1.06);
-    transition:
-      opacity 120ms ease-out,
-      transform 120ms ease-out;
-  }
-  .guide-spot[data-on='true'] {
-    opacity: 1;
-    transform: none;
-    transition:
-      opacity 260ms ease-out 420ms,
-      transform 260ms ease-out 420ms;
-  }
-  .guide-layer[data-swap='cut'] .guide-spot,
-  .guide-static .guide-spot {
-    transition: none;
-  }
-  /* 그림 아래 끝 — 카메라가 그림 밑을 비울 때(BOTTOM_SLACK) 무대 바탕으로 흐려 잘린 끝이 보이지 않게 */
-  .guide-fade-bottom {
+  /* 그림 아래 — 카메라가 그림 밑을 비울 때(BOTTOM_SLACK) 그 그림의 바닥색(manifest ground)이 이어진다 */
+  .guide-ground {
     position: absolute;
     left: 0;
     right: 0;
     pointer-events: none;
-    background: linear-gradient(to bottom, transparent, var(--guide-ground, var(--color-stage)));
   }
-  /* 제목 글자 — 그림과 함께 200ms에 바뀐다 */
-  .guide-caption-in {
-    animation: guide-caption-in 200ms ease-out;
+  .coach-dim {
+    position: absolute;
+    pointer-events: none;
+    border-radius: calc(0.9cqw / var(--cam-scale, 1));
+    box-shadow: 0 0 0 calc(6000px / var(--cam-scale, 1)) rgb(0 0 0 / var(--coach-dim, 0.7));
+    transition: transform 90ms ease-out;
   }
-  @keyframes guide-caption-in {
+  .coach-over {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    animation: coach-in 200ms ease-out var(--coach-delay, 0ms) both;
+  }
+  .coach-over > * {
+    pointer-events: auto;
+  }
+  .coach-over > .coach-ring,
+  .coach-over > .coach-hand,
+  .coach-over > .coach-tap-ripple {
+    pointer-events: none;
+  }
+  @keyframes coach-in {
     from {
       opacity: 0;
     }
   }
+  /*
+   * 고리 — 속이 빈 흰 테. 예전에는 brand-tint(#7fb98c) 그림자를 0.2 → 1.8cqw로 키웠는데, 프로젝터에서 두꺼운 회녹색 띠로
+   * 번졌다(2026-10-08 검토). 이제 0.3cqw 흰 테가 밖으로 1.1cqw 퍼지며 사라진다. 배율(scale)이 아니라 바깥 여백(inset)을
+   * 키운다 — 넓은 칸(실적 표 첫 칸)을 배율로 키우면 가로로만 수십 px 늘어 고리가 납작한 타원처럼 보인다
+   */
+  .coach-ring {
+    position: absolute;
+    border-radius: 0.9cqw;
+    box-shadow: 0 0 0 0.17cqw var(--color-canvas);
+    transition: transform 90ms ease-out;
+  }
+  .coach-ring::after {
+    content: '';
+    position: absolute;
+    inset: -0.3cqw;
+    border: 0.3cqw solid var(--color-canvas);
+    border-radius: 1.2cqw;
+    opacity: 0;
+    animation: coach-pulse 2s ease-out var(--coach-delay, 0ms) infinite;
+  }
+  @keyframes coach-pulse {
+    from {
+      inset: -0.3cqw;
+      opacity: 0.9;
+    }
+    to {
+      inset: -1.4cqw;
+      opacity: 0;
+    }
+  }
+  /* 구멍 위의 투명한 버튼 — 누르면 다음 (그 버튼을 누른 뒤의 화면이 다음 단계다). 키보드 초점은 흰 실선으로 */
+  .coach-hit {
+    position: absolute;
+    border-radius: 0.9cqw;
+    cursor: pointer;
+    background: transparent;
+  }
+  .coach-hit:focus-visible {
+    outline: 0.25cqw solid var(--color-canvas);
+    outline-offset: 0.3cqw;
+  }
+  /* 손 — 손끝(24% 4%)을 축으로 기울이고 뒤집는다(transform은 GuideStage가 단다) */
+  .coach-hand {
+    position: absolute;
+    pointer-events: none;
+    overflow: visible;
+    transform-origin: 24% 4%;
+    filter: drop-shadow(0 0.2cqw 0.35cqw rgb(0 0 0 / 0.45));
+  }
+  /*
+   * 두드리기 — 손끝이 다가가 한 번 누르고(작아짐) 물러난다. **세 번 하고 멈춘다**(약 4초): 발표자가 40초 말하는 동안
+   * 손이 계속 두드리면 청중이 말 대신 손을 본다(2026-10-08 검토). 어두운 곳을 누르면 처음부터 다시 세 번.
+   * 거리는 손 그림의 단위(1 = 0.1cqw)다 — 그림 안의 cqw는 그림 배율만큼 한 번 더 커진다
+   */
+  .coach-hand-tap {
+    transform-origin: 24% 4%;
+    animation: coach-tap 1.3s ease-in-out var(--coach-delay, 0ms) 3;
+  }
+  .coach-hand path,
+  .coach-hand rect {
+    fill: var(--color-canvas);
+    stroke: var(--color-stage);
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+  }
+  @keyframes coach-tap {
+    0%,
+    100% {
+      transform: translate(5px, 9px);
+    }
+    40% {
+      transform: translate(0, 0);
+    }
+    52% {
+      transform: translate(0, 0) scale(0.9);
+    }
+    64% {
+      transform: translate(0, 0);
+    }
+  }
+  /* 손끝의 물결 — 두드리는 순간(52%)에 흰 동그라미가 퍼지며 사라진다. 손과 같이 세 번 */
+  .coach-tap-ripple,
+  .coach-press {
+    position: absolute;
+    width: 1.2cqw;
+    height: 1.2cqw;
+    margin: -0.6cqw 0 0 -0.6cqw;
+    border-radius: 999px;
+    background: var(--color-canvas);
+    pointer-events: none;
+    opacity: 0;
+  }
+  .coach-tap-ripple {
+    animation: coach-tap-ripple 1.3s ease-out var(--coach-delay, 0ms) 3;
+  }
+  @keyframes coach-tap-ripple {
+    0%,
+    50% {
+      transform: scale(0);
+      opacity: 0;
+    }
+    52% {
+      transform: scale(0.2);
+      opacity: 0.8;
+    }
+    84%,
+    100% {
+      transform: scale(1.6);
+      opacity: 0;
+    }
+  }
+  /* 눌린 모양 — 누른 자리에 물결 한 번, 구멍이 살짝 들어가고 손이 누른다 */
+  .coach-press {
+    animation: coach-press-ripple 200ms ease-out both;
+  }
+  @keyframes coach-press-ripple {
+    from {
+      transform: scale(0.2);
+      opacity: 0.85;
+    }
+    to {
+      transform: scale(2.2);
+      opacity: 0;
+    }
+  }
+  [data-press] .coach-dim,
+  [data-press] .coach-ring {
+    transform: scale(0.97);
+  }
+  [data-press] .coach-hand-tap {
+    animation: coach-push 200ms ease-out both;
+  }
+  @keyframes coach-push {
+    from {
+      transform: translate(5px, 9px);
+    }
+    60%,
+    to {
+      transform: translate(0, 0) scale(0.9);
+    }
+  }
+  .coach-bubble {
+    position: absolute;
+    border-radius: calc(1cqw * var(--k, 1));
+    padding: calc(1.1cqw * var(--k, 1)) calc(1.4cqw * var(--k, 1));
+    background: var(--color-canvas);
+    color: var(--color-ink);
+    box-shadow: 0 0.6cqw 2.4cqw rgb(0 0 0 / 0.45);
+    animation: coach-pop 220ms cubic-bezier(0.22, 1, 0.36, 1) var(--coach-delay, 0ms) both;
+    cursor: default;
+  }
+  @keyframes coach-pop {
+    from {
+      opacity: 0;
+      transform: scale(0.94);
+    }
+  }
+  /* 마지막 줄에 「합쳐져요」 한 낱말만 남지 않게(pretty). balance는 쓰지 않는다 — 이름 뒤에서 줄을 끊어 「검토 요청: 마감」처럼 머리만 남았다 */
+  .coach-text {
+    font-size: calc(1.6cqw * var(--k, 1));
+    line-height: 1.3;
+    font-weight: 500;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+    text-wrap: pretty;
+  }
+  .coach-label {
+    font-size: calc(2.1cqw * var(--k, 1));
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  .coach-foot {
+    margin-top: calc(0.7cqw * var(--k, 1));
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: calc(1.2cqw * var(--k, 1));
+    /* 혼자 보기 무대(800px 남짓)에서 꼬리말이 11px 밑으로 내려가지 않게 */
+    font-size: max(11px, calc(1.1cqw * var(--k, 1)));
+    line-height: 1.3;
+    color: var(--color-muted);
+    white-space: nowrap;
+  }
+  .coach-next {
+    border-radius: calc(0.6cqw * var(--k, 1));
+    background: var(--color-brand);
+    color: var(--color-canvas);
+    padding: calc(0.35cqw * var(--k, 1)) calc(0.9cqw * var(--k, 1));
+    font-weight: 600;
+  }
+  .coach-next:focus-visible {
+    outline: 0.2cqw solid var(--color-brand-tint);
+    outline-offset: 0.15cqw;
+  }
+  /* 꼬리 — 말풍선과 같은 흰 마름모의 반쪽이 구멍 쪽 변에서 튀어나온다. 2.0cqw — 1.4cqw는 강당에서 「모서리의 점」으로 보였다 */
+  .coach-arrow {
+    position: absolute;
+    width: calc(2cqw * var(--k, 1));
+    height: calc(2cqw * var(--k, 1));
+    background: var(--color-canvas);
+    transform: translate(-50%, -50%) rotate(45deg);
+  }
+  .coach-arrow[data-edge='left'] {
+    left: 0;
+  }
+  .coach-arrow[data-edge='right'] {
+    left: 100%;
+  }
+  .coach-arrow[data-edge='top'] {
+    top: 0;
+  }
+  .coach-arrow[data-edge='bottom'] {
+    top: 100%;
+  }
+  /*
+   * 구석 알약 「부서원 3/8」(발표 무대에만) — 85% 검정 + 둘레에 옅은 검은 띠. 62%였을 때는 밑의 앱 글자(「전사」·「8」·
+   * 「보도자료」)가 알약 글자와 겹쳐 읽혔다(2026-10-08 검토)
+   */
+  .coach-pill {
+    position: absolute;
+    left: 2.4cqw;
+    top: 2.2cqw;
+    display: flex;
+    align-items: center;
+    height: calc(2.8cqw * var(--k, 1));
+    padding: 0 calc(1.2cqw * var(--k, 1));
+    border-radius: 999px;
+    background: rgb(0 0 0 / 0.85);
+    box-shadow:
+      0 0 0 0.5cqw rgb(0 0 0 / 0.35),
+      inset 0 0 0 0.1cqw rgb(255 255 255 / 0.22);
+    color: var(--color-canvas);
+    font-size: max(11px, calc(1.25cqw * var(--k, 1)));
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  /* 휴대폰·인쇄의 잘라 낸 한 장 — 재지 않고 비율로 놓는다. 그늘은 그림 상자가 자른다 */
+  .coach-static-hole {
+    position: absolute;
+    pointer-events: none;
+    border-radius: 8px;
+    box-shadow:
+      0 0 0 2px var(--color-canvas),
+      0 0 0 5px rgb(255 255 255 / 0.55),
+      0 0 0 3000px rgb(0 0 0 / 0.6);
+  }
+  .coach-still .coach-over,
+  .coach-still .coach-bubble,
+  .coach-still .coach-ring::after,
+  .coach-still .coach-hand-tap,
+  .coach-still .coach-tap-ripple {
+    animation: none;
+  }
   @media (prefers-reduced-motion: reduce) {
-    .guide-layer,
-    .guide-spot,
-    .guide-spot[data-on='true'] {
+    .guide-layer {
       transition: none;
     }
-    .guide-caption-in {
+    /* 움직이지 않는다 — 고리는 0.3cqw 흰 테 한 겹으로 서 있고, 손은 버튼을 짚은 채 멈춰 있다 */
+    .coach-over,
+    .coach-bubble,
+    .coach-hand-tap,
+    .coach-tap-ripple,
+    .coach-press {
       animation: none;
+    }
+    .coach-hand-tap {
+      transform: none;
+    }
+    .coach-ring::after {
+      animation: none;
+      opacity: 0.9;
     }
   }
 }

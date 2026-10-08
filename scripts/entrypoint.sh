@@ -21,5 +21,16 @@ if [ "$COUNT" = "0" ]; then
   exit 1
 fi
 
+# RU-45·47 — 시연 모드(TINCASE_ENV=demo)는 화면 맨 위에 「사람과 업무는 모두 지어낸 것」이라고 띄운다.
+# 그 말이 틀리면(실명이 든 DB가 붙었으면) 뜨지 않는다 — 강당 프로젝터에 실명이 「지어낸 것」 띠를 달고 나가느니 안 뜨는 게 낫다.
+# 시드(demo-seed.ts)·되돌리기(demo-snapshot.sh)도 같은 기준으로 거절한다. 여기는 누가 저장소에 손으로 넣은 DB까지 막는다
+if [ "${TINCASE_ENV:-}" = "demo" ]; then
+  REAL=$(sqlite3 "$DB_FILE" "SELECT COUNT(*) FROM User WHERE email NOT LIKE '%@example.invalid';" 2>/dev/null || echo "?")
+  if [ "$REAL" != "0" ]; then
+    echo "[boot] FATAL: 시연 모드인데 @example.invalid가 아닌 계정이 있습니다 (${REAL}) — 시연 데이터가 아닙니다 (docs/DEMO.md)"
+    exit 1
+  fi
+fi
+
 echo "[boot] 4/4 서버 시작 (Division ${COUNT}개)"
 exec node server.js

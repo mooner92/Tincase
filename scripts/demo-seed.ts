@@ -1,5 +1,6 @@
 /**
- * RU-45 — 운영회의(11/2) **시연 서버**(11113, `docker-compose.demo.yml`)의 가짜 DB. 절차는 docs/DEMO.md.
+ * RU-45 — 운영회의(11/2) **시연 데이터**의 가짜 DB. 테스트 서버(11112, `docker-compose.test.yml`)를
+ *   `TINCASE_TEST_MODE=demo`로 띄우면 이 저장소(/data/worklog-demo)가 붙는다 — 시연용 포트·인스턴스는 따로 없다. 절차는 docs/DEMO.md.
  *
  *   npx tsx scripts/demo-seed.ts [--stage=ready] [--week=2026-W45] [--until=09:40]
  *

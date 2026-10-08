@@ -207,23 +207,26 @@ export function RuleEditor(props: RuleEditorProps) {
         {/* CP-104 — 사용 안내가 가리키는 두 설정(분류·정렬). 감싸는 것은 화면에 아무 영향이 없다 */}
         <div data-guide="merge-order">
         <Field first title="분류 순서">
-          <input
-            value={categories}
-            onChange={(e) => setCategories(e.target.value)}
-            className={FIELD}
-            aria-label="분류 순서"
-            placeholder="예: AI-홍보-시스템"
-          />
-          {parsed.length > 0 && (
-            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted">
-              {parsed.map((c) => (
-                <span key={c} className="chip chip-muted text-xs">
-                  {c}
-                </span>
-              ))}
-              <span className="chip text-xs text-muted ring-1 ring-hairline ring-inset">기타</span>
-            </div>
-          )}
+          {/* CP-104 — 사용 안내의 「분류 순서」 단계는 적는 칸과 그 밑의 칩만 밝힌다(설정 카드 전체가 아니라) */}
+          <div data-guide="merge-categories">
+            <input
+              value={categories}
+              onChange={(e) => setCategories(e.target.value)}
+              className={FIELD}
+              aria-label="분류 순서"
+              placeholder="예: AI-홍보-시스템"
+            />
+            {parsed.length > 0 && (
+              <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+                {parsed.map((c) => (
+                  <span key={c} className="chip chip-muted text-xs">
+                    {c}
+                  </span>
+                ))}
+                <span className="chip text-xs text-muted ring-1 ring-hairline ring-inset">기타</span>
+              </div>
+            )}
+          </div>
         </Field>
 
         {/*

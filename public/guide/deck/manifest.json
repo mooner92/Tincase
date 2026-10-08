@@ -1,5 +1,5 @@
 {
-  "version": "20261007T1910",
+  "version": "20261008T0110",
   "week": "10월 1주차",
   "viewport": {
     "width": 1600,
@@ -12,10 +12,10 @@
       "width": 3200,
       "height": 1800,
       "focus": {
-        "x": 600,
-        "y": 167.2,
-        "w": 400,
-        "h": 475.6
+        "x": 633,
+        "y": 525.8,
+        "w": 334,
+        "h": 44
       },
       "frame": {
         "x": 600,
@@ -23,7 +23,13 @@
         "w": 400,
         "h": 475.6
       },
-      "anchor": "login-form"
+      "anchor": "login-submit",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#f3f4f3"
+        }
+      ]
     },
     "member-week": {
       "file": "member-week.webp",
@@ -41,25 +47,41 @@
         "w": 620,
         "h": 166
       },
-      "anchor": "compose-open"
+      "anchor": "compose-open",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#f3f4f3"
+        }
+      ]
     },
     "member-compose": {
       "file": "member-compose.webp",
       "width": 3200,
       "height": 1800,
       "focus": {
-        "x": 605,
-        "y": 446,
-        "w": 967,
-        "h": 183
+        "x": 658,
+        "y": 512,
+        "w": 511,
+        "h": 32
       },
       "frame": {
         "x": 605,
         "y": 446,
-        "w": 967,
+        "w": 700,
         "h": 183
       },
-      "anchor": "compose-table"
+      "anchor": "compose-first",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#a0a0a0"
+        },
+        {
+          "x": 0.3606,
+          "color": "#ffffff"
+        }
+      ]
     },
     "member-previous": {
       "file": "member-previous.webp",
@@ -72,12 +94,50 @@
         "h": 36
       },
       "frame": {
-        "x": 605,
+        "x": 872,
         "y": 141,
-        "w": 967,
+        "w": 700,
         "h": 281
       },
-      "anchor": "previous-to-achievements"
+      "anchor": "previous-to-achievements",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#a0a0a0"
+        },
+        {
+          "x": 0.3606,
+          "color": "#ffffff"
+        }
+      ]
+    },
+    "member-share": {
+      "file": "member-share.webp",
+      "width": 3200,
+      "height": 1800,
+      "focus": {
+        "x": 1491,
+        "y": 512,
+        "w": 40,
+        "h": 32
+      },
+      "frame": {
+        "x": 872,
+        "y": 446,
+        "w": 700,
+        "h": 183
+      },
+      "anchor": "compose-share",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#a0a0a0"
+        },
+        {
+          "x": 0.3606,
+          "color": "#ffffff"
+        }
+      ]
     },
     "member-submit": {
       "file": "member-submit.webp",
@@ -95,7 +155,17 @@
         "w": 700,
         "h": 69
       },
-      "anchor": "compose-submit"
+      "anchor": "compose-submit",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#a0a0a0"
+        },
+        {
+          "x": 0.3606,
+          "color": "#ffffff"
+        }
+      ]
     },
     "member-done": {
       "file": "member-done.webp",
@@ -104,7 +174,7 @@
       "focus": {
         "x": 285,
         "y": 283,
-        "w": 570,
+        "w": 132,
         "h": 36
       },
       "frame": {
@@ -113,25 +183,37 @@
         "w": 620,
         "h": 158
       },
-      "anchor": "my-actions"
+      "anchor": "compose-open",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#f3f4f3"
+        }
+      ]
     },
     "member-history": {
       "file": "member-history.webp",
       "width": 3200,
       "height": 1800,
       "focus": {
-        "x": 260,
-        "y": 186,
-        "w": 1080,
-        "h": 126.5
+        "x": 1225,
+        "y": 227.5,
+        "w": 48,
+        "h": 36
       },
       "frame": {
-        "x": 260,
+        "x": 640,
         "y": 186,
-        "w": 1080,
+        "w": 700,
         "h": 126.5
       },
-      "anchor": "history-table"
+      "anchor": "history-open",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#f3f4f3"
+        }
+      ]
     },
     "lead-status": {
       "file": "lead-status.webp",
@@ -149,7 +231,13 @@
         "w": 1080,
         "h": 198.2
       },
-      "anchor": "status-card"
+      "anchor": "status-card",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#ffffff"
+        }
+      ]
     },
     "lead-nudge": {
       "file": "lead-nudge.webp",
@@ -167,35 +255,47 @@
         "w": 700,
         "h": 198.2
       },
-      "anchor": "copy-missing"
+      "anchor": "copy-missing",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#ffffff"
+        }
+      ]
     },
     "lead-merge": {
       "file": "lead-merge.webp",
       "width": 3200,
       "height": 1800,
       "focus": {
-        "x": 260,
-        "y": 255.2,
-        "w": 1080,
-        "h": 299
+        "x": 1161,
+        "y": 330.2,
+        "w": 154,
+        "h": 24
       },
       "frame": {
         "x": 260,
-        "y": 255.2,
+        "y": 305.2,
         "w": 1080,
-        "h": 299
+        "h": 200
       },
-      "anchor": "merge-card"
+      "anchor": "merge-ready",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#f7f7f7"
+        }
+      ]
     },
     "lead-merged": {
       "file": "lead-merged.webp",
       "width": 3200,
       "height": 1800,
       "focus": {
-        "x": 705,
-        "y": 160,
-        "w": 895,
-        "h": 240
+        "x": 813,
+        "y": 248,
+        "w": 270.5,
+        "h": 33
       },
       "frame": {
         "x": 704,
@@ -203,7 +303,17 @@
         "w": 896,
         "h": 420
       },
-      "anchor": "merged-body"
+      "anchor": "merged-cell",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#a7a7a7"
+        },
+        {
+          "x": 0.4563,
+          "color": "#f7f7f7"
+        }
+      ]
     },
     "lead-rules": {
       "file": "lead-rules.webp",
@@ -211,9 +321,9 @@
       "height": 1800,
       "focus": {
         "x": 285,
-        "y": 301.6,
+        "y": 359.6,
         "w": 1030,
-        "h": 283
+        "h": 78
       },
       "frame": {
         "x": 260,
@@ -221,7 +331,13 @@
         "w": 1080,
         "h": 400
       },
-      "anchor": "merge-order"
+      "anchor": "merge-categories",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#ffffff"
+        }
+      ]
     },
     "head-open": {
       "file": "head-open.webp",
@@ -239,7 +355,13 @@
         "w": 700,
         "h": 116
       },
-      "anchor": "merged-open"
+      "anchor": "merged-open",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#f7f7f7"
+        }
+      ]
     },
     "head-approve": {
       "file": "head-approve.webp",
@@ -257,7 +379,13 @@
         "w": 700,
         "h": 116
       },
-      "anchor": "merged-approve"
+      "anchor": "merged-approve",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#f7f7f7"
+        }
+      ]
     },
     "head-save": {
       "file": "head-save.webp",
@@ -275,7 +403,17 @@
         "w": 700,
         "h": 83
       },
-      "anchor": "merged-save"
+      "anchor": "merged-save",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#a0a0a0"
+        },
+        {
+          "x": 0.4406,
+          "color": "#ffffff"
+        }
+      ]
     },
     "head-report": {
       "file": "head-report.webp",
@@ -293,7 +431,13 @@
         "w": 700,
         "h": 166
       },
-      "anchor": "report-unit-submit"
+      "anchor": "report-unit-submit",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#ffffff"
+        }
+      ]
     },
     "hq-status": {
       "file": "hq-status.webp",
@@ -311,7 +455,13 @@
         "w": 1080,
         "h": 257
       },
-      "anchor": "hq-units"
+      "anchor": "hq-units",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#f3f4f3"
+        }
+      ]
     },
     "hq-run": {
       "file": "hq-run.webp",
@@ -329,7 +479,13 @@
         "w": 700,
         "h": 116
       },
-      "anchor": "hq-run-button"
+      "anchor": "hq-run-button",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#f3f4f3"
+        }
+      ]
     },
     "hq-approve": {
       "file": "hq-approve.webp",
@@ -347,7 +503,13 @@
         "w": 772,
         "h": 57
       },
-      "anchor": "hq-approve"
+      "anchor": "hq-approve",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#f3f4f3"
+        }
+      ]
     },
     "hq-submit": {
       "file": "hq-submit.webp",
@@ -365,25 +527,37 @@
         "w": 700,
         "h": 137
       },
-      "anchor": "report-hq-submit"
+      "anchor": "report-hq-submit",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#f3f4f3"
+        }
+      ]
     },
     "org-board": {
       "file": "org-board.webp",
       "width": 3200,
       "height": 1800,
       "focus": {
-        "x": 260,
-        "y": 190,
-        "w": 1080,
-        "h": 430
+        "x": 285,
+        "y": 220,
+        "w": 142,
+        "h": 37.1
       },
       "frame": {
         "x": 260,
-        "y": 190,
-        "w": 1080,
-        "h": 430
+        "y": 199,
+        "w": 700,
+        "h": 330
       },
-      "anchor": "org-board"
+      "anchor": "org-total",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#ffffff"
+        }
+      ]
     },
     "org-final": {
       "file": "org-final.webp",
@@ -401,7 +575,13 @@
         "w": 460,
         "h": 330
       },
-      "anchor": "org-upload"
+      "anchor": "org-upload",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#ffffff"
+        }
+      ]
     },
     "org-run": {
       "file": "org-run.webp",
@@ -419,7 +599,13 @@
         "w": 700,
         "h": 166
       },
-      "anchor": "org-run-button"
+      "anchor": "org-run-button",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#f3f4f3"
+        }
+      ]
     },
     "org-download": {
       "file": "org-download.webp",
@@ -437,7 +623,13 @@
         "w": 700,
         "h": 227
       },
-      "anchor": "org-download"
+      "anchor": "org-download",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#f3f4f3"
+        }
+      ]
     },
     "org-schedule": {
       "file": "org-schedule.webp",
@@ -455,7 +647,13 @@
         "w": 1030,
         "h": 194.6
       },
-      "anchor": "deadline-paste"
+      "anchor": "deadline-paste",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#ffffff"
+        }
+      ]
     },
     "org-preview": {
       "file": "org-preview.webp",
@@ -470,10 +668,16 @@
       "frame": {
         "x": 285,
         "y": 198.6,
-        "w": 1030,
+        "w": 700,
         "h": 412
       },
-      "anchor": "deadline-apply"
+      "anchor": "deadline-apply",
+      "ground": [
+        {
+          "x": 0,
+          "color": "#f7f7f7"
+        }
+      ]
     }
   }
 }

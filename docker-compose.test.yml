@@ -2,6 +2,16 @@
 #
 #   sudo docker compose -f docker-compose.test.yml -p repman-test up -d --build
 #
+# RU-45 — **시연 모드.** 운영회의 강당 화면도 이 컨테이너(11112) 하나로 띄운다 — 포트·인스턴스를 더 두지 않는다
+# (2026-10-08, 사용자 요청: 「11113은 쓰지마. 11112에서만」). 평소 데이터(/data/worklog-test)는 운영 사본이라 실명이 있어
+# 프로젝터에 띄울 수 없다. 그래서 **스위치 하나**(TINCASE_TEST_MODE)로 같은 컨테이너를 가짜 사람만 있는 저장소에 붙인다:
+#
+#   sudo TINCASE_TEST_MODE=demo docker compose -f docker-compose.test.yml -p repman-test up -d   ← 시연 데이터로 전환 (굽지 않는다)
+#   sudo docker compose -f docker-compose.test.yml -p repman-test up -d                         ← 되돌리기 (변수 없이)
+#   sudo bash scripts/demo-snapshot.sh status                                                    ← 지금 어느 쪽인지
+#
+# 변수는 sudo **뒤에** 둔다 — 앞에 두면 sudo가 지워 테스트 데이터(실명)로 뜬다. 절차·주의: docs/DEMO.md
+# 왜 변수가 하나인가: 저장소·띠·쿠키를 따로 고르게 하면 「실명 DB 위에 '모두 지어낸 것' 띠」가 가능해진다. 셋이 같은 값을 따른다.
 # 분리하는 것 — 컨테이너·이미지 태그·DB·저장소·세션 쿠키 이름.
 # 끄는 것     — 메신저(실제 사람에게 알림이 가면 안 된다)·자동 병합 스케줄러·Cloudflare·hwp 업로드 제출(ADR-0014).
 # .env.production을 읽지 않는다 — 거기 든 메신저 설정이 딸려 오면 테스트에서 실제 알림이 나간다.
@@ -16,7 +26,8 @@ services:
     environment:
       NODE_ENV: production
       TZ: Asia/Seoul
-      TINCASE_ENV: test                       # RU-43 — 화면 맨 위 「테스트 서버」 띠
+      # RU-43 — 화면 맨 위 「테스트 서버」 띠. 시연 모드면 RU-47 「시연 — 사람과 업무는 모두 지어낸 것입니다」 띠
+      TINCASE_ENV: ${TINCASE_TEST_MODE:-test}
       DATABASE_URL: file:/data/db/worklog.db
       STORAGE_ROOT: /data
       # Cloudflare 경로는 **통과할 수 없게** 막는다 — 사내 비밀번호 로그인만 남는다.
@@ -25,7 +36,9 @@ services:
       # (비밀이 아니다 — 맞는 토큰이 존재할 수 없다는 것이 이 값의 역할이다)
       CF_ACCESS_TEAM: tincase-test-disabled
       CF_ACCESS_AUD: "3cdf50b28c6381d2564643173f971de6487daa825dfaaacd458aa0691f2a3c0a"
-      SESSION_COOKIE_NAME: repman_test_session  # RU-42 — 운영 로그인과 섞이지 않게
+      # RU-42 — 운영 로그인과 섞이지 않게. 시연 모드는 repman_demo_session — 모드를 오가도 서로의 로그인을 지우지 않는다
+      # (강당 PC의 역할별 로그인이 리허설부터 회의 날까지 산다. 쿠키는 포트가 아니라 호스트 단위라 이름으로 가른다)
+      SESSION_COOKIE_NAME: repman_${TINCASE_TEST_MODE:-test}_session
       MESSENGER_URL: ""                       # RU-41 — 알림 끔
       MESSENGER_ALLOWLIST: ""
       MERGE_SCHEDULER: "off"                  # RU-41 — 병합은 버튼으로만
@@ -37,7 +50,8 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
-      - /data/worklog-test:/data
+      # 기본 /data/worklog-test(운영 사본 — 실명) · 시연 모드 /data/worklog-demo(가짜 사람만, scripts/demo-seed.ts가 만든다)
+      - /data/worklog-${TINCASE_TEST_MODE:-test}:/data
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
       interval: 30s
