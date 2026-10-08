@@ -17,6 +17,12 @@
 # 분리하는 것 — 컨테이너·이미지 태그·DB·저장소·세션 쿠키 이름.
 # 끄는 것     — 실제 메신저(알림은 같은 컨테이너의 **가짜 알림 수신함**으로 — NT-56)·자동 병합 스케줄러·Cloudflare·hwp 업로드 제출(ADR-0014).
 # .env.production을 읽지 않는다 — 거기 든 메신저 설정이 딸려 오면 테스트에서 실제 알림이 나간다.
+#
+# OPS-47 — **리허설**(scripts/rehearsal.ts · docs/REHEARSAL.md)은 시연 모드에서 자동 병합 스케줄러를 켠다 — 덧붙이는 compose
+# (docker-compose.rehearsal.yml)로. 이 파일의 변수는 TINCASE_TEST_MODE 하나 그대로다(저장소·띠·쿠키를 따로 고를 길이 없다):
+#   TINCASE_TEST_MODE=demo TINCASE_REHEARSAL=on bash scripts/deploy.sh test --no-build    ← 리허설 시작
+#   TINCASE_TEST_MODE=demo bash scripts/deploy.sh test --no-build                         ← 끝 (스케줄러 꺼짐)
+# 평소 모드(실명 사본)에서 켜려 하면 스크립트가 멈춘다.
 services:
   app-test:
     build: .
@@ -49,7 +55,7 @@ services:
       MESSENGER_URL: http://127.0.0.1:3000/api/dev/messenger-sink
       MESSENGER_SINK: "on"
       MESSENGER_ALLOWLIST: "*"
-      MERGE_SCHEDULER: "off"                  # RU-41 — 병합은 버튼으로만
+      MERGE_SCHEDULER: "off"                  # RU-41 — 병합은 버튼으로만. 리허설만 덧붙이는 compose로 켠다(OPS-47 — 위 머리 주석)
       # RU-60a · ADR-0014 — 「전사」 게시판 hwp [올리기]를 닫는다(410, 버튼도 없다). 부서원의 hwp 업로드 제출은
       # 2026-10-08에 코드째 없어져(WA-39) 이 값과 상관없다. [올리기]가 걷히면 이 줄도 지운다
       SUBMIT_HWP_UPLOAD: "off"

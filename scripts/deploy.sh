@@ -3,6 +3,7 @@
 #
 #   bash scripts/deploy.sh prod  [--no-build] [--ignore-window]   운영   (docker-compose.yml · 11111)
 #   bash scripts/deploy.sh test  [--no-build]                     테스트 (docker-compose.test.yml -p repman-test · 11112)
+#     (TINCASE_TEST_MODE=demo — sudo 뒤로 넘긴다, OPS-43h · 리허설이면 TINCASE_REHEARSAL=on — 덧붙이는 compose, OPS-47)
 #   bash scripts/deploy.sh prune                                  빌드 없이 청소만 (손으로 빌드한 뒤 · 디스크 경보 때)
 #
 # 왜 스크립트인가: 2026-10-08, 이틀 사이 빌드를 거듭하자 태그 없는 이미지가 약 45개(약 35G) 쌓여 루트 디스크가
@@ -358,6 +359,32 @@ check_test_mode() {
 }
 
 # ---------------------------------------------------------------------------------------------------------------
+# OPS-47 — 리허설(scripts/rehearsal.ts · docs/REHEARSAL.md)은 테스트 서버의 자동 병합 스케줄러를 켠다 — 덧붙이는 compose
+# (docker-compose.rehearsal.yml)로. **시연 모드(가짜 사람)에서만** — 평소 모드는 운영 사본(실명)이라, 켜면 그 주차가 저절로 병합·넘김되고
+# 알림 수신함에 실명 알림이 쌓인다.
+#   rehearsal_verdict <TINCASE_TEST_MODE> <TINCASE_REHEARSAL> → 0 가도 됨 · 1 멈춤(실명 데이터에서 켬) · 2 값이 이상함
+# 변수 없이 다시 올리면 꺼진다(덧붙이는 파일 없이 만든다) — 리허설이 끝나면 `TINCASE_TEST_MODE=demo bash scripts/deploy.sh test --no-build`
+# ---------------------------------------------------------------------------------------------------------------
+rehearsal_verdict() {
+  local mode=${1:-} on=${2:-}
+  case $on in
+    '' | off) return 0 ;;
+    on) [[ $mode == demo ]] && return 0 || return 1 ;;
+    *) return 2 ;;
+  esac
+}
+
+check_rehearsal() {
+  local rc=0
+  rehearsal_verdict "${TINCASE_TEST_MODE:-}" "${TINCASE_REHEARSAL:-}" || rc=$?
+  case $rc in
+    0) [[ ${TINCASE_REHEARSAL:-} != on ]] || log "리허설: 자동 병합 스케줄러 켜짐 (docker-compose.rehearsal.yml — 끝나면 변수 없이 다시 올린다)" ;;
+    1) die "TINCASE_REHEARSAL=on은 시연 모드(TINCASE_TEST_MODE=demo)에서만 — 평소 모드는 운영 사본(실명)이다 (OPS-47)" ;;
+    *) die "TINCASE_REHEARSAL 값이 이상하다: '${TINCASE_REHEARSAL:-}' (on 또는 off)" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------------------------------------------
 # 운영 전용 — 브랜치 · 롤백 태그
 # ---------------------------------------------------------------------------------------------------------------
 # 빌드만이 아니라 --no-build 재기동도 본다 — 그 체크아웃의 docker-compose.yml(환경변수·볼륨)로 운영 컨테이너를
@@ -469,6 +496,7 @@ main() {
     compose_args=(compose -f docker-compose.yml -p repman)
     health_url='http://127.0.0.1:11111/api/health'
     [[ -z ${TINCASE_TEST_MODE:-} ]] || warn "TINCASE_TEST_MODE는 테스트 서버 전용이다 — 운영에서는 쓰지 않는다"
+    [[ -z ${TINCASE_REHEARSAL:-} ]] || warn "TINCASE_REHEARSAL은 테스트 서버 전용이다 — 운영에서는 쓰지 않는다"
     require_main_branch
     if ((ignore_window)); then
       warn "배포 금지 시간대 확인을 건너뛴다 (--ignore-window)"
@@ -480,7 +508,9 @@ main() {
     health_url='http://127.0.0.1:11112/api/health'
     ((ignore_window == 0)) || log "테스트 서버에는 금지 시간대가 없다 — --ignore-window는 무시한다"
     check_test_mode
+    check_rehearsal
     [[ -z ${TINCASE_TEST_MODE:-} ]] || env_args=("TINCASE_TEST_MODE=$TINCASE_TEST_MODE")
+    [[ ${TINCASE_REHEARSAL:-} != on ]] || compose_args=(compose -f docker-compose.test.yml -f docker-compose.rehearsal.yml -p repman-test)
   fi
 
   if ((build)); then

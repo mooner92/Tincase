@@ -360,6 +360,24 @@ describe('OPS-43h 테스트 서버 모드', () => {
   });
 });
 
+describe('OPS-47 리허설 — 스케줄러는 시연 모드에서만, 덧붙이는 compose로', () => {
+  it('[OPS-T34] 판정 — 시연 모드에서만 켠다. 평소 모드(실명 사본)·모드 없음은 멈춘다 · 값이 이상하면 멈춘다', () => {
+    const v = (mode: string, on: string) => sh(`rehearsal_verdict '${mode}' '${on}' && echo 0 || echo $?`).out.trim();
+    expect(v('demo', 'on')).toBe('0');
+    expect(v('test', 'on')).toBe('1');
+    expect(v('', 'on')).toBe('1');
+    expect(v('demo', '')).toBe('0');
+    expect(v('test', 'off')).toBe('0');
+    expect(v('demo', 'yes')).toBe('2');
+  });
+
+  it('[OPS-T34b] 덧붙이는 파일은 스케줄러 한 줄만 바꾼다 — 저장소·띠·쿠키·메신저는 docker-compose.test.yml 그대로', () => {
+    const extra = readFileSync(path.join(path.dirname(SCRIPT), '..', 'docker-compose.rehearsal.yml'), 'utf-8');
+    const body = extra.split('\n').filter((l) => l.trim() && !l.trim().startsWith('#'));
+    expect(body.map((l) => l.trim())).toEqual(['services:', 'app-test:', 'environment:', 'MERGE_SCHEDULER: "on"']);
+  });
+});
+
 describe('OPS-43b·g·h 입구에서 끝까지 — main을 가짜 dk로 돌린다', () => {
   // 판정 함수가 옳아도 main이 그것을 부르지 않으면 소용없다 — 롤백 태그를 빼먹거나 순서가 바뀌는 사고는 여기서만 보인다.
   // docker·sudo·curl·df는 셸 함수로 바꿔 끼운다. 저장소는 임시 git(브랜치를 고를 수 있게)으로 REPO_ROOT를 바꾼다
@@ -434,6 +452,20 @@ describe('OPS-43b·g·h 입구에서 끝까지 — main을 가짜 dk로 돌린�
       expect(r.err).toMatch(/main에서만|브랜치를 읽지 못했다/);
       expect(r.calls, `${branch} ${args}`).toEqual([]);
     }
+  });
+
+  it('[OPS-T34c] test + TINCASE_REHEARSAL=on — 시연 모드면 덧붙이는 compose로 다시 만든다 · 평소 모드면 docker를 부르기 전에 멈춘다', () => {
+    const r = runMain('test --no-build', { branch: 'feat/x', env: { TINCASE_TEST_MODE: 'demo', TINCASE_REHEARSAL: 'on' } });
+    expect(r.code, r.err).toBe(0);
+    expect(r.calls).toContain(
+      'TINCASE_TEST_MODE=demo compose -f docker-compose.test.yml -f docker-compose.rehearsal.yml -p repman-test up -d --no-build --force-recreate',
+    );
+    const plain = runMain('test --no-build', { branch: 'feat/x', env: { TINCASE_TEST_MODE: 'demo' } });
+    expect(plain.calls.some((c) => c.includes('rehearsal'))).toBe(false); // 변수 없이 다시 올리면 꺼진다
+    const bad = runMain('test --no-build', { branch: 'feat/x', env: { TINCASE_TEST_MODE: 'test', TINCASE_REHEARSAL: 'on' } });
+    expect(bad.code).toBe(1);
+    expect(bad.err).toContain('OPS-47');
+    expect(bad.calls.some((c) => c.startsWith('compose') || c.includes('up -d'))).toBe(false);
   });
 
   it('[OPS-T23c] test — TINCASE_TEST_MODE를 빌드·기동 모두에 sudo 뒤 환경으로 넘긴다. 운영 compose는 건드리지 않는다', () => {

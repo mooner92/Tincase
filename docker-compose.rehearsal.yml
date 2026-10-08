@@ -1,0 +1,16 @@
+# OPS-47 — **리허설**: 테스트 서버(11112)를 시연 모드로 띄울 때만 덧붙이는 compose. 자동 병합 스케줄러 하나를 켠다.
+#
+#   TINCASE_TEST_MODE=demo TINCASE_REHEARSAL=on bash scripts/deploy.sh test --no-build    ← 시작 (스크립트가 이 파일을 -f로 덧붙인다)
+#   TINCASE_TEST_MODE=demo bash scripts/deploy.sh test --no-build                         ← 끝 (이 파일 없이 다시 만든다 — 스케줄러 꺼짐)
+#
+# 왜 따로 된 파일인가: docker-compose.test.yml의 변수는 TINCASE_TEST_MODE 하나다(RU-45 — 저장소·띠·쿠키를 따로 고를 길을 두지 않는다).
+# 스케줄러는 그 셋과 상관없는 스위치라 변수를 늘리지 않고 덧붙이는 파일로 둔다.
+# 왜 시연 모드에서만인가: 평소 모드(/data/worklog-test)는 운영 사본이라 실명이 있다. 켜면 그 주차가 저절로 병합·넘김되고 알림 수신함에
+# 실명 알림이 쌓인다 — deploy.sh가 막는다. 알림은 이 경우에도 밖으로 나가지 않는다(가짜 수신함, NT-56).
+# 절차·판정: docs/REHEARSAL.md · scripts/rehearsal.ts
+services:
+  app-test:
+    environment:
+      # HM-25 — 매분 도는 스케줄러: 마감 전 알림 · 14:01 자동 병합 · 마감 뒤 알림 · 3단계 맞추기·알림.
+      # 기동하자마자 모델을 데운다(HM-53) — 리허설은 운영과 같은 모델 서버(:11437)를 함께 쓴다. 운영 마감(목 14:00)과 겹치지 않는 때에 돌린다
+      MERGE_SCHEDULER: "on"
