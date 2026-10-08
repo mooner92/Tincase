@@ -268,16 +268,17 @@ Phase 3 리마인드의 밑거름이 되고, 그 전에도 Sean이 로그만 봐
 ### OPS-15 — 재배포 절차 ★ (2026-10-08 개정)
 
 명령은 [DEPLOY.md](../DEPLOY.md) §2b에 있다. 순서와 이유만 여기 둔다.
+빌드·기동은 **`scripts/deploy.sh`** 하나로 한다(OPS-43) — 0·1·3·6단계는 스크립트가 빌드 직전·직후에 다시 한다.
 
 | 단계 | 하는 일 | 왜 |
 |---|---|---|
-| 0 | 이번 주 마감 확인 → 금지 시간대면 멈춘다 | OPS-16. 연휴 주는 마감이 당겨진다(WS-19) |
-| 1 | 디스크: `df -h /` 여유 5G 이상, 아니면 `docker image prune` · `builder prune` · npm/pip 캐시 | 빌드가 루트 디스크에 쌓인다(OPS-42). 2G대에서 빌드하면 도중에 ENOSPC로 죽는다 |
-| 2 | DB 스냅샷 — 컨테이너 안에서 `sqlite3 .backup` → `/data/db/worklog.db.predeploy-시각` | `cp` 금지(OPS-07). `tmp/`는 기동 때 지워지므로 거기 두지 않는다. 야간본(`backup.sh db`)을 손으로 돌리면 **그날 야간본을 덮는다** |
-| 3 | 지금 이미지를 `repman:rollback`으로 태그 | 빌드가 `repman:latest`를 덮으면 옛 이미지는 태그 없는(dangling) 이미지가 되고 일요일 prune에 지워진다. 그 뒤 롤백은 재빌드뿐이다 |
+| 0 | 이번 주 마감 확인 → 금지 시간대면 멈춘다. `deploy.sh prod`도 빌드 전에 같은 계산으로 막는다 | OPS-16. 연휴 주는 마감이 당겨진다(WS-19) |
+| 1 | 디스크: `df -h /` 여유 5G 이상. 모자라면 `deploy.sh prune`(우리 찌꺼기만) · npm/pip 캐시. `deploy.sh`도 빌드 전에 보고, 모자라면 빌드하지 않는다 | 빌드가 루트 디스크에 쌓인다(OPS-42·43). 2G대에서 빌드하면 도중에 ENOSPC로 죽는다 |
+| 2 | DB 스냅샷 — 컨테이너 안에서 `sqlite3 .backup` → `/data/db/worklog.db.predeploy-시각` | `cp` 금지(OPS-07). `tmp/`는 기동 때 지워지므로 거기 두지 않는다. 야간본(`backup.sh db`)을 손으로 돌리면 **그날 야간본을 덮는다**. 4단계(`db push`)보다 먼저여야 하므로 스크립트에 넣지 않았다 |
+| 3 | 지금 이미지를 `repman:rollback`으로 태그 — `deploy.sh prod`가 빌드 직전에 한다 | 빌드가 `repman:latest`를 덮으면 옛 이미지는 태그 없는(dangling) 이미지가 되고 배포 끝 청소(OPS-43)에 지워진다. 그 뒤 롤백은 재빌드뿐이다 |
 | 4 | `git pull` → 스키마가 바뀌었으면 `prisma db push` (**chown 없이**) | 아래 「chown 하지 않는다」 |
 | 5 | 권한 확인: `stat` → `10001:mhchoi drwxrws---` · DB `-rw-rw----` | 틀어졌으면 백업이 조용히 멈춘다 |
-| 6 | 빌드 → 기동 → health `ok:true` | |
+| 6 | `bash scripts/deploy.sh prod` — 빌드 → 기동 → health `ok:true` → 우리 빌드 찌꺼기 청소 | OPS-43 |
 
 **재배포 때는 chown 하지 않는다.** `/data/worklog`는 **`10001:mhchoi`, 그룹 쓰기, 디렉터리 setgid**다. 컨테이너(uid 10001)가
 주인이고, 호스트의 mhchoi는 **그룹으로** 읽고 쓴다 — `backup.sh`의 gzip·tar, `prisma db push`, `issue-passwords.ts`가 모두
@@ -302,6 +303,13 @@ Phase 3 리마인드의 밑거름이 되고, 그 전에도 Sean이 로그만 봐
 **배포 전에 그 주 마감부터 본다.** 연휴 주는 총괄이 마감을 당긴다(WS-19) — 수요일 마감이면 금지 시간대도 하루 당겨진다.
 부서마다 마감이 다를 수 있으니 가장 이른 것을 기준으로 한다. 확인 명령은 DEPLOY.md §2b-0.
 
+**`deploy.sh prod`가 빌드 전에 다시 본다 (OPS-43).** 이번 주와 다음 주 주차의 예외(`WeekSlot`)와 켜진 부서의 마감(`Division`)을
+컨테이너 안 `sqlite3 -readonly`로 읽어 위 규칙대로 금지 시간대를 세고, 그 안이면 빌드하지 않는다. 다음 주도 보는 이유: 마감이
+월요일로 당겨지면 금지 시간대가 **지난 주 일요일**에 시작한다. 계산식은 `deadlineFor`·`dayBeforeAt`(WS-13·NT-41)과 같고,
+테스트가 두 결과를 맞대 본다. 넘는 길은 `--ignore-window` 하나다 — 마감 직전의 긴급 수정·롤백·`MERGE_PAUSE_UNTIL`(OPS-16a)
+적용처럼 금지 시간대에 해야 하는 일이 실제로 있다. 판정을 못 하면(질의 실패·값 이상) **막는다.** 운영 컨테이너가 아예 떠 있지
+않으면 읽을 곳이 없으므로 알리고 지나간다 — 이미 멈춘 서비스를 올리는 일은 금지 시간대가 막으려는 사고를 키우지 않는다.
+
 권장: **목 16:30 이후 ~ 다음 주 화요일** (마감이 당겨진 주는 그만큼 앞당겨 끝낸다).
 
 ### OPS-16a — 자동 병합을 잠시 멈춰야 할 때
@@ -314,7 +322,8 @@ MERGE_PAUSE_UNTIL: "2026-09-21T09:00:00+09:00"   # 반드시 새 주차가 열�
 ```
 
 ```bash
-sudo docker compose up -d        # 재빌드 불필요 — 환경변수만 바뀐다
+bash scripts/deploy.sh prod --no-build   # 재빌드 불필요 — 환경변수만 바뀐다 (OPS-43)
+#   멈추는 일은 대개 마감 직전, 곧 금지 시간대(OPS-16) 안이다 — 그때는 --ignore-window를 붙인다
 sudo docker compose logs app | grep '일시정지'
 ```
 
@@ -372,17 +381,79 @@ sudo journalctl -u docker-image-prune.service     # 회수량 기록
 sudo systemctl disable --now docker-image-prune.timer   # 되돌리기
 ```
 
+> ⚑ **2026-10-08 — 일주일에 한 번으로는 모자랐다.** 이틀 사이 빌드를 거듭하자 찌꺼기 약 45개(약 35G)가 쌓여 루트가 100%가
+> 됐다. 그래서 빌드 **직후** 배포 스크립트가 치우고, 「우리 것」을 가리는 표식을 이미지에 박았다 → **OPS-43.**
+> 위 「배포 스크립트에 넣으면 스크립트를 안 쓴 빌드는 그대로 쌓인다」는 표식으로 풀었다 — 표식은 Dockerfile에 있으므로
+> 누가 어떻게 빌드하든 붙고, `deploy.sh prune`·타이머가 같은 필터로 잡는다. 타이머는 그물로 남긴다.
+
 **디스크가 찼을 때 볼 순서:**
 
 ```bash
 df -h /
 sudo du -sh /var/lib/containerd          # ← /var/lib/docker 아니다
-sudo docker image prune -f
+bash scripts/deploy.sh prune             # 우리 빌드 찌꺼기만 (OPS-43). 필터 없는 image prune은 남의 것까지 지운다
 sudo sh -c 'du -sh /var/lib/containerd/*/ | sort -rh'
 ```
 
 마지막 줄에 `sudo sh -c`를 쓰는 이유: 글로브는 sudo **밖**에서 펼쳐져서, 읽을 권한이 없으면
 조용히 빈 결과가 나온다. 「아무것도 없다」와 「못 봤다」가 똑같이 보인다.
+
+### OPS-43 — 빌드 찌꺼기는 배포 스크립트가 치운다 · 표식으로, 우리 것만 ★ (2026-10-08)
+
+2026-10-08, 이틀 사이 테스트·운영 빌드를 거듭하자 태그 없는 이미지가 **약 45개(약 35G)** 쌓여 루트 디스크가 **100%**가 됐다.
+일요일 타이머(OPS-42)는 그 사이에 돌지 않았고, `image prune` 한 번은 사슬의 끝만 떨어뜨린다 — 손으로 `docker rmi`를 여러
+차례 돌려(태그 없음 · `WorkingDir=/app`) 치웠다. 서버를 함께 쓰는 쪽에서도 「가장 큰 원인이 repman 빌드 찌꺼기」라고 알려 왔다.
+**사람이 기억해서 치우는 것으로는 안 된다** — 빌드하는 그 명령이 치우게 한다.
+
+| ID | 요구사항 |
+|---|---|
+| OPS-43a | `Dockerfile`의 **모든 스테이지**에서 `FROM` 바로 다음 줄이 `LABEL org.tincase.app="repman"`이다. 그 밖의 빌드는 그대로 |
+| OPS-43b | 빌드와 컨테이너를 새로 만드는 재기동의 입구는 **`scripts/deploy.sh <prod\|test\|prune> [--no-build] [--ignore-window]`** 하나다. 운영은 `docker-compose.yml`(프로젝트 `repman`), 테스트는 `docker-compose.test.yml -p repman-test`. 한 번에 하나만 돈다(`flock`) — 겹치면 이쪽 청소가 저쪽 빌드가 다음 스테이지에서 쓸 스테이지 이미지(태그 없음 — 찌꺼기와 똑같이 보인다)를 지울 수 있다. 멈췄다 켜기(`stop`/`start`, 복원 절차의 `up -d`)는 compose 그대로 — 새 이미지가 생기지 않아 찌꺼기도 없다 |
+| OPS-43c | 기동(`up`)이 성공하면 `docker image prune -f --filter label=org.tincase.app=repman`을 **지운 것이 없을 때까지** 되풀이한다 (상한 30회) |
+| OPS-43d | 표식이 생기기 전 이미지(레거시)는 **repman 최종 이미지의 지문이 그대로일 때만** `docker rmi`(`-f` 없이)로 지운다 — 태그 없음 · `WorkingDir=/app` · `User=app` · `Entrypoint=["/usr/bin/tini","--"]` · `Cmd=["./scripts/entrypoint.sh"]` |
+| OPS-43e | **남의 것과 태그 붙은 것은 건드리지 않는다.** `repman:latest`·`repman:rollback`·`repman:test`도 지우지 않는다. 필터 없는 `image prune`, `-a`, `system`·`builder`·`container`·`volume` prune, `rmi -f`를 스크립트에 쓰지 않는다 — 테스트가 스크립트를 읽어 막는다 |
+| OPS-43f | 빌드 전 루트 여유가 **5 GiB 미만**이면 우리 찌꺼기를 먼저 치우고 다시 잰다. 그래도 모자라면 **빌드하지 않고** 할 일을 출력한다 (OPS-19) |
+| OPS-43g | 운영은 `main`에서만 돈다 — 다른 브랜치를 구우면 `repman:latest`가 그 이미지가 되어 다음 재기동이 조용히 그것으로 뜬다. `--no-build`도 같다: 그 체크아웃의 `docker-compose.yml`(환경변수·볼륨)로 운영 컨테이너를 다시 만들고, 프로젝트 이름(`repman`)을 박았으므로 다른 worktree에서 돌려도 운영을 가리킨다. 브랜치를 읽지 못하면(흔히 `sudo bash …` — root에게 git이 답하지 않는다) 막는다. 금지 시간대(OPS-16)면 멈춘다 — `--no-build` 재기동도(재기동이 곧 중단이다). 빌드 직전 `repman:latest` → `repman:rollback`(OPS-15 3단계). `--no-build`는 지금 이미지로 다시 띄우기만 한다(`--force-recreate`) — 롤백 태그를 옮기지 않는다 |
+| OPS-43h | 테스트 서버는 `TINCASE_TEST_MODE`가 있으면 그대로 넘긴다(`sudo` **뒤에** 붙여서 — RU-45의 함정을 스크립트가 대신 피한다). 시연 모드로 떠 있는데 변수 없이 다시 올리려 하면 멈춘다 — 되돌리려면 `TINCASE_TEST_MODE=test`를 적는다. `docs/DEMO.md`(feat/org-rollup)의 `sudo TINCASE_TEST_MODE=… docker compose … up -d`는 병합 때 `TINCASE_TEST_MODE=… bash scripts/deploy.sh test --no-build`로 바꾼다 |
+| OPS-43i | 시작·끝에 `df -h /`, 끝에 health 결과를 출력한다. health가 `ok:true`가 아니면 0이 아닌 값으로 끝나고 롤백 명령을 보여 준다 |
+
+**왜 표식인가 — 공용 서버라서.** 필터 없는 `docker image prune -f`는 **서버 전체**의 태그 없는 이미지를 지운다. 이 서버는 여러
+사람이 도커를 함께 쓴다. 남의 태그 없는 이미지는 그 사람의 빌드 캐시이거나, ID로 잡아 두고 쓰는 이미지일 수 있다. 지워도
+우리 쪽은 아무 일이 없지만 **그 판단은 그 사람 몫이다** — 우리가 만든 것만 우리가 치운다. 그런데 찌꺼기는 이름(태그)이
+없어서, 이름 말고는 「우리 것」을 가릴 방법이 이미지에 박힌 표식뿐이다.
+
+**왜 모든 스테이지에, 왜 `FROM` 바로 다음인가.** 레이블은 그 스테이지 안에서 **그 뒤** 명령으로만 이어진다. 마지막 스테이지(`run`)에만
+붙이면 `deps`·`build` 스테이지가 남긴 이미지 — `npm ci`·`next build` 결과라 찌꺼기 용량의 대부분 — 가 표식 없이 남는다.
+classic builder(OPS-42 — buildx가 없다)는 명령마다 중간 이미지를 만들고, 표식은 `LABEL` 다음에 만들어진 것부터 붙는다.
+맨 앞에 두어야 스테이지의 중간 이미지가 하나도 빠지지 않는다.
+
+**왜 되풀이하나.** classic builder의 찌꺼기는 부모-자식 **사슬**이다. `image prune`은 자식 없는(dangling) 것만 지우므로 한 번에
+사슬 끝이 하나씩 떨어진다. 지운 것이 없을 때까지 돌린다. `run` 스테이지 사슬이 15단 남짓이라 상한은 30회로 넉넉히 둔다.
+
+**왜 레거시 지문은 최종 이미지뿐인가.** 표식 없는 `deps`·`build` 스테이지 이미지는 `node` 기본 이미지와 설정이 같다
+(`WorkingDir=/app`, `Entrypoint=docker-entrypoint.sh`) — 남의 Node 프로젝트와 **구별할 수 없다.** 구별할 수 없으면 지우지 않는다.
+대신 끝에 「태그 없는 이미지 N개가 남았다」를 알린다. 이 변경 뒤에 구운 이미지는 모두 표식이 있으므로 이 경로는 곧 할 일이 없어진다.
+
+**왜 기동이 성공한 뒤인가.** 빌드·기동이 실패했을 때는 그 상태를 그대로 둔다 — 무엇이 남았는지 보고 판단하게.
+치워야 하면 `deploy.sh prune`. 기동 뒤 health가 실패해도 청소는 한다: 되돌릴 이미지는 `repman:rollback` **태그**가 붙잡고 있어서
+청소가 닿지 않고, 컨테이너가 쓰는 이미지는 `image prune`이 지우지 않는다.
+
+**치르는 값.** `deps` 스테이지 캐시(`npm ci` 결과)도 찌꺼기와 함께 지워져 다음 빌드는 `npm ci`부터 다시 한다(수 분).
+예전 §2b도 배포 끝에 `image prune`을 돌려 같은 값을 치르고 있었다 — 디스크와 바꾼다.
+
+**스크립트를 안 거친 빌드.** 표식은 Dockerfile에 있으므로 `sudo docker compose up -d --build`로 손수 빌드해도 붙는다.
+그 뒤 `bash scripts/deploy.sh prune` 한 번이면 같은 청소를 한다. 일요일 타이머(OPS-42)는 그물로 남긴다 — 다만 지금은 필터 없이
+서버 전체를 지운다. 같은 이유로 **표식 필터로 좁히기를 권한다** (운영자 판단, sudo, 1회):
+
+```ini
+# /etc/systemd/system/docker-image-prune.service 의 ExecStart를 이 한 줄로.
+# `$`를 쓰지 않은 이유: systemd가 ExecStart의 $이름을 먼저 펼쳐 버린다 — 셸 변수가 빈 문자열이 된다
+ExecStart=/bin/sh -c 'for n in `seq 30`; do docker image prune -f --filter label=org.tincase.app=repman | grep -qiE "^(deleted|untagged):" || break; done'
+```
+
+```bash
+sudo systemctl daemon-reload && sudo systemctl start docker-image-prune.service && sudo journalctl -u docker-image-prune.service -n 20
+```
 
 ### OPS-17 — 롤백 (2026-10-08 개정)
 
@@ -390,8 +461,8 @@ sudo sh -c 'du -sh /var/lib/containerd/*/ | sort -rh'
 
 ```bash
 sudo docker tag repman:rollback repman:latest
-sudo docker compose up -d --no-build --force-recreate
-curl -fsS http://127.0.0.1:11111/api/health
+bash scripts/deploy.sh prod --no-build    # 지금 태그로 다시 띄우고(--force-recreate) health까지 본다 — 롤백 태그는 옮기지 않는다
+#   금지 시간대(OPS-16) 안이면 --ignore-window — 롤백은 대개 급하다
 ```
 
 **DB는 보통 되돌리지 않는다.** 스키마 변경이 「추가만」(OPS-15)이면 옛 앱은 새 열을 모르고 지나간다. DB 스냅샷(OPS-15 2단계)으로
@@ -440,10 +511,10 @@ curl -fsS http://127.0.0.1:11111/api/health
 | 수칙 | 이유 |
 |---|---|
 | 데이터·DB·백업 스테이징 전부 `/data` | ST-00 |
-| Docker 빌드는 `docker builder prune` 정기 실행과 함께 | 빌드 캐시가 `/var/lib/docker`(= `/`)에 쌓임 |
-| 이미지 태그 2세대만 유지 | 〃 |
+| 빌드는 `scripts/deploy.sh`로만 — 기동이 끝나면 **우리 빌드 찌꺼기**(표식 `org.tincase.app=repman`)를 다 지운다 (2026-10-08 개정) | 빌드 찌꺼기가 `/var/lib/containerd`(= `/`)에 쌓인다(OPS-42). 예전 「`builder prune` 정기 실행」은 buildx가 없는 이 서버에서 0B였고, 서버 전체 캐시라 남의 것이기도 하다 → OPS-43 |
+| 이미지 태그 2세대만 유지 — `repman:latest` · `repman:rollback` (테스트는 `repman:test` 하나) | 롤백 태그가 옮겨 가면 그 전 세대는 태그 없는 찌꺼기가 되어 같은 청소에 지워진다 |
 | 헬스체크에 루트 디스크 여유 감시 추가 — 5G 미만이면 경고 | 다른 서비스가 채워도 우리가 먼저 안다 |
-| 배포 직전 디스크 확인 — 5G 미만이면 먼저 비운다 | OPS-15 1단계 |
+| 배포 직전 디스크 확인 — 5 GiB 미만이면 우리 찌꺼기를 먼저 치우고, 그래도 모자라면 **빌드하지 않는다** (`deploy.sh`가 한다) | OPS-15 1단계 · OPS-43f. 2G대에서 빌드하면 도중에 ENOSPC로 죽고, 죽은 빌드의 찌꺼기가 또 쌓인다 |
 
 **health가 디스크를 말하는 방법 (2026-10-08 결정).**
 

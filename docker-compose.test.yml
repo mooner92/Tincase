@@ -1,6 +1,7 @@
 # RU-40~43 — **테스트 서버 (11112).** 운영(docker-compose.yml)과 완전히 분리한다.
 #
-#   sudo docker compose -f docker-compose.test.yml -p repman-test up -d --build
+#   bash scripts/deploy.sh test      (sudo 없이 — 아래 compose를 sudo로 부르고, 끝나면 빌드 찌꺼기를 치운다: OPS-43)
+#   = sudo docker compose -f docker-compose.test.yml -p repman-test build && … up -d
 #
 # 분리하는 것 — 컨테이너·이미지 태그·DB·저장소·세션 쿠키 이름.
 # 끄는 것     — 메신저(실제 사람에게 알림이 가면 안 된다)·자동 병합 스케줄러·Cloudflare.

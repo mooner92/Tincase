@@ -109,6 +109,19 @@ sudo find /data/worklog -type d -exec chmod g+s {} +
 
 순서와 이유는 [spec 09 OPS-15](spec/09-deployment-ops.md). **chown 하지 않는다** — mhchoi는 그룹 권한으로 이미 쓸 수 있다.
 
+**빌드·기동은 `bash scripts/deploy.sh`로만 한다** ([OPS-43](spec/09-deployment-ops.md)). `sudo` 없이 돌린다 — docker만 안에서 sudo로 부른다.
+스크립트가 빌드 직전에 금지 시간대(2b-0)·디스크(2b-1)를 다시 보고, 롤백 태그(2b-2)를 붙이고, 기동 뒤 health를 기다린 다음
+**우리 빌드 찌꺼기만**(표식 `org.tincase.app=repman`) 치운다. 손으로 할 것은 스냅샷(2b-2)과 코드·스키마(2b-3)다 —
+`db push`보다 스냅샷이 먼저여야 해서 스크립트에 넣지 않았다.
+
+| 명령 | 하는 일 |
+|---|---|
+| `bash scripts/deploy.sh prod` | 운영 — main에서만 · 금지 시간대면 멈춤 · 디스크 5G 미만이면 멈춤 · `repman:rollback` 태그 · 빌드 · 기동 · health · 청소 |
+| `bash scripts/deploy.sh prod --no-build` | 빌드 없이 지금 `repman:latest`로 다시 띄운다(`--force-recreate`) — 환경변수 변경·롤백. 이것도 main에서만 — 이 체크아웃의 compose 설정이 운영에 들어간다 |
+| `bash scripts/deploy.sh test` | 테스트 서버(11112) — 금지 시간대 없음. `TINCASE_TEST_MODE`가 있으면 넘긴다 |
+| `bash scripts/deploy.sh prune` | 빌드 없이 청소만 — 손으로 빌드한 뒤 · 디스크 경보 때 |
+| `--ignore-window` | 운영 금지 시간대를 넘는다 — 긴급 수정·롤백·병합 일시정지(OPS-16a) 때만 |
+
 ### 2b-0. 금지 시간대인가 (OPS-16)
 
 **그 주 마감 전날 11:30 ~ 마감 +2시간 30분에는 하지 않는다** (기본값: 수 11:30 ~ 목 16:30).
@@ -123,20 +136,24 @@ sudo docker exec repman sqlite3 /data/db/worklog.db \
 # 예외가 있으면 그것이, 없으면 부서 값이 마감이다. 가장 이른 마감 기준으로 금지 시간대를 잡는다
 ```
 
+`deploy.sh prod`도 빌드 직전에 같은 표로 이번 주·다음 주를 세어 금지 시간대면 멈춘다. 그래도 여기서 먼저 보는 이유:
+스냅샷·`db push`(2b-2·2b-3)도 금지 시간대에 하지 않기 위해서다.
+
 ### 2b-1. 디스크 (OPS-19 · OPS-42)
 
 루트 여유가 **5G 이상**이어야 빌드한다. 2G대에서 빌드하면 `npm ci`·이미지 레이어를 쓰다 ENOSPC로 죽는다.
+`deploy.sh`가 빌드 직전에 다시 재고, 모자라면 우리 찌꺼기를 먼저 치운 뒤에도 모자라면 빌드하지 않고 할 일을 출력한다.
 
 ```bash
 df -h / | tail -1
-sudo docker image prune -f          # 태그 없는(dangling) 이미지만 — OPS-42가 안전하다고 정리한 명령
-sudo docker builder prune -f        # buildx가 없어 0B일 수 있다. 해는 없다
+bash scripts/deploy.sh prune        # 우리 빌드 찌꺼기만 (표식 org.tincase.app=repman) — 태그 붙은 이미지·남의 이미지는 그대로
 npm cache clean --force             # mhchoi의 npm 캐시 (수 G). 다음에 다시 받을 뿐이다
 pip cache purge                     # 〃 pip
 df -h / | tail -1                   # 아직 5G 미만이면 멈추고: sudo du -sh /var/lib/containerd (OPS-42)
 ```
 
-`docker system prune`은 쓰지 않는다 — 공용 서버라 남의 멈춘 컨테이너·볼륨까지 지운다.
+**필터 없는 `docker image prune`, `builder prune`, `system prune`은 쓰지 않는다** — 공용 서버라 남의 태그 없는 이미지(그 사람의
+빌드 캐시일 수 있다)·멈춘 컨테이너·볼륨까지 지운다. 우리 것은 표식으로 가려 우리가 치운다 (OPS-43).
 
 ### 2b-2. DB 스냅샷 · 롤백 태그
 
@@ -147,10 +164,11 @@ TS=$(date +%Y%m%d-%H%M)
 sudo docker exec repman sqlite3 /data/db/worklog.db ".backup '/data/db/worklog.db.predeploy-$TS'"
 ls -l /data/worklog/db/
 
-# 지금 이미지를 붙잡아 둔다 — 빌드가 repman:latest를 덮으면 옛 이미지는 dangling이 되어 일요일 prune에 지워진다
-sudo docker tag repman:latest repman:rollback
 git -C ~/repman log -1 --oneline    # 지금 돌고 있는 커밋 — 적어 둔다
 ```
+
+롤백 태그(`repman:latest` → `repman:rollback`)는 **`deploy.sh prod`가 빌드 직전에 붙인다** — 손으로 하지 않는다.
+빌드가 `repman:latest`를 덮으면 옛 이미지는 태그 없는 찌꺼기가 되어 배포 끝 청소에 지워지는데, 태그가 붙잡고 있으면 닿지 않는다.
 
 ### 2b-3. 코드 · 스키마 · 권한
 
@@ -170,20 +188,31 @@ stat -c '%u:%G %A %n' /data/worklog /data/worklog/db /data/worklog/db/worklog.db
 ### 2b-4. 빌드 · 기동 · 확인
 
 ```bash
-sudo docker compose build && sudo docker compose up -d
-sleep 15
-curl -sS http://127.0.0.1:11111/api/health | python3 -m json.tool   # -f를 빼야 503일 때도 본문(어느 check인가)이 보인다
-#   ok:true · checks 전부 ok · warnings 비어 있음 (있으면 읽는다 — 대개 루트 디스크, OPS-19)
+cd ~/repman && bash scripts/deploy.sh prod
+#   끝에 health 본문이 나온다 — ok:true · checks 전부 ok · warnings 비어 있음 (있으면 읽는다 — 대개 루트 디스크, OPS-19)
 #   checks.template만 fail이면 배포 탓이 아니다 — 양식 파일이 빠진 켠 부서가 있다(OPS-41). 롤백하지 말고 /ops의 「파일 없음」을 본다
-sudo docker image prune -f && df -h / | tail -1
+#   그 사이: 금지 시간대 확인 → 디스크 → 롤백 태그 → 빌드 → 기동 → health(최대 120초) → 찌꺼기 청소 → df 전·후
 ```
+
+멈추는 경우와 할 일 — 스크립트가 같은 말을 출력한다:
+
+| 출력 | 뜻 · 할 일 |
+|---|---|
+| `운영은 main에서만 돌린다` | 다른 브랜치를 운영 이미지로 구우면 다음 재기동이 조용히 그것으로 뜬다(`--no-build`면 그 브랜치의 compose 설정이 들어간다). `git switch main` |
+| `git으로 브랜치를 읽지 못했다` | 대개 `sudo bash …`로 돌린 것 — root에게 git이 답하지 않는다. sudo 없이 다시 |
+| `배포 금지 시간대다` | 마감 뒤로 미룬다. 꼭 해야 하면 `--ignore-window` |
+| `마감을 DB에서 읽지 못했다` | 판정을 못 하면 막는다. 2b-0을 손으로 보고 `--ignore-window` |
+| `… 미만이라 빌드하지 않는다` | 우리 찌꺼기는 이미 치웠다. 출력된 순서대로 비운다. 빌드 없이 다시 띄우기는 `--no-build`로 된다 |
+| `빌드 실패` · `기동 실패` | 돌던 컨테이너는 그대로다. 찌꺼기는 `bash scripts/deploy.sh prune` |
+| `health가 … ok:true가 아니다` | 본문의 checks를 읽고, 배포 탓이면 아래 롤백 |
+| `다른 deploy.sh가 돌고 있다` | 겹치면 이쪽 청소가 저쪽 빌드의 스테이지 이미지를 지울 수 있다. 끝난 뒤 다시 |
 
 ### 2b-롤백 — 재빌드하지 않는다 (OPS-17)
 
 ```bash
 sudo docker tag repman:rollback repman:latest
-sudo docker compose up -d --no-build --force-recreate
-curl -sS http://127.0.0.1:11111/api/health | python3 -m json.tool
+bash scripts/deploy.sh prod --no-build     # 지금 태그로 다시 띄우고 health까지 — 롤백 태그는 옮기지 않는다
+#   금지 시간대 안이면 --ignore-window를 붙인다 — 롤백은 대개 급하다
 ```
 
 **DB는 보통 되돌리지 않는다.** 스키마가 「추가만」이면 옛 앱은 새 열을 모르고 지나간다. 데이터가 망가졌을 때만
@@ -248,13 +277,11 @@ chmod 600 .env.production
 
 ```bash
 cd ~/repman
-# docker는 sudo 필요 (mhchoi가 docker 그룹 아님). compose 플러그인은
+# docker는 sudo 필요 (mhchoi가 docker 그룹 아님) — 스크립트가 안에서 sudo로 부른다. compose 플러그인은
 # /usr/local/lib/docker/cli-plugins에 설치되어 있음 (2026-08-13)
-sudo docker compose build                        # 루트 디스크 주의 — 완료 후 5단계에서 prune
-sudo docker compose up -d
-sleep 15
-curl -fsS http://127.0.0.1:11111/api/health | python3 -m json.tool
-# 기대: ok:true, checks 전부 ok  (이미 8/13에 스모크 컨테이너로 검증됨)
+bash scripts/deploy.sh prod      # 빌드 · 기동 · health · 빌드 찌꺼기 청소 (OPS-43)
+# 첫 설치에는 돌던 컨테이너도 repman:latest도 없다 — 금지 시간대는 「읽지 못함」으로 알리고 지나가고, 롤백 태그는 건너뛴다
+# 기대: 끝에 ok:true, checks 전부 ok  (이미 8/13에 스모크 컨테이너로 검증됨)
 ```
 
 ## 5. 검증 (AU-12) ⚠
@@ -267,8 +294,7 @@ ss -tlnp | grep 11111
 curl -s -o /dev/null -w "%{http_code} %{redirect_url}\n" http://<서버IP>:11111/
 
 # 3) 루트 디스크 보호 (OPS-19) — 실측: 이 서버는 97~99%를 오간다
-sudo docker builder prune -f && sudo docker image prune -f
-df -h / | tail -1
+bash scripts/deploy.sh prune     # 우리 빌드 찌꺼기만 — 앞뒤 df를 출력한다 (OPS-43)
 ```
 
 브라우저:
@@ -332,7 +358,8 @@ sudo systemctl daemon-reload && sudo mount -a && findmnt /mnt/backup
 **그 주 마감 전날 11:30 ~ 마감 +2시간 30분 동안 재배포 금지.** 기본값(목 14:00 마감)이면 **수 11:30 ~ 목 16:30**.
 전날 11:45·당일 09:00·13:00·13:50 알림, 마감 직전 제출, 14:01 병합, 14:10·14:30 안내, 15:00 대외 마감,
 3단계를 켰으면 16:00 본부 기한까지가 이 안에 있다. 배포는 **목 16:30 이후 ~ 다음 주 화요일**.
-**연휴 주는 마감이 당겨진다** — 배포 전에 §2b-0으로 이번 주 마감부터 본다.
+**연휴 주는 마감이 당겨진다** — 배포 전에 §2b-0으로 이번 주 마감부터 본다. `deploy.sh prod`도 빌드 전에 같은 계산으로 막는다
+(넘는 길은 `--ignore-window` 하나).
 
 
 ---

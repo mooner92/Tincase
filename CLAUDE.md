@@ -22,7 +22,7 @@ npm run build        # next build (standalone)
 npm run db:seed      # docs/private/seed.json → DB (멱등)
 ```
 
-운영: `sudo docker compose up -d --build` · 헬스 `curl 127.0.0.1:11111/api/health` · 배포 절차 [docs/DEPLOY.md](docs/DEPLOY.md)
+운영: `bash scripts/deploy.sh prod` (sudo 없이 — 빌드·health·빌드 찌꺼기 청소까지, OPS-43) · 헬스 `curl 127.0.0.1:11111/api/health` · 배포 절차 [docs/DEPLOY.md](docs/DEPLOY.md)
 
 ## 이 저장소의 작업 규약
 

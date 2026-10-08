@@ -1,11 +1,19 @@
 # OPS-04 — 멀티스테이지. 비루트 실행, TZ 고정.
+#
+# OPS-43a — 모든 스테이지에서 FROM 바로 다음 줄은 LABEL org.tincase.app="repman"이다.
+# 공용 서버라 빌드 찌꺼기(태그 없는 중간 이미지)를 지울 때 **우리 것만** 골라야 하는데, 찌꺼기에는
+# 이름이 없어 이 표식이 유일한 손잡이다 (scripts/deploy.sh가 이 필터로만 prune한다).
+# 레이블은 그 스테이지의 **뒤** 명령으로만 이어지므로 deps·build 스테이지에도, 맨 앞에 둔다 —
+# 빠진 스테이지의 찌꺼기(npm ci·next build 결과, 용량의 대부분)는 남의 것과 구별할 수 없게 된다.
 FROM node:22-bookworm-slim AS deps
+LABEL org.tincase.app="repman"
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY prisma ./prisma
 RUN npm ci
 
 FROM node:22-bookworm-slim AS build
+LABEL org.tincase.app="repman"
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
@@ -16,6 +24,7 @@ ENV DATABASE_URL="file:/tmp/build.db" \
 RUN npx prisma generate && npm run build
 
 FROM node:22-bookworm-slim AS run
+LABEL org.tincase.app="repman"
 ENV NODE_ENV=production \
     TZ=Asia/Seoul \
     HOSTNAME=0.0.0.0 \
