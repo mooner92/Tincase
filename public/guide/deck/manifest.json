@@ -1,5 +1,5 @@
 {
-  "version": "20261008T1239",
+  "version": "20261008T1545",
   "week": "10월 1주차",
   "viewport": {
     "width": 1600,
@@ -203,7 +203,7 @@
         }
       ],
       "radius": 8,
-      "sha256": "6900574cbd348b1742f7b87f834a3db5a30f4eeb12b6e5b13072d34478ec590f"
+      "sha256": "78e458ac5367437936e716a36fecbb8b756de4e9a5d7fe95969135a7552915b7"
     },
     "member-past": {
       "file": "member-past.webp",
@@ -229,7 +229,7 @@
         }
       ],
       "radius": 8,
-      "sha256": "6900574cbd348b1742f7b87f834a3db5a30f4eeb12b6e5b13072d34478ec590f"
+      "sha256": "78e458ac5367437936e716a36fecbb8b756de4e9a5d7fe95969135a7552915b7"
     },
     "lead-nudge": {
       "file": "lead-nudge.webp",
@@ -281,7 +281,7 @@
         }
       ],
       "radius": 12,
-      "sha256": "6372a54deb3a0bbbffb4d975a9060e2f8749b0e50dff4565e233f1863e40addb"
+      "sha256": "9ff68d4ebe3f1333adf3e0538e558cb6a6a2ae9d7ee91207051056b145ff7ffe"
     },
     "lead-merged": {
       "file": "lead-merged.webp",
@@ -337,7 +337,7 @@
         }
       ],
       "radius": 0,
-      "sha256": "8ac89b42fa56b8f9e3ccad4214fc45704703eae20887257488256401a5943bb5"
+      "sha256": "cd681b3efff70004407fd2dfb5eadc0112b64334dd21d45373f3b5f909c635db"
     },
     "lead-rules": {
       "file": "lead-rules.webp",
@@ -389,7 +389,7 @@
         }
       ],
       "radius": 8,
-      "sha256": "06057433608f3072d2a743b97ec32bc53bcff2061695b598429a338230127a6e"
+      "sha256": "ef64e6bc4364eb787d7149f27fbaf7e1f75da876f3999e890f8f15d89be3aa36"
     },
     "head-approve": {
       "file": "head-approve.webp",
@@ -415,7 +415,7 @@
         }
       ],
       "radius": 8,
-      "sha256": "06057433608f3072d2a743b97ec32bc53bcff2061695b598429a338230127a6e"
+      "sha256": "ef64e6bc4364eb787d7149f27fbaf7e1f75da876f3999e890f8f15d89be3aa36"
     },
     "head-save": {
       "file": "head-save.webp",
@@ -471,7 +471,7 @@
         }
       ],
       "radius": 0,
-      "sha256": "351540bbedd185e3ca6b1ed72d52723ac29a135fa71cfd8aa2aeac703feb0edd"
+      "sha256": "731e9068bbb7b0d22d0164c7f4be8cb952837adb3dd46e98e5b04101ab0d1c0f"
     },
     "hq-units": {
       "file": "hq-units.webp",
@@ -497,7 +497,7 @@
         }
       ],
       "radius": 12,
-      "sha256": "906d68120b29ee1d92fa1e0046aeca5daefec2889f8079a77da790c26afd66a7"
+      "sha256": "1b5f358f58f9ebcd6d2367438b40f95f61642ae0f9acc1750e4bec4523cac955"
     },
     "hq-run": {
       "file": "hq-run.webp",
@@ -523,7 +523,7 @@
         }
       ],
       "radius": 0,
-      "sha256": "cc731e18909420b2743f3b642f9a84bf6e80a06a329a6710b6a61b99b6064e5e"
+      "sha256": "42bfe3464873ec22a35071b8cf5aa4982ab7af8561640df13b49e767318bed4c"
     },
     "hq-approve": {
       "file": "hq-approve.webp",
@@ -549,7 +549,7 @@
         }
       ],
       "radius": 8,
-      "sha256": "125f5f870557ffacdc1b8bd0305c2e26458a0b50eef6151f558de1474ed1a9a5"
+      "sha256": "823eb1fffa0d3e1e4d45ee6318afec5590b034e705eae46ee7681bdcd2390f8a"
     },
     "hq-sent": {
       "file": "hq-sent.webp",
@@ -575,7 +575,7 @@
         }
       ],
       "radius": 0,
-      "sha256": "dabc206d4be536c01efe5e5185ff28286c0e978a4de6f675d762cd0d047e0c51"
+      "sha256": "0530e086846dbdaf997b2888dd04eb75160211e5016d6a0269b076e0e4546f18"
     },
     "org-board": {
       "file": "org-board.webp",
@@ -601,7 +601,7 @@
         }
       ],
       "radius": 0,
-      "sha256": "e278a9013f453a7bb3bf239c0c5f38edb811b728eff656398354471d4054ee6f"
+      "sha256": "5b3cebbd1b94350da0ad9ec003ffb287f0cc98c2340732f62230631bdf3a7253"
     },
     "org-run": {
       "file": "org-run.webp",
@@ -627,7 +627,7 @@
         }
       ],
       "radius": 0,
-      "sha256": "82b819816399ac0b7bd6a02d9d96c861c4b956f71a1c15a75e002698ca39633d"
+      "sha256": "dcff0b17020ce3a9652e45a01b784ec305daba500dc63c019cfbd57ebec44fa0"
     },
     "org-download": {
       "file": "org-download.webp",
@@ -653,7 +653,7 @@
         }
       ],
       "radius": 8,
-      "sha256": "82b819816399ac0b7bd6a02d9d96c861c4b956f71a1c15a75e002698ca39633d"
+      "sha256": "dcff0b17020ce3a9652e45a01b784ec305daba500dc63c019cfbd57ebec44fa0"
     },
     "org-schedule": {
       "file": "org-schedule.webp",
@@ -679,7 +679,7 @@
         }
       ],
       "radius": 8,
-      "sha256": "0ab119cdf193ece4a6c3b3009cd8622a95eed6c30a8803365e3defc64037d881"
+      "sha256": "8bb765324c86047d0a05f02da142b6666a40f7ea270985102383496dd78dd3c4"
     },
     "org-preview": {
       "file": "org-preview.webp",
@@ -705,7 +705,7 @@
         }
       ],
       "radius": 8,
-      "sha256": "dc0dbc5b40ef79439f5aa984aa0fdaa5f88f8206b98cc990cffa193a71ec6534"
+      "sha256": "ae993ff05604f9c49dd2cbe2fc42d86cf23297f2f9df27c7b0bd9a22b3b314c5"
     }
   }
 }
