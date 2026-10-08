@@ -450,7 +450,7 @@ export async function approveHq(
   node: RollupNode,
   slot: WeekSlot,
   viewed: { runId?: unknown; sha256?: unknown } | null | undefined,
-): Promise<{ unchanged: boolean; handedOff: { target: string; at: Date } | null }> {
+): Promise<{ unchanged: boolean; handedOff: { target: string; at: Date; submissionId: string } | null }> {
   return withLock(hqLockKey(node.node.id, slot.id), async () => {
     const run = await latestHqRun(node.node.id, slot.id);
     const file = run ? await runSha(run) : null;
@@ -463,7 +463,7 @@ export async function approveHq(
     if (last && last.sha256 === file.sha && !(await supersededSince(node.node.id, slot.id, 'hq', file.sha))) {
       // 같은 판 두 번 — 승인을 또 만들지 않는다. 넘김이 어긋나 있었으면(드문 일) 그 승인으로 맞춘다
       const sub = await catchUpHqApproval(node, slot, { cause: 'catch_up', causedBy: scope.user.email });
-      return { unchanged: true, handedOff: sub ? { target: '총괄', at: sub.submittedAt } : null };
+      return { unchanged: true, handedOff: sub ? { target: '총괄', at: sub.submittedAt, submissionId: sub.id } : null };
     }
     const { review, submission } = await prisma.$transaction(async (tx) => {
       const review = await tx.mergeReview.create({
@@ -488,7 +488,7 @@ export async function approveHq(
     });
     await audit(scope.user.email, 'rollup', node.node.id, `rollup:${run.id}`, { action: 'approve', review: review.id, sha256: file.sha });
     if (submission) await auditSubmit(scope.user.email, submission, { isoKey: slot.isoKey, auto: true, reviewId: review.id, target: '총괄' });
-    return { unchanged: false, handedOff: submission ? { target: '총괄', at: submission.submittedAt } : null };
+    return { unchanged: false, handedOff: submission ? { target: '총괄', at: submission.submittedAt, submissionId: submission.id } : null };
   });
 }
 

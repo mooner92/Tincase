@@ -277,8 +277,8 @@ async function perform(ctx: Ctx, a: Action, at: Date): Promise<void> {
       const node = await hqNode(ctx);
       const run = await latestHqRun(node.node.id, slot.id);
       if (!run) throw new Error(`${a.div} 승인할 본부본이 없습니다`);
-      await approveHq(scopeOf(who(ctx, a.who), divOf(ctx, a.div)), node, slot, { runId: run.id, sha256: await fileSha(run.outputPath) });
-      await syncOrg(slot, { cause: 'hq_approval', causedBy: who(ctx, a.who).email });
+      const r = await approveHq(scopeOf(who(ctx, a.who), divOf(ctx, a.div)), node, slot, { runId: run.id, sha256: await fileSha(run.outputPath) });
+      if (r.handedOff) await syncOrg(slot, { cause: `hq_handoff:${r.handedOff.submissionId}`, causedBy: who(ctx, a.who).email });
       return;
     }
   }

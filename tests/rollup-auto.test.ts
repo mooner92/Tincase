@@ -642,8 +642,13 @@ describe('RU-71~76 본부 — 저절로 이어 붙고, 본부장 승인이 곧 �
     const { latestReview } = await import('@/server/merge/review');
     expect(await latestReview(divId.hq, (await slot()).id)).toBeNull();
     await settle();
+    // RU-78 — 본부장 승인으로 다시 만든 전사본은 「무엇 때문에」를 안다: 그 본부 사본 → 「본부가 승인으로」 (응답에는 사본 id를 싣지 않는다)
+    const { causeLabel } = await import('@/server/rollup/run');
+    const lastOrg = (await orgRuns()).at(-1)!;
+    expect(lastOrg.cause).toBe(`hq_handoff:${sub.id}`);
+    expect(await causeLabel(lastOrg.cause)).toBe('본부가 승인으로');
     // 전사본 — 본부가 승인해 보낸 판의 실·팀 사본으로
-    const org = JSON.parse((await stored((await orgRuns()).at(-1)!.outputPath!)).toString()) as [string, string | null][];
+    const org = JSON.parse((await stored(lastOrg.outputPath!)).toString()) as [string, string | null][];
     expect(org.map((s) => s[0])).toEqual(['본부가(실하나)', '본부가(실둘)', '본부나', '본부나(실셋)', '단독단']);
     expect(org[0][1]).toContain('실하나 몰림');
   });

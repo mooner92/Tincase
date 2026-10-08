@@ -21,6 +21,9 @@ export const POST = handler(async (req: NextRequest) => {
   if (!parsed.success) throw new HttpError(422, 'invalid_request', '요청 형식이 맞지 않습니다.');
   const slot = await rollupSlot(parsed.data.isoKey);
   const r = await approveHq(scope, node, slot, parsed.data);
-  if (r.handedOff) later('syncOrg', () => syncOrg(slot, { cause: 'hq_approval', causedBy: scope.user.email }));
-  return json({ ok: true, unchanged: r.unchanged, handedOff: r.handedOff });
+  // RU-78 — 일으킨 사건은 그 본부 사본(`hq_handoff:<id>`) — 전사본 상태 줄이 「기획경영본부 승인으로」라고 말한다.
+  // 예전 `hq_approval`은 이름표가 없어 본부장 승인으로 다시 만든 전사본의 「무엇 때문에」가 비었다(2026-10-08 머지 뒤 화면에서 발견)
+  const h = r.handedOff;
+  if (h) later('syncOrg', () => syncOrg(slot, { cause: `hq_handoff:${h.submissionId}`, causedBy: scope.user.email }));
+  return json({ ok: true, unchanged: r.unchanged, handedOff: h ? { target: h.target, at: h.at } : null });
 });
