@@ -216,6 +216,7 @@ cd ~/repman && bash scripts/deploy.sh prod
 > 운영에서 나갈 쪽지 문구 전부는 [NOTIFICATIONS-v2.md](NOTIFICATIONS-v2.md), 부서 안내문은 [ANNOUNCE-v2.md](ANNOUNCE-v2.md). 이 절은 스키마와 기동 확인만 다룬다.
 
 절차는 2b-0 ~ 2b-4 그대로다. 다른 것은 2b-3의 `db push`가 **이번에는 반드시 무언가를 만든다**는 것뿐 — 「already in sync」면 체크아웃이 v2가 아니다.
+그날은 운영 DB에 push하기 전에 **2b-2 스냅샷의 사본**에 같은 push를 먼저 돌린다(LAUNCH-v2 ⑤-0) — 이행 리허설은 지어낸 사람의 DB로만 돌았다.
 바뀌는 것은 전부 **더하기만**이라 프롬프트 없이 끝나야 한다. 데이터 손실 경고·확인을 물으면 멈춘다(그럴 변경이 없다 — 체크아웃을 의심한다).
 `Division`은 열 넷이 기본값 있는 NOT NULL이라 Prisma가 **표를 새로 만들어 옮긴다**(행·외래 키 그대로 — 2026-10-09 main 스키마 DB 사본으로 확인). 그래서 스냅샷이 먼저다.
 빠뜨리고 띄우면 새 앱이 **뜨지 않는다** — 로그 첫 줄 `[boot] FATAL: DB 스키마가 이 판보다 오래됐습니다`에 없는 표 7 · 열 6이 적힌다(OPS-48). 그때는 push 뒤 `--no-build`로 다시 띄운다.
@@ -259,8 +260,8 @@ bash scripts/deploy.sh prod --no-build     # 지금 태그로 다시 띄우고 h
 
 ```bash
 sudo docker compose stop app
-cp /data/worklog/db/worklog.db.predeploy-$TS /data/worklog/db/worklog.db   # 있는 파일에 덮는다 — 주인·권한이 그대로 남는다
-ls /data/worklog/db/                     # worklog.db-journal · -wal · -shm 이 남아 있으면 지운다
+rm -f /data/worklog/db/worklog.db-wal /data/worklog/db/worklog.db-shm /data/worklog/db/worklog.db-journal   # 덮기 전에 — 남은 로그가 스냅샷에 적용되지 않게
+cp /data/worklog/db/worklog.db.predeploy-$TS /data/worklog/db/worklog.db   # 있는 파일에 덮는다 — 주인·권한이 그대로 남는다 (닫힌 스냅샷 · 멈춘 앱)
 sudo docker compose up -d
 ```
 

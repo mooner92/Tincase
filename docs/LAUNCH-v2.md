@@ -13,10 +13,11 @@
 
 | 시각 | 단계 | 여기서 멈추면 |
 |---|---|---|
-| 07:00 | ① 준비 · 금지 시간대(OPS-16) · 디스크 · 야간 백업 · 배포 전 기록 | 아무 일 없음 — 옛 앱이 돈다 |
+| 07:00 | ① 준비 · 금지 시간대(OPS-16) · 디스크 · 야간 백업 · 배포 전 기록 · **v1 이미지 고정 태그** | 아무 일 없음 — 옛 앱이 돈다 |
 | 07:10 | ② 작업 공지 | 〃 |
 | 07:15 | ③ `main`에 합치고 `v2.0.0` 태그 | 〃 |
 | 07:20 | ④ DB 스냅샷 (컨테이너 안) | 〃 |
+| 07:22 | ⑤-0 스냅샷 **사본**에 `prisma db push` — 실제 데이터로 먼저 (3초) | 〃 |
 | 07:25 | ⑤ `prisma db push` (운영 DB) | 〃 — 더한 표·열은 옛 앱이 모르고 지나간다 |
 | 07:30 | ⑥ `bash scripts/deploy.sh prod` (빌드 5~10분) | **여기부터 새 앱** — 문제면 §3 |
 | 07:45 | ⑦ health · 기동 로그 FATAL | §3 |
@@ -32,13 +33,35 @@
 
 - [ ] **릴리스 커밋** = `feat/org-rollup`의 끝. 테스트 서버(11112)·리허설에서 본 코드와 같은지 확인하고 해시를 적어 둔다(③에서 맞춘다).
       개발 쪽 게이트(`npm test` · `tsc` · `check-secrets.sh`)는 **종료 코드로** 판정한다(`| tail` 금지).
+      `npm test`는 env가 있어야 한다 — 없으면 아홉 파일이 `[env] 환경변수 검증 실패`로 떨어진다(코드 탓이 아니다):
+      `STORAGE_ROOT=$(mktemp -d) CF_ACCESS_TEAM=t DATABASE_URL=file:$(mktemp -u)/x.db npm test; echo $?` (2026-10-09 검토 끝: 59파일 1001개 통과).
 - [ ] **11112를 원래대로** — 리허설이 끝나면 리허설 덧붙임(`TINCASE_REHEARSAL=on`) 없이 다시 올려 스케줄러가 꺼진 상태로. 11112와 운영은
       **같은 모델 서버(:11437)**를 쓴다 — 목요일 마감에 시험 서버가 자동 병합을 돌리면 운영 병합과 모델을 다툰다.
+      `TINCASE_TEST_MODE=demo bash scripts/deploy.sh test --no-build` (시연 모드로 떠 있으니 변수가 있어야 한다 — 없으면 deploy.sh가 멈춘다) →
+      `sudo docker exec repman-test printenv MERGE_SCHEDULER` 가 `off`.
 - [ ] **수신 허용 목록** — 새 부서 사람이 쪽지를 받으려면 `.env.production`의 `MESSENGER_ALLOWLIST`가 `*`이거나 그 사번을 담아야 한다.
       `MESSENGER_LINK_BASE`가 없으면 설정 링크가 나가지 않는다(409). 바꿀 거면 **⑥ 전에** — 배포가 컨테이너를 새로 만들며 읽는다. 파일은 그 자리에서 고치고 복사하지 않는다.
 - [ ] **사람 명단**(비공개): 12개 쓰는 부서의 담당자(lead)·부서장(head), 기획경영본부의 본부 담당·본부장, 총괄 계정 — ⑨-4에서 넣는다.
 - [ ] **문구 검토** — [NOTIFICATIONS-v2.md](NOTIFICATIONS-v2.md) §5. [ANNOUNCE-v2.md](ANNOUNCE-v2.md)의 자리표시자를 채운다.
 - [ ] §5의 질문에 답.
+- [ ] (권장 · 일요일) **실제 데이터로 미리 한 번** — 이행 리허설은 지어낸 사람의 DB로만 돌았다(운영 사본은 개인정보라 에이전트가 복사하지 않았다).
+      월요일의 ⑤-0(사본에 push)과 9-3b(파일 점검)를 일요일에 먼저 돌려 두면 월요일 아침에 놀랄 일이 줄어든다. **브랜치 체크아웃 `~/repman-rollup`에서** —
+      일요일의 `~/repman`은 아직 v1 스키마라 거기서 push하면 아무것도 바뀌지 않는다. 10/07 13:12의 `.bak-20261007-pre-rollup`은 v1.39.0 전
+      (main이 `mergeSort`·`MergeReview`를 더하기 전)이라 월요일의 출발점이 아니다 — 쓰지 않는다. 운영 DB·파일은 읽기만 한다.
+
+```bash
+D=~/sunday-check && mkdir -m 700 -p $D && R=$D/rehearse.db
+sudo docker exec repman sqlite3 /data/db/worklog.db ".backup '/data/db/worklog.db.sunday-check'"   # 살아 있는 DB는 컨테이너 안에서 .backup으로만 (OPS-07)
+cp /data/worklog/db/worklog.db.sunday-check "$R" && rm /data/worklog/db/worklog.db.sunday-check
+c() { for t in $(sqlite3 "$R" "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY 1"); do
+        echo "$t $(sqlite3 "$R" "SELECT COUNT(*) FROM \"$t\"")"; done; }
+c > $D/before.txt
+cd ~/repman-rollup && DATABASE_URL=file:$R npx prisma db push --skip-generate      # 확인 질문 없이 「in sync」 (물으면 N — 월요일 No-go감)
+c > $D/after.txt; sqlite3 "$R" "PRAGMA integrity_check; PRAGMA foreign_key_check;"; diff $D/before.txt $D/after.txt   # ok · `>` 일곱 줄(새 표 0)뿐
+cd ~/repman-rollup && DATABASE_URL=file:/data/worklog/db/worklog.db STORAGE_ROOT=/data/worklog npx tsx scripts/check-files.ts --all-templates; echo "exit=$?"
+#   --all-templates: 아직 꺼진 12개 부서의 양식도 웹 작성 길로 채워 본다(그 줄은 숫자만 — 종료 코드에 넣지 않는다). 실패가 있으면 월요일 9-2 전에 그 부서 양식을 다시 받는다
+rm -rf $D
+```
 
 ## 2. 월요일 순서
 
@@ -70,6 +93,16 @@ q "SELECT COUNT(*) AS 부서, SUM(isActive) AS 켜짐, SUM(notifyEnabled) AS 알
   | tee ~/deploy-$TS/before.txt
 sudo docker logs repman 2>&1 | grep -E '\[알림\] (켜짐|꺼짐)' | tail -1 > ~/deploy-$TS/notify-before.txt   # 수신 허용 · 발송 부서
 sudo docker image inspect repman:latest --format '{{.Id}} {{.Created}}' > ~/deploy-$TS/image-before.txt
+```
+
+- **v1 이미지를 고정 태그로 붙잡는다** — 롤백(§3)의 근거다. ⑥의 `deploy.sh`도 `repman:rollback`을 붙이지만, ⑥을 **빌드째 다시** 돌리면
+  (첫 번째가 빌드를 마친 뒤 health에서 멈췄을 때 등) 그 태그가 v2로 옮겨지고 v1 이미지는 태그 없는 찌꺼기가 되어 그 실행의 청소에 지워진다.
+  `repman:v1.39.0`은 deploy.sh가 옮기지도 지우지도 않는다(청소는 태그 없는 것만 — OPS-43). 디스크는 더 들지 않는다(같은 이미지).
+
+```bash
+RUNNING=$(sudo docker inspect repman --format '{{.Image}}'); LATEST=$(sudo docker image inspect repman:latest --format '{{.Id}}')
+[ "$RUNNING" = "$LATEST" ] && echo IMAGE-SAME || echo "다름 — 멈춘다"   # 다르면 누가 빌드만 하고 띄우지 않았다: ⑥의 롤백 태그가 지금 도는 v1이 아니다
+sudo docker tag "$RUNNING" repman:v1.39.0 && sudo docker image inspect repman:v1.39.0 --format '{{.Id}}' | tee ~/deploy-$TS/image-v1.txt
 ```
 
 ### ② 07:10 작업 공지
@@ -113,7 +146,29 @@ sudo docker exec repman sqlite3 /data/db/worklog.db ".backup '/data/db/worklog.d
 ls -l /data/worklog/db/          # worklog.db.predeploy-$TS 가 worklog.db와 비슷한 크기로 있다
 ```
 
-`repman:rollback` 태그는 ⑥이 빌드 직전에 붙인다 — 손으로 하지 않는다.
+`repman:rollback` 태그는 ⑥이 빌드 직전에 붙인다 — 손으로 하지 않는다(롤백은 ①의 고정 태그 `repman:v1.39.0`으로 한다 — §3.1).
+
+### ⑤-0 07:22 스냅샷 **사본**에 먼저 push — 실제 데이터로
+
+이행 리허설(2026-10-09)은 v1.39.0 코드로 만든 **지어낸 사람의 DB**로 돌았다 — push 3초 · 데이터 손실 확인 없음 · 행 수 그대로 · 옛 앱이 새 DB를 읽고 씀.
+실제 데이터로는 아직이다. ④의 스냅샷이 바로 월요일의 출발점이니, 그 **사본**에 같은 명령을 먼저 돌린다(3초). 사본은 `~/deploy-$TS`(700)에 두고 끝나면 지운다.
+닫힌 스냅샷이라 `cp`해도 된다 — OPS-07이 막는 것은 **살아 있는** DB의 `cp`다.
+
+```bash
+R=~/deploy-$TS/rehearse.db
+cp /data/worklog/db/worklog.db.predeploy-$TS "$R"      # Permission denied면: sudo docker exec repman chmod g+r /data/db/worklog.db.predeploy-$TS
+c() { for t in $(sqlite3 "$R" "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY 1"); do
+        echo "$t $(sqlite3 "$R" "SELECT COUNT(*) FROM \"$t\"")"; done; }
+c > ~/deploy-$TS/rehearse-before.txt
+cd ~/repman && DATABASE_URL=file:$R npx prisma db push --skip-generate 2>&1 | tee ~/deploy-$TS/rehearse-push.txt
+c > ~/deploy-$TS/rehearse-after.txt
+sqlite3 "$R" "PRAGMA integrity_check; PRAGMA foreign_key_check;"                       # ok 한 줄뿐
+diff ~/deploy-$TS/rehearse-before.txt ~/deploy-$TS/rehearse-after.txt                 # `>` 일곱 줄(새 표, 모두 0)뿐 · `<` 줄이 없다
+rm -f "$R" "$R-wal" "$R-shm" "$R-journal"
+```
+
+- 기대: 「Your database is now in sync」 · 데이터 손실 경고·확인 **없음** · `ok` · diff는 `> GuideTourSeen 0` … 일곱 줄. 이 파일들에는 표 이름과 수만 있다.
+- 확인을 물으면 N(Ctrl+C) — **No-go**(§4). 사본이라 아무것도 바뀌지 않았다. ⑤를 하지 않고 옛 앱 그대로 둔다.
 
 ### ⑤ 07:25 `prisma db push` — 운영 DB
 
@@ -152,6 +207,9 @@ cd ~/repman && bash scripts/deploy.sh prod 2>&1 | tee ~/deploy-$TS/deploy.txt; e
 - 기대: `exit=0`, 끝에 health 본문 `ok:true`. 멈추는 경우와 할 일은 [DEPLOY.md](DEPLOY.md) §2b-4 표 — 이날 가장 그럴듯한 둘:
   - 로그 `[boot] FATAL: DB 스키마가 이 판보다 오래됐습니다` → ⑤를 빠뜨렸다(OPS-48). **롤백하지 않는다** — ⑤ 뒤 `bash scripts/deploy.sh prod --no-build`
   - `checks.template`만 fail → 배포 탓이 아니다(OPS-41). 롤백하지 않고 ⑨-2
+- ⚠ **⑥을 다시 돌릴 때는 `--no-build`만.** 첫 실행이 빌드를 마친 뒤(health에서) 멈췄는데 빌드째 다시 돌리면, deploy.sh가 `repman:rollback`을
+  **지금의 `repman:latest`(= 방금 구운 v2)**로 옮기고 v1 이미지는 그 실행의 청소에 지워진다. ①의 `repman:v1.39.0`이 있으면 롤백은 그대로 되지만,
+  다시 구울 이유가 없다 — 코드를 고친 게 아니면 `bash scripts/deploy.sh prod --no-build`.
 
 ### ⑦ 07:45 health · 기동 로그
 
@@ -166,7 +224,7 @@ sudo docker exec repman printenv | grep -E '^(TINCASE_ENV|MESSENGER_SINK|MERGE_S
 기동 로그에 있어야 하는 줄:
 
 - `[boot] 4/4 서버 시작 (Division 30개)`
-- `[알림] 켜짐 (수신 허용: …) · 발송 부서 n/30개: …` — `notify-before.txt`와 같다(부서 알림은 ⑨-5에서 켠다)
+- `[알림] 켜짐 (수신 허용: …) · 발송 부서 n/30개: …` — `notify-before.txt`와 같다(부서 알림은 ⑨-5에서 켠다 · 1절에서 허용 목록을 바꿨으면 그 칸만 다르다)
 - `[merge] 자동 병합 스케줄러 등록 (1분 주기)` — 이 줄이 있으면 환경 검사(OPS-46)와 스키마 검사(OPS-48)를 지났다
 - `[merge] 모델 데우기 — 기동 · n초 · keep_alive -1` — 몇 초~수십 초 뒤에 찍힌다
 
@@ -179,8 +237,8 @@ sudo docker exec repman printenv | grep -E '^(TINCASE_ENV|MESSENGER_SINK|MERGE_S
 
 ```bash
 sleep 60
-sudo docker logs --since 5m repman 2>&1 | grep -E '스케줄러 오류|맞추기 오류|알림 오류|회수 실패|데우기 실패' || echo "틱 오류 없음"
-q "SELECT isoKey, label FROM WeekSlot ORDER BY opensAt DESC LIMIT 1;"                                  # 2026-W42
+sudo docker logs --since 5m repman 2>&1 | grep -E 'FATAL|오류|실패' || echo "틱 오류 없음"
+q "SELECT isoKey, label FROM WeekSlot WHERE isoKey IN ('2026-W42', '2026-W43') ORDER BY isoKey;"        # 2026-W42가 있다 (W43은 일정 화면을 연 뒤면 있을 수 있다)
 curl -s http://127.0.0.1:11437/api/ps | python3 -m json.tool | grep -E '"name"|"expires_at"'           # 모델이 올라와 있고 expires_at이 아주 먼 미래(상주)
 ```
 
@@ -222,6 +280,21 @@ q "SELECT nameKo AS 부서, boardStatus AS 게시판 FROM Division WHERE boardSt
 
 섹션 「기후대기전략연구본부」·「생활환경연구본부」는 산하 실(탄소중립에너지연구실·순환경제연구실)이 채운다 — 그 두 본부는 켜지 않는다.
 
+**9-3b 파일 점검 — 이 판의 읽기로 운영 파일을 한 번 연다** (OPS-49 · 읽기 전용 · 숫자만)
+
+이행 리허설은 지어낸 파일로만 돌았다 — 8~9월에 한글에서 올린 실제 제출물 · 옛 엔진이 쓴 병합본 · 새로 켠 부서의 실제 양식을 v2로 연 적이 없다.
+v2는 지난 제출물·병합본을 부서원 홈에서 열고, 켠 부서의 양식은 웹 작성이 그대로 채운다. 9-3 뒤에(켠 부서가 정해진 뒤) 돌린다 — 몇십 초.
+
+```bash
+cd ~/repman && DATABASE_URL=file:/data/worklog/db/worklog.db STORAGE_ROOT=/data/worklog npx tsx scripts/check-files.ts \
+  | tee ~/deploy-$TS/files.txt; echo "exit=${PIPESTATUS[0]}"
+```
+
+- 기대: `exit=0` · 「끝: 모두 읽혔다」. 「template(꺼진 부서 · 있는지만)」의 「파일 없음」은 문제가 아니다(OPS-41 정리 뒤 남은 기록).
+- 「template(켠 부서 · 웹 작성으로 채워 봄)」에 실패가 있으면 **그 부서는 목요일에 아무도 못 낸다** — 바로 아래 「└ 부서: …」 줄이 어느 부서인지 말한다
+  (부서 이름만 — 경로·사람 이름은 찍지 않는다). 그 부서 설정에서 양식을 다시 올린다(올릴 때 이 판이 검증한다). 오늘 못 고치면 그 부서는 끈다(9-3) — No-go는 아니다.
+- 「submission」·「mergeRun」의 실패는 그 주의 지난 문서가 홈에서 열리지 않는다는 뜻이다 — 수를 적어 두고 Go(목요일 전 할 일).
+
 **9-4 사람** — `/ops` 부서 표 → 그 줄 [열기] → 인원 드로어.
 
 - 켠 부서마다 **담당자(lead) 1명 이상**. 부서장(head)은 승인할 사람이다 — 없으면 마감 뒤 병합본이 저절로 위로 올라간다(RU-71).
@@ -235,7 +308,7 @@ q "SELECT d.nameKo AS 부서, d.isActive AS 켜짐, d.notifyEnabled AS 알림, d
           d.deadlineDow AS 요일, d.deadlineTime AS 시각,
           SUM(u.isActive AND u.onRoster) AS 명단, SUM(u.isActive AND u.divisionRole = 'lead') AS 담당,
           SUM(u.isActive AND u.divisionRole = 'head') AS 부서장, SUM(u.isActive AND u.employeeNo IS NULL) AS 사번없음,
-          SUM(u.isActive AND u.passwordHash IS NULL) AS 비번없음
+          SUM(u.isActive AND u.passwordHash IS NULL) AS 비번없음, SUM(u.isActive AND u.divisionRole = 'head' AND u.onRoster) AS 부서장명단
    FROM Division d LEFT JOIN User u ON u.divisionId = d.id
    WHERE d.isActive = 1 OR d.boardStatus = 'confirmed' OR d.nameKo = '기획경영본부'
    GROUP BY d.id ORDER BY d.createdAt;" | tee ~/deploy-$TS/divisions-after.txt
@@ -244,7 +317,9 @@ q "SELECT d.nameKo AS 총괄부서, COUNT(*) AS 총괄, SUM(u.employeeNo IS NOT 
    SELECT COUNT(*) AS 운영자, SUM(employeeNo IS NOT NULL AND notifyEnabled) AS 알림받음 FROM User WHERE isActive = 1 AND isOperator = 1;"
 ```
 
-- 기대: 켠 부서마다 담당 ≥ 1 · 요일 4 · 시각 14:00(다르면 그 부서 담당과 확인) · 총괄 ≥ 1(알림받음 ≥ 1) · 운영자 알림받음 1.
+- 기대: 켠 부서마다 담당 ≥ 1 · 요일 4 · 시각 14:00(다르면 그 부서 담당과 확인) · **부서장명단 0** · 총괄 ≥ 1(알림받음 ≥ 1) · 운영자 알림받음 1.
+- **부서장명단이 0이 아니면 9-5 전에 고친다** — 집계 대상(onRoster)인 부서장은 매주 「미제출」로 잡히고, 알림을 켜는 순간 **부서장에게 마감 독촉 세 통**이 간다
+  (마감 전 알림은 명단 안 미제출자에게 — NOTIFICATIONS-v2 §3.1). 인원 드로어에서 그 줄을 집계 제외(이유 「부서장」). 이행 리허설 보고 6.
 - 총괄이 없을 때만: `q "UPDATE User SET isCoordinator = 1 WHERE email = '<총괄-이메일>' AND isActive = 1; SELECT changes();" | tee -a ~/deploy-$TS/sql.txt` → 1.
 
 **9-5 부서 알림 스위치** (화면 없음 — SQL)
@@ -293,7 +368,8 @@ q "SELECT s.sortOrder AS 순서, s.title AS 제목, s.kind AS 꼴, s.isActive AS
    FROM OrgSection s LEFT JOIN Division d ON d.id = s.divisionId ORDER BY s.sortOrder;" | tee ~/deploy-$TS/sections.txt
 ```
 
-- 13줄, **부서 칸이 빈 줄이 없다**(비면 부서 이름이 안 맞은 것 — 「섹션 구성 편집」에서 부서를 골라 저장).
+- 13줄, **부서 칸이 빈 줄이 없다**(비면 부서 이름이 안 맞은 것 — 「섹션 구성 편집」에서 부서를 골라 저장). 섹션은 부서 **이름**(`nameKo`)으로 한 번 이어지고
+  그 뒤로 다시 맞추지 않는다 — 이행 리허설의 지어낸 DB에서는 13개 중 10개만 이어졌다(이름이 달랐다). 한 줄로: `q "SELECT COUNT(*) AS 섹션, SUM(divisionId IS NULL) AS 부서빈칸 FROM OrgSection;"` → 13 · 0.
 - 제목: 「경영지원실」(접두 없음) · 「기획경영본부(기획조정실)」 … 「기획경영본부(AI홍보전략실)」.
 - 「전사」 섹션 표에서 「Tincase 밖」 표시는 9-3에서 보류한 섹션뿐이어야 한다(기후대기·생활환경 줄은 본부가 꺼져 있어도 산하 실이 채운다).
 
@@ -305,9 +381,18 @@ q "SELECT s.sortOrder AS 순서, s.title AS 제목, s.kind AS 꼴, s.isActive AS
 - [ ] 산하 실 다섯(기획조정실 · 연구관리실 · AI홍보전략실 · 인사관리실 · 경영지원실) 켜짐
 - [ ] 섹션 13줄, 부서 칸 빈 줄 없음 (9-8) · 총괄 ≥ 1 (9-4)
 - [ ] 이번 주 승인 0 — 월요일 아침이라 당연하다. 켜는 순간 이번 주의 승인이 위로 가기 때문에 따지는 것이다(RU-79)
+- [ ] **누가 누구에게 내나** — 단위 나무는 ERP 「상위부서」(`Division.parentKo`)로 정해진다(RU-07 · 인원 최신화가 맞추는 값). 틀리면 받는 곳·쪽지의 「{받는 곳}」이 틀린다
 
-방법: 운영자 「전사」 → **[일정 바꾸기]** → 마지막 줄 「3단계 취합 꺼짐」 → [간격 바꾸기]로 **+1시간 / +2시간**(실·팀 → 본부 15:00 · 본부 → 총괄 16:00, 12 §12 Q6 기본) 확인 →
-스위치를 켠다(누르는 즉시 켜진다). 끄기는 같은 자리에서 한 번 더 묻는다. 꺼져 있는 동안 스위치는 운영자에게만 보이고, 켠 뒤에는 총괄에게도 열린다(RU-52).
+```bash
+q "SELECT w.isoKey AS 주차, COUNT(r.id) AS 승인 FROM WeekSlot w LEFT JOIN MergeReview r ON r.weekSlotId = w.id WHERE w.isoKey = '2026-W42' GROUP BY w.id;"   # 0 (줄이 없어도 0)
+q "SELECT nameKo AS 부서, parentKo AS 상위부서 FROM Division WHERE isActive = 1 ORDER BY parentKo, createdAt;"
+#   산하 실 다섯의 상위부서 = 기획경영본부 · 탄소중립에너지연구실 = 기후대기전략연구본부 · 순환경제연구실 = 생활환경연구본부 ·
+#   나머지 켠 부서 = 한국환경연구원(또는 꺼진 본부). 다르면 켜지 않는다 — 인원 최신화(roster-sync)가 맞출 값이다
+```
+
+방법: 운영자 「전사」 → **[일정 바꾸기]** → 펼친 칸 맨 아래 줄 「3단계 취합 ☐ 꺼짐 · 실·팀 → 본부 +1시간 · 본부 → 총괄 +2시간」에서 간격을 확인하고
+(실·팀 → 본부 15:00 · 본부 → 총괄 16:00, 12 §12 Q6 기본 — 다르면 [간격 바꾸기] → [저장]) **체크 상자를 켠다**(누르는 즉시 켜진다). 끄기는 같은 자리에서 「끄기」를 한 번 더 누른다.
+꺼져 있는 동안 스위치는 운영자에게만 보이고, 켠 뒤에는 총괄에게도 열린다(RU-52).
 
 ```bash
 q "SELECT enabled, unitDueMinutes, hqDueMinutes FROM OrgRollupSetting;"     # 1 · 60 · 120
@@ -344,10 +429,13 @@ sudo docker logs --since 5m repman 2>&1 | grep -E '\[자동\]' | tail -5        
 
 §4로 판정한다. Go면:
 
-1. **설정 링크를 자신에게 먼저 한 통** — `/ops` 인원 드로어에서 내 줄의 「링크 보내기」(지금 비밀번호는 그대로). 메신저에서 쪽지 본문의 주소가 **눌리는지** 본다
-   (NOTIFICATIONS-v2 §5-1). 안 눌리면 안내문의 「주소를 복사해 주소창에 붙여 넣으세요」 줄을 남긴다.
+1. **설정 링크를 자신에게 먼저 한 통** — `/ops` 인원 드로어에서 내 줄의 「링크 보내기」(지금 비밀번호는 그대로 — 링크는 쓸 때만 바꾼다).
+   이 판부터 설정 링크도 다른 쪽지처럼 주소를 `URL` 필드에 싣는다(AU-T90 — 본문의 주소는 메신저에서 눌리지 않는다, messenger.md §7 실측).
+   메신저에서 **쪽지 제목을 누르면 설정 화면이 열리는지** 본다 — 열리면 그 화면에서 아무것도 저장하지 않고 닫는다(보낸 링크는 3일 뒤 저절로 죽는다).
+   안 열리면 안내문의 「주소를 복사해 주소창에 붙여 넣어」 쪽을 쓴다(ANNOUNCE-v2 머리말).
 2. **안내문** — [ANNOUNCE-v2.md](ANNOUNCE-v2.md)를 13개 부서에(메신저 단체 쪽지 · 취합게시판). 작업 끝 공지를 겸한다.
-3. **설정 링크** — `/ops` 부서 줄 [열기] → 인원 드로어 → 「미발급 n명에게 링크 보내기」(한 번에 60명까지). **3일 만료** — 오늘 보내면 목요일 아침까지다.
+3. **설정 링크** — `/ops` 부서 줄 [열기] → 인원 드로어 → 「미발급 n명에게 링크 보내기」(한 번에 60명까지 · 운영자당 1분에 10번 — 「요청이 너무 잦습니다」면 몇 초 뒤 다시).
+   **3일 만료** — 오늘 보내면 목요일 아침까지다. 링크는 본인 알림 설정과 상관없이 간다(NT-20).
    사번이 없는 사람은 이 목록에서 빠진다 — 인원 드로어에 사번을 넣거나, 그 사람만 줄 끝 [직접](임시 비밀번호 표시 — 개인별로 전달, 단체 쪽지 금지).
    결과에 「수신 허용 목록 밖」이 있으면 1절의 허용 목록이다.
 
@@ -385,7 +473,7 @@ q "SELECT chapter AS 장, outcome AS 고른것, COUNT(*) AS 사람 FROM GuideTou
 
 | 상황 | 할 일 |
 |---|---|
-| ⑥ 전 어디서든 멈춤 | **아무것도 안 한다** — 옛 앱이 돈다. ⑤로 더한 표·열은 옛 앱이 모르고 지나간다(2026-10-09 main 스키마 DB 사본에서 옛 앱의 읽기·쓰기 확인 — CHANGELOG). 합침·태그는 다음 시도에 쓴다. 단 그 사이 `deploy.sh prod`(빌드)를 돌리면 v2가 구워진다 |
+| ⑥ 전 어디서든 멈춤 | **앱은 아무것도 안 한다** — 옛 앱이 돈다. ⑤로 더한 표·열은 옛 앱이 모르고 지나간다(2026-10-09 v1.39.0 모양의 DB로 옛 앱의 읽기·쓰기 확인 — 이행 리허설). 오늘 안에 다시 하면 합침·태그를 그대로 쓴다. **며칠 미루면 `main`을 되돌린다** — 그대로 두면 다음 `deploy.sh prod`(빌드)가 v2를 굽는다: `git -C ~/repman reset --hard "$(cat ~/deploy-$TS/old-commit)" && git -C ~/repman tag -d v2.0.0` (push 전이라 안전 · 추적 안 된 ADR 파일은 그대로) |
 | `[boot] FATAL: DB 스키마가 …` | 롤백 아님 — ⑤ 뒤 `bash scripts/deploy.sh prod --no-build` |
 | health `checks.template`만 fail | 롤백 아님 — 양식 파일이 빠진 켠 부서(⑨-2) |
 | 3단계만 이상하다 | 「전사」에서 3단계를 끈다 — 나머지는 그대로. 끄면 숨을 뿐 데이터는 남는다 |
@@ -397,11 +485,15 @@ q "SELECT chapter AS 장, outcome AS 고른것, COUNT(*) AS 사람 FROM GuideTou
 
 ```bash
 cd ~/repman
-sudo docker tag repman:rollback repman:latest
+sudo docker tag repman:v1.39.0 repman:latest       # ①에서 붙인 고정 태그 — repman:rollback은 ⑥을 빌드째 다시 돌렸으면 v2일 수 있다
+sudo docker image inspect repman:latest --format '{{.Id}}' | diff - ~/deploy-$TS/image-v1.txt && echo V1-TAGGED
 bash scripts/deploy.sh prod --no-build --ignore-window
+sudo docker inspect repman --format '{{.Image}}' | diff - ~/deploy-$TS/image-v1.txt && echo V1-RUNNING
 ```
 
-- `repman:rollback` = ⑥ 직전의 `repman:latest`(v1). 자세한 것은 [DEPLOY.md](DEPLOY.md) §2b-롤백.
+- `repman:v1.39.0` = ① 시점에 돌던 이미지(v1). `repman:rollback`도 보통 같은 이미지다(⑥이 한 번만 빌드했으면). 자세한 것은 [DEPLOY.md](DEPLOY.md) §2b-롤백.
+- `--no-build`는 지금 체크아웃(v2)의 `docker-compose.yml`로 컨테이너를 만든다 — v1.39.0과 다른 것은 `MERGE_MODEL_KEEP_ALIVE` 한 줄이고 옛 앱은 읽지 않는다(2026-10-09 diff).
+- 며칠 v1으로 갈 거면 `main`도 되돌린다(위 표 첫 줄) — 그대로 두면 다음 빌드가 v2를 굽는다.
 - DB는 그대로다 — ⑨에서 한 설정(부서 켜기 · 사람 · 알림 스위치)이 남고 옛 앱도 그것을 따른다. 새 부서에도 **v1 쪽지**가 간다
   (당일 09:00 알림 포함, 끝 줄 「취합게시판에 올리고」).
 - 옛 앱에는 **hwp 업로드 제출이 다시 열린다.** 「웹 작성만」이라고 안내했으면 한 줄 정정한다.
@@ -414,15 +506,17 @@ bash scripts/deploy.sh prod --no-build --ignore-window
 
 ```bash
 cd ~/repman
-sudo docker tag repman:rollback repman:latest
+sudo docker tag repman:v1.39.0 repman:latest                                  # §3.1과 같다 — 고정 태그
 sudo docker compose -f docker-compose.yml -p repman stop app
-cp /data/worklog/db/worklog.db.predeploy-$TS /data/worklog/db/worklog.db     # 있는 파일에 덮는다 — 주인·권한이 그대로 남는다
-ls -l /data/worklog/db/                                                       # worklog.db-journal · -wal · -shm 이 남아 있으면 지운다
+rm -f /data/worklog/db/worklog.db-wal /data/worklog/db/worklog.db-shm /data/worklog/db/worklog.db-journal   # 덮기 **전에** — v2 DB의 남은 로그가 v1 스냅샷에 적용되지 않게
+cp /data/worklog/db/worklog.db.predeploy-$TS /data/worklog/db/worklog.db     # 있는 파일에 덮는다 — 주인·권한이 그대로 남는다 (닫힌 스냅샷 · 멈춘 앱 — OPS-07의 「cp 금지」는 살아 있는 DB)
+stat -c '%u:%G %A %n' /data/worklog/db/worklog.db                             # 10001:mhchoi -rw-rw---- (호스트 sqlite3로 열지 않는다 — 남긴 -wal·-shm이 mhchoi 것이면 앱이 못 쓴다)
 bash scripts/deploy.sh prod --no-build --ignore-window
+q "PRAGMA integrity_check; SELECT COUNT(*) AS 제출 FROM Submission;"           # ok · before.txt의 제출 수와 같다 (컨테이너 안에서)
 ```
 
 - 스냅샷은 ⑤ 전이라 스키마도 v1으로 돌아간다 — 옛 이미지와 맞는다. (이 DB로 v2 이미지를 띄우면 OPS-48이 막는다.)
-- 이미 보낸 설정 링크는 무효가 된다(토큰이 DB에 없다) — 다시 보낸다. ⑨는 다시 한다.
+- 이미 보낸 설정 링크는 무효가 된다(토큰이 DB에 없다) — 다시 보낸다. 그 사이 **링크로 비밀번호를 정한 사람도 다시 정해야 한다**(비밀번호가 ④ 시점으로 돌아간다). ⑨는 다시 한다.
 - 새 앱이 만든 파일(`divisions/*/reports/` · `org/`)은 남는다 — 행 없는 파일이라 해가 없다.
 
 ### 3.3 쪽지만 멈추기
@@ -439,13 +533,16 @@ bash scripts/deploy.sh prod --no-build --ignore-window
 
 **Go — 모두 ✓ (⑪에서)**
 
+- [ ] ① `IMAGE-SAME` · `repman:v1.39.0` 태그 있음 (`image-v1.txt`)
+- [ ] ⑤-0 사본 push — 확인 질문 없음 · `ok` · diff는 새 표 일곱 줄뿐
 - [ ] ⑤ 새 표 7 · `integrity_check` ok · 행 수가 `before.txt`와 같다
 - [ ] ⑥ `exit=0` · ⑦ health `ok:true`, checks 전부 ok · FATAL 0
 - [ ] 로그 `[merge] 자동 병합 스케줄러 등록 (1분 주기)` · `[알림] 켜짐 (수신 허용: …)`
 - [ ] `printenv`에 테스트 값 없음 · 띠 없음 · `/ops/notify-sink` 404
 - [ ] ⑧ 틱 오류 없음 · 모델 상주 (아니면 목요일 전 할 일로 적고 Go)
 - [ ] 기존 로그인 유지
-- [ ] `divisions-after.txt`가 기대대로 — 켜짐 12 + 기획경영본부 · 알림 12 · 담당 ≥ 1 · 기획경영본부 알림 0·자기문서 0·게시판 none · 사번없음 0(아니면 누구인지 안다)
+- [ ] `divisions-after.txt`가 기대대로 — 켜짐 12 + 기획경영본부 · 알림 12 · 담당 ≥ 1 · **부서장명단 0** · 기획경영본부 알림 0·자기문서 0·게시판 none · 사번없음 0(아니면 누구인지 안다)
+- [ ] 9-3b 파일 점검 — 켠 부서 양식 실패 0 (실패한 부서는 껐다). 제출·병합본 실패는 수를 적고 Go
 - [ ] 총괄 ≥ 1 · 운영자 알림받음 1
 - [ ] 섹션 13줄 · 부서 칸 빈 줄 없음
 - [ ] ⑩ 스모크 통과
@@ -454,7 +551,8 @@ bash scripts/deploy.sh prod --no-build --ignore-window
 
 **No-go — 하나라도면 멈춘다**
 
-- ⑤가 데이터 손실을 묻는다 · 새 표가 7이 아니다 · `integrity_check`가 ok가 아니다 · 행 수가 줄었다 → ⑥을 하지 않는다(옛 앱 그대로)
+- ①의 이미지가 다르다(`IMAGE-SAME` 아님) → 누가 무엇을 구웠는지 알기 전에는 ⑥을 하지 않는다 — 롤백할 이미지가 v1이라는 보장이 없다
+- ⑤-0이나 ⑤가 데이터 손실을 묻는다 · 새 표가 7이 아니다 · `integrity_check`가 ok가 아니다 · 행 수가 줄었다 → ⑥을 하지 않는다(옛 앱 그대로)
 - 금지 시간대 · 디스크 5G 미만 · 오늘 야간 백업 실패 → ⑥을 하지 않는다
 - ⑥ 뒤: health `ok:false`(template 밖) · 스케줄러 등록 줄 없음 · 띠 · `printenv`에 테스트 값 · 전원 로그아웃 → §3.1
 
@@ -468,14 +566,19 @@ bash scripts/deploy.sh prod --no-build --ignore-window
    이 문서는 같은 날 켜되 9-9에서 따로 판정한다.
 3. **수신 허용 목록** — `*`로 여나, 사번 목록을 늘리나.
 4. **총괄 계정** — 누구에게 `isCoordinator`가 있나. 「전사본 준비」는 총괄 각자에게 간다. 최종본을 NAMS에 올리는 사람과 같은가.
-5. **설정 링크 본문 주소가 메신저에서 눌리나** — NOTIFICATIONS-v2 §5-1. 안 눌리면 안내문으로 메우고, 코드는 다음 판에 `URL` 필드를 싣는다.
+5. ~~설정 링크 본문 주소가 메신저에서 눌리나~~ — **고쳤다(2026-10-09, AU-T90).** 본문 주소는 눌리지 않는다는 것이 이미 실측(messenger.md §7)이라
+   설정 링크·비밀번호 찾기도 주소를 `URL` 필드에 싣는다(제목을 누르면 열린다). 남은 것은 ⑪-1에서 제목을 눌러 열리는지 한 번 보는 것뿐.
 6. **모델 서버를 11112와 함께 쓴다** — 「목요일 마감 시간에 11112에서 병합하지 않는다」로 충분한가, 인스턴스를 나누나.
 7. **병합 규칙 초안**(기획조정실·인사관리실 분류 순서) — 담당자 확인 전이면 넣지 않는다.
 8. **CHANGELOG** — 「미출시」 절들을 `v2.0.0 — 2026-10-12`로 묶는 일을 ③ 전에 릴리스 커밋에 넣을지, 배포 뒤에 할지.
+9. **이행 리허설을 실제 데이터로** — 2026-10-09 리허설은 운영 사본 복사가 막혀(개인정보) 지어낸 사람의 DB로만 돌았다. 이 문서는 그 빈 곳을
+   ⑤-0(스냅샷 사본에 push)과 9-3b(파일 점검)로 월요일에 메운다. 더 일찍 알고 싶으면 일요일에 같은 둘을 돌린다(1절 끝). 실제 데이터로 화면을
+   한 바퀴 도는 것(이행 리허설 3)은 ⑩ 스모크가 대신한다 — 3단계를 켠 흐름은 한 주 리허설(REHEARSAL.md · 지어낸 사람)에서만 봤다.
 
 ## 끝나고
 
 - 스냅샷 `worklog.db.predeploy-$TS`는 **다음** 배포가 무사히 끝난 뒤 지운다.
+- `repman:v1.39.0` 태그도 v2로 한 주(첫 목요일 마감)를 무사히 지난 뒤 떼어 낸다 — `sudo docker rmi repman:v1.39.0`(그 이미지에 다른 태그가 없으면 이미지째 지워진다 — 그때는 더 쓸 일이 없다).
 - `~/deploy-$TS/sql.txt`가 이날 SQL로 바꾼 것(9-4 · 9-5 · 9-6)의 유일한 기록이다 — 감사 기록이 없다.
 - 다음 날 아침 야간 백업 로그: db·files 둘 다 성공(새 디렉터리 `divisions/*/reports/`·`org/`도 files 묶음에 들어간다).
 - push(선택) — 공개 저장소다. `bash scripts/check-secrets.sh >/dev/null 2>&1; echo $?`가 0인지 **종료 코드로** 본 뒤 `git push origin main v2.0.0`.
@@ -491,7 +594,8 @@ bash scripts/deploy.sh prod --no-build --ignore-window
 | `docker compose build && up -d`를 손으로, 롤백 태그도 손으로 | `bash scripts/deploy.sh prod` | 금지 시간대·디스크·롤백 태그·health·찌꺼기 청소를 한 번에(OPS-43) |
 | 새 표 5 · 열 4 | 새 표 7 · 새 열 6 | `MergeJob`(병합 줄) · `GuideTourSeen`(둘러보기) · `MergeReview.filePath` · `MergeRun.outputSha` |
 | push를 빠뜨리면 health는 초록인데 화면이 500 | 뜨지 않고 없는 표·열을 말한다 | 기동 스키마 검사(OPS-48) |
-| 스냅샷 사본에서 스키마 리허설(`migrate diff` · push) | 하지 않는다 | 2026-10-09 main 스키마 DB 사본에서 확인했다(CHANGELOG). push는 손실 변경이면 적용 전에 묻는다 — 거기서 멈추면 된다 |
+| 스냅샷 사본에서 스키마 리허설(`migrate diff` · push) | **한다** — ⑤-0, 그날 스냅샷의 사본에 같은 push (3초) | 2026-10-09 이행 리허설은 지어낸 사람의 DB(v1.39.0 코드로 만든 모양)로만 돌았다 — 실제 데이터로는 그날 스냅샷이 처음이다. 10/07의 `.bak-20261007-pre-rollup`은 v1.39.0 전이라 출발점이 아니다 |
+| 롤백은 `repman:rollback` | `repman:v1.39.0` 고정 태그(①) | ⑥을 빌드째 다시 돌리면 `repman:rollback`이 v2로 옮겨지고 v1 이미지가 청소에 지워진다 |
 | 병합 규칙 초안이 지침·정렬까지 넣는다 | 분류 순서 둘만 | HM-51 · ADR-0018 |
 | 3단계 쪽지 `ru_hq_collect` · `hq_approved` · 당일 09:00 알림 | 없다 | 막고 있는 사람에게만(ADR-0015) · R13 |
 | 섹션 13개는 「섹션 구성 편집」에서 그대로 저장 | 운영자가 「전사」를 열면 생긴다 | 편집기의 [저장]은 바뀐 것이 있어야 눌린다. 여는 순간 기본 13개를 저장한다 |
