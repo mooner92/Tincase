@@ -15,6 +15,10 @@
 // 프레젠터·키로 **버튼 단계**에서 넘길 때는 무대에 눌린 모양(손이 누르고 손끝에 물결)을 200ms 보인 뒤 넘긴다 — 컷만 바뀌면
 // 「그 버튼을 눌러서 이 화면이 됐다」가 안 보였다(2026-10-08 검토). 눌린 모양은 두 창이 같이 보인다(`press` 알림).
 // 메모(발표자가 말할 것)는 발표자 창에만 있다 — 강당 화면에는 말풍선 한 문장뿐이다.
+//
+// 2026-10-08 v2 — 무대는 **흰 바탕**(PG-82 — 사용자: 프레젠터로 흰 배경에서 발표), 넘기기 단추는 **언제나 같은 상자**(PG-80):
+// 발표 화면의 마우스 묶음 `[←] [→] [발표자 창] [전체 화면]`은 칸 폭 고정, 발표자 창은 창 높이에 맞춘 격자라 메모 길이가 바닥 줄을
+// 밀지 않는다(예전에는 메모가 긴 장에서 [다음 →]이 창 밖으로 밀려났다).
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { DECK, presentSlides, type Slide } from '@/lib/guide/deck';
 import { deckNav, isDeckKey, keyPressMs, type DeckNavAction, type DeckNavState, type StageTarget } from '@/lib/guide/nav';
@@ -278,27 +282,37 @@ export function GuidePresent({ view }: { view: 'stage' | 'notes' }) {
 
   return (
     <div
-      className={`fixed inset-0 flex items-center justify-center bg-stage text-canvas ${idle || state.black ? 'cursor-none' : ''}`}
+      data-present=""
+      className={`fixed inset-0 flex items-center justify-center bg-stage text-stage-ink ${idle || state.black ? 'cursor-none' : ''}`}
     >
-      <div className="w-[min(100vw,calc(100dvh*16/9))]">
+      {/* 스크롤이 없는 화면이라 폭은 100%(거터 없음 — globals.css). 100vw는 스크롤바 폭이 들어가 양끝이 잘렸다(PG-81 B6) */}
+      <div className="w-[min(100%,calc(100dvh*16/9))]">
         <PresentFrame slides={slides} index={state.index} hint={state.hint} press={press} onStageClick={started ? click : undefined} />
       </div>
 
       {/* 숫자 + Enter — 누르는 중인 숫자를 구석에 보인다 */}
       {state.buffer && (
-        <p className="fixed bottom-4 left-4 rounded-lg bg-stage-soft px-3 py-1.5 text-lg font-semibold text-canvas tabular-nums">
+        <p className="fixed bottom-4 left-4 rounded-lg border border-stage-line bg-stage-soft px-3 py-1.5 text-lg font-semibold text-stage-ink tabular-nums">
           {state.buffer} <span className="text-stage-muted">Enter로 이동</span>
         </p>
       )}
 
-      {/* 마우스를 움직일 때만 — 프레젠터만 쓰는 동안에는 아무것도 떠 있지 않다 */}
+      {/*
+        마우스를 움직일 때만 — 프레젠터만 쓰는 동안에는 아무것도 떠 있지 않다. PG-80: 칸 폭 고정 격자 [←][→][발표자 창][전체 화면] —
+        같은 자리를 계속 눌러 넘긴다. 설명 글은 걷었다(키 표는 시작 화면에 있다)
+      */}
       {started && !idle && !state.black && (
-        <div className="fixed right-4 bottom-4 flex items-center gap-2 text-sm">
-          <span className="hidden text-stage-muted md:inline">밝은 곳 누르기 · → 다음 · ← 이전 · B 검은 화면 · F 전체 화면</span>
-          <button onClick={openNotes} className="rounded-lg border border-stage-line bg-stage-soft px-3 py-1.5 text-canvas hover:border-stage-muted">
+        <div role="group" aria-label="넘기기" className="fixed right-4 bottom-4 grid grid-cols-[2.75rem_2.75rem_6rem_6rem] gap-2 text-sm">
+          <button data-dock="prev" aria-label="이전" onClick={() => go('ArrowLeft')} disabled={state.index === 0} className={`${PRESENT_BTN} px-0`}>
+            ←
+          </button>
+          <button data-dock="next" aria-label="다음" onClick={() => go('ArrowRight')} disabled={state.index >= total - 1} className={`${PRESENT_BTN} px-0`}>
+            →
+          </button>
+          <button onClick={openNotes} className={PRESENT_BTN}>
             발표자 창
           </button>
-          <button onClick={toggleFullscreen} className="rounded-lg border border-stage-line bg-stage-soft px-3 py-1.5 text-canvas hover:border-stage-muted">
+          <button onClick={toggleFullscreen} className={PRESENT_BTN}>
             전체 화면
           </button>
         </div>
@@ -316,12 +330,16 @@ export function GuidePresent({ view }: { view: 'stage' | 'notes' }) {
         />
       )}
 
-      {/* B · . — 검은 화면. 아무 넘기기 키나 누르면 같은 장으로 돌아온다 (넘기지 않는다) */}
-      {state.black && <div aria-label="검은 화면" className="fixed inset-0 z-50 bg-stage" />}
+      {/* B · . — 검은 화면. 무대가 희어도 검다(`blackout` — PG-82). 아무 넘기기 키나 누르면 같은 장으로 돌아온다 (넘기지 않는다) */}
+      {state.black && <div aria-label="검은 화면" className="fixed inset-0 z-50 bg-blackout" />}
     </div>
   );
 }
 
+
+/** 발표 화면 마우스 묶음의 단추 — 높이·폭 고정(PG-80) */
+const PRESENT_BTN =
+  'inline-flex h-11 w-full items-center justify-center rounded-lg border border-stage-line bg-canvas px-2 text-stage-ink shadow-[0_1px_2px_rgb(0_0_0/0.06)] hover:border-stage-muted disabled:text-stage-muted disabled:opacity-60';
 
 function openNotes() {
   window.open('/guide/present?view=notes', 'tincase-guide-notes', 'width=1280,height=800');
@@ -342,7 +360,7 @@ function StartPanel({ onStart, onClose, slide, index }: { onStart: () => void; o
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-stage/92 p-6">
       <div className="w-full max-w-xl rounded-2xl border border-stage-line bg-stage-soft p-8">
-        <p className="text-sm font-semibold text-brand-tint">사용 안내 · 발표 모드</p>
+        <p className="text-sm font-semibold text-brand">사용 안내 · 발표 모드</p>
         <h1 className="mt-1 text-[26px] leading-tight font-semibold">
           {index === 0 ? '처음부터' : `${index + 1}번째 장(${slide.chapter.title})부터`} 발표합니다
         </h1>
@@ -361,7 +379,7 @@ function StartPanel({ onStart, onClose, slide, index }: { onStart: () => void; o
                           +
                         </span>
                       ) : (
-                        <kbd key={k} className="rounded-md border border-stage-line bg-stage px-1.5 py-0.5 font-sans text-[13px] text-canvas">
+                        <kbd key={k} className="rounded-md border border-stage-line bg-stage px-1.5 py-0.5 font-sans text-[13px] text-stage-ink">
                           {k}
                         </kbd>
                       ),
@@ -372,27 +390,17 @@ function StartPanel({ onStart, onClose, slide, index }: { onStart: () => void; o
             ))}
           </tbody>
         </table>
-        <p className="mt-3 text-[15px] text-stage-muted">
-          무선 프레젠터의 넘김 버튼도 그대로 됩니다. 마우스로는 밝게 뚫린 곳(누를 버튼)을 누르면 다음 장, 어두운 곳을 누르면 「여기를
-          누르세요」를 다시 보입니다.
-        </p>
         <div className="mt-7 flex flex-wrap items-center gap-2">
-          <button
-            onClick={openNotes}
-            className="inline-flex h-11 items-center rounded-lg border border-stage-line px-5 text-[15px] font-medium text-canvas hover:border-stage-muted"
-          >
+          <button onClick={openNotes} className="btn-secondary">
             발표자 창
           </button>
-          <button onClick={onStart} className="btn-primary border border-brand-tint">
+          <button onClick={onStart} className="btn-primary">
             발표 시작
           </button>
-          <button onClick={onClose} className="ml-auto text-sm text-stage-muted underline-offset-2 hover:text-canvas hover:underline">
+          <button onClick={onClose} className="ml-auto text-sm text-stage-muted underline-offset-2 hover:text-stage-ink hover:underline">
             전체 화면 없이 보기
           </button>
         </div>
-        <p className="mt-4 text-xs leading-5 text-stage-muted">
-          발표자 창은 노트북 화면에 두세요. 지금 장·다음 장·메모·시간이 보이고, 어느 창에서 넘겨도 같이 넘어갑니다.
-        </p>
       </div>
     </div>
   );
@@ -425,19 +433,18 @@ export function PresentFrame({
   const slide = slides[index];
   const pct = ((index + 1) / slides.length) * 100;
   return (
-    <div className="@container relative aspect-video w-full overflow-hidden bg-stage text-canvas">
+    <div className="@container relative aspect-video w-full overflow-hidden bg-stage text-stage-ink">
       <GuideStage
         slide={slide}
         index={index}
-        theme="dark"
         still={still}
         hint={hint}
         press={press}
         onClick={onStageClick}
         className="absolute inset-0"
       />
-      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[0.32cqw] bg-stage-soft/80" aria-hidden>
-        <div className="h-full bg-brand-tint transition-[width] duration-500 ease-out" style={{ width: `${pct}%` }} />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[0.32cqw] bg-stage-line" aria-hidden>
+        <div className="h-full bg-brand transition-[width] duration-500 ease-out" style={{ width: `${pct}%` }} />
       </div>
     </div>
   );
@@ -464,7 +471,13 @@ export function sentencesOf(notes: string): string[] {
     .filter(Boolean);
 }
 
-/** PG-60 — 발표자 창. 노트북 화면에 둔다 */
+/**
+ * PG-60 — 발표자 창. 노트북 화면에 둔다.
+ *
+ * PG-80 — **창 높이에 맞춘 격자**(머리 3.5rem · 가운데 · 바닥): 높이가 정해져야 가운데 줄(메모)이 내용만큼 자라 바닥 줄을 밀지 않는다.
+ * 예전 `min-h-dvh`는 메모가 긴 장(208자)에서 [다음 →]을 창 밖으로 밀어냈다. 메모는 제 칸 안에서 스크롤하고, 바닥 줄은 칸 폭 고정
+ * `[← 이전] [다음 →] [검은 화면]`. 머리는 한 줄(`flex-nowrap`) — 「검은 화면 중」이 생겨도 줄이 늘지 않는다
+ */
 function NotesView({
   slides,
   state,
@@ -493,14 +506,14 @@ function NotesView({
   // 질의응답 때 「담당자 화면 다시 보여 주세요」에 바로 가도록 — 장마다 첫 장(역할 장이면 장 제목)으로
   const starts = DECK.map((c) => ({ c, i: slides.findIndex((s) => s.chapter.id === c.id) })).filter((x) => x.i >= 0);
   const btn =
-    'inline-flex h-12 items-center justify-center rounded-lg border border-stage-line bg-stage-soft px-5 text-[16px] font-medium text-canvas hover:border-stage-muted';
+    'inline-flex h-12 w-full items-center justify-center rounded-lg border border-stage-line bg-canvas px-3 text-[16px] font-medium text-stage-ink whitespace-nowrap hover:border-stage-muted disabled:text-stage-muted';
 
   return (
-    <div className="grid min-h-dvh grid-rows-[auto_minmax(0,1fr)_auto] gap-5 bg-stage p-5 text-canvas">
-      <header className="flex flex-wrap items-center gap-x-6 gap-y-2">
+    <div data-present="" className="grid h-dvh grid-rows-[3.5rem_minmax(0,1fr)_auto] gap-4 overflow-hidden bg-stage p-5 text-stage-ink">
+      <header className="flex min-w-0 flex-nowrap items-center gap-x-6 overflow-hidden whitespace-nowrap">
         <p className="text-[34px] leading-none font-semibold tabular-nums">{mmss(secs)}</p>
         {target > 0 && (
-          <p className={`text-lg tabular-nums ${left < 0 ? 'font-semibold text-canvas' : 'text-stage-muted'}`}>
+          <p className={`text-lg tabular-nums ${left < 0 ? 'font-semibold text-error' : 'text-stage-muted'}`}>
             {left < 0 ? `${mmss(-left)} 넘음` : `남은 ${mmss(left)}`}
           </p>
         )}
@@ -509,7 +522,7 @@ function NotesView({
           <select
             value={target}
             onChange={(e) => setTarget(Number(e.target.value))}
-            className="rounded-md border border-stage-line bg-stage-soft px-2 py-1 text-canvas"
+            className="rounded-md border border-stage-line bg-canvas px-2 py-1 text-stage-ink"
           >
             <option value={0}>없음</option>
             {[15, 20, 25, 30, 40].map((m) => (
@@ -519,40 +532,41 @@ function NotesView({
             ))}
           </select>
         </label>
-        <button onClick={reset} className="text-sm text-stage-muted underline-offset-2 hover:text-canvas hover:underline">
+        <button onClick={reset} className="text-sm text-stage-muted underline-offset-2 hover:text-stage-ink hover:underline">
           다시 재기
         </button>
         <p className="text-lg text-stage-muted tabular-nums">지금 {clock}</p>
-        <p className="ml-auto text-lg tabular-nums">
+        {state.black && <span className="rounded-full bg-blackout px-3 py-1 text-sm font-semibold text-canvas">검은 화면 중</span>}
+        <p className="ml-auto min-w-0 truncate text-lg tabular-nums">
           <span className="font-semibold">{state.index + 1}</span>
           <span className="text-stage-muted"> / {slides.length}</span>
           {slide.n > 0 && (
-            <span className="ml-3 text-brand-tint">
+            <span className="ml-3 text-brand">
               {slide.chapter.title} · {slide.n}/{slide.of}
             </span>
           )}
         </p>
-        {state.black && <span className="rounded-full bg-stage-soft px-3 py-1 text-sm font-semibold text-brand-tint">검은 화면 중</span>}
       </header>
 
-      <div className="grid min-h-0 gap-5 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
+      <div className="grid min-h-0 gap-5 overflow-y-auto lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)] lg:overflow-hidden">
         <section aria-label="지금 장" className="self-start overflow-hidden rounded-xl border border-stage-line">
           <PresentFrame slides={slides} index={state.index} hint={state.hint} press={press} onStageClick={click} />
         </section>
         <aside className="flex min-h-0 flex-col gap-5">
           <div>
-            <p className="mb-2 text-sm font-semibold text-stage-muted tabular-nums">
+            <p className="mb-2 truncate text-sm font-semibold text-stage-muted tabular-nums">
               {next ? `다음 · ${state.index + 2} ${next.chapter.title} ${next.n > 0 ? `${next.n}/${next.of}` : '장 카드'}` : '다음'}
             </p>
             {next ? (
-              <div className="overflow-hidden rounded-xl border border-stage-line opacity-90">
+              <div className="overflow-hidden rounded-xl border border-stage-line">
                 <PresentFrame slides={slides} index={state.index + 1} still />
               </div>
             ) : (
-              <p className="rounded-xl border border-stage-line px-4 py-8 text-center text-stage-muted">마지막 장입니다</p>
+              <p className="flex aspect-video items-center justify-center rounded-xl border border-stage-line text-stage-muted">마지막 장입니다</p>
             )}
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto rounded-xl bg-stage-soft p-5">
+          {/* 메모는 제 칸 안에서 스크롤한다 — 길어도 바닥 줄을 밀지 않는다 */}
+          <div data-notes="" className="min-h-0 flex-1 overflow-y-auto rounded-xl bg-stage-soft p-5">
             {bubble && <p className="mb-3 text-sm text-stage-muted">화면 · {bubble}</p>}
             <p className="text-sm font-semibold text-stage-muted">메모</p>
             <div className="mt-2 space-y-2 text-[24px] leading-[1.55]">
@@ -567,19 +581,19 @@ function NotesView({
       </div>
 
       <footer className="flex flex-col gap-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <button onClick={() => go('ArrowLeft')} className={btn}>
+        {/* PG-80 — 칸 폭 고정. 「검은 화면」·「화면 다시 보이기」 중 긴 쪽 폭 */}
+        <div role="group" aria-label="넘기기" className="grid h-12 grid-cols-[8rem_8rem_11rem_minmax(0,1fr)] gap-2">
+          <button data-dock="prev" onClick={() => go('ArrowLeft')} disabled={state.index === 0} className={btn}>
             ← 이전
           </button>
-          <button onClick={() => go('ArrowRight')} className={`${btn} border-brand-tint`}>
+          <button data-dock="next" onClick={() => go('ArrowRight')} disabled={state.index >= slides.length - 1} className={`${btn} border-brand`}>
             다음 →
           </button>
           <button onClick={() => go('b')} className={btn}>
             {state.black ? '화면 다시 보이기' : '검은 화면'}
           </button>
-          <p className="ml-auto text-sm text-stage-muted">이 창에서 넘겨도 발표 화면이 같이 넘어갑니다 · 키는 발표 화면과 같습니다</p>
         </div>
-        <nav aria-label="장으로 이동" className="flex flex-wrap items-center gap-1.5 text-sm">
+        <nav aria-label="장으로 이동" className="flex flex-nowrap items-center gap-1.5 overflow-x-auto text-sm whitespace-nowrap">
           <span className="mr-1 text-stage-muted">장으로</span>
           {starts.map(({ c, i }) => {
             const here = slide.chapter.id === c.id;
@@ -588,8 +602,8 @@ function NotesView({
                 key={c.id}
                 onClick={() => jump(i)}
                 aria-current={here ? 'true' : undefined}
-                className={`rounded-full border px-3 py-1.5 ${
-                  here ? 'border-brand-tint font-semibold text-canvas' : 'border-stage-line text-stage-muted hover:border-stage-muted hover:text-canvas'
+                className={`shrink-0 rounded-full border px-3 py-1.5 ${
+                  here ? 'border-brand font-semibold text-stage-ink' : 'border-stage-line text-stage-muted hover:border-stage-muted hover:text-stage-ink'
                 }`}
               >
                 {c.title}

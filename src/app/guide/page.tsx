@@ -20,6 +20,7 @@ import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
 import { GuideSelf } from '@/components/GuideSelf';
+import { getTour } from '@/server/tour';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: '사용 안내' };
@@ -32,7 +33,7 @@ export default async function GuidePage({ searchParams }: { searchParams: Promis
   // PG-59 — `?mode=present`도 발표 모드로 (회의 공지에 적기 쉬운 주소)
   if ((await searchParams).mode === 'present') redirect('/guide/present');
 
-  const [caps, rnav] = await Promise.all([guideCaps(scope), rollupNav(scope)]);
+  const [caps, rnav, tour] = await Promise.all([guideCaps(scope), rollupNav(scope), getTour(scope, false)]);
   return (
     <div className="flex min-h-screen flex-col">
       <div className="print:hidden">
@@ -45,6 +46,7 @@ export default async function GuidePage({ searchParams }: { searchParams: Promis
           readAll={scope.readAll}
           {...rnav}
           viaCloudflare={scope.source === 'cloudflare'}
+          tour={tour}
         />
       </div>
 
@@ -52,9 +54,6 @@ export default async function GuidePage({ searchParams }: { searchParams: Promis
         <div className="page-head print:hidden">
           <div className="min-w-0">
             <h1 className="page-title">사용 안내</h1>
-            <p className="page-sub">
-              한 주의 흐름대로 한 장씩 넘겨 보세요. <strong className="font-semibold text-ink">내 역할의 장</strong>이 맨 앞에 있습니다.
-            </p>
           </div>
           {/* PG-59 — 발표는 새 탭에서: 이 화면(목차)을 띄워 둔 채 발표 화면을 프로젝터로 보낸다 */}
           {/* 휴대폰에서 발표할 일은 없다 — 640px 이상에서만 */}
@@ -63,7 +62,7 @@ export default async function GuidePage({ searchParams }: { searchParams: Promis
           </Link>
         </div>
 
-        <GuideSelf caps={caps} />
+        <GuideSelf caps={caps} tour={{ slug: tour.slug, chapters: tour.chapters }} />
       </main>
       <div className="print:hidden">
         <AppFooter />

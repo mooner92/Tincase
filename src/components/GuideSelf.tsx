@@ -1,34 +1,35 @@
 'use client';
-// CP-103 · PG-61 — 사용 안내, 혼자 보기. 발표가 끝난 뒤 각자 모니터에서 자기 속도로 넘겨 본다.
+// CP-103 · PG-61 · PG-83 — 사용 안내, **체험하기**(혼자 보기). 각자 모니터에서 자기 속도로 넘겨 본다.
 //
-// 발표 모드와 같은 단계·같은 무대(게임 튜토리얼식 코치 마크)를 쓴다. 다른 것은 넷이다:
-//   - 이 사람이 쓰는 단계만, 내 역할의 장이 맨 앞 — 거르기와 순서는 서버가 준 `caps`로 `selfChapters`가 정한다(TACP-9)
+// 발표 모드와 같은 단계·같은 무대(게임 튜토리얼식 코치 마크)를 쓴다. 다른 것은:
+//   - **가진 역할 장만, 이야기 순서로 쌓는다**(PG-83 — 부서원 → + 부서담당자 → + 실·팀장 → + 본부 → + 총괄). 거르기는 서버가 준
+//     `caps`로 `selfChapters`가 정한다(TACP-9). 예전의 「내 역할 장 맨 앞」은 없앴다
 //   - 말풍선을 1.2배로(`SELF_K`) — 모니터 안의 800px 남짓 무대에서 발표와 같은 cqw면 문장이 13px이다
 //   - ← → 만 받는다. Space·PageDown은 문서를 스크롤하는 키로 남긴다
-//   - [크게 보기]로 검은 바탕의 발표 무대 그대로 — 무대를 누르는 것은 이제 「누를 곳을 눌러 보기」다
-// 2026-10-08 — 무대 밑의 본문 2–3줄을 걷었다. 글은 무대 안의 말풍선 「이름: 한 문장」이 맡고, 더 알 것이 있으면
-// 「자세히」 밑에 한 줄(`more`)만 둔다 — 글이 길면 화면을 보지 않고 글을 읽는다(사용자: 「거창한 설명보다 직관적으로」).
-// 무대 구석의 알약(「부서원 3/8」)은 혼자 보기에서는 그리지 않는다 — 목차·진행 막대가 이미 자리를 말하고, 알약이 앱 머리를
-// 덮었다. 「밝게 뚫린 곳을 누르면…」 도움말은 첫 단계에만(2026-10-08 검토 — 매 단계 같은 줄이면 읽히지 않는다).
+//   - [크게 보기]로 발표 무대 그대로
+// 2026-10-08 v2(PG-80) — **넘기기 단추는 언제나 같은 자리.** 사용자: 「이전, 다음 버튼이 내용 양에 따라 위아래로 이동 — 같은 위치에
+// 있어야 연속적으로 누를 때 피로가 덜하다」. 그래서 무대 **바로 밑** 높이 고정 줄에 도크(칸 폭 고정)를 두고, 단계에 따라 크기가
+// 바뀌는 것(「자세히」)은 도크 **아래**에 둔다. 말풍선 속 [다음]·진행 막대·「다음: {이름} →」는 지웠다 — 도크의 「부서원 3/7」이 자리를 말한다.
 // 640px 미만과 인쇄에서는 무대 대신 단계를 세로로 늘어놓는다 — 휴대폰에서 줌·팬은 손가락과 싸운다.
-// 둘 다 그림을 누를 곳 둘레만 잘라(4:3, 구멍은 가장자리에서 12% 넘게 안쪽) 누를 곳만 밝게 보인다. 인쇄는 A4 가로 한 쪽에
-// 잘라 낸 그림을 쪽 폭의 2/3로 크게, 그 밑에 「이름: 한 문장」을 20pt로 — 전체 그림을 쪽의 1/3로 넣었더니 「공유」·「제출」
-// 버튼이 10px 남짓이었다.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { selfChapters, type GuideCap, type GuideStep, type Slide } from '@/lib/guide/deck';
+import Link from 'next/link';
+import { isCoachStep, selfChapters, type GuideCap, type GuideStep, type Slide } from '@/lib/guide/deck';
 import { stageClick, type StageTarget } from '@/lib/guide/nav';
 import { SELF_K } from '@/lib/guide/coach';
 import { fillWeek } from '@/lib/guide/manifest';
+import { tourPath, type TourChapterId } from '@/lib/guide/tour';
 import { GuideStage, StaticSlide } from './GuideStage';
 import { PresentFrame } from './GuidePresent';
+import { CoachDock } from './CoachParts';
 
-export function GuideSelf({ caps }: { caps: GuideCap[] }) {
+export function GuideSelf({ caps, tour }: { caps: GuideCap[]; tour?: { slug: string; chapters: TourChapterId[] } | null }) {
   const chapters = useMemo(() => selfChapters(caps), [caps]);
   const slides = useMemo(() => chapters.flatMap((c) => c.slides), [chapters]);
   const [index, setIndex] = useState(0);
   const [big, setBig] = useState(false);
   const [hint, setHint] = useState(0);
-  const [open, setOpen] = useState<Set<string>>(() => new Set(chapters.filter((c) => c.mine).map((c) => c.chapter.id)));
+  // 목차는 지금 장만 펼친다 — 장이 짧아(3~8단계) 다 펼쳐도 되지만, 목차가 길면 지금 자리가 안 보인다
+  const [open, setOpen] = useState<Set<string>>(() => new Set(chapters.slice(0, 1).map((c) => c.chapter.id)));
   const slide = slides[index];
 
   // #lead-3 — 주소로 바로 그 단계. 이 사람에게 없는 단계(다른 역할의 것)면 처음으로
@@ -59,7 +60,7 @@ export function GuideSelf({ caps }: { caps: GuideCap[] }) {
     [slides],
   );
 
-  // PG-T90 — 밝은 곳·[다음]은 다음 단계, 어두운 곳은 「여기를 누르세요」를 다시
+  // PG-T90 — 밝은 곳은 다음 단계, 어두운 곳은 「여기를 누르세요」를 다시
   const onStage = useCallback(
     (target: StageTarget) => {
       if (stageClick(target) === 'next') go(index + 1);
@@ -83,9 +84,31 @@ export function GuideSelf({ caps }: { caps: GuideCap[] }) {
     return () => window.removeEventListener('keydown', onKey);
   }, [go, index, big]);
 
+  // 크게 보기가 열린 동안 문서 스크롤을 잠근다(PG-81 · B6) — 스크롤바가 보이는 채로 무대를 재면 그 폭만큼 잘렸다.
+  // 거터(scrollbar-gutter: stable)가 있어 뒤 페이지는 흔들리지 않는다
+  useEffect(() => {
+    if (!big) return;
+    const html = document.documentElement;
+    const before = html.style.overflow;
+    html.style.overflow = 'hidden';
+    return () => {
+      html.style.overflow = before;
+    };
+  }, [big]);
+
   if (!slide) return null;
-  const next = slides[index + 1];
   const more = slide.step?.more;
+  const count = `${slide.chapter.title} ${slide.n}/${slide.of}`;
+  const dock = (float: boolean) => (
+    <CoachDock
+      count={count}
+      onPrev={() => go(index - 1)}
+      onNext={() => go(index + 1)}
+      canPrev={index > 0}
+      canNext={index < slides.length - 1}
+      float={float}
+    />
+  );
 
   return (
     <>
@@ -109,37 +132,50 @@ export function GuideSelf({ caps }: { caps: GuideCap[] }) {
           <ol className="hidden space-y-1 lg:block">
             {chapters.map((c) => {
               const expanded = open.has(c.chapter.id);
+              const ch = c.chapter.id as TourChapterId;
+              const onTour = tour && tour.chapters.includes(ch);
               return (
                 <li key={c.chapter.id}>
-                  <button
-                    onClick={() =>
-                      setOpen((o) => {
-                        const n = new Set(o);
-                        if (n.has(c.chapter.id)) n.delete(c.chapter.id);
-                        else n.add(c.chapter.id);
-                        return n;
-                      })
-                    }
-                    aria-expanded={expanded}
-                    className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[15px] font-semibold text-ink hover:bg-canvas"
-                  >
-                    <span
-                      aria-hidden
-                      className={`inline-block h-1.5 w-1.5 shrink-0 border-r-[1.5px] border-b-[1.5px] border-current text-muted transition-transform ${
-                        expanded ? 'rotate-45' : '-rotate-45'
-                      }`}
-                    />
-                    <span className="min-w-0 flex-1 truncate">{c.chapter.title}</span>
-                    {c.mine && <span className="chip chip-ok px-2 text-xs">내 역할</span>}
-                    <span className="text-xs font-normal text-muted tabular-nums">{c.slides.length}</span>
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() =>
+                        setOpen((o) => {
+                          const n = new Set(o);
+                          if (n.has(c.chapter.id)) n.delete(c.chapter.id);
+                          else n.add(c.chapter.id);
+                          return n;
+                        })
+                      }
+                      aria-expanded={expanded}
+                      className="flex min-w-0 flex-1 items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[15px] font-semibold text-ink hover:bg-canvas"
+                    >
+                      <span
+                        aria-hidden
+                        className={`inline-block h-1.5 w-1.5 shrink-0 border-r-[1.5px] border-b-[1.5px] border-current text-muted transition-transform ${
+                          expanded ? 'rotate-45' : '-rotate-45'
+                        }`}
+                      />
+                      <span className="min-w-0 flex-1 truncate">{c.chapter.title}</span>
+                      <span className="text-xs font-normal text-muted tabular-nums">{c.slides.length}</span>
+                    </button>
+                    {/* PG-84 — 그 장의 실제 화면 둘러보기. 기록과 상관없이 시작한다 */}
+                    {onTour && (
+                      <Link
+                        href={`${tourPath(ch, tour.slug)}?tour=${ch}`}
+                        className="shrink-0 rounded-md px-1.5 py-1 text-xs text-muted underline-offset-2 hover:text-ink hover:underline"
+                        aria-label={`${c.chapter.title} — 실제 화면에서 둘러보기`}
+                      >
+                        화면에서
+                      </Link>
+                    )}
+                  </div>
                   {expanded && (
                     <ol className="mt-0.5 mb-2 ml-3.5 space-y-0.5 border-l border-hairline pl-2">
                       {c.slides.map((s) => {
                         const on = s.key === slide.key;
                         return (
                           <li key={s.key}>
-                            {/* 목차는 화면 속 이름 — 「제출」·「주요 업무실적」. 화면에서 찾을 그 낱말이다 */}
+                            {/* 목차는 화면 속 이름 — 「제출」·「업무 내용」. 화면에서 찾을 그 낱말이다 */}
                             <a
                               href={`#${s.key}`}
                               onClick={(e) => {
@@ -168,51 +204,27 @@ export function GuideSelf({ caps }: { caps: GuideCap[] }) {
           <GuideStage
             slide={slide}
             index={index}
-            theme="light"
             k={SELF_K}
             hint={hint}
             pill={false}
+            // PG-80 — 꼬리말 「버튼을 눌러 계속」은 첫 코치 단계에만
+            foot={index === 0 && !!slide.step && isCoachStep(slide.step)}
             onClick={onStage}
             className="relative aspect-video w-full"
           />
-          <div className="border-t border-hairline px-5 pt-4 pb-5 sm:px-7">
-            <div className="flex flex-wrap items-center gap-3">
-              <button onClick={() => go(index - 1)} disabled={index === 0} className="btn-secondary btn-sm">
-                ← 이전
-              </button>
-              <button onClick={() => go(index + 1)} disabled={!next} className="btn-primary btn-sm">
-                다음 →
-              </button>
-              <button onClick={() => setBig(true)} className="btn-ghost btn-sm" title="검은 바탕에 크게 (Esc로 닫기)">
-                크게 보기
-              </button>
-              {/* 「1 / 17」 대신 다음 단계의 이름 — 몇 번째인지는 목차와 이 막대가 말한다 */}
-              <div className="ml-auto flex min-w-[12rem] flex-1 flex-col gap-1.5 sm:max-w-sm">
-                <span className="relative block h-1.5 overflow-hidden rounded-full bg-surface-strong" aria-hidden>
-                  <span
-                    className="absolute inset-y-0 left-0 rounded-full bg-brand transition-[width] duration-300"
-                    style={{ width: `${((index + 1) / slides.length) * 100}%` }}
-                  />
-                </span>
-                {next ? (
-                  <button onClick={() => go(index + 1)} className="truncate text-left text-sm text-muted hover:text-ink">
-                    다음: {next.step?.label} →
-                  </button>
-                ) : (
-                  <span className="text-sm text-muted">마지막 단계입니다</span>
-                )}
-              </div>
-            </div>
-            {more && (
-              <details key={slide.key} className="disclosure mt-4">
-                <summary className="text-sm">자세히</summary>
-                <p className="mt-1.5 text-[15px] leading-6 text-body">{more}</p>
-              </details>
-            )}
-            {index === 0 && (
-              <p className="mt-3 text-xs text-muted">밝게 뚫린 곳을 누르면 다음으로 넘어가요 · 어두운 곳을 누르면 다시 알려 줘요 · ← → 키도 돼요</p>
-            )}
+          {/* PG-80 — 도크 줄. 높이 고정, 무대 바로 밑 — 위에 단계마다 크기가 바뀌는 것이 없다 */}
+          <div className="flex h-16 items-center gap-3 border-t border-hairline px-5 sm:px-7">
+            {dock(false)}
+            <button onClick={() => setBig(true)} className="btn-ghost ml-auto w-24 shrink-0" title="크게 (Esc로 닫기)">
+              크게 보기
+            </button>
           </div>
+          {more && (
+            <details key={slide.key} className="disclosure border-t border-hairline-soft px-5 py-3 sm:px-7">
+              <summary className="text-sm">자세히</summary>
+              <p className="mt-1.5 text-[15px] leading-6 text-body">{more}</p>
+            </details>
+          )}
         </section>
       </div>
 
@@ -221,22 +233,23 @@ export function GuideSelf({ caps }: { caps: GuideCap[] }) {
           role="dialog"
           aria-modal="true"
           aria-label="크게 보기"
-          className="fixed inset-0 z-50 flex items-center justify-center bg-stage print:hidden"
+          className="fixed top-0 left-0 z-50 h-dvh w-screen bg-stage print:hidden"
           onClick={() => setBig(false)}
         >
-          <div className="w-[min(100vw,calc(100dvh*16/9))]" onClick={(e) => e.stopPropagation()}>
-            <PresentFrame slides={slides} index={index} hint={hint} onStageClick={onStage} />
+          {/* 무대는 덮개 기준 — 도크 자리(5.5rem)를 비우고 가운데. 100vw가 아니라 100%(스크롤바 폭이 들어가 양끝이 잘렸다 — PG-81 B6) */}
+          <div className="absolute inset-x-0 top-0 bottom-[5.5rem] flex items-center justify-center px-4">
+            <div className="w-[min(100%,calc((100dvh-5.5rem)*16/9))]" onClick={(e) => e.stopPropagation()}>
+              <PresentFrame slides={slides} index={index} hint={hint} onStageClick={onStage} />
+            </div>
           </div>
-          <div className="fixed top-4 right-4 flex items-center gap-2 text-sm">
-            <span className="hidden text-stage-muted md:inline">← → 넘기기 · Esc 닫기</span>
-            <button
-              autoFocus
-              onClick={() => setBig(false)}
-              className="rounded-lg border border-stage-line bg-stage-soft px-3 py-1.5 text-canvas hover:border-stage-muted"
-            >
-              닫기
-            </button>
-          </div>
+          {dock(true)}
+          <button
+            autoFocus
+            onClick={() => setBig(false)}
+            className="btn-secondary btn-sm fixed top-4 right-4"
+          >
+            닫기
+          </button>
         </div>
       )}
 
@@ -257,7 +270,7 @@ function ListStep({ slide, first }: { slide: Slide; first: boolean }) {
   const shot = step?.kind === 'shot';
   return (
     <li id={`step-${slide.key}`} className="break-inside-avoid print:break-after-page print:last:break-after-auto">
-      {/* 장 머리 — 휴대폰에서 「부서원 · 8단계」. 인쇄는 쪽마다 머리가 있어 따로 두지 않는다 */}
+      {/* 장 머리 — 휴대폰에서 「부서원 · 7단계」. 인쇄는 쪽마다 머리가 있어 따로 두지 않는다 */}
       {first && (
         <h2 className="mt-4 mb-2 text-[15px] font-semibold text-ink print:hidden">
           {slide.chapter.title} <span className="font-normal text-muted">· {slide.of}단계</span>
@@ -309,22 +322,8 @@ function ListStep({ slide, first }: { slide: Slide; first: boolean }) {
   );
 }
 
-/** 글자 슬라이드의 내용을 글로 — 휴대폰·인쇄용 (무대의 큰 글자 대신) */
+/** 글자 슬라이드의 내용을 글로 — 휴대폰·인쇄용 (무대의 큰 글자 대신). 체험하기에는 알림 카드만 남았다(PG-83) */
 function StepExtras({ step }: { step: Exclude<GuideStep, { kind: 'shot' }> }) {
-  if (step.kind === 'flow') {
-    // 다섯 칸 가로 흐름은 휴대폰 폭에 안 들어간다 — 위에서 아래로 다섯 줄
-    return (
-      <ol className="mt-2.5 divide-y divide-hairline-soft rounded-lg border border-hairline text-sm">
-        {step.flow.map((f, i) => (
-          <li key={f.who} className="flex items-baseline gap-3 px-3 py-2">
-            <span className="w-4 shrink-0 text-xs text-muted tabular-nums">{i + 1}</span>
-            <span className="w-20 shrink-0 font-semibold text-ink">{f.who}</span>
-            <span className="text-body">{f.what}</span>
-          </li>
-        ))}
-      </ol>
-    );
-  }
   if (step.kind === 'message') {
     return (
       <div className="mt-2.5 rounded-lg border border-hairline bg-surface-soft px-3 py-2.5 text-sm">
@@ -336,25 +335,6 @@ function StepExtras({ step }: { step: Exclude<GuideStep, { kind: 'shot' }> }) {
           </p>
         ))}
       </div>
-    );
-  }
-  if (step.kind === 'buttons') {
-    return (
-      <dl className="mt-2.5 space-y-2 text-sm">
-        {step.rows.map((r) => (
-          <div key={r.who} className="flex flex-wrap items-center gap-x-2 gap-y-1">
-            <dt className="w-20 shrink-0 font-semibold text-muted">{r.who}</dt>
-            <dd className="flex flex-wrap items-center gap-1.5">
-              {r.buttons.map((b, i) => (
-                <span key={b} className="flex items-center gap-1.5">
-                  {i > 0 && <span className="text-xs text-muted">{r.or ? '또는' : '→'}</span>}
-                  <span className="rounded-md border border-border-strong px-2 py-0.5 text-ink">{b}</span>
-                </span>
-              ))}
-            </dd>
-          </div>
-        ))}
-      </dl>
     );
   }
   return null;

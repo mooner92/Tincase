@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { buildNav, isNavActive } from '@/lib/nav';
+import type { TourProp } from '@/server/tour';
+import { TourHost } from './Tour';
 export type { NavItem } from '@/lib/nav';
 
 
@@ -20,6 +22,7 @@ export function AppHeader({
   viaCloudflare,
   foreign = false,
   ownSlug,
+  tour = null,
 }: {
   slug: string | null; // null이면 부서 컨텍스트 없음 (/ops 단독 등)
   divisionName: string;
@@ -37,11 +40,18 @@ export function AppHeader({
   foreign?: boolean;
   /** 타 부서 열람 중일 때 [내 부서로]의 행선지 — 신원의 부서 슬러그 */
   ownSlug?: string;
+  /**
+   * PG-84 — 화면 둘러보기(서버가 계산한 장 목록·제안 — `getTour`). 머리를 그리는 여섯 곳이 모두 넘긴다(PG-T152).
+   * 있으면 구석 카드와 사용자 메뉴 「화면 둘러보기」가 생긴다
+   */
+  tour?: TourProp | null;
 }) {
   const pathname = usePathname();
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
+  // 사용자 메뉴 「화면 둘러보기」 — 누를 때마다 하나씩 올라가고 TourHost가 지금 페이지의 장을 연다
+  const [tourAsk, setTourAsk] = useState(0);
 
   useEffect(() => {
     if (!open) return;
@@ -81,6 +91,7 @@ export function AppHeader({
   };
 
   return (
+    <>
     <header className="sticky top-0 z-30 border-b border-hairline-soft bg-canvas/95 backdrop-blur-sm">
       {/*
         UX-01 — 좁은 화면에서 메뉴가 로고를 덮던 것을 고쳤다 (v1.23.2).
@@ -132,6 +143,9 @@ export function AppHeader({
         )}
       </div>
     </header>
+    {/* 머리 **밖**에 둔다 — 머리의 backdrop-filter가 fixed 자식의 기준 상자가 되어 카드가 머리 안에 갇힌다 */}
+    {tour && <TourHost tour={tour} ask={tourAsk} />}
+    </>
   );
 
   /**
@@ -206,6 +220,19 @@ export function AppHeader({
               role="menu"
               className="absolute right-0 mt-2 w-56 overflow-hidden rounded-2xl border border-hairline bg-canvas py-1.5 shadow-[0_8px_24px_rgba(10,10,10,0.08)]"
             >
+              {/* PG-84 — 언제든 다시: 지금 페이지의 장(없으면 홈의 부서원 장). 기록과 상관없이 시작한다 */}
+              {tour && tour.chapters.length > 0 && (
+                <button
+                  role="menuitem"
+                  onClick={() => {
+                    setOpen(false);
+                    setTourAsk((n) => n + 1);
+                  }}
+                  className="block w-full px-4 py-2 text-left text-sm text-body hover:bg-surface-soft"
+                >
+                  화면 둘러보기
+                </button>
+              )}
               <Link
                 role="menuitem"
                 href="/password"

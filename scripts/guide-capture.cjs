@@ -5,18 +5,14 @@
  *   node scripts/guide-capture.cjs
  *
  * 하는 일 (순서대로):
- *   1. 새 임시 디렉터리(os.tmpdir()/tincase-guide-*)에 빈 SQLite DB를 만든다      — 실제 DB를 가리킬 길이 없다
- *   2. `scripts/guide-seed.ts`로 가짜 부서·사람·업무일지를 넣고 표식(nonce)을 남긴다  — 사람이 있는 DB에는 시드하지 않는다
- *   3. `--verify`로 표식을 확인한다. 틀리면 찍지 않는다
- *   4. 이 체크아웃에서 `next dev`를 띄운다 (그 DB · 웹 작성만 · 알림·스케줄러·모델 끔)
- *   5. 역할별 세션으로 로그인해 단계마다 그 상태를 만들고(제출·병합·승인은 화면에서 실제로 누른다 — 2026-10-08부터
- *      위로 올리기·이어 붙이기·전사본은 승인이 일으키는 자동 진행이라 누를 것이 없다, RU-84),
- *      `data-guide` 앵커(무대의 구멍 = 누를 곳)와 카메라 사각형을 재서 `public/guide/deck/<단계>.webp`와 `manifest.json`을 쓴다.
- *      단계 순서는 「누르면 다음 화면」이다 — 한 단계의 구멍을 실제로 누른 결과가 다음 단계의 그림이 되게 찍는다
+ *   1~4. 가짜 앱을 띄운다 — 새 임시 DB · 가짜 시드 · 표식 확인 · 이 체크아웃의 `next dev` (`scripts/lib/fake-app.cjs`).
+ *        표식이 맞지 않으면(이 실행이 만든 가짜 DB가 아니면) **찍지 않는다**
+ *   5. 역할별 세션으로 로그인해 단계마다 그 상태를 만들고(제출·병합·승인은 화면에서 실제로 누른다 — 위로 올리기·이어 붙이기·
+ *      전사본은 승인이 일으키는 자동 진행이라 누를 것이 없다, RU-84), `data-guide` 앵커(무대의 구멍 = 누를 곳)와 카메라 사각형을
+ *      재서 `public/guide/deck/<단계>.webp`와 `manifest.json`을 쓴다. 단계 순서는 「누르면 다음 화면」이다
  *   6. 서버를 끄고, `next dev`가 고쳐 쓴 CLAUDE.md·AGENTS.md·next-env.d.ts를 되돌리고, 임시 디렉터리를 지운다
  *
- * 다른 서버·다른 DB를 겨냥하는 옵션은 **일부러 없다.** 테스트 서버의 DB도 운영의 사본이라 실명이 들어 있다 —
- * 그런 화면이 한 장이라도 찍히면 공개 저장소와 강당 화면에 남는다.
+ * 다른 서버·다른 DB를 겨냥하는 옵션은 **일부러 없다.** 테스트 서버의 DB도 운영의 사본이라 실명이 들어 있다.
  *
  * 필요한 것:
  *   - 부서 양식 hwp — 기본 `fixtures/master-template.hwp` (공개 저장소에는 없다, 로컬에만). 다른 파일이면 GUIDE_TEMPLATE=<경로>
@@ -26,132 +22,35 @@
  * 선택: GUIDE_PORT(기본 3199) · GUIDE_NOW(ISO 시각 — 가짜 시계를 그 시각으로) · GUIDE_KEEP=1(임시 디렉터리를 남긴다)
  *       GUIDE_OUT=<디렉터리>(그림을 다른 곳에 — 찍기 자체를 시험할 때. 기본 public/guide/deck)
  *
- * **시계.** 언제 찍어도 같은 그림이 나오게, 서버와 시드를 「이번 주 수요일 15:00」(마감 전날 오후)으로 옮겨 놓고 찍는다
- * (GUIDE_CLOCK_SHIFT_MS). 마감(목 14:00)이 지난 뒤에 진짜 시각으로 찍으면 부서원 화면에 [작성하기]가 없고(마감 후 잠김),
- * 새벽에 찍으면 「제출 01:32」 같은 시각이 강당 화면에 뜬다. 월간 주(그 달 말일이 든 주)면 그 전 주로 간다.
- * Prisma가 스스로 채우는 시각(`@default(now())`)은 엔진이 진짜 시각으로 넣으므로 단계마다 `--fix-clock`으로 맞춘다.
- *
  * 그림: 1600×900 창을 배율 2로(3200×1800) → WebP, 장당 200KB 이하가 될 때까지 품질을 낮춘다.
- * 배율 2인 이유: 발표 무대(1920px)에서 카메라가 버튼 둘레로 2.2배까지 다가간다 — 1.5배로 찍으면 그림을 늘려 그려 글자가
- * 번졌다(2026-10-08 검토). 무대는 찍은 배율의 1.15배까지만 키운다(camera.ts OVERZOOM).
+ * 카메라 사각형(`frame`)은 단계의 `frameClip`으로, 창보다 큰 앵커의 구멍은 `focusClip`으로 줄여 manifest에 남긴다.
+ * 찍기 전에 그 사각형의 가운데가 창 높이 45%에 오게 스크롤한다(찍는 동안만 바닥에 50vh를 덧댄다).
  *
- * 카메라 사각형(`frame`)은 단계의 `frameClip`으로, 창보다 큰 앵커의 구멍(누를 곳)은 `focusClip`으로 줄여 manifest에 남긴다 — 카드 하나를 통째로 담으면 덜 다가가 글자가
- * 작다. 찍기 전에 그 사각형의 가운데가 창 높이 45%에 오게 스크롤한다(페이지 맨 끝의 카드도 올라오도록 찍는 동안만
- * 바닥에 50vh를 덧댄다). 아래쪽에 붙은 채로 찍으면 강당에서 버튼이 화면 맨 아래 — 앞사람 머리 높이 — 에 놓인다.
+ * **안전장치 (PG-81 · B7, 2026-10-08 v2)** — 사각형과 그림의 짝이 어긋나도 눈으로는 모른다. 그래서 찍을 때마다:
+ *   글꼴을 기다린다(`document.fonts.ready`) → 잰다 → 찍는다 → **다시 잰다**: 0.5px 넘게 달라졌으면 한 번 다시, 또 다르면 실패 ·
+ *   가림 검사 — 앵커 가운데와 안쪽 네 점의 `elementFromPoint`가 모두 앵커 안이어야 한다(머리·토스트가 덮은 채 찍지 않게) ·
+ *   manifest에 그림 `sha256`(그림만 다시 찍히고 사각형이 낡은 것을 테스트가 잡는다 — PG-T143)과 앵커 둥글기 `radius`(구멍을 버튼과
+ *   동심으로 — PG-81)를 남긴다
  */
 'use strict';
 const path = require('node:path');
 const fs = require('node:fs');
-const os = require('node:os');
 const crypto = require('node:crypto');
-const { spawn, spawnSync } = require('node:child_process');
+const { REPO, DAY, kst, mondayOf, log, loadPlaywright, startFakeApp, tsx } = require('./lib/fake-app.cjs');
 
-const REPO = path.resolve(__dirname, '..');
 const OUT = path.resolve(process.env.GUIDE_OUT || path.join(REPO, 'public/guide/deck'));
 const PORT = Number(process.env.GUIDE_PORT || 3199);
-const BASE = `http://127.0.0.1:${PORT}`;
 const VIEW = { width: 1600, height: 900 };
 const SCALE = 2;
 const MAX_BYTES = 200 * 1024;
-const COOKIE = 'repman_session';
-const HOUR = 3600_000;
-const DAY = 24 * HOUR;
-const AGENT_FILES = ['CLAUDE.md', 'AGENTS.md', 'next-env.d.ts'];
 const QUIET =
   'nextjs-portal{display:none!important} *{caret-color:transparent!important;transition:none!important;animation:none!important}' +
   // 페이지 맨 끝의 카드도 창 가운데까지 올라올 수 있게 — 찍는 동안만. 그림에는 바닥(빈 회색)으로만 보인다
-  ' body{padding-bottom:50vh!important}';
-
-function log(...a) {
-  console.log('[guide]', ...a);
-}
-
-function loadPlaywright() {
-  for (const id of [process.env.PLAYWRIGHT, 'playwright'].filter(Boolean)) {
-    try {
-      return require(id);
-    } catch {
-      /* 다음 후보 */
-    }
-  }
-  console.error('[guide] Playwright를 찾지 못했습니다. PLAYWRIGHT=<.../node_modules/playwright>로 알려 주세요.');
-  process.exit(2);
-}
-
-// ── 시계 ────────────────────────────────────────────────────────────────────
-/** KST 달력 — UTC 게터로 읽는다 (이 기계의 TZ와 무관하게) */
-const kst = (ms) => new Date(ms + 9 * HOUR);
-/** 그 시각이 든 주의 월요일 00:00 KST (UTC ms) */
-function mondayOf(ms) {
-  const k = kst(ms);
-  const dow = (k.getUTCDay() + 6) % 7; // 월=0
-  return Date.UTC(k.getUTCFullYear(), k.getUTCMonth(), k.getUTCDate() - dow) - 9 * HOUR;
-}
-/** WS-14 — 그 주에 어느 달의 말일이 들어 있으면 월간 주다 */
-function isMonthly(monday) {
-  for (let d = 0; d < 7; d++) {
-    const a = kst(monday + d * DAY);
-    const b = kst(monday + (d + 1) * DAY);
-    if (a.getUTCMonth() !== b.getUTCMonth()) return true;
-  }
-  return false;
-}
-function pickClock(realNow) {
-  if (process.env.GUIDE_NOW) {
-    const t = Date.parse(process.env.GUIDE_NOW);
-    if (Number.isNaN(t)) throw new Error(`GUIDE_NOW를 읽지 못했습니다: ${process.env.GUIDE_NOW}`);
-    return t;
-  }
-  // 이번 주(월간 주면 그 전의 평범한 주) 수요일 15:00 — 마감 전날 오후. 업무 시간의 시각이 찍히고, 제출은 열려 있다
-  let m = mondayOf(realNow);
-  while (isMonthly(m)) m -= 7 * DAY;
-  return m + 2 * DAY + 15 * HOUR;
-}
-
-/** 시계 심 — 서버·시드 프로세스의 `Date`만 옮긴다. 하위 클래스(TZDate)도 그대로 동작하게 new.target을 넘긴다 */
-const CLOCK_SHIM = `'use strict';
-const shift = Number(process.env.GUIDE_CLOCK_SHIFT_MS || 0);
-if (shift) {
-  const R = Date;
-  function D(...a) {
-    if (!new.target) return new R(R.now() + shift).toString();
-    return Reflect.construct(R, a.length ? a : [R.now() + shift], new.target);
-  }
-  Object.setPrototypeOf(D, R);
-  D.prototype = R.prototype;
-  // 정적 메서드는 **자기 속성으로** 둔다 — Next 16 dev는 Date를 감싸면서 자기 속성만 옮겨 담아, 물려받은 UTC·parse가 사라졌다
-  D.UTC = R.UTC;
-  D.parse = R.parse;
-  D.now = () => R.now() + shift;
-  globalThis.Date = D;
-}
-`;
-
-// ── 하위 프로세스 ────────────────────────────────────────────────────────────
-function run(cmd, args, env, what) {
-  const r = spawnSync(cmd, args, { cwd: REPO, env, encoding: 'utf8' });
-  const out = `${r.stdout ?? ''}${r.stderr ?? ''}`
-    .split('\n')
-    .filter((l) => l && !l.startsWith('{"level"'))
-    .join('\n');
-  if (r.status !== 0) throw new Error(`${what} 실패 (종료 ${r.status})\n${out}`);
-  return out;
-}
-const tsx = (args, env, what) => run(process.execPath, [require.resolve('tsx/cli', { paths: [REPO] }), ...args], env, what);
-
-async function waitFor(url, ms) {
-  const until = Date.now() + ms;
-  for (;;) {
-    try {
-      const r = await fetch(url, { redirect: 'manual' });
-      if (r.status < 500) return;
-    } catch {
-      /* 아직 안 떴다 */
-    }
-    if (Date.now() > until) throw new Error(`서버가 ${ms / 1000}초 안에 뜨지 않았습니다: ${url}`);
-    await new Promise((r) => setTimeout(r, 1000));
-  }
-}
+  ' body{padding-bottom:50vh!important}' +
+  // 둘러보기 카드(PG-84)는 그림에 넣지 않는다 — 찍는 사람들은 처음 온 사람이라 카드가 뜬다
+  ' [data-tour-offer]{display:none!important}' +
+  // 스크롤바 자리(PG-80 scrollbar-gutter)는 그림에 빈 띠로 남는다 — 찍는 동안만 없앤다
+  ' html{scrollbar-gutter:auto!important}';
 
 // ── 찍기 ─────────────────────────────────────────────────────────────────────
 const sel = (id) => `[data-guide="${id}"]`;
@@ -251,6 +150,49 @@ async function rectOf(page, id, clip) {
   return { x: r(x), y: r(y), w: r(w), h: r(h) };
 }
 
+/** PG-81 · B2 — 앵커의 둥글기(왼쪽 위 모서리, 그림 px). 높이 절반을 넘는 값(999px 알약)은 절반으로 */
+async function radiusOf(page, id) {
+  return page.evaluate((s) => {
+    const el = document.querySelector(s);
+    if (!el) return 0;
+    const r = el.getBoundingClientRect();
+    const v = parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0;
+    return Math.round(Math.min(v, r.height / 2, r.width / 2) * 10) / 10;
+  }, sel(id));
+}
+
+/**
+ * PG-81 · B7 — 가림 검사. 앵커 가운데와 안쪽 네 점(가장자리에서 25%)을 누르면 앵커(또는 그 안)가 잡혀야 한다 —
+ * 붙어 있는 머리·토스트·다른 층이 앵커를 덮은 채 찍으면 무대의 구멍이 엉뚱한 것을 밝힌다
+ */
+async function assertUncovered(page, id, focus) {
+  const bad = await page.evaluate(
+    ([s, f]) => {
+      const el = document.querySelector(s);
+      if (!el) return ['앵커 없음'];
+      const pts = [
+        [0.5, 0.5],
+        [0.25, 0.25],
+        [0.75, 0.25],
+        [0.25, 0.75],
+        [0.75, 0.75],
+      ];
+      const out = [];
+      for (const [fx, fy] of pts) {
+        const x = f.x + f.w * fx;
+        const y = f.y + f.h * fy;
+        const hit = document.elementFromPoint(x, y);
+        if (!hit || !(el === hit || el.contains(hit) || hit.contains(el))) out.push(`${x.toFixed(0)},${y.toFixed(0)} → ${hit ? hit.tagName : '없음'}`);
+      }
+      return out;
+    },
+    [sel(id), focus],
+  );
+  if (bad.length) throw new Error(`앵커 ${id}가 다른 것에 가려 있습니다: ${bad.join(' · ')}`);
+}
+
+const near = (a, b) => ['x', 'y', 'w', 'h'].every((k) => Math.abs(a[k] - b[k]) <= 0.5);
+
 /**
  * 바닥색 — 그림 맨 아래 한 줄을 색 토막으로(manifest `ground`). 무대가 그림 아래를 비울 때 그 자리를 이 색으로 칠한다(CP-101).
  * 비슷한 색(채널 차 12 이하)은 한 토막, 폭 2% 미만의 토막(글자·테두리 한 획)은 왼쪽 토막에 붙인다
@@ -260,13 +202,13 @@ async function groundOf(png) {
   const { data, info } = await sharp(png).extract({ left: 0, top: VIEW.height * SCALE - 1, width: VIEW.width * SCALE, height: 1 }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
   const W = info.width;
   const px = (i) => [data[i * 3], data[i * 3 + 1], data[i * 3 + 2]];
-  const near = (a, b) => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2])) <= 12;
+  const nearC = (a, b) => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2])) <= 12;
   // 토막의 색은 그 토막에서 가장 많은 색 — 첫 픽셀은 경계의 번진 색일 수 있다
   const runs = [];
   for (let i = 0; i < W; i++) {
     const c = px(i);
     const last = runs[runs.length - 1];
-    if (last && near(last.c, c)) {
+    if (last && nearC(last.c, c)) {
       last.n++;
       const k = c.join(',');
       last.hist.set(k, (last.hist.get(k) ?? 0) + 1);
@@ -275,7 +217,7 @@ async function groundOf(png) {
   const kept = [];
   for (const r of runs) {
     const last = kept[kept.length - 1];
-    if (last && (r.n < W * 0.02 || near(last.c, r.c))) {
+    if (last && (r.n < W * 0.02 || nearC(last.c, r.c))) {
       last.n += r.n;
       for (const [k, v] of r.hist) last.hist.set(k, (last.hist.get(k) ?? 0) + v);
     } else kept.push({ ...r, hist: new Map(r.hist) });
@@ -376,10 +318,9 @@ function plan(ai, notice) {
       },
     },
     { id: 'member-done', role: 'memberPending', path: `/${ai}` },
-    { id: 'member-history', role: 'memberPending', path: `/${ai}` },
+    { id: 'member-past', role: 'memberPending', path: `/${ai}` },
 
-    { id: 'lead-status', role: 'lead', path: `/${ai}/manage` },
-    { id: 'lead-nudge', role: 'lead' },
+    { id: 'lead-nudge', role: 'lead', path: `/${ai}/manage` },
     {
       id: 'lead-merge',
       role: 'lead',
@@ -392,9 +333,12 @@ function plan(ai, notice) {
       },
     },
     { id: 'lead-merged', role: 'lead', act: click('merged-open') },
+    // RU-80 — 부서장 승인 전의 「위로」 상태 카드. 버튼이 아니라 상태 줄이다 — 누르지 않는다
+    { id: 'lead-handoff', role: 'lead', path: `/${ai}/manage` },
     { id: 'lead-rules', role: 'lead', path: `/${ai}/manage/settings` },
 
     { id: 'head-open', role: 'head', path: `/${ai}/manage` },
+    // 승인 단추는 저장(= 승인) 전에만 있다 — 저장보다 먼저 찍는다(이야기 순서는 deck.ts가 정한다)
     { id: 'head-approve', role: 'head' },
     {
       id: 'head-save',
@@ -415,7 +359,7 @@ function plan(ai, notice) {
     },
     {
       // RU-80 — 실장의 저장(= 승인)이 그 요청 안에서 본부로 올렸다. 담당자 화면의 「위로」 카드는 상태 줄이다 — 누르지 않는다
-      id: 'head-report',
+      id: 'head-sent',
       role: 'lead',
       path: `/${ai}/manage`,
       act: async (p) => {
@@ -424,7 +368,7 @@ function plan(ai, notice) {
     },
 
     // RU-82 — 본부본은 연 순간(읽기 수리) 올라온 실·팀으로 저절로 이어 붙어 있다
-    { id: 'hq-status', role: 'hqLead', path: '/hq' },
+    { id: 'hq-units', role: 'hqLead', path: '/hq' },
     {
       id: 'hq-run',
       role: 'hqLead',
@@ -444,10 +388,9 @@ function plan(ai, notice) {
         await fix();
       },
     },
-    { id: 'hq-submit', role: 'hqLead', path: '/hq' },
+    { id: 'hq-sent', role: 'hqLead', path: '/hq' },
 
     { id: 'org-board', role: 'coordinator', path: '/org' },
-    { id: 'org-final', role: 'coordinator' },
     {
       // RU-83 — 전사본은 본부장 승인 뒤 저절로 다시 만들어져 있다(연 순간 읽기 수리도 맞춘다)
       id: 'org-run',
@@ -463,7 +406,7 @@ function plan(ai, notice) {
       role: 'coordinator',
       path: '/org',
       act: async (p) => {
-        // WS-19l — [일정 바꾸기] 한 번에 입력칸이 열린다(예전 [마감 바꾸기]는 없다)
+        // WS-19l — [일정 바꾸기] 한 번에 입력칸이 열린다
         await click('schedule-open')(p);
         await p.locator(sel('deadline-paste')).fill(notice);
         await away(p);
@@ -487,97 +430,33 @@ function noticeFor(nowMs) {
   return `★ 다음 주 주간업무 제출 기한은 ${wed.getUTCMonth() + 1}월 ${String(wed.getUTCDate()).padStart(2, '0')}(수) 오후 3시입니다. ★\n(연휴 일정으로 인한 마감 기한이니 양해 부탁드립니다.)`;
 }
 
+/** 재고 → 찍고 → 다시 잰다. 0.5px 넘게 달라졌으면 한 번 더, 또 다르면 실패(PG-81 · B7) */
+async function shootStable(p, step) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await p.evaluate(() => document.fonts.ready.then(() => true));
+    await bringIntoView(p, step.anchor, step.frame, step.frameClip);
+    const focus = await rectOf(p, step.anchor, step.focusClip);
+    const frame = step.frame || step.frameClip ? await rectOf(p, step.frame ?? step.anchor, step.frameClip) : focus;
+    await assertUncovered(p, step.anchor, focus);
+    const png = await p.screenshot({ type: 'png' });
+    const again = await rectOf(p, step.anchor, step.focusClip);
+    const frameAgain = step.frame || step.frameClip ? await rectOf(p, step.frame ?? step.anchor, step.frameClip) : again;
+    if (near(focus, again) && near(frame, frameAgain)) return { focus, frame, png, radius: await radiusOf(p, step.anchor) };
+    log(`${step.id}: 찍는 동안 사각형이 움직였다 — 다시 찍는다 (${JSON.stringify(focus)} → ${JSON.stringify(again)})`);
+    await p.waitForTimeout(800);
+  }
+  throw new Error(`${step.id}: 사각형이 가라앉지 않는다 — 찍지 않는다`);
+}
+
 async function main() {
   const { chromium } = loadPlaywright();
-  const realNow = Date.now();
-  const fake = pickClock(realNow);
-  let shift = fake - realNow;
-  if (Math.abs(shift) < 60_000) shift = 0; // 1분 안쪽이면 옮길 것이 없다
-
-  const work = fs.mkdtempSync(path.join(os.tmpdir(), 'tincase-guide-'));
-  const nonce = crypto.randomBytes(12).toString('base64url');
-  const clock = path.join(work, 'clock.cjs');
-  fs.writeFileSync(clock, CLOCK_SHIM);
-  const db = path.join(work, 'guide.db');
-  const env = {
-    ...process.env,
-    DATABASE_URL: `file:${db}`,
-    STORAGE_ROOT: path.join(work, 'storage'),
-    CF_ACCESS_TEAM: 'guide-capture',
-    CF_ACCESS_AUD: '',
-    SUBMIT_HWP_UPLOAD: 'off', // RU-60a — 「전사」 [올리기]를 닫는다. 부서원 업로드 길은 코드째 없다(WA-39)
-    MERGE_MODEL: '',
-    MERGE_SCHEDULER: 'off',
-    MERGE_PAUSE_UNTIL: '',
-    MESSENGER_URL: '', // 알림이 어디로도 나가지 않는다
-    MESSENGER_LINK_BASE: '',
-    TINCASE_ENV: '',
-    SESSION_COOKIE_NAME: COOKIE,
-    NODE_ENV: 'development',
-    NEXT_TELEMETRY_DISABLED: '1',
-    LOG_LEVEL: 'warn',
-    GUIDE_WORK: work,
-    GUIDE_NONCE: nonce,
-    GUIDE_CLOCK_SHIFT_MS: String(shift),
-    GUIDE_REAL_START: String(realNow),
-    NODE_OPTIONS: [process.env.NODE_OPTIONS, shift ? `--require ${clock}` : ''].filter(Boolean).join(' '),
-  };
-  delete env.DEV_IDENTITY; // 세션으로만 들어간다
-  log(`작업 디렉터리 ${work}`);
-  log(shift ? `가짜 시계: ${new Date(fake).toISOString()} (진짜보다 ${Math.round(shift / HOUR)}시간)` : '시계: 지금 그대로');
-
-  const saved = Object.fromEntries(
-    AGENT_FILES.map((f) => [f, fs.existsSync(path.join(REPO, f)) ? fs.readFileSync(path.join(REPO, f)) : null]),
-  );
-  let server = null;
-  const restore = () => {
-    if (server) {
-      try {
-        process.kill(-server.pid, 'SIGTERM');
-      } catch {
-        /* 이미 꺼졌다 */
-      }
-      server = null;
-    }
-    for (const [f, buf] of Object.entries(saved)) {
-      const p = path.join(REPO, f);
-      if (buf === null) {
-        if (fs.existsSync(p)) fs.rmSync(p);
-      } else if (!fs.existsSync(p) || !fs.readFileSync(p).equals(buf)) {
-        fs.writeFileSync(p, buf);
-      }
-    }
-  };
-  process.on('SIGINT', () => {
-    restore();
-    process.exit(130);
-  });
-
+  const app = await startFakeApp({ port: PORT });
   try {
-    run(process.execPath, [require.resolve('prisma/build/index.js', { paths: [REPO] }), 'db', 'push', '--skip-generate'], env, 'prisma db push');
-    log(tsx(['scripts/guide-seed.ts'], env, '시드').trim());
-    log(tsx(['scripts/guide-seed.ts', '--verify'], env, '표식 확인').trim());
-    const { sessions, slugs, week } = JSON.parse(fs.readFileSync(path.join(work, 'sessions.json'), 'utf8'));
+    const { base, sessions, slugs, week, fake, fix, cookie } = app;
     const deck = JSON.parse(
-      tsx(['-e', "import('./src/lib/guide/deck.ts').then((m) => process.stdout.write(JSON.stringify(m.shotSteps())))"], env, '단계 목록'),
+      tsx(['-e', "import('./src/lib/guide/deck.ts').then((m) => process.stdout.write(JSON.stringify(m.shotSteps())))"], app.env, '단계 목록'),
     );
 
-    const logFile = path.join(work, 'next-dev.log');
-    const fd = fs.openSync(logFile, 'w');
-    server = spawn(process.execPath, [require.resolve('next/dist/bin/next', { paths: [REPO] }), 'dev', '-p', String(PORT), '-H', '127.0.0.1'], {
-      cwd: REPO,
-      env,
-      stdio: ['ignore', fd, fd],
-      detached: true,
-    });
-    log(`next dev → ${BASE} (로그 ${logFile})`);
-    await waitFor(`${BASE}/login`, 180_000);
-
-    // 겨눈 서버가 이 시드의 DB인가 — 이 실행에서 만든 세션으로만 들어가진다
-    const probe = await fetch(`${BASE}/${slugs.ai}`, { headers: { cookie: `${COOKIE}=${sessions.memberPending}` }, redirect: 'manual' });
-    if (probe.status !== 200) throw new Error(`시드 세션으로 들어가지지 않습니다 (HTTP ${probe.status}) — 다른 서버가 ${PORT}를 쓰고 있지 않은지 확인하세요`);
-
-    const fix = () => (shift ? Promise.resolve(tsx(['scripts/guide-seed.ts', '--fix-clock'], env, '시각 맞추기')) : Promise.resolve());
     const browser = await chromium.launch();
     const pages = new Map();
     const pageFor = async (role) => {
@@ -590,8 +469,8 @@ async function main() {
         timezoneId: 'Asia/Seoul',
         reducedMotion: 'reduce',
       });
-      if (role) await ctx.addCookies([{ name: COOKIE, value: sessions[role], url: BASE }]);
-      // 새로 열거나 다시 읽을 때마다 — 개발 서버 표시·깜빡이는 커서·움직임이 그림에 섞이지 않게
+      if (role) await ctx.addCookies([{ name: cookie, value: sessions[role], url: base }]);
+      // 새로 열거나 다시 읽을 때마다 — 개발 서버 표시·깜빡이는 커서·움직임·둘러보기 카드가 그림에 섞이지 않게
       await ctx.addInitScript((css) => {
         document.addEventListener('DOMContentLoaded', () => {
           const s = document.createElement('style');
@@ -617,20 +496,18 @@ async function main() {
       const step = byId.get(st.id);
       const p = await pageFor(st.role);
       if (st.path) {
-        await p.goto(BASE + st.path, { waitUntil: 'networkidle', timeout: 180_000 });
+        await p.goto(base + st.path, { waitUntil: 'networkidle', timeout: 180_000 });
         await settle(p, 300);
       }
       if (st.act) await st.act(p, fix);
-      await bringIntoView(p, step.anchor, step.frame, step.frameClip);
-      const focus = await rectOf(p, step.anchor, step.focusClip);
-      const frame = step.frame || step.frameClip ? await rectOf(p, step.frame ?? step.anchor, step.frameClip) : focus;
-      const png = await p.screenshot({ type: 'png' });
+      const { focus, frame, png, radius } = await shootStable(p, step);
       const { buf, q } = await toWebp(png);
       const file = `${step.id}.webp`;
       fs.writeFileSync(path.join(OUT, file), buf);
       const ground = await groundOf(png);
-      shots[step.id] = { file, width: VIEW.width * SCALE, height: VIEW.height * SCALE, focus, frame, anchor: step.anchor, ground };
-      log(`${step.id.padEnd(16)} ${Math.round(buf.length / 1024)}KB q${q}`);
+      const sha256 = crypto.createHash('sha256').update(buf).digest('hex');
+      shots[step.id] = { file, width: VIEW.width * SCALE, height: VIEW.height * SCALE, focus, frame, anchor: step.anchor, ground, radius, sha256 };
+      log(`${step.id.padEnd(16)} ${Math.round(buf.length / 1024)}KB q${q} r${radius}`);
       if (st.after) await st.after(p, fix);
     }
     await browser.close();
@@ -639,14 +516,12 @@ async function main() {
     for (const f of fs.readdirSync(OUT)) {
       if (f.endsWith('.webp') && !Object.values(shots).some((s) => s.file === f)) fs.rmSync(path.join(OUT, f));
     }
-    const stamp = new Date(realNow).toISOString().replace(/[-:]/g, '').slice(0, 13); // 20261008T0130
+    const stamp = new Date(app.realNow).toISOString().replace(/[-:]/g, '').slice(0, 13); // 20261008T0130
     const manifest = { version: stamp, week, viewport: VIEW, scale: SCALE, shots };
     fs.writeFileSync(path.join(OUT, 'manifest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
     log(`그림 ${Object.keys(shots).length}장 → ${path.relative(REPO, OUT)}`);
   } finally {
-    restore();
-    if (!process.env.GUIDE_KEEP) fs.rmSync(work, { recursive: true, force: true });
-    else log(`임시 디렉터리를 남겼습니다: ${work}`);
+    app.stop();
   }
 }
 

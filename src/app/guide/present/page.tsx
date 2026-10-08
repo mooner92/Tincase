@@ -4,7 +4,7 @@
 // 회사 전체에 흐름 전체를 보여 주는 화면이라, 보는 사람의 역할로 거르지 않는다(혼자 보기는 거른다 — PG-61).
 // 버튼·링크가 아니라 그림과 글이므로 TACP-9(할 수 없는 행동은 그리지 않는다)와 부딪히지 않는다.
 //
-// 머리·바닥(AppHeader)이 없다 — 검정 무대 하나가 화면 전체다.
+// 머리·바닥(AppHeader)이 없다 — 무대 하나가 화면 전체다(2026-10-08 v2 — 흰 무대, PG-82). 둘러보기 카드도 여기에는 뜨지 않는다(PG-84).
 import { requirePageScope } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { GuidePresent } from '@/components/GuidePresent';

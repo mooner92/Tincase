@@ -612,3 +612,12 @@ export async function guideCaps(scope: Scope): Promise<GuideCap[]> {
   ];
   return caps.filter(([, on]) => on).map(([c]) => c);
 }
+
+/**
+ * PG-84 · TACP v1.10 노트 — 첫 로그인 **둘러보기 카드를 띄울 사람인가** (화면 판정, 권한 아님).
+ * 운영자는 뺀다(결정 Q5) — 모든 부서·모든 화면을 다루는 사람에게 「처음이시죠?」는 맞지 않는다. 메뉴로는 언제든 본다.
+ * 무엇을 권할지는 `guideCaps`(체험하기와 같은 판정)가 정한다 — 컴포넌트가 역할 플래그를 비교하지 않게(TACP-12)
+ */
+export function tourEligible(scope: Pick<Scope, 'user'>): boolean {
+  return !scope.user.isOperator;
+}

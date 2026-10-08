@@ -8,7 +8,11 @@
 // 모든 단계를 1080p·720p 무대에서 잰다(PG-T89).
 //
 // 길이는 모두 **무대 폭의 1%(cqw)** 를 단위로 쓴다. 무대의 글자도 cqw라, 1920px 프로젝터든 발표자 창의 작은 그림이든
-// 같은 모양이 나온다 — 자리 계산도 무대 크기와 상관없이 같은 답을 낸다.
+// 같은 모양이 나온다 — 자리 계산도 무대 크기와 상관없이 같은 답을 낸다. 실제 화면 위의 둘러보기(PG-84)는 같은 말풍선을
+// 창 위에 놓는데, 창 폭의 1%면 휴대폰에서 글자가 4px이 된다 — 그래서 단위를 인자(`unit`)로 받는다(둘러보기는 9px).
+//
+// 2026-10-08 v2(PG-80) — 말풍선 안의 [다음]을 없앴다. 구멍 옆에 높이 가운데 맞춤으로 놓이는 말풍선 속 단추는 글 양·구멍 자리마다
+// 움직였다(사용자: 「버튼은 같은 위치에 있어야 연속적으로 누를 때 피로가 덜하다」). 넘기기는 화면마다 한 곳의 도크가 맡는다.
 import { cameraFor, union, type Camera, type CameraOptions, type Rect, type Size } from './camera';
 
 /**
@@ -69,12 +73,10 @@ export const BUBBLE_WIDTHS: readonly number[] = [BUBBLE.maxW, 31, 24];
 export type CoachTarget = 'button' | 'area';
 
 /**
- * 말풍선 꼬리말 — 무엇을 누르면 넘어가나. 몇 번째인지는 적지 않는다: 구석 알약(발표)·목차와 진행 막대(혼자 보기)가 이미
- * 말한다 — 2026-10-08 검토에서 한 화면에 순번이 세 번(알약·꼬리말·막대) 보였다
+ * 말풍선 꼬리말 — 무엇을 누르면 넘어가나. 체험하기의 **첫 코치 단계에만** 붙는다(PG-80 — 매 단계 같은 줄이면 읽히지 않고,
+ * 말풍선 높이가 단계마다 달라진다). 발표·둘러보기에는 없다
  */
 export const footOf = (target: CoachTarget) => (target === 'button' ? '버튼을 눌러 계속' : '밝은 곳을 눌러 계속');
-/** 꼬리말 옆 [다음] 버튼의 글자 */
-export const NEXT_LABEL = '다음';
 
 const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
@@ -121,12 +123,21 @@ const SAFETY = 1.05;
 /**
  * 말풍선 크기 어림 — 「**이름:** 문장」을 낱말 단위로 줄에 채운다(CSS `word-break: keep-all` — 한글도 띄어쓰기에서만
  * 줄을 바꾼다. 낱말 가운데서 잘리면 「눌러/요」가 된다). 이름이 길면(`labelOwnLine`) 이름 줄과 문장 줄을 따로 채운다.
- * 마지막 줄은 꼬리말 「버튼을 눌러 계속 [다음]」.
+ * 꼬리말(`foot`)이 있으면 마지막 줄 — 없으면(`null`) 그 줄의 높이도 없다.
  *
  * `k`는 말풍선 배율 — 혼자 보기 무대는 모니터 안의 800px 남짓이라 1.2배로 키운다(같은 cqw면 문장이 13px이다).
+ * `unit`은 길이 단위(px) — 무대는 무대 폭의 1%, 둘러보기는 9px(CP-120).
  */
-export function estimateBubble(label: string, say: string, foot: string, stage: Size, k = 1, maxW: number = BUBBLE.maxW): Size {
-  const u = (stage.w / 100) * k;
+export function estimateBubble(
+  label: string,
+  say: string,
+  foot: string | null,
+  stage: Size,
+  k = 1,
+  maxW: number = BUBBLE.maxW,
+  unit: number = stage.w / 100,
+): Size {
+  const u = unit * k;
   const fl = BUBBLE.label * u;
   const fs = BUBBLE.say * u;
   const ff = BUBBLE.foot * u;
@@ -154,15 +165,14 @@ export function estimateBubble(label: string, say: string, foot: string, stage: 
     cur = { w: cur.w + (cur.w > 0 ? sp : 0) + Math.min(ww, inner), big: cur.big || px === fl };
   }
   lines.push(cur);
-  // 꼬리말 줄 — 글자 + [다음] 버튼(좌우 0.9cqw 여백, 위아래 0.35cqw)
-  const nextW = textWidth(`${NEXT_LABEL} →`, ff) + 1.8 * u;
-  const footW = textWidth(foot, ff) * SAFETY + 1.2 * u + nextW;
-  const footH = Math.max(ff * 1.4, ff * BUBBLE.lineHeight + 0.7 * u);
+  // 꼬리말 줄 — 글자만(PG-80: [다음]은 도크로 갔다). 없으면 그 줄과 위 여백이 없다
+  const footW = foot ? textWidth(foot, ff) * SAFETY : 0;
+  const footH = foot ? BUBBLE.footGap * u + ff * BUBBLE.lineHeight : 0;
   const contentW = Math.min(inner, Math.max(footW, ...lines.map((l) => l.w)));
   const textH = lines.reduce((h, l) => h + (l.big ? fl : fs) * BUBBLE.lineHeight, 0);
   return {
     w: contentW + 2 * BUBBLE.padX * u,
-    h: textH + BUBBLE.footGap * u + footH + 2 * BUBBLE.padY * u,
+    h: textH + footH + 2 * BUBBLE.padY * u,
   };
 }
 
@@ -176,6 +186,15 @@ export function pillRect(stage: Size, text: string, k = 1): Rect {
 export const SELF_K = 1.2;
 
 // ── 구멍·손·말풍선 ────────────────────────────────────────────────────────────
+
+/**
+ * PG-81 — 구멍의 둥글기 (무대 px). 찍을 때 잰 앵커의 둥글기(`radius`, 그림 px)에 배율을 곱하고 여백을 더하면 버튼과 **동심**이다 —
+ * 늘 같은 둥글기(0.9cqw)를 쓰던 때는 모서리에서만 틈이 넓어 고리가 버튼에서 비껴 보였다. 높이 절반을 넘지 않는다(알약 모양까지)
+ */
+export function holeRadius(radius: number | undefined, scale: number, pad: number, hole: Rect): number {
+  const r = (radius ?? 8) * scale + pad;
+  return Math.max(0, Math.min(r, hole.h / 2, hole.w / 2));
+}
 
 /** 카메라를 거친 누를 곳 = 구멍 (무대 좌표, 둘레 여백 포함, 무대 안으로 자른다) */
 export function holeOf(cam: Camera, focus: Rect, stage: Size): Rect {
@@ -260,10 +279,12 @@ const HAND_WAYS: Record<Side, readonly (readonly [1 | -1, 1 | -1])[]> = {
 };
 
 export interface CoachOptions {
-  /** 말풍선(과 손)이 덮지 않을 것 — 구석 알약 */
+  /** 말풍선(과 손)이 덮지 않을 것 — 구석 알약, 둘러보기의 도크 */
   avoid?: readonly Rect[];
   /** 누르라는 손을 그리나 — 누르는 것(`target: 'button'`)일 때 */
   hand?: boolean;
+  /** 길이 단위(px) — 기본 무대 폭의 1%. 둘러보기는 9px (CP-120) */
+  unit?: number;
 }
 
 /**
@@ -273,7 +294,7 @@ export interface CoachOptions {
  */
 export function coachLayout(stage: Size, hole: Rect, bubble: Size, opts: CoachOptions = {}): CoachLayout {
   const avoid = opts.avoid ?? [];
-  const u = stage.w / 100;
+  const u = opts.unit ?? stage.w / 100;
   const m = MARGIN * u;
   const g = GAP * u;
   const area: Rect = { x: m, y: m, w: stage.w - 2 * m, h: stage.h - 2 * m };

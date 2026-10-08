@@ -6,14 +6,19 @@
 import { describe, expect, it } from 'vitest';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import {
   chapterHeadline,
   CHAPTER_ORDER,
   DECK,
   isCoachStep,
+  LABEL_MAX,
   presentSlides,
+  SAY_MAX,
   selfChapters,
   shotSteps,
+  stackedChapters,
+  TITLE_MAX,
   type GuideCap,
   type GuideStep,
 } from '@/lib/guide/deck';
@@ -44,6 +49,9 @@ import {
   GAP,
   HAND,
   handOf,
+  HOLE_PAD,
+  holeOf,
+  holeRadius,
   inside,
   intersects,
   labelOwnLine,
@@ -79,21 +87,22 @@ describe('[PG-T84] 단계 목록 무결성', () => {
     expect(titles).toEqual(['member', 'lead', 'head', 'hq', 'org']);
     // 장 카드에는 앞 장에서 넘어가는 메모가 있다 (발표자 창)
     for (const c of DECK.filter((c) => c.lede)) expect(c.notes?.length ?? 0, c.id).toBeGreaterThan(10);
-    // 장 카드의 큰 줄은 「이번엔 ○○ 차례예요」 — 한 줄은 32자까지 해요체
+    // 장 카드의 큰 줄은 「이번엔 ○○ 차례예요」 — 한 줄은 30자까지 해요체
     expect(chapterHeadline(DECK.find((c) => c.id === 'lead')!)).toBe('이번엔 부서담당자 차례예요');
     for (const c of DECK.filter((c) => c.lede)) {
-      expect([...c.lede!].length, c.id).toBeLessThanOrEqual(32);
+      expect([...c.lede!].length, c.id).toBeLessThanOrEqual(SAY_MAX);
       expect(c.lede, c.id).toMatch(/요$/);
     }
   });
 
   // 2026-10-08 사용자: 「거창한 설명보다 게임처럼 — 『인벤토리: 습득한 아이템은 여기서 확인할 수 있어요』」
-  it('[PG-57] 말풍선은 「이름: 한 문장」 — 이름 16자 · 문장 32자 · 생각 하나 · 해요체 · 「자세히」는 한 줄 · 메모가 있다', () => {
+  it('[PG-T147] 말풍선은 「이름: 한 문장」 — 이름 13자 · 문장 30자 · 생각 하나 · 해요체 · 「자세히」는 한 줄 · 메모가 있다', () => {
+    expect([LABEL_MAX, SAY_MAX, TITLE_MAX]).toEqual([13, 30, 24]);
     for (const s of steps) {
       const says = `${s.id}: ${s.label} / ${s.say}`;
-      // 그림·알림 단계는 말풍선의 머리(화면 이름 — 긴 버튼 이름을 줄이지 않는다), 글자 슬라이드는 큰 줄 — 둘 다 한 줄에 읽힌다
-      expect([...s.label].length, says).toBeLessThanOrEqual(isCoachStep(s) ? 16 : 24);
-      expect([...s.say].length, says).toBeLessThanOrEqual(32);
+      // 그림·알림 단계는 말풍선의 머리(화면의 글자), 글자 슬라이드는 큰 줄 — 둘 다 한 줄에 읽힌다
+      expect([...s.label].length, says).toBeLessThanOrEqual(isCoachStep(s) ? LABEL_MAX : TITLE_MAX);
+      expect([...s.say].length, says).toBeLessThanOrEqual(SAY_MAX);
       // 2026-10-08 검토 — 말풍선 문장에 「—」로 두 생각을 잇지 않는다(둘째 생각은 「자세히」로)
       if (isCoachStep(s)) expect(s.say, says).not.toMatch(/—|\[|\]/);
       expect(s.say, says).toMatch(/요$/);
@@ -106,7 +115,7 @@ describe('[PG-T84] 단계 목록 무결성', () => {
     }
   });
 
-  it('[PG-57] 그림 단계의 이름은 화면에 있는 그 글자다 — 소스에 그대로(또는 이름을 끼워 만드는 틀로) 있다', () => {
+  it('[PG-T147] 그림 단계의 이름은 화면에 있는 그 글자다 — 소스에 그대로(또는 이름을 끼워 만드는 틀로) 있다', () => {
     const walk = (dir: string): string[] =>
       readdirSync(dir).flatMap((n) => {
         const p = path.join(dir, n);
@@ -118,9 +127,6 @@ describe('[PG-T84] 단계 목록 무결성', () => {
     // 화면이 숫자·부서 이름을 끼워 만드는 버튼 — 소스에는 틀만 있다. label은 그림(가짜 조직)에 찍힌 그대로다
     const DYNAMIC: Record<string, RegExp> = {
       '미제출 2명 이름 복사': /`미제출 \$\{[^}]+\}명 이름 복사`/,
-      '계획 2줄을 이번 주 실적으로': /계획 \{rows\.plans\.length\}줄을 이번 주 실적으로/,
-      // 2026-10-08 자동 진행(RU-80) — 「위로」 상태 카드의 제목. 받는 곳 이름을 끼운다
-      '기획경영본부에 올라가는 병합본': /\{view\.target\}에 올라가는 병합본/,
     };
     for (const s of shotSteps()) {
       if (DYNAMIC[s.label]) expect(src, s.label).toMatch(DYNAMIC[s.label]);
@@ -133,9 +139,9 @@ describe('[PG-T84] 단계 목록 무결성', () => {
     for (const gone of ['이어 붙이기', '전사 취합본 만들기', '다시 만들기', '다시 제출', '에 제출', '전사본 만들기']) {
       expect(names.filter((n) => n.includes(gone)), gone).toEqual([]);
     }
-    // 본부·총괄 장의 「위로」 단계는 누르는 버튼이 아니라 상태 줄이다 — 손을 그리지 않는다
-    const status = shotSteps().filter((s) => ['head-report', 'hq-run', 'hq-submit', 'org-run'].includes(s.id));
-    expect(status.map((s) => `${s.id}:${s.target}`)).toEqual(['head-report:area', 'hq-run:area', 'hq-submit:area', 'org-run:area']);
+    // 「위로」 단계는 누르는 버튼이 아니라 상태 줄이다 — 손을 그리지 않는다
+    const status = shotSteps().filter((s) => ['lead-handoff', 'head-sent', 'hq-run', 'hq-sent', 'org-run'].includes(s.id));
+    expect(status.map((s) => `${s.id}:${s.target}`)).toEqual(['lead-handoff:area', 'head-sent:area', 'hq-run:area', 'hq-sent:area', 'org-run:area']);
   });
 
   it('[PG-57] 버튼 이름은 화면 그대로 — 화면에 없는 줄임 이름을 쓰지 않는다', () => {
@@ -151,19 +157,19 @@ describe('[PG-T84] 단계 목록 무결성', () => {
     expect(DECK.find((c) => c.id === 'head')?.lede).toContain('부서장');
   });
 
-  it('[PG-59] 발표는 35장 — 혼자 보기 전용(연휴 마감 미리보기 · 다음 장과 같은 화면의 현황 카드 둘)은 빠지고, 총괄 장은 다섯 장', () => {
+  it('[PG-59] 발표는 34장 — 체험하기 전용(연휴 마감 미리보기 · 분류 순서 · 산하 현황)은 빠지고, 총괄 장은 네 장', () => {
     const slides = presentSlides();
-    expect(slides.length).toBe(35);
-    // 「제출 현황」·「산하 제출」은 바로 다음 단계와 같은 화면이다 — 강당에서 같은 화면이 두 장 이어지면 넘긴 줄 모른다
-    expect(slides.map((s) => s.step?.id)).not.toContain('lead-status');
-    expect(slides.map((s) => s.step?.id)).not.toContain('hq-status');
+    expect(slides.length).toBe(34);
+    // 「산하 현황」은 바로 다음 단계와 같은 화면이다 — 강당에서 같은 화면이 두 장 이어지면 넘긴 줄 모른다
+    expect(slides.map((s) => s.step?.id)).not.toContain('hq-units');
+    expect(slides.map((s) => s.step?.id)).not.toContain('lead-rules');
     expect(slides.filter((s) => s.chapter.id === 'lead' && s.step).map((s) => `${s.step!.id} ${s.n}/${s.of}`)).toEqual([
       'lead-nudge 1/4',
       'lead-merge 2/4',
       'lead-merged 3/4',
-      'lead-rules 4/4',
+      'lead-handoff 4/4',
     ]);
-    // 부서원 장은 여덟 장 — 2026-10-08 「공유」를 따로 짚는다(말풍선 하나에 버튼 하나)
+    // 부서원 장은 여덟 장 — 로그인은 발표에만(체험하기는 로그인한 사람이 연다)
     expect(slides.filter((s) => s.chapter.id === 'member' && s.step).map((s) => s.step!.id)).toEqual([
       'member-login',
       'member-week',
@@ -172,12 +178,19 @@ describe('[PG-T84] 단계 목록 무결성', () => {
       'member-share',
       'member-submit',
       'member-done',
-      'member-history',
+      'member-past',
     ]);
     expect(slides.map((s) => s.step?.id)).not.toContain('org-preview');
     const org = slides.filter((s) => s.chapter.id === 'org' && s.step);
-    expect(org.map((s) => `${s.n}/${s.of}`)).toEqual(['1/5', '2/5', '3/5', '4/5', '5/5']);
-    expect(org.find((s) => s.step?.id === 'org-download')?.n).toBe(4);
+    expect(org.map((s) => `${s.n}/${s.of}`)).toEqual(['1/4', '2/4', '3/4', '4/4']);
+    expect(org.find((s) => s.step?.id === 'org-download')?.n).toBe(3);
+  });
+
+  it('[PG-83] 단계는 지금 화면의 앵커만 — hwp 올리기·없어진 [올리기]를 가리키지 않는다', () => {
+    const anchors = shotSteps().map((s) => s.anchor);
+    expect(anchors).not.toContain('org-upload');
+    expect(anchors).not.toContain('report-unit-submit-button');
+    expect(JSON.stringify(DECK)).not.toMatch(/selfHome/);
   });
 
   it('[WA-39] 웹 작성만 — 한글 파일을 올려 내는 단계가 없다', () => {
@@ -208,7 +221,7 @@ describe('[PG-T84] 단계 목록 무결성', () => {
 
   it('[PG-58] 발표의 구멍은 누르는 것 하나 — 그림의 절반을 뚫지 않는다 (2026-10-08 검토: 서른 단계 중 열둘이 패널 전체였다)', () => {
     const { width, height } = MANIFEST.viewport;
-    // 혼자 보기 전용 현황 카드(「제출 현황」·「산하 제출」)는 카드 전체가 볼 것이다 — 발표에는 나오지 않는다
+    // 체험하기 전용 현황 카드(「산하 현황」)는 카드 전체가 볼 것이다 — 발표에는 나오지 않는다
     for (const s of shotSteps().filter((x) => !x.selfOnly)) {
       const f = MANIFEST.shots[s.id].focus;
       // 버튼은 버튼 크기, 보기만 하는 것(칩·합계·칸 묶음)도 그림의 12%를 넘지 않는다 — 예전 표·카드는 25–80%였다
@@ -298,17 +311,16 @@ describe('[PG-T85] 발표 키 → 슬라이드 번호', () => {
 describe('[PG-T90] 무대 클릭 — 밝은 곳은 다음, 어두운 곳은 다시 알려 주기', () => {
   const N = 10;
   const at = (index: number, extra: Partial<DeckNavState> = {}): DeckNavState => ({ index, black: false, buffer: '', hint: 0, ...extra });
-  const click = (s: DeckNavState, target: 'cutout' | 'next' | 'dim' | 'card') => deckNav(s, { type: 'click', target }, N);
+  const click = (s: DeckNavState, target: 'cutout' | 'dim' | 'card') => deckNav(s, { type: 'click', target }, N);
 
-  it('누른 곳 → 할 일', () => {
+  it('누른 곳 → 할 일 (말풍선 [다음]은 없다 — 넘기기는 도크, PG-80)', () => {
     expect(stageClick('cutout')).toBe('next');
-    expect(stageClick('next')).toBe('next');
     expect(stageClick('card')).toBe('next');
     expect(stageClick('dim')).toBe('hint');
   });
 
-  it('구멍·[다음]·글자 슬라이드를 누르면 다음 장 (그 버튼을 누른 뒤의 화면)', () => {
-    for (const t of ['cutout', 'next', 'card'] as const) expect(click(at(3), t), t).toEqual(at(4));
+  it('구멍·글자 슬라이드를 누르면 다음 장 (그 버튼을 누른 뒤의 화면)', () => {
+    for (const t of ['cutout', 'card'] as const) expect(click(at(3), t), t).toEqual(at(4));
   });
 
   it('어두운 곳을 누르면 넘기지 않고 hint만 하나 늘린다 — 무대가 테두리·손을 다시 움직인다', () => {
@@ -326,10 +338,10 @@ describe('[PG-T90] 무대 클릭 — 밝은 곳은 다음, 어두운 곳은 다�
     expect(deckNav(at(0, { hint: 5 }), { type: 'sync', index: 4, black: false }, N)).toEqual(at(4, { hint: 5 }));
   });
 
-  it('눌린 모양 — 구멍을 누르면 160ms, [다음]·어두운 곳·글자 슬라이드는 기다리지 않는다', () => {
+  it('눌린 모양 — 구멍을 누르면 160ms, 어두운 곳·글자 슬라이드는 기다리지 않는다', () => {
     expect(CLICK_PRESS_MS).toBe(160);
     expect(clickPressMs('cutout')).toBe(CLICK_PRESS_MS);
-    for (const t of ['next', 'dim', 'card'] as const) expect(clickPressMs(t), t).toBe(0);
+    for (const t of ['dim', 'card'] as const) expect(clickPressMs(t), t).toBe(0);
   });
 
   it('눌린 모양 — 버튼 단계에서 넘기기 키(프레젠터)면 200ms, 그 밖에는 바로', () => {
@@ -362,77 +374,59 @@ describe('[PG-T86] 앵커가 코드에 있다 (CP-104)', () => {
   });
 });
 
-describe('[PG-T87] 혼자 보기 — 역할 거르기와 순서', () => {
+describe('[PG-T145] 체험하기 — 역할이 쌓이는 장 (PG-83)', () => {
   const ids = (caps: GuideCap[]) => selfChapters(caps).map((c) => c.chapter.id);
-  const mine = (caps: GuideCap[]) => selfChapters(caps).filter((c) => c.mine).map((c) => c.chapter.id);
   const stepIds = (caps: GuideCap[], ch: string) =>
     selfChapters(caps).find((c) => c.chapter.id === ch)?.slides.map((s) => s.step!.id) ?? [];
+  const ALL: GuideCap[] = ['all', 'manager', 'head', 'report', 'hq', 'org', 'orgDesk', 'schedule'];
 
-  it('부서원 — 부서원 장이 맨 앞, 담당자·본부·총괄 장은 없다', () => {
-    expect(ids(['all'])).toEqual(['member', 'why', 'outro']); // 표지는 발표에만 — 혼자 보기는 페이지 머리가 표지다
-    expect(mine(['all'])).toEqual(['member']);
+  it('쌓기 — 부서원 → + 부서담당자 → + 실·팀장 → + 본부 · 총괄 담당은 부서원 + 총괄 · 전부면 다섯 장, 늘 이야기 순서', () => {
+    expect(ids(['all'])).toEqual(['member']);
+    expect(ids(['all', 'manager'])).toEqual(['member', 'lead']);
+    expect(ids(['all', 'manager', 'head', 'report'])).toEqual(['member', 'lead', 'head']);
+    expect(ids(['all', 'manager', 'head', 'report', 'hq'])).toEqual(['member', 'lead', 'head', 'hq']);
+    expect(ids(['all', 'org', 'orgDesk', 'schedule'])).toEqual(['member', 'org']);
+    expect(ids(ALL)).toEqual(['member', 'lead', 'head', 'hq', 'org']);
+    // 순서는 caps를 어떻게 넘겨도 이야기 순서 — 「내 역할 장 맨 앞」 정렬은 없다
+    expect(ids(['org', 'hq', 'head', 'manager', 'all'] as GuideCap[])).toEqual(['member', 'lead', 'head', 'hq', 'org']);
+    // 둘러보기(PG-84)와 같은 쌓기
+    expect(stackedChapters(ALL)).toEqual(['member', 'lead', 'head', 'hq', 'org']);
+    expect(stackedChapters(['all'])).toEqual(['member']);
   });
 
-  it('담당자 — 담당자 장이 맨 앞, 「위로 제출」은 담당자 장의 마지막 (실·팀장 장은 내 장이 아니다)', () => {
-    const caps: GuideCap[] = ['all', 'manager', 'report'];
-    expect(ids(caps)[0]).toBe('lead');
-    expect(mine(caps)).toEqual(['lead']);
-    expect(stepIds(caps, 'lead').at(-1)).toBe('head-report');
-    const lead = selfChapters(caps).find((c) => c.chapter.id === 'lead')!;
-    expect(lead.slides.map((s) => `${s.n}/${s.of}`).at(-1)).toBe('6/6'); // 「부서담당자 · 6/6」
-    expect(ids(caps)).not.toContain('head');
-    expect(ids(caps)).not.toContain('hq');
-    expect(ids(caps)).not.toContain('org');
-  });
-
-  it('부서장 — 담당자·실·팀장 장이 앞에, 승인 단계가 있다', () => {
-    const caps: GuideCap[] = ['all', 'manager', 'head', 'report'];
-    expect(mine(caps)).toEqual(['lead', 'head']);
-    expect(stepIds(caps, 'head')).toContain('head-approve');
-    expect(stepIds(caps, 'head')).not.toContain('head-report');
-  });
-
-  it('「내 역할」은 그 장의 주인일 때만 — 빌려 온 단계 하나로 붙지 않는다', () => {
-    // 장의 who를 가진 사람만 내 장. 부서원은 역할 장이 없어 부서원 장이 내 장
-    expect(mine(['all'])).toEqual(['member']);
-    expect(mine(['all', 'org'])).toEqual(['org']);
-    expect(mine(['all', 'hq', 'report'])).toEqual(['hq']);
-  });
-
-  it('3단계가 꺼진 담당자 — 위로 제출 단계도 없다', () => {
-    expect(ids(['all', 'manager'])).not.toContain('head');
-    expect(stepIds(['all', 'manager'], 'lead')).not.toContain('head-report');
-  });
-
-  it('총괄 — 전사 장의 취합·일정 단계는 그 문이 있을 때만', () => {
+  it('장 안의 단계도 쓰는 사람만 — 「위로」 상태(report)·전사본(orgDesk)·일정(schedule)', () => {
+    expect(stepIds(['all', 'manager'], 'lead')).toEqual(['lead-nudge', 'lead-merge', 'lead-merged', 'lead-rules']);
+    expect(stepIds(['all', 'manager', 'report'], 'lead')).toEqual(['lead-nudge', 'lead-merge', 'lead-merged', 'lead-handoff', 'lead-rules']);
+    expect(stepIds(['all', 'manager', 'head'], 'head')).toEqual(['head-notice', 'head-open', 'head-save', 'head-approve']);
+    expect(stepIds(['all', 'manager', 'head', 'report'], 'head')).toContain('head-sent');
     expect(stepIds(['all', 'org'], 'org')).toEqual(['org-board']);
-    expect(stepIds(['all', 'org', 'orgDesk', 'schedule'], 'org')).toEqual([
-      'org-board',
-      'org-final',
-      'org-run',
-      'org-download',
-      'org-schedule',
-      'org-preview',
-    ]);
-  });
-
-  it('발표에서만 쓰는 단계(표지·주소)는 혼자 보기에 없고, 혼자 보기 전용(연휴 미리보기)은 발표에 없다', () => {
-    const all: GuideCap[] = ['all', 'manager', 'head', 'report', 'hq', 'org', 'orgDesk', 'schedule'];
-    const self = selfChapters(all).flatMap((c) => c.slides.map((s) => s.step!.id));
-    expect(self).not.toContain('outro-address');
-    expect(self).not.toContain('intro-cover');
-    expect(self).toContain('org-preview');
-    expect(self.length).toBe(steps.length - 2);
-    expect(self).toContain('lead-status');
-    expect(self).toContain('hq-status');
-    expect(presentSlides().filter((s) => s.step).length).toBe(steps.length - 3);
-  });
-
-  it('주소 조각은 이야기 순서 기준 — 옮겨 둔 단계도 거른 뒤에도 같은 단계는 같은 #', () => {
+    expect(stepIds(['all', 'org', 'orgDesk', 'schedule'], 'org')).toEqual(['org-board', 'org-run', 'org-download', 'org-schedule', 'org-preview']);
+    // 장 안의 순번 — 도크의 「부서담당자 4/5」
     const lead = selfChapters(['all', 'manager', 'report']).find((c) => c.chapter.id === 'lead')!;
-    expect(lead.slides.at(-1)?.key).toBe('head-5');
-    expect(presentSlides().find((s) => s.key === 'head-5')?.step?.id).toBe('head-report');
-    expect(presentSlides().find((s) => s.key === 'head-5')?.chapter.id).toBe('head'); // 발표는 이야기 순서
+    expect(lead.slides.map((s) => `${s.n}/${s.of}`)).toEqual(['1/5', '2/5', '3/5', '4/5', '5/5']);
+  });
+
+  it('[PG-T146] 체험하기에는 표지·왜·마무리·주소·로그인이 없다 — 발표에만', () => {
+    const self = selfChapters(ALL).flatMap((c) => c.slides.map((s) => s.step!));
+    for (const id of ['intro-cover', 'why-before', 'why-after', 'member-login', 'outro-summary', 'outro-address']) {
+      expect(self.map((s) => s.id), id).not.toContain(id);
+    }
+    expect(self.filter((s) => !isCoachStep(s)).map((s) => s.id)).toEqual([]);
+    expect(selfChapters(ALL).map((c) => c.chapter.id)).not.toContain('intro');
+    // 발표에만 쓰는 단계는 모두 presentOnly — 체험하기 전용(selfOnly)은 발표에 없다
+    const present = presentSlides().flatMap((s) => (s.step ? [s.step.id] : []));
+    expect(present).toContain('member-login');
+    expect(present).not.toContain('org-preview');
+    expect(self.map((s) => s.id)).toContain('org-preview');
+  });
+
+  it('주소 조각은 이야기 순서 기준 — 거른 뒤에도 같은 단계는 같은 #', () => {
+    const lead = selfChapters(['all', 'manager', 'report']).find((c) => c.chapter.id === 'lead')!;
+    expect(lead.slides.find((s) => s.step!.id === 'lead-handoff')?.key).toBe('lead-4');
+    expect(presentSlides().find((s) => s.key === 'lead-4')?.step?.id).toBe('lead-handoff');
+    // 거른 사람(위로 없음)에게도 분류 순서는 lead-5
+    const plain = selfChapters(['all', 'manager']).find((c) => c.chapter.id === 'lead')!;
+    expect(plain.slides.at(-1)?.key).toBe('lead-5');
   });
 
   it('[TACP-12] 거르기의 판정은 authz.ts의 guideCaps 하나 — 안내 페이지는 역할 플래그를 보지 않는다', () => {
@@ -535,7 +529,7 @@ const STAGES: { name: string; view: Size; k: number; pill: boolean; slides: Retu
   { name: '발표 1920×1080', view: { w: 1920, h: 1080 }, k: 1, pill: true, slides: presentSlides() },
   { name: '발표 1280×720', view: { w: 1280, h: 720 }, k: 1, pill: true, slides: presentSlides() },
   {
-    // 혼자 보기에는 구석 알약이 없다 — 목차·진행 막대가 자리를 말한다
+    // 체험하기에는 구석 알약이 없다 — 도크가 자리를 말한다
     name: '혼자 보기 816×459',
     view: { w: 816, h: 459 },
     k: SELF_K,
@@ -549,7 +543,8 @@ function planFor(sl: ReturnType<typeof presentSlides>[number], view: Size, k: nu
   const s = sl.step as Extract<GuideStep, { kind: 'shot' }>;
   const pill = withPill ? pillRect(view, `${sl.chapter.title} ${sl.n}/${sl.of}`, k) : null;
   const shot = MANIFEST.shots[s.id];
-  const bubble = (maxW: number) => estimateBubble(s.label, s.say, footOf(s.target), view, k, maxW);
+  // PG-80 — 말풍선에 꼬리말이 없다(체험하기 첫 단계만 — 그 하나는 아래 순수 함수 시험이 본다)
+  const bubble = (maxW: number) => estimateBubble(s.label, s.say, null, view, k, maxW);
   return {
     pill,
     ...coachPlan(view, IMG, shot, bubble, {
@@ -663,7 +658,7 @@ describe('[PG-T89] 코치 마크 — 말풍선 자리', () => {
     const view = { w: 1920, h: 1080 };
     const u = view.w / 100;
     // 한 줄 말풍선의 높이 — 이름 줄 하나 + 꼬리말
-    const oneLine = estimateBubble('제출', '다 적었으면 여기를 눌러요', footOf('button'), view).h;
+    const oneLine = estimateBubble('제출', '다 적었으면 여기를 눌러요', null, view).h;
     const plans = presentSlides()
       .filter((sl) => sl.step?.kind === 'shot' && !labelOwnLine(sl.step.label))
       .map((sl) => ({ id: sl.step!.id, ...planFor(sl, view, 1, true) }));
@@ -714,9 +709,23 @@ describe('[PG-T89] 코치 마크 — 순수 함수', () => {
   const u = view.w / 100;
   const bubble = { w: 560, h: 190 };
 
-  it('꼬리말은 무엇을 누르나만 — 순번은 알약·목차가 말한다', () => {
+  it('꼬리말은 무엇을 누르나만 — 순번은 도크가 말한다 · 없으면 그 줄의 높이도 없다', () => {
     expect(footOf('button')).toBe('버튼을 눌러 계속');
     expect(footOf('area')).toBe('밝은 곳을 눌러 계속');
+    const withFoot = estimateBubble('제출', '다 적었으면 눌러요', footOf('button'), view);
+    const without = estimateBubble('제출', '다 적었으면 눌러요', null, view);
+    expect(withFoot.h).toBeGreaterThan(without.h);
+    expect(withFoot.w).toBeGreaterThanOrEqual(without.w);
+  });
+
+  it('단위(unit) — 둘러보기는 9px 단위로 같은 모양을 잰다 (CP-120)', () => {
+    const tour = estimateBubble('작성하기', '이번 주 일지는 이 버튼 하나예요', null, { w: 1280, h: 800 }, 1, BUBBLE.maxW, 9);
+    const stage900 = estimateBubble('작성하기', '이번 주 일지는 이 버튼 하나예요', null, { w: 900, h: 506 });
+    expect(tour.w).toBeCloseTo(stage900.w, 5);
+    expect(tour.h).toBeCloseTo(stage900.h, 5);
+    const l = coachLayout({ w: 1280, h: 800 }, { x: 100, y: 300, w: 120, h: 44 }, tour, { unit: 9 });
+    expect(l.fits).toBe(true);
+    expect(l.bubble.x).toBeCloseTo(100 + 120 + GAP * 9, 5);
   });
 
   it('오른쪽에 자리가 있으면 오른쪽, 없으면 왼쪽 — 꼬리는 구멍 가운데 높이를 가리킨다', () => {
@@ -788,17 +797,122 @@ describe('[PG-T89] 코치 마크 — 순수 함수', () => {
   });
 
   it('말풍선 어림 — 38cqw를 넘지 않고, 글이 길면 높아진다 · 긴 이름은 제 줄 · 무대 크기에 비례한다', () => {
-    const short = estimateBubble('제출', '다 적었으면 여기를 눌러요', footOf('button'), view);
-    const long = estimateBubble('총괄(기획조정실)에 제출', '본부본을 올리면 본부 일은 끝이에요 정말로 끝이에요', footOf('button'), view);
+    const short = estimateBubble('제출', '다 적었으면 여기를 눌러요', null, view);
+    const long = estimateBubble('총괄(기획조정실)에 제출', '본부본을 올리면 본부 일은 끝이에요 정말로 끝이에요', null, view);
     expect(long.w).toBeLessThanOrEqual(BUBBLE.maxW * u + 0.5);
     expect(long.h).toBeGreaterThan(short.h);
     // 8자 넘는 이름은 제 줄 — 짧은 문장이어도 한 줄이 더 든다
     expect(labelOwnLine('미제출 2명 이름 복사')).toBe(true);
     expect(labelOwnLine('제출')).toBe(false);
-    expect(estimateBubble('미제출 2명 이름 복사', '알려요', footOf('button'), view).h).toBeGreaterThan(short.h);
-    const half = estimateBubble('제출', '다 적었으면 여기를 눌러요', footOf('button'), { w: 960, h: 540 });
+    expect(estimateBubble('미제출 2명 이름 복사', '알려요', null, view).h).toBeGreaterThan(short.h);
+    const half = estimateBubble('제출', '다 적었으면 여기를 눌러요', null, { w: 960, h: 540 });
     expect(half.w).toBeCloseTo(short.w / 2, 5);
     expect(half.h).toBeCloseTo(short.h / 2, 5);
   });
 });
 
+
+describe('[PG-81] 구멍과 고리 — 한 사각형, 버튼과 동심', () => {
+  const read = (p: string) => readFileSync(path.join(ROOT, p), 'utf8');
+
+  it('[PG-T142] 모든 그림 단계 × 무대 세 크기에서 구멍이 무대 끝에서 잘리지 않는다 — 고리(무대)와 그늘(판)이 갈라질 일이 없다', () => {
+    for (const { name, view, k, pill: withPill, slides } of STAGES) {
+      for (const sl of slides.filter((x) => x.step?.kind === 'shot' && MANIFEST.shots[x.step.id])) {
+        const { cam, hole } = planFor(sl, view, k, withPill);
+        const shot = MANIFEST.shots[sl.step!.id];
+        const p = (HOLE_PAD * view.w) / 100;
+        const raw = {
+          x: cam.x + shot.focus.x * cam.scale - p,
+          y: cam.y + shot.focus.y * cam.scale - p,
+          w: shot.focus.w * cam.scale + 2 * p,
+          h: shot.focus.h * cam.scale + 2 * p,
+        };
+        const id = `${name} ${sl.step!.id}`;
+        expect(hole.x, id).toBeCloseTo(raw.x, 6);
+        expect(hole.y, id).toBeCloseTo(raw.y, 6);
+        expect(hole.w, id).toBeCloseTo(raw.w, 6);
+        expect(hole.h, id).toBeCloseTo(raw.h, 6);
+        // 그늘은 이 구멍을 판 좌표로 되돌려 그린다 — 다시 무대로 옮기면 같은 사각형
+        const back = holeOf(cam, shot.focus, view);
+        expect(back, id).toEqual(hole);
+      }
+    }
+  });
+
+  it('[PG-T143] manifest의 그림 sha256이 webp 파일과 같고, 앵커 둥글기(radius)가 있다 — 그림만 다시 찍힌 것을 잡는다', () => {
+    for (const s of shotSteps()) {
+      const shot = MANIFEST.shots[s.id];
+      const buf = readFileSync(path.join(DECK_DIR, shot.file));
+      expect(shot.sha256, s.id).toBe(createHash('sha256').update(buf).digest('hex'));
+      expect(typeof shot.radius, s.id).toBe('number');
+      expect(shot.radius!, s.id).toBeGreaterThanOrEqual(0);
+      expect(shot.radius!, s.id).toBeLessThanOrEqual(shot.focus.h / 2 + 0.1);
+    }
+  });
+
+  it('둥글기는 버튼과 동심 — 앵커 둥글기 × 배율 + 여백, 높이 절반까지', () => {
+    const hole = { x: 0, y: 0, w: 200, h: 60 };
+    expect(holeRadius(8, 1.5, 9.6, hole)).toBeCloseTo(8 * 1.5 + 9.6);
+    expect(holeRadius(999, 1.5, 9.6, hole)).toBe(30); // 알약(칩)은 높이 절반
+    expect(holeRadius(undefined, 1, 10, hole)).toBe(18); // 옛 그림은 8px로 본다
+  });
+
+  it('[PG-T144] 소스 — 무대는 소수로 잰다(clientWidth·offset* 없음), 100vw 무대 없음, 고리는 가장자리 위에 걸친 outline 띠', () => {
+    const stage = read('src/components/GuideStage.tsx');
+    expect(stage).not.toMatch(/\.clientWidth|\.clientHeight|\.offsetLeft|\.offsetTop|\.offsetWidth|\.offsetHeight/);
+    expect(stage).toContain('contentBoxSize');
+    expect(stage).toContain('data-settled');
+    for (const f of ['GuideStage', 'GuideSelf', 'GuidePresent', 'Tour']) {
+      expect(read(`src/components/${f}.tsx`), f).not.toMatch(/min\(100vw/);
+    }
+    const css = read('src/app/globals.css');
+    const ring = css.slice(css.indexOf('.coach-ring {'), css.indexOf('}', css.indexOf('.coach-ring {')));
+    expect(ring).toMatch(/outline:/);
+    expect(ring).toMatch(/outline-offset: calc\(-1 \* var\(--ring-in\)\)/);
+    expect(ring).not.toMatch(/box-shadow/);
+  });
+});
+
+describe('[PG-80] 넘기기 단추는 언제나 같은 자리 — 소스로 지키는 것 (화면에서는 PG-T140 guide-check.cjs --dock)', () => {
+  const read = (p: string) => readFileSync(path.join(ROOT, p), 'utf8');
+
+  it('말풍선 안에 [다음]이 없다 — 넘기기는 도크 한 곳', () => {
+    const parts = read('src/components/CoachParts.tsx');
+    const bubble = parts.slice(parts.indexOf('export function CoachBubble'), parts.indexOf('export function CoachDock'));
+    expect(bubble).not.toMatch(/<button/);
+    expect(read('src/lib/guide/coach.ts')).not.toMatch(/NEXT_LABEL/);
+    expect(read('src/lib/guide/nav.ts')).not.toMatch(/StageTarget = [^;]*'next'/);
+  });
+
+  it('도크 칸은 폭·높이 고정 격자 — 글자가 바뀌어도 칸이 그대로다', () => {
+    const css = read('src/app/globals.css');
+    const dock = css.slice(css.indexOf('.coach-dock {'), css.indexOf('}', css.indexOf('.coach-dock {')));
+    expect(dock).toMatch(/grid-template-columns: 7rem 9rem 7rem;/);
+    expect(dock).toMatch(/grid-template-rows: 2\.75rem;/);
+    expect(dock).toMatch(/contain: layout paint;/);
+    expect(css).toMatch(/html \{\s*scrollbar-gutter: stable;/);
+  });
+
+  it('체험하기 — 도크 줄은 무대 바로 밑, 「자세히」는 도크 아래 · 진행 막대·「다음: {이름}」 없음', () => {
+    const self = read('src/components/GuideSelf.tsx');
+    const stage = self.indexOf('<GuideStage');
+    const dockRow = self.indexOf('{dock(false)}');
+    const more = self.indexOf('{more && (');
+    expect(stage).toBeGreaterThan(0);
+    expect(dockRow).toBeGreaterThan(stage);
+    expect(more).toBeGreaterThan(dockRow);
+    expect(self).not.toMatch(/다음: \{next/);
+    expect(self).toMatch(/flex h-16 items-center/);
+  });
+
+  it('발표자 창 — 창 높이에 맞춘 격자(min-h-dvh 아님), 메모는 제 칸에서 스크롤, 바닥 줄 칸 폭 고정', () => {
+    const present = read('src/components/GuidePresent.tsx');
+    const notes = present.slice(present.indexOf('function NotesView'));
+    expect(notes).toMatch(/grid h-dvh grid-rows-\[3\.5rem_minmax\(0,1fr\)_auto\]/);
+    expect(notes).not.toMatch(/min-h-dvh/);
+    expect(notes).toMatch(/grid h-12 grid-cols-\[8rem_8rem_11rem_minmax\(0,1fr\)\]/);
+    expect(notes).toMatch(/overflow-y-auto rounded-xl bg-stage-soft/);
+    // 발표 화면의 마우스 묶음도 칸 폭 고정 [←][→][발표자 창][전체 화면]
+    expect(present).toMatch(/grid-cols-\[2\.75rem_2\.75rem_6rem_6rem\]/);
+  });
+});

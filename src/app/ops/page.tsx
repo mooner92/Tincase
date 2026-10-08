@@ -5,6 +5,7 @@ import { noticeFor } from '@/components/Notice';
 import { OpsClient } from './OpsClient';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
+import { getTour } from '@/server/tour';
 import Link from 'next/link';
 
 export const dynamic = 'force-dynamic';
@@ -28,6 +29,7 @@ export default async function OpsPage() {
         isOperator
         readAll
         viaCloudflare={ps.scope.source === 'cloudflare'}
+        tour={await getTour(ps.scope, false)}
       />
       <main className="mx-auto w-full max-w-[1120px] flex-1 px-5 pt-8 pb-8">
         <div className="page-head">
