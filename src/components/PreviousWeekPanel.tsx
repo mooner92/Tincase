@@ -204,24 +204,15 @@ export function PreviousWeekPanel({
               </div>
             )}
 
-            {/* 받기는 오른쪽 위 한 줄 — 「넣을 곳을 고르세요…」 안내는 2026-10-08에 걷었다(사용자: 주석 걷기) */}
-            <div className="mb-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              {data.submissionId && (
-                <a
-                  href={`/api/submissions/${data.submissionId}/download`}
-                  className="ml-auto text-xs text-muted underline underline-offset-2 hover:text-ink"
-                >
-                  hwp로 받기
-                </a>
-              )}
-            </div>
+            {/*
+              2026-10-08 — [hwp로 받기]를 걷었다. 지난 hwp를 받는 것은 「한글에서 고쳐 다시 올리기」 동선이었고,
+              hwp 업로드가 없어지면서 그 길도 없다(R19). 옮기는 버튼이 그 일을 한다
+            */}
 
             {/* 지난주가 길어도 표를 덮지 않게 묶는다 */}
             <div className="max-h-44 overflow-y-auto">
               {!rows ? (
-                <p className="text-xs text-muted">
-                  파일을 읽지 못했습니다. [hwp로 받기]로 내려받아 확인해 주세요.
-                </p>
+                <p className="text-xs text-muted">파일을 읽지 못했습니다.</p>
               ) : SECTIONS.every((s) => rows[s.key].length === 0) ? (
                 <p className="text-xs text-muted">이 주차에는 적은 내용이 없습니다.</p>
               ) : (

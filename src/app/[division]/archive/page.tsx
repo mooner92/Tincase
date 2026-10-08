@@ -1,49 +1,25 @@
-// `/{slug}/archive` — 주간업무 보관함 (PG-45, TACP-15).
-//
-// 목요일 14시에 자동으로 병합된 결과를 **부서원 모두**가 본다.
-// 그동안 병합본은 담당자만 봤는데, 그 문서는 취합게시판에 올라가 전사가 읽는다 —
-// 정작 그 글을 쓴 사람만 못 보고 있었다. 결과를 보면 다음 주에 뭘 어떻게 쓸지 감이 잡히고,
-// 잘못 들어간 것도 본인이 먼저 발견한다.
-import { redirect } from 'next/navigation';
-import { getPageScope, getDivisionView } from '@/server/page-scope';
-import { latestRunPerWeek } from '@/server/merge/archive';
+// `/{slug}/archive` — 옛 주소. 「보관함」은 홈의 지난 주차 [병합본]으로 합쳤다 (PG-70).
+// 담당자·부서장은 수합 관리로 보낸다 — 이미 나간 `merge_review` 알림 링크가 이 주소이고, 승인은 수합 관리에서 한다(D19).
+// 2026-12-31까지 남긴다. 2027년 첫 정리 때 시험과 함께 지운다.
+import { notFound, redirect } from 'next/navigation';
+import { requirePageScope, getDivisionView, type DivisionView } from '@/server/page-scope';
+import { HttpError } from '@/server/authz';
 import { noticeFor } from '@/components/Notice';
-import { ArchiveList } from '@/components/ArchiveList';
-import { toKstIso, slotKind } from '@/lib/week';
 
 export const dynamic = 'force-dynamic';
 
-export default async function ArchivePage({ params }: { params: Promise<{ division: string }> }) {
-  const ps = await getPageScope();
-  if (!ps.ok) {
-    if (ps.code === 'unauthenticated') redirect('/login');
-    return noticeFor(ps.code, ps.message);
+export default async function ArchiveRedirect({ params }: { params: Promise<{ division: string }> }) {
+  const ps = await requirePageScope(); // AU-22 — 보내기만 하는 페이지도 거친다 (AU-T39)
+  if (!ps.ok) return noticeFor(ps.code, ps.message);
+  let view: DivisionView;
+  try {
+    view = await getDivisionView((await params).division);
+  } catch (e) {
+    // 남의 부서·없는 부서는 어디로도 보내지 않고 404 — 주소가 어딘가로 이어진다는 것도 알리지 않는다 (TACP-5)
+    if (e instanceof HttpError && e.status === 404) notFound();
+    throw e;
   }
-  if (ps.scope.user.mustChangePassword) redirect('/password?first=1'); // AU-22
-  const { division: slugParam } = await params;
-  const view = await getDivisionView(slugParam); // TACP-7 — 대상 부서는 단일 해석기로
-
-  // 주차당 마지막 성공본만 — 다시 병합하면 같은 주차에 여러 건이 쌓인다. 주차를 먼저 고른다 (최근 n건을 접으면 옛 주차가 빠진다)
-  const runs = await latestRunPerWeek(view.division.id);
-  const items = runs.map((r) => {
-    const counts = r.rowCounts ? (JSON.parse(r.rowCounts) as Record<string, number>) : null;
-    return {
-      isoKey: r.weekSlot.isoKey,
-      label: `${r.weekSlot.year}년 ${r.weekSlot.label}`,
-      monthly: slotKind(r.weekSlot) === 'monthly',
-      madeAtKst: toKstIso(r.finishedAt ?? r.startedAt).slice(5, 16).replace('T', ' '),
-      sources: (JSON.parse(r.sourceIds) as string[]).length,
-      counts,
-    };
-  });
-
-  return (
-    <main className="pt-8">
-      <h1 className="page-title">{view.division.nameKo} 주간업무</h1>
-
-      <div className="mt-6">
-        <ArchiveList items={items} divisionSlug={view.division.slug} canEdit={view.canEditMerged} />
-      </div>
-    </main>
-  );
+  const slug = view.division.slug;
+  // canManage = 내 부서 lead·head 또는 readAll (getDivisionView — TACP-12)
+  redirect(view.canManage ? `/${slug}/manage` : `/${slug}`);
 }

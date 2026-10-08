@@ -132,8 +132,18 @@ async function seed() {
   };
   const before = (ms: number) => new Date(now.getTime() - ms);
 
-  // 지난주 — 「지난번에 낸 것」·이력·보관함
-  for (const [k, u] of ai.slice(0, 8).entries()) await submit(u, 'AI홍보전략실', new Date(lastWeek.getTime() - (8 - k) * 1800_000));
+  // PG-66 — 홈의 지난 주차(PG-68)는 「내가 냈거나, 내가 들어온 뒤 부서 제출이 있는 주」만 보인다. 가짜 사람은 오늘 만들어졌으므로
+  // AI홍보전략실 사람들이 6주 전에 들어온 것으로 둔다 — 그래야 주인공이 안 낸 주가 「미제출」로 보인다
+  const weeksAgo = (n: number) => new Date(now.getTime() - n * 7 * 86400_000);
+  await prisma.user.updateMany({ where: { divisionId: div['AI홍보전략실'].id }, data: { createdAt: weeksAgo(6) } });
+  // 3주 전 — 주인공(남시우)만 안 냈다(부서 제출은 있다) · 2주 전 — 주인공도 냈다
+  for (const n of [3, 2]) {
+    const who = ai.filter((u) => n === 2 || u.id !== roles.memberPending.id).slice(0, 6);
+    for (const [k, u] of who.entries()) await submit(u, 'AI홍보전략실', new Date(weeksAgo(n).getTime() - (6 - k) * 1800_000));
+  }
+  // 지난주 — 「지난번에 낸 것」·지난 주차의 [내 일지]·[병합본]. 주인공도 낸다
+  const lastWho = [roles.memberPending, ...ai.filter((u) => u.id !== roles.memberPending.id).slice(0, 7)];
+  for (const [k, u] of lastWho.entries()) await submit(u, 'AI홍보전략실', new Date(lastWeek.getTime() - (8 - k) * 1800_000));
   // 이번 주 — AI홍보전략실 10명 중 7명. 주인공(남시우)은 아직이다. 유단비는 다시 내 v2
   const aiNow = ai.filter((u) => u.id !== roles.memberPending.id).slice(0, 7);
   for (const [k, u] of aiNow.entries()) await submit(u, 'AI홍보전략실', before((9 - k) * 3600_000));

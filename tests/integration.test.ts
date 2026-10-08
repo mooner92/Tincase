@@ -108,11 +108,31 @@ beforeAll(async () => {
   }
 }, 60_000);
 
+/**
+ * 제출물 하나를 만든다 — 저장 함수 `uploadSubmission()`을 신원에서 나온 범위로 부른다.
+ *
+ * 2026-10-08 — hwp 업로드 라우트(`POST /api/submissions`)를 지웠다(WA-39 · ADR-0014 완료). 아래 시험들이 보는 것은
+ * 그 라우트가 아니라 저장의 성질(버전·잠금·검증·격리)이고, 그 성질은 웹 작성이 같은 함수로 저장하므로 그대로다.
+ * 그래서 문만 바꿨다: 신원 → `requireSubmitter`(웹 작성 라우트와 같은 게이트) → `uploadSubmission`.
+ * `handler()`로 감싸 오류를 라우트와 같은 응답(status·{error,message})으로 돌려받는다 — 기대값을 고치지 않으려고.
+ * 픽스처 hwp를 그대로 쓰는 것도 같은 이유다: 미리보기 시험이 실제 파일의 표 내용을 본다.
+ */
 async function upload(identity: string, bytes: Buffer, name = '주간업무.hwp') {
-  const { POST } = await import('@/app/api/submissions/route');
-  const fd = new FormData();
-  fd.set('file', new File([new Uint8Array(bytes)], name));
-  return POST(nx('/api/submissions', identity, { method: 'POST', body: fd }));
+  const { handler, json } = await import('@/server/http');
+  const { requireSubmitter } = await import('@/server/authz');
+  const { uploadSubmission } = await import('@/server/worklog');
+  return handler(async () => {
+    const scope = await requireSubmitter(new Headers({ 'x-test-identity': identity }));
+    const r = await uploadSubmission({ user: scope.user, division: scope.division, fileName: name, bytes });
+    return json(
+      {
+        submission: { id: r.submission.id, version: r.submission.version },
+        replacedVersion: r.replacedVersion,
+        sameAsPrevious: r.sameAsPrevious,
+      },
+      { status: 201 },
+    );
+  })();
 }
 
 async function del(identity: string, id: string) {
@@ -145,15 +165,15 @@ d('인증 (AU-T01/T06/T10)', () => {
   });
 });
 
-d('업로드 (API-T01~T05, ST-T)', () => {
-  it('정상 업로드 → 201 v1', async () => {
+d('제출 저장 — uploadSubmission (API-T03·T04, ST-T)', () => {
+  it('정상 저장 → 201 v1', async () => {
     const res = await upload(ID.aMember, hwpBytes);
     expect(res.status).toBe(201);
     const body = await res.json();
     expect(body.submission.version).toBe(1);
     expect(body.sameAsPrevious).toBe(false);
   });
-  it('[API-T04] 재업로드 → v2, sameAsPrevious 안내 (DM-07)', async () => {
+  it('[API-T04] 다시 내면 → v2, sameAsPrevious 안내 (DM-07)', async () => {
     const res = await upload(ID.aMember, hwpBytes);
     expect(res.status).toBe(201);
     const body = await res.json();
@@ -176,44 +196,55 @@ d('업로드 (API-T01~T05, ST-T)', () => {
     const res = await upload(ID.aMember2, png);
     expect(res.status).toBe(422);
   });
-  it('[API-T03] 본문 divisionId 위조 → 무시되고 신원의 부서로 저장 (DM-12)', async () => {
-    const { POST } = await import('@/app/api/submissions/route');
+  it('[API-T03] 본문에 부서·사람을 적어 보내도 무시되고 신원의 부서·본인으로 저장 (DM-12 · TACP-6)', async () => {
+    // 2026-10-08 — 업로드 라우트가 없어져 제출을 받는 HTTP 문은 웹 작성(compose) 하나다(WA-39). 같은 위조를 그 문에 보낸다
+    const { POST } = await import('@/app/api/submissions/compose/route');
     const { prisma } = await import('@/server/db');
-    const fd = new FormData();
-    fd.set('file', new File([new Uint8Array(hwpBytes2)], '주간업무.hwp'));
+    const { writeFileAtomic } = await import('@/server/storage');
+    const aDiv = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
     const bDiv = await prisma.division.findUniqueOrThrow({ where: { slug: B.slug } });
-    fd.set('divisionId', bDiv.id); // 위조 시도
-    fd.set('userId', 'someone-else');
-    const res = await POST(nx('/api/submissions', ID.aMember2, { method: 'POST', body: fd }));
-    expect(res.status).toBe(201);
-    const sub = await prisma.submission.findFirst({
+    const other = await prisma.user.findUniqueOrThrow({ where: { email: ID.aMember } });
+    // 웹 작성은 부서 양식으로 hwp를 만든다. 이 스위트의 부서에는 양식이 없어 잠시 두고 치운다 — 뒤의 health 시험이 양식 없는 상태를 본다
+    const rel = `divisions/${A.slug}/template/active.hwp`;
+    await writeFileAtomic(rel, hwpBytes);
+    const t = await prisma.template.create({ data: { divisionId: aDiv.id, filePath: rel, sha256: 'x', version: 1, uploadedBy: 'test' } });
+    try {
+      const res = await POST(
+        nx('/api/submissions/compose', ID.aMember2, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          // 위조 시도 — 남의 부서와 다른 사람
+          body: JSON.stringify({ divisionId: bDiv.id, userId: other.id, achievements: [{ content: '실적' }], plans: [], notes: [] }),
+        }),
+      );
+      expect(res.status).toBe(200);
+    } finally {
+      await prisma.template.delete({ where: { id: t.id } });
+    }
+    const sub = await prisma.submission.findFirstOrThrow({
       where: { user: { email: ID.aMember2 } },
       include: { division: true },
     });
-    expect(sub!.division.slug).toBe(A.slug);
+    expect(sub.division.slug).toBe(A.slug);
+    expect(await prisma.submission.count({ where: { divisionId: bDiv.id } })).toBe(0);
+    expect(await prisma.submission.count({ where: { userId: other.id, origin: 'web' } })).toBe(0);
   });
 });
 
+// 2026-10-08 — `GET /api/division/status`는 지웠다(R2 · TACP-11 v1.8). 부서원 축소판(API-T05a)은 AU-T87로 뒤집혔고,
+// 담당자의 현황은 수합 관리가 서버 함수를 직접 부른다(그 앞에 canManage — PG-T08). 같은 사실을 함수로 본다
 d('현황 (API-T05~T07)', () => {
-  it('[API-T05a] member → 200 축소판 (id·링크·버전 없음)', async () => {
-    const { GET } = await import('@/app/api/division/status/route');
-    const res = await GET(nx('/api/division/status', ID.aMember));
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.summary.roster).toBe(5); // A부서 onRoster: member + member2 + lead + op + aDel
-    const submitted = body.members.filter((m: { status: string }) => m.status === 'submitted');
-    expect(submitted.length).toBe(2);
-    expect(body.members[0].user.id).toBeUndefined(); // 축소판
-    expect(body.members[0].latest).toBeUndefined();
-    expect(body.offRoster).toBeUndefined();
-  });
-  it('[API-T06] lead → 전체 필드 + 미제출자 missing 포함', async () => {
-    const { GET } = await import('@/app/api/division/status/route');
-    const res = await GET(nx('/api/division/status', ID.aLead));
-    const body = await res.json();
-    const me = body.members.find((m: { user: { name: string } }) => m.user.name === 'a-member');
-    expect(me.latest.version).toBe(2);
-    expect(body.members.some((m: { status: string }) => m.status === 'missing')).toBe(true);
+  it('[API-T06] 수합 관리의 현황 — 전체 필드 + 미제출자 missing 포함', async () => {
+    const { prisma } = await import('@/server/db');
+    const { divisionStatus, ensureCurrentSlot } = await import('@/server/worklog');
+    const da = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
+    const slot = await ensureCurrentSlot();
+    const st = await divisionStatus(da.id, slot.id);
+    expect(st.summary.roster).toBe(5); // A부서 onRoster: member + member2 + lead + op + aDel
+    expect(st.members.filter((m) => m.status === 'submitted').length).toBe(2);
+    const me = st.members.find((m) => m.user.name === 'a-member')!;
+    expect(me.latest?.version).toBe(2);
+    expect(st.members.some((m) => m.status === 'missing')).toBe(true);
   });
 });
 
@@ -469,10 +500,11 @@ d('마감 잠금 (API-T01/T02)', () => {
     expect(res.status).toBe(409);
     expect((await res.json()).error).toBe('slot_locked');
 
-    const { GET } = await import('@/app/api/division/status/route');
-    const st = await GET(nx('/api/division/status', ID.aLead));
-    expect(st.status).toBe(200);
-    expect((await st.json()).slot.locked).toBe(true);
+    // 화면(홈 카드·수합 관리)이 쓰는 판정도 같은 답이다 — 마감 판정의 단일 진입점(isSubmissionLocked)
+    const { isSubmissionLocked } = await import('@/lib/deadline');
+    const { ensureCurrentSlot } = await import('@/server/worklog');
+    const da = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
+    expect(isSubmissionLocked(await ensureCurrentSlot(), da, null)).toBe(true);
 
     const dl = await import('@/app/api/submissions/[id]/download/route');
     const own = await prisma.submission.findFirstOrThrow({
@@ -584,21 +616,19 @@ describe('AU-33 같은 출처 — 다른 포트의 페이지가 대신 보내는
 
 describe('ST-04 업로드 크기 — 본문을 읽기 전에 (ST-T39)', () => {
   it('[ST-T39] Content-Length가 한도(20MB)+여유를 넘으면 읽지 않고 413 too_large · 그 아래는 지금처럼 본문을 본다', async () => {
-    const { POST } = await import('@/app/api/submissions/route');
-    const { prisma } = await import('@/server/db');
-    // 전용 계정 — 업로드 속도 제한(5분 10회)을 다른 테스트와 나눠 쓰지 않게
-    const who = 'a-size@test.kei.re.kr';
-    const da = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
-    await prisma.user.upsert({ where: { email: who }, update: {}, create: { email: who, name: 'a-size', divisionId: da.id } });
+    // 2026-10-08 — 예전에는 제출 업로드 라우트로 봤다. 그 라우트가 없어져(WA-39) 파일을 받는 문 중 부서 양식 등록으로 본다.
+    // 같은 `rejectOversizedBody`를 쓰고, 이 문은 남는다(부서 설정의 양식)
+    const { POST } = await import('@/app/api/division/template/route');
+    const who = ID.aLead;
     const big = await POST(
-      nx('/api/submissions', who, { method: 'POST', headers: { 'content-length': String(30 * 1024 * 1024) }, body: 'x' }),
+      nx('/api/division/template', who, { method: 'POST', headers: { 'content-length': String(30 * 1024 * 1024) }, body: 'x' }),
     );
     expect(big.status).toBe(413);
     const body = await big.json();
     expect(body.error).toBe('too_large');
     expect(body.message).toContain('20MB');
     // 한도 안이면 통과해서 본문을 읽는다 — 파일이 없으니 422
-    const small = await POST(nx('/api/submissions', who, { method: 'POST', headers: { 'content-length': '10' }, body: 'x' }));
+    const small = await POST(nx('/api/division/template', who, { method: 'POST', headers: { 'content-length': '10' }, body: 'x' }));
     expect(small.status).toBe(422);
   });
 });
@@ -648,42 +678,246 @@ describe('health — 양식 파일 · 경고 (API-T13)', () => {
 });
 
 /**
- * PG-45 — 보관함은 주차마다 마지막 성공본 하나. 예전에는 최근 성공 실행 60건을 읽은 뒤 주차로 접어서,
- * 재병합이 잦은 부서는 옛 주차가 **목록에서 소리 없이** 빠졌다.
+ * PG-66 — 부서원 홈. 「보관함」·「내 이력」을 합친 화면이라 그 둘의 시험을 이어받는다(PG-T94 = 옛 「[PG-T90] 보관함」).
+ *
+ * 이 스위트는 제 부서(다부서)와 가짜 주차를 만들고 끝나면 지운다 — 다른 시험의 부서 수·주차를 흔들지 않게.
+ * 제출물 행은 파일 없이 넣는다: 홈은 행(WeekSlot·Submission·MergeRun)만 읽고 내용은 드로어를 열 때 읽는다.
  */
-describe('PG-45 보관함 — 옛 주차가 빠지지 않는다 (PG-T90)', () => {
-  it('[PG-T90] 최근 주차에 성공 실행이 70건 쌓여도 옛 주차가 남고, 주차마다 가장 늦게 시작한 성공본을 고른다', async () => {
+describe('PG-66 부서원 홈 (PG-T94·T97·T98·T99 · AU-T87)', () => {
+  const H = { slug: 'Division_H', nameKo: '다부서' };
+  const HID = {
+    me: 'h-me@test.kei.re.kr',
+    lead: 'h-lead@test.kei.re.kr',
+    off: 'h-off@test.kei.re.kr',
+    peers: Array.from({ length: 9 }, (_, i) => `h-peer${i + 1}@test.kei.re.kr`),
+  };
+  const WEEK = 7 * 86_400_000;
+  const keys: string[] = [];
+  let hid = '';
+  let me = { id: '', name: '' };
+  let lead = { id: '', name: '' };
+  const slotAt = async (key: string, weeksAgo: number) => {
     const { prisma } = await import('@/server/db');
-    const { latestRunPerWeek } = await import('@/server/merge/archive');
-    const div = await prisma.division.create({ data: { slug: 'PG90_Div', nameKo: '보관실', nameEn: 'PG90', isActive: false } });
+    const { describeWeek, mondayOf } = await import('@/lib/week');
+    const w = describeWeek(new Date(mondayOf(new Date()).getTime() - weeksAgo * WEEK));
+    keys.push(key);
+    return prisma.weekSlot.create({
+      data: { isoKey: key, label: w.label, year: w.year, month: w.month, weekOfMonth: w.weekOfMonth, opensAt: w.opensAt },
+    });
+  };
+  const sub = async (userId: string, weekSlotId: string, extra: object = {}) => {
+    const { prisma } = await import('@/server/db');
+    return prisma.submission.create({
+      data: { divisionId: hid, userId, weekSlotId, version: 1, filePath: 'x.hwp', originalName: 'x.hwp', byteSize: 1, sha256: 'x', ...extra },
+    });
+  };
+  const run = async (weekSlotId: string, startedAt: Date, status = 'succeeded', divisionId = hid) => {
+    const { prisma } = await import('@/server/db');
+    return prisma.mergeRun.create({
+      data: { divisionId, weekSlotId, status, outputPath: status === 'succeeded' ? 'x.hwp' : null, sourceIds: '[]', ruleSnapshot: '{}', startedAt },
+    });
+  };
+  /** 페이지 하나를 그 사람으로 불러 본다 — 보내면 digest, 그리면 요소 나무 */
+  const visit = async (page: (p: { params: Promise<{ division: string }> }) => Promise<unknown>, who: string, slug = H.slug) => {
+    pageAs.who = who;
     try {
-      const mk = (isoKey: string, opensAt: string, weekOfMonth: number) =>
-        prisma.weekSlot.create({ data: { isoKey, label: `9월 ${weekOfMonth}주차`, year: 2026, month: 9, weekOfMonth, opensAt: new Date(opensAt) } });
-      const old = await mk('PG90-W36', '2026-08-31T00:00:00+09:00', 1);
-      const recent = await mk('PG90-W40', '2026-09-28T00:00:00+09:00', 5);
-      const run = (weekSlotId: string, startedAt: string, status = 'succeeded') =>
-        prisma.mergeRun.create({
-          data: { divisionId: div.id, weekSlotId, status, outputPath: status === 'succeeded' ? 'x.hwp' : null, sourceIds: '[]', ruleSnapshot: '{}', startedAt: new Date(startedAt) },
-        });
-
-      await run(old.id, '2026-09-03T14:01:00+09:00');
-      const oldLatest = await run(old.id, '2026-09-03T15:20:00+09:00'); // 그 주 마지막 재병합
-      await run(old.id, '2026-09-03T16:00:00+09:00', 'failed'); // 실패는 보관함에 없다
-      let last = '';
-      for (let i = 0; i < 70; i++) {
-        const t = new Date(Date.parse('2026-10-01T09:00:00+09:00') + i * 60_000).toISOString();
-        last = (await run(recent.id, t)).id;
-      }
-
-      const rows = await latestRunPerWeek(div.id);
-      expect(rows.map((r) => r.weekSlot.isoKey)).toEqual(['PG90-W40', 'PG90-W36']);
-      expect(rows.map((r) => r.id)).toEqual([last, oldLatest.id]);
-    } finally {
-      // 뒤 시험이 이 부서를 세지 않게 지운다 — 「전사」의 「세지 않는 부서 n곳」(PG-T83)은 비활성 부서도 센다
-      await prisma.mergeRun.deleteMany({ where: { divisionId: div.id } });
-      await prisma.weekSlot.deleteMany({ where: { isoKey: { in: ['PG90-W36', 'PG90-W40'] } } });
-      await prisma.division.delete({ where: { id: div.id } });
+      return { tree: await page({ params: Promise.resolve({ division: slug }) }), digest: null as string | null };
+    } catch (e) {
+      return { tree: null, digest: String((e as { digest?: string }).digest) };
     }
+  };
+
+  beforeAll(async () => {
+    const { prisma } = await import('@/server/db');
+    // 마감은 늘 지나 있게(월 00:01) — 이번 주 [병합본](PG-67c)이 마감 이벤트로 걸러지는지 본다
+    const div = await prisma.division.create({ data: { slug: H.slug, nameKo: H.nameKo, nameEn: H.slug, isActive: true, deadlineDow: 1, deadlineTime: '00:01' } });
+    hid = div.id;
+    const joined = new Date(Date.now() - 52 * WEEK); // 1년 전에 들어왔다 — 근거 있는 주는 다 줄이 된다
+    const mk = (email: string, name: string, extra: object = {}) =>
+      prisma.user.create({ data: { email, name, divisionId: hid, mustChangePassword: false, createdAt: joined, ...extra } });
+    const m = await mk(HID.me, '홈본인');
+    me = { id: m.id, name: m.name };
+    const l = await mk(HID.lead, '홈담당', { divisionRole: 'lead' });
+    lead = { id: l.id, name: l.name };
+    await mk(HID.off, '홈휴직', { onRoster: false, rosterNote: '휴직' });
+    for (const [i, e] of HID.peers.entries()) await mk(e, `홈동료${i + 1}`);
+  });
+
+  afterAll(async () => {
+    const { prisma } = await import('@/server/db');
+    await prisma.mergeRun.deleteMany({ where: { divisionId: hid } });
+    await prisma.submission.deleteMany({ where: { divisionId: hid } });
+    await prisma.mergeRun.deleteMany({ where: { weekSlot: { isoKey: { in: keys } } } });
+    await prisma.submission.deleteMany({ where: { weekSlot: { isoKey: { in: keys } } } });
+    await prisma.weekSlot.deleteMany({ where: { isoKey: { in: keys } } });
+    await prisma.session.deleteMany({ where: { user: { divisionId: hid } } }).catch(() => undefined);
+    await prisma.user.deleteMany({ where: { divisionId: hid } });
+    await prisma.division.delete({ where: { id: hid } });
+    pageAs.who = '';
+  });
+
+  it('[PG-T94] 재병합이 70건 쌓여도 옛 주의 [병합본]이 남는다 · 실패만 있는 주는 줄이지만 [병합본]이 없다 · 남의 부서 것은 없다 · 이번 주는 마감 이벤트 뒤의 성공본만', async () => {
+    const { prisma } = await import('@/server/db');
+    const { getDivisionView } = await import('@/server/page-scope');
+    const { loadMemberHome } = await import('@/server/my-weeks');
+    const { ensureCurrentSlot, effectiveDeadline } = await import('@/server/worklog');
+    const old = await slotAt('HM94-OLD', 30);
+    const recent = await slotAt('HM94-RECENT', 2);
+    const failed = await slotAt('HM94-FAILED', 3);
+    const elsewhere = await slotAt('HM94-ELSEWHERE', 4);
+
+    await run(old.id, new Date(old.opensAt.getTime() + 3 * 86_400_000));
+    for (let i = 0; i < 70; i++) await run(recent.id, new Date(recent.opensAt.getTime() + 3 * 86_400_000 + i * 60_000));
+    await run(failed.id, new Date(failed.opensAt.getTime() + 3 * 86_400_000), 'failed');
+    await sub(lead.id, failed.id); // 부서 제출은 있었다 — 내가 안 낸 주가 사라지지 않는다
+    await sub(me.id, recent.id);
+    // 남의 부서(나부서)의 제출·병합본 — 다부서 홈에는 없다
+    const db = await prisma.division.findUniqueOrThrow({ where: { slug: B.slug } });
+    const bLead = await prisma.user.findUniqueOrThrow({ where: { email: ID.bLead } });
+    await prisma.submission.create({
+      data: { divisionId: db.id, userId: bLead.id, weekSlotId: elsewhere.id, version: 1, filePath: 'x.hwp', originalName: 'x.hwp', byteSize: 1, sha256: 'x' },
+    });
+    await run(elsewhere.id, new Date(elsewhere.opensAt.getTime() + 3 * 86_400_000), 'succeeded', db.id);
+
+    pageAs.who = HID.me;
+    const view = await getDivisionView(H.slug);
+    const flat = async () => {
+      const h = await loadMemberHome(view, new Date());
+      const weeks = [...h.groups.recent, ...h.groups.older.flatMap((y) => y.months)].flatMap((m) => m.weeks);
+      return { h, byKey: new Map(weeks.map((w) => [w.isoKey, w])) };
+    };
+    const first = await flat();
+    const byKey = first.byKey;
+    let h = first.h;
+    expect(byKey.get('HM94-OLD')?.doc).toBe(true);
+    expect(byKey.get('HM94-RECENT')).toMatchObject({ doc: true, mine: { edited: false } });
+    expect(byKey.get('HM94-FAILED')).toMatchObject({ doc: false, mine: null });
+    expect(byKey.has('HM94-ELSEWHERE')).toBe(false);
+
+    // 이번 주 — 마감(월 00:01) 전에 돌린 미리보기 병합은 [병합본]이 아니다. 마감 뒤에 만든 것만
+    const slot = await ensureCurrentSlot();
+    const gate = effectiveDeadline(slot, view.division);
+    await run(slot.id, new Date(gate.getTime() - 30_000));
+    expect(h.card.phase).toBe('locked');
+    h = (await flat()).h;
+    expect(h.card.doc).toBe(false);
+    await run(slot.id, new Date(gate.getTime() + 60_000));
+    h = (await flat()).h;
+    expect(h.card.doc).toBe(true);
+    await prisma.mergeRun.deleteMany({ where: { divisionId: hid, weekSlotId: slot.id } });
+  });
+
+  it('[PG-T97] ★ 홈에 남의 이름이 없다 — 부서원 10명 · 담당자가 고친 판이 있어도 카드·목록 props에 남의 이름·id가 없다 (PG-66e · TACP-11 v1.8)', async () => {
+    const { prisma } = await import('@/server/db');
+    const { ensureCurrentSlot } = await import('@/server/worklog');
+    const { default: MemberHome } = await import('@/app/[division]/page');
+    const slot = await ensureCurrentSlot();
+    const past = await slotAt('HM97-PAST', 1);
+    const peers = await prisma.user.findMany({ where: { email: { in: HID.peers } } });
+    for (const p of peers) {
+      await sub(p.id, slot.id);
+      await sub(p.id, past.id);
+    }
+    // 담당자가 내 지난 주 판을 고쳤다(TACP-22) — 「고침」은 보이고 고친 사람은 안 보인다
+    await sub(me.id, past.id, { editedById: lead.id, editedAt: new Date(), origin: 'lead_edit' });
+    await sub(me.id, slot.id);
+
+    const { tree, digest } = await visit(MemberHome as never, HID.me);
+    expect(digest).toBeNull();
+    const els = elements(tree);
+    const propsOf = (n: string) => els.find((e) => typeof e.type === 'function' && (e.type as { name: string }).name === n)?.props;
+    const card = propsOf('ThisWeekCard');
+    const list = propsOf('PastWeeks');
+    expect(card).toBeTruthy();
+    expect(list).toBeTruthy();
+    const json = JSON.stringify([card, list]);
+    for (const p of [...peers, { id: lead.id, name: lead.name }]) {
+      expect(json, p.name).not.toContain(p.name);
+      expect(json, p.name).not.toContain(p.id);
+    }
+    expect(json).not.toContain('홈휴직');
+    // 「고침」은 남는다 — 누가 고쳤는지는 열었을 때(preview) 본다
+    const groups = list!.groups as { recent: { weeks: { isoKey: string; mine: { edited: boolean } | null }[] }[] };
+    expect(groups.recent.flatMap((m) => m.weeks).find((w) => w.isoKey === 'HM97-PAST')?.mine?.edited).toBe(true);
+    // 내 것은 실린다 — 제출물 드로어의 members=[me]
+    expect(card!.me).toEqual({ id: me.id, name: me.name });
+
+    // PG-T03을 뒤집는다 — 홈은 부서 현황·업로드·카운트다운을 가져오지 않는다
+    const src = readFileSync(path.resolve(__dirname, '../src/app/[division]/page.tsx'), 'utf8');
+    for (const gone of ['divisionStatus', 'SubmitChoice', 'hwpUploadOpen', 'DeadlineCountdown', 'BellIcon']) expect(src, gone).not.toContain(gone);
+  });
+
+  it('[PG-T98] 옛 주소 보내기 — /history → 홈 · /archive → 부서원 홈, 담당자 수합 관리 · 타 부서 총괄은 수합 관리 · 남의 부서·없는 부서는 404 · 로그인 전은 /login (PG-70)', async () => {
+    const { prisma } = await import('@/server/db');
+    const { default: MemberHome } = await import('@/app/[division]/page');
+    const { default: History } = await import('@/app/[division]/history/page');
+    const { default: Archive } = await import('@/app/[division]/archive/page');
+    const go = async (page: unknown, who: string, slug = H.slug) => (await visit(page as never, who, slug)).digest;
+    const to = (p: string) => `NEXT_REDIRECT;replace;${p};307;`;
+    const NF = 'NEXT_HTTP_ERROR_FALLBACK;404';
+
+    expect(await go(History, HID.me)).toBe(to(`/${H.slug}`));
+    expect(await go(Archive, HID.me)).toBe(to(`/${H.slug}`));
+    expect(await go(History, HID.lead)).toBe(to(`/${H.slug}`));
+    expect(await go(Archive, HID.lead)).toBe(to(`/${H.slug}/manage`));
+
+    await prisma.user.updateMany({ where: { email: { in: [ID.coord, ID.aLead] } }, data: { mustChangePassword: false } });
+    try {
+      // 타 부서를 읽는 사람 — 홈·옛 주소 모두 그 부서의 수합 관리로 (「개요」는 없어졌다)
+      for (const page of [MemberHome, History, Archive]) expect(await go(page, ID.coord)).toBe(to(`/${H.slug}/manage`));
+      // 남의 부서(권한 없음)·없는 부서 — 어디로도 보내지 않고 같은 404 (AU-T17 · TACP-5)
+      for (const page of [MemberHome, History, Archive]) {
+        expect(await go(page, ID.aLead)).toBe(NF);
+        expect(await go(page, HID.me, 'No_Such_Division')).toBe(NF);
+      }
+    } finally {
+      await prisma.user.updateMany({ where: { email: { in: [ID.coord, ID.aLead] } }, data: { mustChangePassword: true } });
+    }
+    // 로그인 전이면 로그인으로 (AU-22)
+    for (const page of [MemberHome, History, Archive]) expect(await go(page, '')).toBe(to('/login'));
+  });
+
+  it('[PG-T99] 수합 관리 주차 — 근거 있는 주 + 이번 주 + 보는 주, 26주 상한 없음 · 수는 명단 기준(명단 밖 제출은 분자에 없다)', async () => {
+    const { prisma } = await import('@/server/db');
+    const { divisionWeeks, ensureCurrentSlot } = await import('@/server/worklog');
+    const current = await ensureCurrentSlot();
+    const far = await slotAt('HM99-FAR', 40);
+    const bare = await slotAt('HM99-BARE', 5);
+    const counted = await slotAt('HM99-COUNTED', 6);
+    await run(far.id, new Date(far.opensAt.getTime() + 3 * 86_400_000));
+    const off = await prisma.user.findUniqueOrThrow({ where: { email: HID.off } });
+    await sub(me.id, counted.id);
+    await sub(off.id, counted.id); // 명단 밖 — 병합에는 들어가도 진척 수에는 없다
+
+    const w = await divisionWeeks(hid);
+    const ks = w.slots.map((s) => s.isoKey);
+    expect(ks).toContain(current.isoKey);
+    expect(ks).toContain('HM99-FAR'); // 40주 전 — 26주 상한이 없다
+    expect(ks).toContain('HM99-COUNTED');
+    expect(ks).not.toContain('HM99-BARE'); // 이 부서에 아무 근거도 없는 주
+    expect(ks.indexOf(current.isoKey)).toBe(0); // 최신이 위
+    expect((await divisionWeeks(hid, bare.id)).slots.map((s) => s.isoKey)).toContain('HM99-BARE'); // 지금 보는 주는 들어간다
+    expect(w.submittedOf(counted.id)).toBe(1);
+    expect(w.roster).toBe(await prisma.user.count({ where: { divisionId: hid, isActive: true, onRoster: true } }));
+  });
+
+  it('[AU-T87] ★ 부서원은 부서 제출 현황(이름·시각)을 받는 길이 없다 — 라우트 없음 · API가 현황 함수를 부르지 않음 · 수합 관리는 404. 담당자는 그대로 (TACP-11 v1.8 · 새로 금지된 것)', async () => {
+    const { existsSync: exists, readdirSync, statSync } = await import('node:fs');
+    expect(exists(path.resolve(__dirname, '../src/app/api/division/status/route.ts'))).toBe(false);
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((n) => {
+        const p = path.join(dir, n);
+        return statSync(p).isDirectory() ? walk(p) : p.endsWith('route.ts') ? [p] : [];
+      });
+    const callers = walk(path.resolve(__dirname, '../src/app/api')).filter((f) => readFileSync(f, 'utf8').includes('divisionStatus'));
+    expect(callers).toEqual([]);
+
+    const { default: ManagePage } = await import('@/app/[division]/manage/page');
+    expect((await visit(ManagePage as never, HID.me)).digest).toBe('NEXT_HTTP_ERROR_FALLBACK;404');
+    // 담당자 — 수합 관리 화면(그 안의 현황 카드)이 그대로 열린다
+    const asLead = await visit(ManagePage as never, HID.lead);
+    expect(asLead.digest).toBeNull();
+    expect(elements(asLead.tree).some((e) => typeof e.type === 'function' && (e.type as { name: string }).name === 'ManageView')).toBe(true);
   });
 });
 
@@ -910,9 +1144,9 @@ describe('WA-10 지난번에 낸 것 (api/my/previous)', () => {
     expect(body.items.map((i: { submissionId: string }) => i.submissionId)).not.toContain(남의_것);
   });
 
-  it('[WA-T16] 파일을 못 읽어도 목록과 「받기」는 살아 있다', async () => {
+  it('[WA-T16] 파일을 못 읽어도 목록과 고른 주차는 살아 있다', async () => {
     const body = await get('?isoKey=WA-W05');
-    expect(body.rows).toBeNull(); // 실재하지 않는 파일 — 화면이 「받기만 됩니다」로 안내한다
+    expect(body.rows).toBeNull(); // 실재하지 않는 파일 — 화면은 「파일을 읽지 못했습니다」 한 줄 ([hwp로 받기]는 2026-10-08에 걷었다)
     expect(body.submissionId).toBeTruthy();
   });
 

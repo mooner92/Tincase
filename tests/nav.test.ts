@@ -9,13 +9,16 @@ const base: NavRole = { slug: 'psd', foreign: false, isLead: false, isOperator: 
 const labels = (r: Partial<NavRole>) => buildNav({ ...base, ...r }).map((i) => i.label);
 
 describe('PG-49 역할별 메뉴', () => {
-  it('[PG-T60] 부서원 — 자기 부서 메뉴뿐. 전사·운영 메뉴는 없다 (P5)', () => {
-    expect(labels({})).toEqual(['제출', '보관함', '내 이력', '사용 안내']);
+  it('[PG-T60] 부서원 — 업무 메뉴 없이 「사용 안내」 하나. 로고가 홈이다 (PG-71, 2026-10-08)', () => {
+    expect(labels({})).toEqual(['사용 안내']);
+    // R18 — 「사용 안내」를 업무 메뉴와 다르게 칠하던 표시가 없다
+    expect(buildNav(base).some((i) => 'hint' in i)).toBe(false);
   });
 
-  it('[PG-T61] 부서 담당자 — 수합 관리·부서 설정이 붙지만 타 부서로 가는 길은 없다 (P5)', () => {
+  it('[PG-T61] 부서 담당자 — 제출 · 수합 관리 · 사용 안내. 「부서 설정」은 메뉴가 아니라 수합 관리 머리의 링크 (P5)', () => {
     const l = labels({ isLead: true });
-    expect(l).toContain('수합 관리');
+    expect(l).toEqual(['제출', '수합 관리', '사용 안내']);
+    expect(l).not.toContain('부서 설정');
     expect(l).not.toContain('전사');
     expect(l).not.toContain('운영');
   });
@@ -35,9 +38,10 @@ describe('PG-49 역할별 메뉴', () => {
     expect(l.indexOf('전사')).toBeLessThan(l.indexOf('운영'));
   });
 
-  it('[PG-T64] 타 부서 열람 중 — `내 이력`은 없다 (남의 부서에 내 이력은 없다)', () => {
-    expect(labels({ foreign: true, readAll: true, isLead: true })).not.toContain('내 이력');
-    expect(labels({ foreign: true, readAll: true })[0]).toBe('개요');
+  it('[PG-T64] 타 부서 열람 중 — 첫 항목은 `수합 관리`. `개요`·`보관함`·`내 이력`·`제출`은 없다 (PG-70)', () => {
+    const l = labels({ foreign: true, readAll: true, isLead: true });
+    expect(l[0]).toBe('수합 관리');
+    for (const gone of ['개요', '보관함', '내 이력', '제출']) expect(l).not.toContain(gone);
   });
 });
 
@@ -52,11 +56,13 @@ describe('PG-49 활성 메뉴 판정', () => {
     expect(active('/ops/audit')).toEqual(['운영']);
   });
 
-  it('[PG-T66] 부서 메뉴 — 제출·수합 관리·부서 설정이 서로 겹쳐 켜지지 않는다', () => {
+  it('[PG-T66] 부서 메뉴 — 제출과 수합 관리가 겹쳐 켜지지 않고, 수합 관리는 그 아래 전부(지난 주·부서 설정)에서 켜진다', () => {
     expect(active('/psd')).toEqual(['제출']);
     expect(active('/psd/manage')).toEqual(['수합 관리']);
     expect(active('/psd/manage/2026-W40')).toEqual(['수합 관리']);
-    expect(active('/psd/manage/settings')).toEqual(['부서 설정']);
+    expect(active('/psd/manage/settings')).toEqual(['수합 관리']);
+    // 이름이 비슷한 주소에 속지 않는다
+    expect(active('/psd/manager')).toEqual([]);
   });
 });
 
@@ -64,7 +70,7 @@ describe('RU-31·32 취합 메뉴 (TACP-21)', () => {
   it('[PG-T67] 본부 담당자 — `본부 취합`이 부서 메뉴 다음, 전사 메뉴 앞에 (넓어지는 순서)', () => {
     const l = labels({ isLead: true, hqDesk: true });
     expect(l).toContain('본부 취합');
-    expect(l.indexOf('부서 설정')).toBeLessThan(l.indexOf('본부 취합'));
+    expect(l.indexOf('수합 관리')).toBeLessThan(l.indexOf('본부 취합'));
     expect(labels({ isLead: true })).not.toContain('본부 취합');
   });
 

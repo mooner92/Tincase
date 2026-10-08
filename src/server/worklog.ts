@@ -326,17 +326,35 @@ export async function divisionStatus(divisionId: string, slotId: string): Promis
   };
 }
 
-/** 부서 관점 주차 목록 (API-30 상당) */
-export async function divisionSlots(divisionId: string, limit = 26) {
-  const slots = await prisma.weekSlot.findMany({ orderBy: { opensAt: 'desc' }, take: limit });
-  const counts = await prisma.submission.groupBy({
-    by: ['weekSlotId'],
-    where: { divisionId, isLatest: true, weekSlotId: { in: slots.map((s) => s.id) } },
-    _count: { _all: true },
-  });
-  const roster = await prisma.user.count({ where: { divisionId, isActive: true, onRoster: true } });
-  const byId = new Map(counts.map((c) => [c.weekSlotId, c._count._all]));
-  return { slots, roster, submittedOf: (slotId: string) => byId.get(slotId) ?? 0 };
+/**
+ * PG-72 — 수합 관리의 주차 목록. **근거 있는 주만, 상한 없이.**
+ *
+ *   들어가는 주: (이 부서에 제출이 있는 주 ∪ 성공 병합본이 있는 주) ∪ 이번 주 ∪ 지금 보는 주. 최신이 위
+ *   수: 분자는 명단 안(onRoster ∧ isActive) 사람의 최신 제출, 분모는 지금 명단 수 — 제출 현황(PG-18)과 같은 기준
+ *
+ * 예전(`divisionSlots`)은 서버의 최근 26주를 그대로 늘어놓고 명단 밖 제출까지 세서, 쓰지 않은 주가 끼고
+ * 「12/11」이 나왔으며 반년이 지나면 옛 주가 목록에서 소리 없이 빠졌다.
+ */
+export async function divisionWeeks(divisionId: string, viewingSlotId?: string, now = new Date()) {
+  const current = currentWeek(now);
+  const [slots, any, counted, merged, roster] = await Promise.all([
+    prisma.weekSlot.findMany({ where: { opensAt: { lte: current.opensAt } }, orderBy: { opensAt: 'desc' } }),
+    prisma.submission.groupBy({ by: ['weekSlotId'], where: { divisionId, isLatest: true } }),
+    prisma.submission.groupBy({
+      by: ['weekSlotId'],
+      where: { divisionId, isLatest: true, user: { onRoster: true, isActive: true } },
+      _count: { _all: true },
+    }),
+    prisma.mergeRun.groupBy({ by: ['weekSlotId'], where: { divisionId, status: 'succeeded', outputPath: { not: null } } }),
+    prisma.user.count({ where: { divisionId, isActive: true, onRoster: true } }),
+  ]);
+  const evidence = new Set([...any.map((r) => r.weekSlotId), ...merged.map((r) => r.weekSlotId)]);
+  const byId = new Map(counted.map((c) => [c.weekSlotId, c._count._all]));
+  return {
+    slots: slots.filter((s) => evidence.has(s.id) || s.isoKey === current.isoKey || s.id === viewingSlotId),
+    roster,
+    submittedOf: (slotId: string) => byId.get(slotId) ?? 0,
+  };
 }
 
 export function effectiveDeadline(slot: WeekSlot, division: Division): Date {

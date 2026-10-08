@@ -5,7 +5,7 @@
 // 긴 표가 맨 위에 있으면 병합본·제출 카드가 스크롤 아래로 밀려 「할 일」이 안 보였다.
 import { prisma } from '@/server/db';
 import type { Division } from '@prisma/client';
-import { divisionStatus, divisionSlots, effectiveDeadline, ensureCurrentSlot } from '@/server/worklog';
+import { divisionStatus, divisionWeeks, effectiveDeadline, ensureCurrentSlot } from '@/server/worklog';
 import { formatDeadlineKo, isLocked, toKstIso, currentWeek, slotKind } from '@/lib/week';
 import { isOpenNow, OPEN_MINUTES } from '@/lib/deadline';
 import { openingOf } from '@/server/deadline';
@@ -68,7 +68,7 @@ export async function ManageView({
 
   const [{ members, extras, offRoster, summary }, slotList] = await Promise.all([
     divisionStatus(division.id, slot.id),
-    divisionSlots(division.id),
+    divisionWeeks(division.id, slot.id), // PG-72 — 근거 있는 주 + 이번 주 + 보는 주
   ]);
 
   // RU-30 — 위로 [제출]. 내 부서 lead·head에게만 그린다 (TACP-21·TACP-9). `canMerge`가 아니다 — 거기엔 readAll이

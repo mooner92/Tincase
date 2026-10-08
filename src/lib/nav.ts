@@ -4,11 +4,13 @@
 // 흩어져 테스트할 곳이 없다. 2026-10-06에 총괄(기획조정실)이 로그인해 보니 전 부서 열람
 // 권한은 있는데 **그 화면으로 가는 메뉴가 없었다** — 그런 빈칸이 바로 이렇게 생긴다.
 
+// PG-71 (2026-10-08, 사용자: 부서원은 홈 하나) — 부서원에게는 업무 메뉴가 없다. 로고가 홈이고 메뉴는 「사용 안내」 하나다.
+// 항목이 하나뿐인 「제출」 메뉴는 고를 것이 없다. 「보관함」·「내 이력」은 홈의 지난 주차로, 「부서 설정」은 수합 관리 머리의
+// 링크로, 타 부서의 「개요」는 수합 관리로 갔다(PG-70).
+
 export interface NavItem {
   href: string;
   label: string;
-  /** 업무 메뉴가 아니라 도움말 — 시각적으로 구분한다 */
-  hint?: boolean;
 }
 
 export interface NavRole {
@@ -16,7 +18,7 @@ export interface NavRole {
   slug: string | null;
   /** 내 부서가 아닌 부서를 열람 중 */
   foreign: boolean;
-  /** 부서 문서 화면을 볼 수 있다 (lead·head, 또는 readAll의 읽기) */
+  /** 부서 문서 화면을 볼 수 있다 (lead·head, 또는 readAll의 읽기) — `getDivisionView().canManage` */
   isLead: boolean;
   isOperator: boolean;
   /** 전 부서 읽기 (총괄·운영자 — TACP `canReadAllDivisions`) — 「전사」 화면의 제출 현황 */
@@ -29,20 +31,10 @@ export interface NavRole {
 
 export function buildNav(r: NavRole): NavItem[] {
   return [
-    ...(r.slug
-      ? [
-          { href: `/${r.slug}`, label: r.foreign ? '개요' : '제출' },
-          // TACP-15 — 병합본은 부서원 모두가 본다. 타 부서 열람 중에도 그 부서 보관함을 본다
-          { href: `/${r.slug}/archive`, label: '보관함' },
-          ...(r.foreign ? [] : [{ href: `/${r.slug}/history`, label: '내 이력' }]),
-          ...(r.isLead
-            ? [
-                { href: `/${r.slug}/manage`, label: '수합 관리' },
-                { href: `/${r.slug}/manage/settings`, label: '부서 설정' },
-              ]
-            : []),
-        ]
-      : []),
+    // 「제출」은 수합 관리가 있는 사람에게만 — 둘 사이를 오가야 하기 때문이다. 부서원은 로고가 홈이다
+    ...(r.slug && r.isLead && !r.foreign ? [{ href: `/${r.slug}`, label: '제출' }] : []),
+    // 「부서 설정」은 수합 관리 머리의 링크로 들어간다 — 메뉴에서는 수합 관리가 그 주소까지 켠다(isNavActive)
+    ...(r.slug && r.isLead ? [{ href: `/${r.slug}/manage`, label: '수합 관리' }] : []),
     // RU-31 — 본부 단계는 부서 메뉴 다음, 전사 메뉴 앞 (넓어지는 순서 그대로)
     ...(r.hqDesk ? [{ href: '/hq', label: '본부 취합' }] : []),
     // PG-49a·f — 전사는 **메뉴 하나, 화면 하나**(`/org`)다. 「전사 현황」·「전사 취합」 두 메뉴였다가(~10-06) 한 메뉴 두 탭이
@@ -52,8 +44,8 @@ export function buildNav(r: NavRole): NavItem[] {
     ...(r.readAll || r.orgDesk ? [{ href: '/org', label: '전사' }] : []),
     ...(r.isOperator ? [{ href: '/ops', label: '운영' }] : []),
     // 안내는 **처음 쓰는 사람**이 찾는 것이다. 드롭다운 안은 이미 아는 사람만 여는 자리라
-    // 정작 필요한 사람에게 안 보인다. 맨 끝에 두되 물음표를 붙여 업무 메뉴와 구분한다
-    { href: '/guide', label: '사용 안내', hint: true },
+    // 정작 필요한 사람에게 안 보인다. 맨 끝에 둔다 — 초록 강조는 걷었다(R18, 다른 메뉴와 같은 모양)
+    { href: '/guide', label: '사용 안내' },
   ];
 }
 
@@ -70,7 +62,8 @@ function claim(prefix: string, pathname: string): number {
  */
 export function isNavActive(href: string, pathname: string, items: readonly NavItem[], slug: string | null): boolean {
   if (slug && href === `/${slug}`) return pathname === href;
-  if (href.endsWith('/manage')) return pathname === href || /\/manage\/\d{4}-W\d{2}$/.test(pathname);
+  // PG-71 — 수합 관리는 그 아래 전부(지난 주 `/manage/2026-W40` · 머리 링크로 가는 `/manage/settings`)
+  if (href.endsWith('/manage')) return pathname === href || pathname.startsWith(href + '/');
   const mine = claim(href, pathname);
   if (mine < 0) return false;
   // 더 구체적인 메뉴가 이 경로를 차지하면 양보한다

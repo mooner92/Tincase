@@ -171,7 +171,7 @@ describe('[PG-T84] 단계 목록 무결성', () => {
     expect(org.find((s) => s.step?.id === 'org-download')?.n).toBe(4);
   });
 
-  it('[WA-32] 웹 작성만 — 한글 파일을 올려 내는 단계가 없다', () => {
+  it('[WA-39] 웹 작성만 — 한글 파일을 올려 내는 단계가 없다', () => {
     const text = JSON.stringify(DECK);
     expect(text).not.toMatch(/파일 올리기|드롭존|양식 다운로드|끌어다 놓/);
   });

@@ -5,7 +5,7 @@
 import { describe, expect, it } from 'vitest';
 import { TZDate } from '@date-fns/tz';
 import { KST, deadlineFor } from '@/lib/week';
-import { OPEN_MINUTES, isOpenNow, isSubmissionLocked, mergeGate } from '@/lib/deadline';
+import { OPEN_MINUTES, homeRefreshAt, isOpenNow, isSubmissionLocked, mergeGate } from '@/lib/deadline';
 
 const 목14시마감 = { deadlineDow: 4, deadlineTime: '14:00' };
 // 월 인덱스는 0부터 — 7이 8월이다. 2026-08-31(월) 개시 주차, 목요일은 9/3
@@ -69,5 +69,31 @@ describe('DM-20 · HM-34 열었다 닫으면 새 마감 이벤트다', () => {
     // 마감보다 이른 시각에 닫힌 기록이 남아 있어도 마감이 앞당겨지면 안 된다
     const 옛것 = { openUntil: at(9, 0), openedBy: '담당자' };
     expect(mergeGate(마감, 옛것).getTime()).toBe(마감.getTime());
+  });
+});
+
+/**
+ * PG-67d — 부서원 홈은 **보이지 않게** 새로 고친다. 카운트다운을 지우면서 남긴 일 하나다:
+ * 마감 순간 [작성하기]·[제출 취소]가 사라지고, 「내일」이 「오늘」로 바뀌고, 월요일에 이번 주가 지난 주차로 내려간다.
+ */
+describe('PG-67d 홈 새로 고침 시각 (PG-T100)', () => {
+  const 다음주 = new Date(new TZDate(2026, 8, 7, 0, 0, 0, 0, KST).getTime()); // 9/7(월) 00:00
+  const base = { deadline: 마감, openUntil: null, nextMonday: 다음주 };
+  const kstAt = (d: number, h: number, m = 0) => new Date(new TZDate(2026, 8, d, h, m, 0, 0, KST).getTime());
+
+  it('[PG-T100] 열린 동안 — 마감 당일이면 마감, 그 전이면 다음 KST 자정(「내일」 → 「오늘」)', () => {
+    expect(homeRefreshAt({ ...base, now: at(10, 0), phase: 'open' }).getTime()).toBe(마감.getTime());
+    expect(homeRefreshAt({ ...base, now: kstAt(2, 22), phase: 'open' }).getTime()).toBe(kstAt(3, 0).getTime());
+  });
+
+  it('[PG-T100] 열림 동안(TACP-18) — 담당자가 연 시각이 끝날 때', () => {
+    const openUntil = at(14, 30);
+    expect(homeRefreshAt({ ...base, openUntil, now: at(14, 10), phase: 'opened' }).getTime()).toBe(openUntil.getTime());
+  });
+
+  it('[PG-T100] 잠긴 뒤 — 다음 주 월요일 00:00 KST (이번 주가 지난 주차로 내려간다) · 지난 시각은 고르지 않는다', () => {
+    expect(homeRefreshAt({ ...base, now: at(15, 0), phase: 'locked' }).getTime()).toBe(다음주.getTime());
+    // 「열림」 기록이 이미 지났어도 그 시각을 고르지 않는다
+    expect(homeRefreshAt({ ...base, openUntil: at(14, 30), now: at(15, 0), phase: 'locked' }).getTime()).toBe(다음주.getTime());
   });
 });

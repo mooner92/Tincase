@@ -55,3 +55,27 @@ export function dateHint(weekStartMs: number, weeksAhead = 0): string {
   const d = new Date(weekStartMs + (1 + 7 * weeksAhead) * 86_400_000 + 9 * 3_600_000);
   return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
 }
+
+/** WA-37이 비교하는 칸 — 문서로 나가는 것 전부 */
+interface Comparable {
+  content: string;
+  date?: string;
+  place?: string;
+  attendee?: string;
+  emphasis?: boolean;
+}
+
+/**
+ * WA-37 — 두 표가 **내용으로** 같은가. 표마다 내용 있는 줄만, 칸은 앞뒤 공백을 뺀 값으로, 순서대로 견준다.
+ *
+ * 예전 「손대기 전」 판정은 참조 비교(`data === start.data`)였다. 한 글자 쳤다 지우기만 해도 「바뀜」이라
+ * [제출]이 켜지고, 같은 내용의 새 판이 생겼다(2판 이상 0건인 지금도 그 길은 열려 있었다).
+ * 내용 없는 줄은 제출 때 빠지므로(끝의 빈 줄 포함) 보지 않는다. 「공유」를 켜면 문서 색이 바뀌므로 다르다.
+ */
+export function sameRows<R extends Comparable>(a: Buckets<R> | null | undefined, b: Buckets<R> | null | undefined): boolean {
+  const norm = (rows: R[] | undefined) =>
+    (rows ?? [])
+      .filter((r) => typeof r?.content === 'string' && r.content.trim() !== '')
+      .map((r) => [r.content.trim(), (r.date ?? '').trim(), (r.place ?? '').trim(), (r.attendee ?? '').trim(), r.emphasis === true]);
+  return BUCKETS.every((k) => JSON.stringify(norm(a?.[k])) === JSON.stringify(norm(b?.[k])));
+}

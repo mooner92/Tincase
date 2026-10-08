@@ -19,6 +19,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { copyText } from '@/lib/clipboard';
 import { moveItem, rowNo } from '@/lib/merge-rows';
+import { drawerControls, type DrawerVariant } from '@/lib/merged-drawer';
 
 interface TableView {
   key: string;
@@ -78,7 +79,8 @@ export function MergedDrawer({
   onClose,
   isoKey,
   divisionSlug,
-  canEdit,
+  canEdit: canEditProp,
+  variant = 'edit',
 }: {
   open: boolean;
   onClose: () => void;
@@ -86,8 +88,13 @@ export function MergedDrawer({
   divisionSlug: string;
   /** 담당자만 고칠 수 있다 (TACP §3.2 — 병합 실행과 같은 권한) */
   canEdit: boolean;
+  /** CP-114 — `view`는 부서원 홈의 [병합본]. 누구에게나 읽기만(고치기·승인 띠·복사·받기 없음) */
+  variant?: DrawerVariant;
 }) {
   const [data, setData] = useState<Content | null>(null);
+  // CP-114 — 무엇을 그릴지는 순수 함수 하나가 정한다(CP-T100). view면 canEdit을 무시한다
+  const ctl = drawerControls(variant, canEditProp, data);
+  const canEdit = ctl.edit;
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
@@ -108,6 +115,8 @@ export function MergedDrawer({
    */
   const refocusRef = useRef<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const router = useRouter();
 
   /**
@@ -165,9 +174,34 @@ export function MergedDrawer({
     };
   }, [open, isoKey, divisionSlug]);
 
+  // CP-114 — 열면 제목에 초점(화면 읽기 프로그램이 무엇이 열렸는지 먼저 읽는다)
+  useEffect(() => {
+    if (open) titleRef.current?.focus();
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !dirty && onClose();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (!dirty) onClose();
+        return;
+      }
+      // CP-114 — Tab은 드로어 안에서 돈다. 뒤 화면으로 새면 열린 줄 모르고 홈의 버튼을 누른다
+      if (e.key !== 'Tab' || !panelRef.current) return;
+      const focusables = panelRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], select, input, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === titleRef.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [open, onClose, dirty]);
@@ -328,6 +362,7 @@ export function MergedDrawer({
         aria-hidden
       />
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="병합본 보기"
@@ -337,7 +372,9 @@ export function MergedDrawer({
         <header className="flex items-start justify-between gap-3 border-b border-hairline px-4 py-4 sm:px-6">
           <div className="min-w-0">
             <p className="text-sm text-muted">병합본</p>
-            <h2 className="card-title truncate">{data?.title ?? '불러오는 중…'}</h2>
+            <h2 ref={titleRef} tabIndex={-1} className="card-title truncate outline-none">
+              {data?.title ?? '불러오는 중…'}
+            </h2>
           </div>
           <button
             onClick={() => (!dirty || confirm('저장하지 않은 수정이 있습니다. 닫을까요?')) && onClose()}
@@ -353,8 +390,11 @@ export function MergedDrawer({
           2026-10-07 — 버튼 넷이 모양 셋(테두리·초록·옅은 테두리·회색)이었다. 이 드로어의 주 버튼은 [수정 저장] 하나,
           나머지는 보조·글자 버튼이다 (CP-99). 설명 글은 버튼 줄에 끼우지 않고 그 밑 한 줄로
         */}
+        {/* CP-114 — 읽기 전용(view)인 부서원에게는 이 줄에 둘 것이 없다 */}
+        {(ctl.headActions || data?.canSeeAuthors) && (
         <div data-guide="merged-head" className="border-b border-hairline px-4 py-3 sm:px-6">
         <div className="flex flex-wrap items-center gap-2">
+          {ctl.headActions && (
           <button
             onClick={async () => {
               if (!data) return;
@@ -367,6 +407,7 @@ export function MergedDrawer({
           >
             제목 복사
           </button>
+          )}
           {/*
             «표 복사»는 뺐다 (v1.16.0). 한컴 웹에디터가 붙여넣은 HTML을 자기 방식으로
             다시 그려서 양식과 완전히 같게 만들 수 없었다 — 폭·정렬·머리행까지 맞춰도
@@ -375,12 +416,14 @@ export function MergedDrawer({
             hwp를 받아 한글에서 복사하는 것이 유일하게 서식이 100% 보존되는 경로다.
             되살릴 때는 v1.15.1의 표 복사 구현에서 이어가면 된다.
           */}
+          {ctl.headActions && (
           <a
             href={`/api/division/merged?division=${divisionSlug}&isoKey=${isoKey}`}
             className="btn-secondary btn-sm"
           >
             hwp로 받기
           </a>
+          )}
           {/* TACP-17 — 서버가 작성자를 보낸 사람에게만 보이는 토글 */}
           {data?.canSeeAuthors && (
             <button
@@ -405,9 +448,10 @@ export function MergedDrawer({
           )}
         </div>
         </div>
+        )}
 
         {/* HM-47 — 승인 상태. 부서장에게는 [고칠 것 없음 · 승인] — 고쳐 저장하면 그 저장이 승인이다 */}
-        {data && (data.review || data.canApprove) && (
+        {data && ctl.reviewBand && (
           <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline-soft bg-surface-soft px-4 py-2.5 text-sm sm:px-6">
             {data.review ? (
               <>
@@ -425,7 +469,7 @@ export function MergedDrawer({
                 {canEdit ? '승인 전 · 고쳐 저장하면 승인' : '승인 전'}
               </span>
             )}
-            {data.canApprove && (!data.review || data.review.changedAfter) && (
+            {ctl.approve && (
               <button onClick={approve} disabled={busy || dirty} className="btn-secondary btn-sm ml-auto">
                 고칠 것 없음 · 승인
               </button>

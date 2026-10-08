@@ -7,10 +7,10 @@
 //
 // `구분`은 시스템이 다시 매기므로(ABS-5) 입력칸이 아니라 **번호 표시**로 둔다.
 import { flagWordOf, parseFlagWords } from '@/lib/empty-content';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { parseClipboardTable } from '@/lib/paste-table';
-import { composerStart, dateHint, type ComposerFrom } from '@/lib/composer';
+import { composerStart, dateHint, sameRows, type ComposerFrom } from '@/lib/composer';
 import { PreviousWeekPanel, type PrevRow } from './PreviousWeekPanel';
 
 export interface ComposerRow {
@@ -40,6 +40,22 @@ const SECTIONS: { key: Bucket; no: number; title: string; hint: string }[] = [
 const blank = (): ComposerRow => ({ content: '', date: '', place: '', attendee: '', emphasis: false });
 const draftKey = (isoKey: string) => `tincase.compose.${isoKey}`;
 
+/** 브라우저 임시본 쓰기·지우기 — 저장소를 못 쓰면 임시 보관만 못 할 뿐이다 */
+function writeDraft(isoKey: string, data: unknown) {
+  try {
+    localStorage.setItem(draftKey(isoKey), JSON.stringify(data));
+  } catch {
+    /* 사생활 보호 모드 등 */
+  }
+}
+function dropDraft(isoKey: string) {
+  try {
+    localStorage.removeItem(draftKey(isoKey));
+  } catch {
+    /* 지우지 못해도 다음에 열 때 내용 비교(WA-37)가 다시 판정한다 */
+  }
+}
+
 /** 브라우저 임시본 읽기 — 사생활 보호 모드 등에서 저장소가 던지면 없는 것으로 친다 */
 function readDraft(isoKey: string): string | null {
   try {
@@ -51,7 +67,8 @@ function readDraft(isoKey: string): string | null {
 
 export function WebComposer({
   isoKey,
-  guideLines,
+  title,
+  editedNote = null,
   initial,
   initialVersion,
   initialFailed = false,
@@ -60,10 +77,13 @@ export function WebComposer({
   emptyWordsRaw = '',
 }: {
   isoKey: string;
-  guideLines: string[];
+  /** WA-38 — 「10월 1주차 업무일지」 · 「9월 월간 업무일지」. 「업무일지 작성」은 어느 주인지 말하지 않는다 */
+  title: string;
+  /** WA-38 — 담당자가 고친 판이면 「○○ 고침 · 10-07 15:20」 한 줄(TACP-22). 고치지 않았으면 없음 */
+  editedNote?: string | null;
   /** WA-35 — 이번 주에 낸 판의 표 (「공유」 포함). 없으면 null */
   initial?: Record<Bucket, ComposerRow[]> | null;
-  /** WA-35 — 그 판의 버전 (「지금 낸 v2에서 시작합니다」) */
+  /** WA-35a — 그 판의 버전 ([지금 낸 v2로 다시 시작]) */
   initialVersion?: number;
   /** WA-35c — 낸 판이 있는데 못 불러왔다. 빈 표로 열되 그렇다고 말한다 */
   initialFailed?: boolean;
@@ -87,29 +107,73 @@ export function WebComposer({
   const [pasted, setPasted] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const router = useRouter();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  /*
+   * WA-37 — 「바뀌었나」는 **내용으로** 판정한다. 참조로 보던 예전 판정은 한 글자 쳤다 지워도 바뀐 것이라
+   * 같은 내용의 새 판이 생겼다. 낸 판으로 연 화면은 내용이 같은 동안 [제출]이 꺼져 있다 — 보려고 연 사람이
+   * 실수로 새 판을 만들지 않게(S1: [열어보기]를 [열기] 하나로 합친 대가).
+   */
+  const unchanged = useMemo(() => sameRows(start.data, data), [start, data]);
 
   // 임시 보관은 **제출 전까지만**. 제출 후에도 남아 있으면 다음에 열었을 때
   // 낸 건지 안 낸 건지 헷갈린다 (지연 저장이 뒤늦게 되살리는 것도 막는다)
   useEffect(() => {
-    if (done || data === start.data) return; // WA-35b — 손대기 전에는 쓰지 않는다
-    const t = setTimeout(() => {
-      try {
-        localStorage.setItem(draftKey(isoKey), JSON.stringify(data));
-      } catch {
-        /* 저장소를 못 쓰면 임시 보관만 못 할 뿐이다 */
-      }
-    }, 800);
+    if (done) return;
+    // WA-35b·37 — 내용이 시작점으로 돌아왔으면 임시본도 시작점으로: 임시본에서 시작했으면 그 내용, 아니면 없음.
+    // 지연 저장이 써 둔 중간 내용(쳤다 지운 것)이 남아 다음에 낸 판을 가리지 않게
+    if (unchanged) {
+      if (start.from === 'draft') writeDraft(isoKey, data);
+      else dropDraft(isoKey);
+      return;
+    }
+    const t = setTimeout(() => writeDraft(isoKey, data), 800);
     return () => clearTimeout(t);
-  }, [data, isoKey, done, start]);
+  }, [data, isoKey, done, unchanged, start.from]);
+
+  /**
+   * WA-38 — 닫기(×·바탕·Esc). 바뀐 것이 있으면 임시본을 **바로** 쓰고 닫는다 — 800ms 지연 저장을 기다리면
+   * 빨리 닫은 사람의 마지막 글자가 사라진다. 다음에 열면 이어 쓰므로 「닫을까요?」를 묻지 않는다.
+   */
+  const close = useCallback(() => {
+    if (!done && !unchanged) writeDraft(isoKey, data);
+    onClose();
+  }, [done, unchanged, isoKey, data, onClose]);
+
+  // WA-38 — 열면 제목에 초점, Tab은 드로어 안에서 돈다, Esc로 닫는다 (FileDrawer CP-75와 같은 방식)
+  useEffect(() => {
+    titleRef.current?.focus();
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+        return;
+      }
+      if (e.key !== 'Tab' || !panelRef.current) return;
+      const focusables = panelRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], select, input, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === titleRef.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [close]);
 
   /** WA-35a — 임시본을 버리고 지금 낸 판에서 다시. 적던 것이 사라지므로 묻는다 */
   const restartFromSubmitted = () => {
     if (!initial || !confirm(`작성하던 임시본을 지우고 지금 낸 v${initialVersion}에서 다시 시작할까요?`)) return;
-    try {
-      localStorage.removeItem(draftKey(isoKey));
-    } catch {
-      /* 지우지 못해도 아래에서 다시 시작한다 — 손대지 않으면 다시 쓰지 않는다 */
-    }
+    dropDraft(isoKey); // 지우지 못해도 아래에서 다시 시작한다 — 손대지 않으면 다시 쓰지 않는다
     const next = composerStart(null, initial, blank);
     setStart(next);
     setData(next.data);
@@ -147,15 +211,6 @@ export function WebComposer({
       rows[i] = { ...rows[i], emphasis: !rows[i].emphasis };
       return { ...d, [bucket]: rows };
     });
-  }, []);
-
-  /** 구역 비우기 — 잘못 붙여넣었을 때 한 줄씩 지우게 두면 아무도 안 쓴다 */
-  const clearSection = useCallback((bucket: Bucket) => {
-    setData((d) => ({ ...d, [bucket]: [blank()] }));
-  }, []);
-
-  const clearAll = useCallback(() => {
-    setData({ achievements: [blank(), blank(), blank()], plans: [blank(), blank()], notes: [blank()] });
   }, []);
 
   /**
@@ -215,11 +270,7 @@ export function WebComposer({
           return;
         }
         setDone(true); // 지연 저장이 다시 쓰지 못하게 먼저 막는다
-        try {
-          localStorage.removeItem(draftKey(isoKey));
-        } catch {
-          /* 저장소를 못 쓰면 지울 것도 없다 */
-        }
+        dropDraft(isoKey);
         // WA-35c — 표는 그대로 둔다. 다시 열면 방금 낸 판에서 시작하므로 「빈 화면」이라고 하지 않는다
         setMsg({ ok: true, text: `제출되었습니다 (v${body.version}).` });
         router.refresh();
@@ -247,21 +298,26 @@ export function WebComposer({
    */
   return (
     <div className="fixed inset-0 z-40 h-screen">
-      <div className="absolute inset-0 bg-ink/40" onClick={onClose} aria-hidden />
+      <div className="absolute inset-0 bg-ink/40" onClick={close} aria-hidden />
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="업무일지 작성"
+        aria-labelledby="composer-title"
         className="absolute inset-y-0 right-0 flex h-full w-full max-w-5xl flex-col border-l border-hairline bg-canvas shadow-[0_8px_32px_rgba(0,0,0,0.12)]"
       >
-        {/* 머리 — 제목 하나. 붙여넣기는 첫 칸의 placeholder가 말한다 (2026-10-08 사용자: 주석 걷기 — 설명 줄을 걷었다) */}
+        {/* 머리 — 제목은 그 주(WA-38). 붙여넣기는 첫 칸의 placeholder가 말한다 */}
         <div className="flex items-start justify-between gap-3 border-b border-hairline px-4 py-4 sm:px-7">
           <div className="min-w-0">
-            <h2 className="card-title">업무일지 작성</h2>
+            <h2 id="composer-title" ref={titleRef} tabIndex={-1} className="card-title outline-none">
+              {title}
+            </h2>
+            {/* TACP-22 — 담당자가 고친 판이면 누가 언제. 홈의 카드·줄에는 「고침」만 있고 이름은 여기서 본다 */}
+            {editedNote && <p className="mt-0.5 text-sm text-warning">{editedNote}</p>}
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {pasted && <span className="text-sm font-medium text-success">{pasted}</span>}
-            <button onClick={onClose} aria-label="닫기" className="btn-ghost h-9 w-9 px-0 text-xl leading-none text-muted">
+            <button onClick={close} aria-label="닫기" className="btn-ghost h-9 w-9 px-0 text-xl leading-none text-muted">
               ×
             </button>
           </div>
@@ -269,12 +325,10 @@ export function WebComposer({
 
         {/* 본문 */}
         <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-7">
-          {/* WA-35 — 어디서 시작했는지 한 줄. 빈 표가 아니면 왜 채워져 있는지, 빈 표면 왜 빈지 말한다 */}
-          {from === 'submission' && initialVersion !== undefined && (
-            <p className="mb-4 text-sm text-body">
-              <span className="font-semibold text-ink">지금 낸 v{initialVersion}에서 시작합니다</span>
-            </p>
-          )}
+          {/*
+            WA-35 — 낸 것과 **다른 것**을 보고 있을 때만 한 줄(임시본·못 불러옴). 낸 판에서 시작하면 말하지 않는다 —
+            [열기]로 열었으니 당연하다(R15, 2026-10-08)
+          */}
           {from === 'draft' && (
             <p className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-body">
               <span className="font-semibold text-ink">저장하지 않은 임시본에서 이어 씁니다</span>
@@ -287,19 +341,6 @@ export function WebComposer({
           )}
           {from === 'blank' && initialFailed && (
             <p className="mb-4 text-sm text-warning">지금 낸 판을 불러오지 못해 빈 표로 시작합니다.</p>
-          )}
-          {guideLines.length > 0 && (
-            <details className="disclosure mb-4">
-              <summary>부서 작성 안내 {guideLines.length}줄</summary>
-              <ul className="mt-2 space-y-1 pl-4 text-sm leading-6 text-body">
-                {guideLines.map((l) => (
-                  <li key={l} className="flex items-baseline gap-2.5">
-                    <span aria-hidden className="dot relative -top-px text-border-strong" />
-                    {l}
-                  </li>
-                ))}
-              </ul>
-            </details>
           )}
           {/*
             WA-13 — 지난번 낸 내용. **본문 맨 위**다.
@@ -322,14 +363,6 @@ export function WebComposer({
                 </h3>
                 <span className="text-xs text-muted">{s.hint}</span>
                 <span className="ml-auto text-xs font-medium text-muted tabular-nums">{filled[s.key]}줄</span>
-                {filled[s.key] > 0 && (
-                  <button
-                    onClick={() => clearSection(s.key)}
-                    className="rounded-md px-2 py-0.5 text-xs text-muted hover:bg-error-soft hover:text-error"
-                  >
-                    비우기
-                  </button>
-                )}
               </div>
 
               <div className="overflow-hidden rounded-lg border border-hairline">
@@ -464,11 +497,6 @@ export function WebComposer({
               </div>
             </section>
           ))}
-
-          <p className="pb-2 text-xs leading-6 text-muted">
-            {/* WA-36 — 「공유」의 뜻. 툴팁은 터치·좁은 화면에서 안 뜬다. 2026-10-08 — 일자·빈 줄·번호 안내 줄은 걷었다 */}
-            <span className="font-medium text-emphasis">공유</span> = 전 직원 공유 사항(파란색)
-          </p>
         </div>
 
         {/* 바닥 — 이 화면의 주 버튼은 [제출] 하나다 */}
@@ -477,16 +505,13 @@ export function WebComposer({
             {msg?.text}
           </span>
           <div className="ml-auto flex items-center gap-3 sm:gap-4">
-            {total > 0 && (
-              <button onClick={clearAll} className="btn-link-danger">
-                전체 지우기
-              </button>
-            )}
-            <span className="hidden text-sm text-muted tabular-nums sm:inline">
-              실적 {filled.achievements} · 계획 {filled.plans}
-              {filled.notes > 0 && ` · 특이 ${filled.notes}`}
-            </span>
-            <button data-guide="compose-submit" onClick={submit} disabled={busy || total === 0} className="btn-primary">
+            {/* WA-37 — 낸 판으로 연 화면은 내용이 바뀌기 전에는 꺼져 있다. 2026-10-08 — [전체 지우기]·합계는 걷었다(R15) */}
+            <button
+              data-guide="compose-submit"
+              onClick={submit}
+              disabled={busy || total === 0 || (from === 'submission' && unchanged)}
+              className="btn-primary"
+            >
               {busy ? '제출 중…' : '제출'}
             </button>
           </div>

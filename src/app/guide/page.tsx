@@ -13,7 +13,6 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { requirePageScope } from '@/server/page-scope';
 import { guideCaps, rollupNav } from '@/server/authz';
-import { hwpUploadOpen } from '@/server/submit-mode';
 import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
@@ -73,8 +72,6 @@ export default async function GuidePage({ searchParams }: { searchParams: Promis
   const [caps, rnav] = await Promise.all([guideCaps(scope), rollupNav(scope)]);
   const has = new Set(caps);
   const examples = monthlyExamples(new Date());
-  // WA-32 — 안내의 단계는 웹 작성만이다. 업로드가 아직 열린 서버(운영 1단계, ADR-0014)에서는 그 길이 있다는 것만 한 줄로
-  const uploadOpen = hwpUploadOpen();
 
   // 단계 밖의 쓸모 있는 것 — 예전 안내의 글 매뉴얼에서 단계로 옮기지 않은 것만 남긴다. 역할 것은 그 역할에게만 (TACP-9)
   const faq: [string, string][] = [
@@ -82,18 +79,19 @@ export default async function GuidePage({ searchParams }: { searchParams: Promis
       '주간과 월간은 어떻게 구분되나요?',
       `그 달의 마지막 날이 들어 있는 주가 마지막 주이고, 그 주에는 월간 업무일지를 냅니다. ${examples
         .map((e) => `${e.month}은 ${e.range} — ${e.note}`)
-        .join('. ')}. 월간 주에는 제출 화면 위쪽에 초록색 [월간] 표시가 뜹니다.`,
+        .join('. ')}. 월간 주에는 이번 주 카드 제목 옆에 [월간] 표시가 뜹니다.`,
     ],
     ['월간에는 뭘 더 써야 하나요?', '한 주가 아니라 한 달치를 정리합니다. 양식과 마감(목요일 14:00)은 주간과 같고, 분량이 늘어납니다. 병합본 파일 이름도 "월간업무"로 나옵니다.'],
     ['알림은 언제 오나요?', '아직 내지 않은 분에게만 갑니다 — 마감 전날 11:45, 마감 당일 09:00, 마감 1시간 전, 마감 10분 전. 이미 냈으면 오지 않습니다. 사내 메신저 알림함으로 옵니다.'],
     ['연휴 때 마감이 바뀌면요?', '그 주만 마감이 당겨지고, 제출 화면의 마감 표시가 빨갛게 바뀌며 이유가 함께 나옵니다. 알림도 바뀐 마감에 맞춰 나갑니다. 다음 주에는 평소대로 돌아갑니다.'],
     ['마감을 놓치면 어떻게 되나요?', '마감 후에는 제출도 취소도 되지 않습니다. 담당자에게 말씀해 주세요 — 담당자가 마감을 잠시 열어 둘 수 있습니다.'],
-    ['다른 사람이 낸 내용을 볼 수 있나요?', '부서원끼리는 누가 언제 냈는지만 봅니다. 업무일지 내용은 부서담당자부터 볼 수 있고, 마감 뒤 만들어진 부서 병합본은 [보관함]에서 모두 봅니다.'],
+    // TACP-11 v1.8 (2026-10-08) — 부서원 홈에서 제출 명단을 뺐다. 누가 냈는지는 담당자가 수합 관리에서 본다
+    ['다른 사람이 낸 내용을 볼 수 있나요?', '다른 부서원의 업무일지와 제출 여부는 부서담당자가 봅니다. 마감 뒤 만들어진 부서 병합본은 부서원 모두 제출 화면의 지난 주차 [병합본]에서 봅니다.'],
     ...(has.has('manager')
       ? ([
           [
             '부서원 업무일지를 직접 고칠 수 있나요?',
-            '[수합 관리]에서 이름을 눌러 열고 오른쪽 위 [고치기] → 표를 고쳐 [고쳐서 저장]. 덮어쓰지 않고 그 사람의 새 판이 생기며, 판 목록과 본인의 [내 이력]에 「○○ 고침」이 남습니다. 병합본에 넣으려면 [다시 병합]을 누릅니다 — 병합본에서 직접 고친 내용은 사라지므로, 고친 적이 있으면 누가 몇 곳 고쳤는지 보여 주고 먼저 묻습니다.',
+            '[수합 관리]에서 이름을 눌러 열고 오른쪽 위 [고치기] → 표를 고쳐 [고쳐서 저장]. 덮어쓰지 않고 그 사람의 새 판이 생기며, 판 목록에 「○○ 고침」이 남고, 본인 화면의 그 주 줄에 「고침」이 붙습니다. 병합본에 넣으려면 [다시 병합]을 누릅니다 — 병합본에서 직접 고친 내용은 사라지므로, 고친 적이 있으면 누가 몇 곳 고쳤는지 보여 주고 먼저 묻습니다.',
           ],
         ] as [string, string][])
       : []),
@@ -150,14 +148,9 @@ export default async function GuidePage({ searchParams }: { searchParams: Promis
           <span className="badge-pill">그 달 마지막 주는 월간</span>
         </div>
 
+        {/* WA-39 (2026-10-08) — 「아직 한글 파일을 올려 내는 길도 열려 있다」 한 줄을 걷었다. 그 길(탭·라우트)이 코드째 없어져
+            가리킬 곳이 없다 — 안내는 원래부터 웹 작성 단계만 보였다 */}
         <GuideSelf caps={caps} />
-
-        {uploadOpen && (
-          <p className="callout callout-muted mt-6 print:hidden">
-            이 서버에서는 아직 한글 파일을 올려 내는 길도 열려 있습니다 — 「이번 주 업무일지」 카드의 [파일 올리기] 탭.
-            안내는 웹에서 적는 방법만 보여 줍니다.
-          </p>
-        )}
 
         <h2 className="mt-12 mb-4 text-[17px] font-semibold text-ink print:hidden">자주 묻는 것</h2>
         <div className="card card-flush divide-y divide-hairline-soft print:hidden">

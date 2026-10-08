@@ -1,53 +1,24 @@
-// `/{slug}/history` — 내 제출 이력 (PG §3, 본인 것만)
-import { prisma } from '@/server/db';
-import { redirect } from 'next/navigation';
-import { getPageScope } from '@/server/page-scope';
+// `/{slug}/history` — 옛 주소. 「내 이력」은 홈의 지난 주차로 합쳤다 (PG-70).
+// 2026-12-31까지 남긴다 — 메신저·즐겨찾기에 남은 옛 링크가 대개 며칠 안에 눌린다. 2027년 첫 정리 때 시험과 함께 지운다.
+import { notFound, redirect } from 'next/navigation';
+import { requirePageScope, getDivisionView, type DivisionView } from '@/server/page-scope';
+import { HttpError } from '@/server/authz';
 import { noticeFor } from '@/components/Notice';
-import { HistoryTable } from '@/components/HistoryTable';
-import { toKstIso, slotKind } from '@/lib/week';
 
 export const dynamic = 'force-dynamic';
 
-export default async function HistoryPage() {
-  const ps = await getPageScope();
-  if (!ps.ok) {
-    if (ps.code === 'unauthenticated') redirect('/login');
-    return noticeFor(ps.code, ps.message);
+export default async function HistoryRedirect({ params }: { params: Promise<{ division: string }> }) {
+  const ps = await requirePageScope(); // AU-22 — 보내기만 하는 페이지도 거친다 (AU-T39)
+  if (!ps.ok) return noticeFor(ps.code, ps.message);
+  let view: DivisionView;
+  try {
+    view = await getDivisionView((await params).division);
+  } catch (e) {
+    // 레이아웃과 병렬로 그려지므로 페이지가 스스로 막는다 — 남의 부서·없는 부서는 어디로도 보내지 않고 404 (TACP-5)
+    if (e instanceof HttpError && e.status === 404) notFound();
+    throw e;
   }
-  if (ps.scope.user.mustChangePassword) redirect('/password?first=1'); // AU-22
-
-  const slots = await prisma.weekSlot.findMany({ orderBy: { opensAt: 'desc' }, take: 26 });
-  const subs = await prisma.submission.findMany({
-    where: { userId: ps.scope.user.id, weekSlotId: { in: slots.map((s) => s.id) }, isLatest: true },
-  });
-  const byId = new Map(subs.map((s) => [s.weekSlotId, s]));
-  // TACP-22 — 담당자가 고친 판이면 고친 사람 이름
-  const editorIds = [...new Set(subs.map((s) => s.editedById).filter((x): x is string => !!x))];
-  const editors = new Map(
-    (await prisma.user.findMany({ where: { id: { in: editorIds } }, select: { id: true, name: true } })).map((u) => [u.id, u.name]),
-  );
-
-  return (
-    <main className="pt-8">
-      <h1 className="page-title">내 제출 이력</h1>
-      <HistoryTable
-        userId={ps.scope.user.id}
-        userName={ps.scope.user.name}
-        rows={slots.map((s) => {
-          const sub = byId.get(s.id);
-          return {
-            slotId: s.id,
-            label: `${s.year}년 ${s.label}`,
-            submissionId: sub?.id ?? null,
-            version: sub?.version ?? null,
-            uploadedAtKst: sub ? toKstIso(sub.uploadedAt).slice(0, 16).replace('T', ' ') : null,
-            monthly: slotKind(s) === 'monthly',
-            editedBy: sub?.editedById ? (editors.get(sub.editedById) ?? '담당자') : null,
-            // TACP-22 — 제출시각은 내가 낸 시각 그대로, 고친 시각은 따로
-            editedAtKst: sub?.editedAt ? toKstIso(sub.editedAt).slice(11, 16) : null,
-          };
-        })}
-      />
-    </main>
-  );
+  const slug = view.division.slug; // 별칭이어도 정식 슬러그로 한 번에
+  // 역할은 getDivisionView가 계산한 값만 본다 (TACP-12). 307 — 이 주소가 나중에 다른 뜻으로 쓰일 수 있다
+  redirect(view.isOwn ? `/${slug}` : `/${slug}/manage`);
 }
