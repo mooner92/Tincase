@@ -91,7 +91,8 @@ describe('HM-44 배포 파일의 값', () => {
 
 describe('HM-44 멈춰도 도는 것', () => {
   it('[RU-T48] 3단계 알림(RU-54~57)은 병합 일시정지 **앞에서** 돈다 — 사람이 하는 단계의 기한은 멈추지 않는다', () => {
-    const src = readFileSync('src/instrumentation.ts', 'utf-8');
+    // 2026-10-08 2단계(HM-60) — 한 주기는 server/scheduler.ts로 옮겼다(시험이 직접 돌려 볼 수 있게)
+    const src = readFileSync('src/server/scheduler.ts', 'utf-8');
     const call = src.indexOf('await runDueRollupNotices(');
     const pause = src.indexOf('if (pause.paused)');
     expect(call, 'runDueRollupNotices 호출이 없다').toBeGreaterThan(0);

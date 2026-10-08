@@ -316,6 +316,11 @@ model MergeRun {
    */
   reviewJson   String?
   errorText    String?
+  /**
+   * HM-56e (2026-10-08) — 병합이 쓴 바이트의 sha256. 수정 저장(API-50)이 파일을 다시 쓰면 함께 바뀐다.
+   * 「병합 점검」(HM-54)이 디스크 파일과 기록이 같은지 이것으로 본다. 옛 실행은 null
+   */
+  outputSha    String?
   startedAt    DateTime  @default(now())
   finishedAt   DateTime?
 
@@ -323,6 +328,43 @@ model MergeRun {
   weekSlot WeekSlot @relation(fields: [weekSlotId], references: [id])
 
   @@index([divisionId, weekSlotId, startedAt])
+}
+
+/**
+ * HM-59 (2026-10-08) — 병합 **줄**의 작업. `MergeRun`은 결과 기록으로 그대로 두고, 「무엇을 언제 병합할 차례인가」는 여기에 둔다 —
+ * `MergeRun`에 'queued'를 끼우면 「가장 최근 실행」을 고르는 질의 여러 곳이 흔들린다. 재시작에도 줄이 남도록 DB에 둔다(ADR-0019).
+ * 관계(외래 키)는 두지 않는다 — 더하기만 하는 표라 Division·WeekSlot 모델을 건드리지 않는다
+ */
+model MergeJob {
+  id             String    @id @default(cuid())
+  divisionId     String
+  weekSlotId     String
+  /// "auto" 자동 · "reopen" 마감 열기가 닫힘(DM-20) · "manual" [지금 병합]·[다시 병합] · "model_retry" (3단계 몫)
+  trigger        String
+  actorEmail     String?
+  /// [다시 병합]에서 409 edited를 확인하고 들어온 것 (API-55) — 쓰기 직전 확인(HM-61)도 넘긴다
+  overwriteEdits Boolean   @default(false)
+  /// 작을수록 먼저. 넣을 때마다 커진다(FIFO) — 스케줄러는 한 주기를 제출 수 적은 부서부터 넣는다 (HM-59c)
+  orderKey       Int
+  /// "queued" | "running" | "done" | "failed" | "cancelled"
+  status         String
+  /// 일꾼이 잡은 횟수 — 회수(HM-59e)가 2번째부터는 다시 넣지 않는다
+  attempt        Int       @default(0)
+  /// HM-61 — 넣을 때의 판 { saves, reviewId } (JSON — 사람이 한 일만, 병합 자신의 새 실행은 넣지 않는다). 쓰기 직전에 이것과 다르면 쓰지 않는다
+  baseMark       String?
+  /// HM-59b — 잡힐 때의 최신 제출 묶음(sha). 병합 중에 새 제출이 왔는지 이것으로 가른다
+  sourceKey      String?
+  enqueuedAt     DateTime
+  startedAt      DateTime?
+  /// 이 시각이 지나도 running이면 죽은 것 (HM-59e)
+  leaseUntil     DateTime?
+  finishedAt     DateTime?
+  mergeRunId     String?
+  errorText      String?
+
+  @@index([status, orderKey])
+  @@index([divisionId, weekSlotId, status])
+  @@index([weekSlotId, orderKey])
 }
 
 model AuditLog {

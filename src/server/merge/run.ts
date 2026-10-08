@@ -15,13 +15,13 @@
 
 import type { Division, WeekSlot } from '@prisma/client';
 import { prisma } from '../db';
-import { writeFileAtomic } from '../storage';
+import { sha256, writeFileAtomic } from '../storage';
 import { runMerge, MergeUnavailable, MergeFailed, type MergeOutcome } from './index';
 // 잠금 표 옆의 줄 이름만 가져온다 — rollup/handoff를 정적으로 이으면 고리가 된다(lock.ts는 아무것도 잇지 않는다)
 import { withUnitLock } from '../rollup/lock';
 import { mergeGateOf } from '../deadline';
 import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
-import { latestEdits } from './edits';
+import { HELD_TEXT, latestEdits, sameMark, unitMark, type UnitMark } from './edits';
 import { ruleSnapshotOf } from './rule-snapshot';
 import { noticeMergeHeld } from '../notify/merge-notices';
 import { NEWEST_FIRST, UNIT_REVIEW } from './review-scope';
@@ -36,6 +36,20 @@ export const MERGE_DELAY_MINUTES = 1;
  * 되는 실패(모델 시간 초과)는 곧 낫고, 안 되는 실패(제출물 문제)는 사람이 봐야 한다.
  */
 export const RETRY_BACKOFF_MINUTES = [1, 5, 15, 30] as const;
+
+/**
+ * HM-59a — 병합을 일으킨 것. `auto` 스케줄러 · `reopen` 마감 열기가 닫힌 뒤(DM-20) · `manual` [지금 병합]·[다시 병합] ·
+ * `model_retry` 2차 모델 병합(3단계 몫 — 자리만). 실행 기록의 스냅샷(DM-13)에 그대로 남는다
+ */
+export type MergeTrigger = 'auto' | 'reopen' | 'manual' | 'model_retry';
+
+/** HM-61 — 줄의 일꾼이 넘기는 작업 정보. 직접 부르면(스크립트) 없다 — 그때 기준은 시작할 때 잡는다 */
+export interface MergeJobContext {
+  id: string;
+  overwriteEdits: boolean;
+  /** 줄에 넣을 때의 판 (HM-61a). 못 읽었으면 null — 시작할 때 잡는다 */
+  baseMark: UnitMark | null;
+}
 
 export interface MergeRunResult {
   /** `busy`면 이미 돌고 있는 실행의 id (아직 기록을 만들기 전이면 빈 문자열) */
@@ -59,7 +73,8 @@ export interface MergeRunResult {
  *   2. **실행 기록**(running) + **예산**(HM-57) — 예산은 기록을 만드는 순간부터 간다. 그래야 「running이 예산 + 여유보다 오래면
  *      멈춘 것」(HM-55)이 이 행에 대해 참이다.
  *   3. **모델 · 조립** — 잠금 **밖에서**. 잠금이 모델을 기다리면 그동안 승인·저장이 1분씩 멈춘다.
- *   4. **쓰기 + 성공 기록** — RU-75 (2026-10-08 결정 c) 승인·수정 저장과 같은 줄(`unit:` 잠금) 안에서 한 덩어리로. 병합본은
+ *   4. **쓰기 + 성공 기록** — RU-75 (2026-10-08 결정 c) 승인·수정 저장과 같은 줄(`unit:` 잠금) 안에서 한 덩어리로. 쓰기 직전에
+ *      기준 판(줄에 넣을 때 · 직접 부르면 시작할 때)과 지금 판을 비교해, 그 사이 사람이 고쳤거나 승인했으면 쓰지 않는다(HM-61). 병합본은
  *      주차마다 같은 자리라, 엔진이 파일을 쓰고 기록하기 전 틈에 수정 저장이 끼면 새 실행이 담당자가 고친 바이트를 가리키고 고친
  *      기록은 옛 실행에 남았다(또는 고친 것이 기록 없이 덮였다 — HM-49가 지키지 못한다). **잠금은 이 두 걸음만 감싼다.**
  *   5. **병합 뒤 맞추기**(`afterMerged`, RU-72) — 잠금 밖(같은 줄을 다시 쥔다 — 재진입 없음), 그러나 **잡은 채로**. 놓고 나서
@@ -70,9 +85,11 @@ export interface MergeRunResult {
 export async function runMergeRecorded(
   divisionId: string,
   weekSlotId: string,
-  trigger: 'auto' | 'manual',
+  trigger: MergeTrigger,
   /** RU-78 — [지금 병합]·[다시 병합]을 누른 사람 (자동이면 없다). 부서장 없는 단위의 사본 기록에 「일으킨 사람」으로 붙는다 */
   actorEmail: string | null = null,
+  /** HM-59 — 줄의 일꾼이 부르면 그 작업. 쓰기 직전 확인(HM-61)의 기준과 「덮기 확인」이 여기서 온다 */
+  opts: { job?: MergeJobContext } = {},
 ): Promise<MergeRunResult> {
   const release = claimMergeUnit(divisionId, weekSlotId);
   if (!release) return { runId: '', status: 'busy', errorText: MERGING_TEXT, outcome: null };
@@ -98,10 +115,22 @@ export async function runMergeRecorded(
       },
     });
 
+    // HM-61a — 기준 판. 줄에서 왔으면 넣을 때 잡은 것, 직접 불렀으면 지금(모델을 부르기 전)
+    const base = opts.job?.baseMark ?? (await unitMark(divisionId, weekSlotId));
     let outcome: MergeOutcome;
     try {
       outcome = await runMerge(divisionId, weekSlotId, { budget });
-      await withUnitLock(divisionId, weekSlotId, () => recordSucceeded(run.id, outcome));
+      const wrote = await withUnitLock(divisionId, weekSlotId, async () => {
+        // HM-61b — 쓰기 직전, 잠금 안에서 다시 본다. 그 사이 누가 고쳐 저장했거나 승인했으면 덮지 않는다
+        if (!opts.job?.overwriteEdits && (await editedWhileQueued(division, weekSlotId, trigger, base))) return false;
+        await recordSucceeded(run.id, outcome);
+        return true;
+      });
+      if (!wrote) {
+        await prisma.mergeRun.update({ where: { id: run.id }, data: { status: 'failed', errorText: HELD_TEXT, finishedAt: new Date() } });
+        console.warn(`[merge] 쓰지 않음 — ${division.nameKo}: ${HELD_TEXT} (HM-61)`);
+        return { runId: run.id, status: 'failed', errorText: HELD_TEXT, outcome: null };
+      }
     } catch (e) {
       const known = e instanceof MergeUnavailable || e instanceof MergeFailed;
       const errorText = known ? (e as Error).message : `예상치 못한 오류 (${(e as Error).message})`;
@@ -126,6 +155,26 @@ function withoutBytes({ output, ...rest }: MergeOutcome): Omit<MergeOutcome, 'ou
   return rest;
 }
 
+/**
+ * HM-61b·c — 기준을 잡은 뒤 이 부서·주차의 판이 바뀌었고, 그 판이 이 병합이 지켜야 하는 판인가. 부르는 쪽이 `unit:` 잠금을 쥐고 있다.
+ * 수동(·2차 모델) 병합은 미리보기든 최종본이든 지킨다 — [다시 병합]의 409 edited가 미리보기도 묻는 것과 같다.
+ * 자동 병합(auto · reopen)은 **최종본만** 지킨다 — 마감 전 미리보기는 마감이 덮는다(HM-34 · HM-49). 지켜 봐야 다음 주기에 다시 돌아 덮을 뿐이다.
+ */
+async function editedWhileQueued(division: Division, weekSlotId: string, trigger: MergeTrigger, base: UnitMark): Promise<boolean> {
+  if (sameMark(base, await unitMark(division.id, weekSlotId))) return false;
+  if (trigger === 'manual' || trigger === 'model_retry') return true;
+  // 사람이 고친(승인한) 것은 지금 가장 최근 성공 실행의 판이다 — 그것이 최종본일 때만 자동 병합이 지킨다
+  const [latest, slot] = await Promise.all([
+    prisma.mergeRun.findFirst({
+      where: { divisionId: division.id, weekSlotId, status: 'succeeded', outputPath: { not: null } },
+      orderBy: { startedAt: 'desc' },
+      select: { startedAt: true },
+    }),
+    prisma.weekSlot.findUniqueOrThrow({ where: { id: weekSlotId } }),
+  ]);
+  return !!latest && latest.startedAt >= effectiveDeadline(slot, division);
+}
+
 /** 결정 c — 잠금 안의 짧은 두 걸음: 병합본 쓰기 → 성공 기록. 쓰기가 실패하면 기록하지 않는다(부르는 쪽이 실패로 남긴다) */
 async function recordSucceeded(runId: string, outcome: MergeOutcome): Promise<void> {
   await writeFileAtomic(outcome.outputRelPath, outcome.output);
@@ -134,6 +183,8 @@ async function recordSucceeded(runId: string, outcome: MergeOutcome): Promise<vo
     data: {
       status: 'succeeded',
       outputPath: outcome.outputRelPath,
+      // HM-56e — 쓴 바이트의 sha. 점검 요약(HM-54)이 「디스크 파일 = 기록」을 이것으로 본다
+      outputSha: sha256(outcome.output),
       sourceIds: JSON.stringify(outcome.sourceIds),
       rowCounts: JSON.stringify(outcome.rowCounts),
       warnings: JSON.stringify(outcome.warnings),
@@ -265,23 +316,21 @@ async function holdForEdits(division: Division, slot: WeekSlot, gate: Date): Pro
   return true;
 }
 
-export interface DueMergeOptions {
-  /**
-   * HM-50 — 부서 하나를 병합할 때마다 부른다. 스케줄러는 여기서 병합 안내·마감 전 알림을 다시 판정한다 —
-   * 13개 부서를 다 병합할 때까지 기다리면 먼저 끝난 부서의 검토 요청 창이 지나간다. 실패해도 병합은 계속 간다.
-   */
-  afterEach?: () => Promise<void>;
-}
-
 /**
- * HM-25 — 마감이 지난 주차를 부서별로 **1회** 자동 병합.
+ * HM-25 — 마감이 지난 주차를 부서별로 **1회** 자동 병합 — HM-60a (2026-10-08 2단계) 부터는 **판정해서 줄에 넣기만 한다.**
+ * 병합은 줄의 일꾼(queue.ts)이 한다. 그래서 스케줄러 주기가 병합을 기다리지 않는다 — 13개 부서 병합이 15시를 넘겨도
+ * 마감 전 알림 · 3단계 맞추기 · 3단계 알림이 매분 제때 돈다(예전에는 병합 루프가 주기를 붙잡아 14:45 · 15:00 창을 놓쳤다).
  *
  * 조용히 넘어가는 경우 (경고도 남기지 않는다):
  * - 마감 +1분 전 · **최종본이 이미 있음**(마감 후 성공) · 제출 0건 · 양식 없음
  *   → 빈 병합본이나 무의미한 실패 기록을 남기지 않는다.
+ * - 줄에 이미 그 부서·주차 작업이 있음(대기 · 병합 중) — 그 작업이 끝나면 결과대로
  * - 사람이 고친 최종본 (HM-49) — 로그 한 줄, 늦게 낸 사람이 있으면 담당자에게 알림
+ *
+ * HM-59c — 한 주기에 넣는 부서들은 **제출 수가 적은 부서부터, 같으면 이름순**이다. 전체 시간은 같고 「누가 늦게 끝나나」만 바뀐다 —
+ * 작은 부서부터 하면 +10분 전에 끝나는 부서가 가장 많다(사용자 결정 「순서는 크게 중요하지 않다 — 단순하게」).
  */
-export async function runDueMerges(now = new Date(), opts: DueMergeOptions = {}): Promise<{ ran: number; skipped: number }> {
+export async function runDueMerges(now = new Date()): Promise<{ queued: number; skipped: number }> {
   /*
    * HM-45 — **이번 주 슬롯을 보장한다.** 예전에는 «가장 최근 슬롯»을 그냥 집어 왔다.
    *
@@ -306,8 +355,10 @@ export async function runDueMerges(now = new Date(), opts: DueMergeOptions = {})
     console.error('[merge] 멈춘 실행 회수 오류', e);
   }
 
+  // 정적으로 이으면 queue → run 고리가 된다 (줄의 일꾼이 runMergeRecorded를 부른다)
+  const { activeMergeJob, enqueueMerge } = await import('./queue');
   const divisions = await prisma.division.findMany({ where: { isActive: true } });
-  let ran = 0;
+  const due: { division: Division; submissions: number; trigger: MergeTrigger }[] = [];
   let skipped = 0;
 
   for (const division of divisions) {
@@ -335,6 +386,14 @@ export async function runDueMerges(now = new Date(), opts: DueMergeOptions = {})
     if (await hasFinalMerge(division.id, slot.id, deadline)) {
       skipped++;
       continue; // 마감 후에 됐다 — 재실행은 담당자가 버튼으로
+    }
+    /*
+     * HM-60a — 줄에 이미 이 부서·주차 작업이 있으면(대기 · 병합 중) 넣지 않는다. 그 작업이 끝나면 위의 최종본 판정이나
+     * 아래의 재시도 셈이 결과대로 이어 간다. 일시정지(HM-44)가 풀리기를 기다리는 자동 작업도 여기 걸린다.
+     */
+    if (await activeMergeJob(division.id, slot.id)) {
+      skipped++;
+      continue;
     }
     /*
      * HM-58 — 담당자가 [지금 병합]으로 돌리고 있으면 건너뛴다. 같이 돌면 늦게 끝난 쪽이 그 사이 고친 판을 덮는다.
@@ -389,25 +448,13 @@ export async function runDueMerges(now = new Date(), opts: DueMergeOptions = {})
       continue; // 낸 사람이 없으면 만들 것도 없다
     }
 
-    const result = await runMergeRecorded(division.id, slot.id, 'auto');
-    if (result.status === 'busy') {
-      skipped++; // 바로 위 확인과 이 사이에 누가 시작했다 (HM-58)
-      continue;
-    }
-    ran++;
-    if (result.status === 'failed') {
-      console.warn(
-        `[merge] 자동 병합 실패(${failures + 1}회) — ${division.nameKo} / ${slot.isoKey}: ${result.errorText}`,
-      );
-    }
-    // HM-50 — 이 부서의 안내는 뒤 부서들을 기다리지 않는다
-    if (opts.afterEach) {
-      try {
-        await opts.afterEach();
-      } catch (e) {
-        console.error('[merge] 병합 뒤 알림 판정 오류', e);
-      }
-    }
+    // DM-20 — 기준 시각이 마감보다 뒤면 마감 열기가 닫혀 다시 도는 것이다
+    due.push({ division, submissions, trigger: deadline.getTime() > effectiveDeadline(slot, division).getTime() ? 'reopen' : 'auto' });
+    if (failures > 0) console.warn(`[merge] 자동 병합 다시 넣음(실패 ${failures}회 뒤) — ${division.nameKo} / ${slot.isoKey}`);
   }
-  return { ran, skipped };
+
+  // HM-59c — 작은 부서부터, 같으면 이름순. 넣는 순서가 곧 줄의 순서다(orderKey는 넣을 때마다 커진다)
+  due.sort((a, b) => a.submissions - b.submissions || a.division.nameKo.localeCompare(b.division.nameKo, 'ko'));
+  for (const d of due) await enqueueMerge(d.division.id, slot.id, { trigger: d.trigger, now });
+  return { queued: due.length, skipped };
 }
