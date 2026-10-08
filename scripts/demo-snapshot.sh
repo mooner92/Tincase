@@ -115,7 +115,7 @@ case "$cmd" in
     if [ "$TESTING" -eq 0 ]; then
       # stop/start는 컨테이너를 새로 만들지 않아 시연 모드가 그대로다. up -d를 변수 없이 치면 테스트 데이터로 돌아간다
       if on_root "$info"; then echo "켜기: sudo $COMPOSE start   (시연 모드 그대로)"
-      else echo "시연 데이터로 전환: sudo TINCASE_TEST_MODE=demo $COMPOSE up -d"; fi
+      else echo "시연 데이터로 전환: TINCASE_TEST_MODE=demo bash scripts/deploy.sh test --no-build"; fi
     fi
     ;;
   list)
