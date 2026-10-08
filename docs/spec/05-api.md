@@ -33,7 +33,7 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 | `not_found` | 404 | 없거나 **권한 없음** (격리 — 구별 불가) |
 | `cross_origin` | 403 | 다른 출처에서 온 상태 변경 요청 (API-56 · AU-33) |
 | `slot_locked` | 409 | 부서 마감 지남 |
-| `upload_closed` | 410 | HWP 업로드 경로가 닫힘 — 웹 작성만 받는다 (API-54 · WA-31) |
+| `upload_closed` | 410 | hwp 올리기가 닫힘 — 「전사」 섹션 [올리기](RU-60a)만 낸다. 부서원 업로드 라우트(API-54)는 2026-10-08에 없어졌다(WA-39) |
 | `no_submissions` | 409 | 대상 0건 |
 | `edited` | 409 | 사람이 고친 병합본 — 확인 없이 다시 병합하지 않는다 (API-55 · HM-49) |
 | `too_large` | 413 | 본문이 너무 큼 — 읽기 전에 `Content-Length`로 거른다 (ST-04) |
@@ -78,21 +78,24 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 | ID | 요구사항 |
 |---|---|
 | API-07 | 슬롯은 호출 시점 upsert 보장 (WS-11). `deadlineAt`은 부서 정책 계산값 |
-| API-08 | 응답에 타인 정보 없음. member 화면의 부서 현황은 `/api/division/status` 축소판을 따로 쓴다 |
+| API-08 | 응답에 타인 정보 없음 (2026-10-08 — 「member 화면의 부서 현황은 `/api/division/status` 축소판을 따로 쓴다」는 걷었다: 그 라우트가 없어졌다, TACP-11 v1.8) |
 
-### `POST /api/submissions` — 업로드
+### 제출 저장 — `POST /api/submissions/compose`와 `uploadSubmission()` (2026-10-08 개정)
 
-`multipart/form-data`, 필드 `file` 하나.
+> **2026-10-08 — `POST /api/submissions`(멀티파트 업로드) 라우트를 지웠다** (WA-39 · R19 · [ADR-0014](../adr/0014-web-only-submission.md) 완료).
+> 그 주소에는 이제 라우트가 없다(404). 제출물을 만드는 HTTP 문은 웹 작성 `POST /api/submissions/compose`(JSON 본문, WA-04) 하나이고,
+> 그 라우트가 저장 함수 `uploadSubmission()`을 부른다. 아래 API-09~14는 원래 업로드 라우트의 요구사항이었지만 **저장의 성질**이라
+> 웹 작성에 그대로 걸린다 — 그래서 남긴다. 업로드 라우트에만 있던 것(API-54 · 멀티파트 본문 · 업로드 속도 제한)만 폐지한다.
 
 | ID | 요구사항 |
 |---|---|
-| API-09 | 업로더·부서는 JWT 신원에서 도출. 본문의 `userId`/`divisionId`류는 **무시** (AU-05, DM-12) |
+| API-09 | 제출자·부서는 신원에서 도출. 본문의 `userId`/`divisionId`류는 **무시** (AU-05, DM-12 · TACP-6) — 웹 작성 본문(`DocInput`)에는 그런 칸이 없고, 붙여 보내도 읽지 않는다(API-T03) |
 | API-10 | 대상 슬롯은 **현재 슬롯 고정** — 과거·미래 슬롯 지정 불가 |
-| API-11 | `now > deadlineFor(slot, division)` → 409 `slot_locked`. 예외 경로 없음 |
-| API-12 | 검증 순서: 인증→사용자→부서 활성→잠금→크기→확장자(.hwp)→매직→구조(표 파싱 포함) |
+| API-11 | `now > deadlineFor(slot, division)` → 409 `slot_locked`. 예외는 담당자가 문을 잠시 연 때뿐(TACP-18) |
+| API-12 | 검증 순서: 인증→사용자→부서 활성→잠금→크기→확장자(.hwp)→매직→구조(표 파싱 포함). 웹 작성이 만든 hwp도 같은 검증을 거친다(WA-05) |
 | API-13 | 버전 부여·`isLatest` 전환 단일 트랜잭션 (DM-05) · 감사 로그 · 실패 시 tmp 정리 |
-| API-14 | 응답에 `sameAsPrevious`(직전 버전과 sha256 동일) 포함 (DM-07) |
-| API-54 | `SUBMIT_HWP_UPLOAD=off`면 **410 `upload_closed`** — 인증 다음, 속도 제한·본문 읽기보다 먼저. 파일·DB 행·감사 기록을 남기지 않는다. 권한이 아니라 누구에게나 닫힌 길이라 404가 아니다 (WA-30~34 · [ADR-0014](../adr/0014-web-only-submission.md)) |
+| API-14 | 저장 결과에 `sameAsPrevious`(직전 버전과 sha256 동일) 포함 (DM-07) |
+| ~~API-54~~ | ~~`SUBMIT_HWP_UPLOAD=off`면 **410 `upload_closed`** — 인증 다음, 속도 제한·본문 읽기보다 먼저. 파일·DB 행·감사 기록을 남기지 않는다. 권한이 아니라 누구에게나 닫힌 길이라 404가 아니다 (WA-30~34)~~ — **폐지 2026-10-08** → WA-39 (라우트가 없다. 같은 스위치·410은 「전사」 [올리기]에만 남는다 — RU-60a) |
 
 ### `GET /api/submissions/:id/download`
 
@@ -147,6 +150,10 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 병합과 수정은 `composeMergedHwp` 하나를 쓴다 (HM-27) — 두 곳이 각자 조립하면
 표를 지우는 조건·채번 방식이 갈라진다.
 
+| ID | 요구사항 |
+|---|---|
+| API-58 | **(뒤로 — 2026-10-08 채택, 구현은 `feat/auto-flow`의 같은 GET 수정과 함께)** `GET` 응답의 `review`(승인자 이름·바뀐 줄)와 `canApprove`는 lead·head(내 부서)·readAll에게만 담는다. TACP-17이 작성자를 보내지 않는 것과 같은 방식이다. 응답이 줄어드는 쪽이라 TACP 표는 고치지 않는다. 그때까지는 부서원 홈의 읽기 전용 드로어(`variant="view"`, CP-114)가 화면에서 그리지 않는다. 시험 API-T16 |
+
 ### `GET /api/template` — 부서 양식 다운로드
 
 | ID | 요구사항 |
@@ -155,9 +162,10 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 | API-18 | 파일명 `{주차라벨}_{부서명}_주간업무.hwp` — 주차 주입 |
 | API-19 | 잠김 상태에서도 다운로드 가능 (다음 주 대비) |
 
-### `GET /api/my/history`
+### ~~`GET /api/my/history`~~ — **폐지 2026-10-08** (R2 · PG-70)
 
-최근 26주 본인 제출 이력. 본인 것만 (API-08 원칙).
+~~최근 26주 본인 제출 이력. 본인 것만 (API-08 원칙).~~ 화면이 부른 적이 없었다. 내 지난 주는 부서원 홈의
+지난 주차(PG-68)가 서버 렌더로 그린다(`src/server/my-weeks.ts`). 라우트 파일을 지웠다 — 404.
 
 ---
 
@@ -165,10 +173,13 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 
 lead 전용 표기가 있는 엔드포인트는 member에게 **404**.
 
-### `GET /api/division/status` — **member도 접근 가능 (v2.1)**
+### ~~`GET /api/division/status`~~ — **폐지 2026-10-08** (R2 · TACP-11 v1.8 · [ADR-0016](../adr/0016-division-status-visibility.md))
 
-member 응답은 축소판: `members[].{user.name, status, uploadedAt}` 만 —
-버전 수·크기·다운로드 링크는 lead부터 (AU-06).
+부서원에게 이름·시각 축소판을 주던 **마지막 경로**였다(화면 호출 0). 부서원 홈에서 명단이 빠지면서(PG-66) 라우트를 지웠다 — 404.
+담당자의 현황은 수합 관리 페이지가 서버 함수 `divisionStatus`를 직접 부른다(그 앞에 `canManage` — PG-T08). 아래 계약은 기록으로 남긴다.
+
+~~member 응답은 축소판: `members[].{user.name, status, uploadedAt}` 만 —
+버전 수·크기·다운로드 링크는 lead부터 (AU-06).~~
 
 ```jsonc
 // 200 (lead 응답) — ?slot=2026-W33 지원 (기본: 현재)
@@ -187,8 +198,8 @@ member 응답은 축소판: `members[].{user.name, status, uploadedAt}` 만 —
 
 | ID | 요구사항 |
 |---|---|
-| API-20 | 분모 = `isActive && onRoster` (DM-04). 미제출자 포함 전원 |
-| API-21 | 정렬 `sortOrder → name` |
+| API-20 | 분모 = `isActive && onRoster` (DM-04). 미제출자 포함 전원 — `divisionStatus`가 그대로 지킨다 |
+| API-21 | 정렬 `sortOrder → name` — 위와 같다 |
 
 ### `GET /api/submissions/:id/preview` — 드로어 데이터 ★
 
@@ -226,9 +237,10 @@ member 응답은 축소판: `members[].{user.name, status, uploadedAt}` 만 —
 
 ST-16. `?slot=` 지원, 0건 409, 스트리밍, 감사 로그.
 
-### `GET /api/division/slots`
+### ~~`GET /api/division/slots`~~ — **폐지 2026-10-08** (R2 · PG-72)
 
-부서 관점 주차 목록 (최신 26개): `{isoKey, label, submitted, roster, locked}`.
+~~부서 관점 주차 목록 (최신 26개): `{isoKey, label, submitted, roster, locked}`.~~ 화면이 부른 적이 없었다.
+수합 관리의 주차 목록은 서버 함수 `divisionWeeks`(PG-72)가 만든다 — 근거 있는 주만, 상한 없이, 명단 기준 수. 라우트 파일을 지웠다.
 
 ### ~~`PUT /api/division/roster`~~ → **`PUT /api/ops/roster`로 이동 (v2.1)**
 
@@ -320,7 +332,7 @@ v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노�
 
 ### API-34 — 속도 제한
 
-업로드 5분당 10회/사용자 · zip 분당 3회 · preview 분당 30회 · 그 외 분당 120회.
+~~업로드 5분당 10회/사용자~~(2026-10-08 — 업로드 라우트와 함께 폐지, WA-39) · zip 분당 3회 · preview 분당 30회 · 그 외 분당 120회.
 
 ---
 
@@ -328,12 +340,12 @@ v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노�
 
 | ID | 내용 |
 |---|---|
-| API-T01 | 마감 후 업로드 → 409 `slot_locked` (dow=3 부서는 수요일 기준으로 판정) |
+| API-T01 | 마감 후 제출 저장 → 409 `slot_locked` (dow=3 부서는 수요일 기준으로 판정) (2026-10-08 — 예전 「업로드」. 저장 함수로 본다, WA-39) |
 | API-T02 | 마감 후 조회·다운로드는 정상 |
-| API-T03 | 본문 `divisionId` 위조 → JWT 신원의 부서로 저장 (DM-12) |
-| API-T04 | 재업로드 → v2, 이전 `isLatest=false` |
-| API-T05 | member가 `/api/division/status` → 200 축소판(링크·크기 없음) · zip/preview → 404 |
-| API-T06 | lead 현황에 미제출자 `missing` 포함, `onRoster=false`는 분모 제외 |
+| API-T03 | 본문 `divisionId`·`userId` 위조 → 신원의 부서·본인으로 저장 (DM-12) — 2026-10-08부터 웹 작성 문(`compose`)에 보낸다(예전: 업로드 멀티파트 필드) |
+| API-T04 | 다시 내면 → v2, 이전 `isLatest=false` |
+| ~~API-T05~~ | ~~member가 `/api/division/status` → 200 축소판(링크·크기 없음)~~ — **폐지 2026-10-08**: 라우트가 없어 AU-T87(부서원은 현황을 받는 길이 없다)로 뒤집었다. zip/preview → 404는 AU-T13·ST-15가 본다 |
+| API-T06 | 수합 관리의 현황(`divisionStatus`)에 미제출자 `missing` 포함, `onRoster=false`는 분모 제외 |
 | API-T07 | preview 응답의 rows가 픽스처 실측값과 일치 (`sample-filled-w2` → 실적 9행) |
 | API-T08 | coordinator가 PUT 계열 호출 → 404 · GET /api/overview → 200 |
 | API-T09 | 전 엔드포인트 `no-store` · 시각 `+09:00` |

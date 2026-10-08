@@ -113,6 +113,10 @@ npx tsx scripts/notify-test.ts --reminder  # 마감 전 알림 경로를 지금 
   (`NotifyLog.kind = merge_held:<닫힌 시각>`)
 - 부서장 알림에는 **「각 항목을 누가 냈는지도 보입니다」**를 덧붙인다 (TACP-17).
   검토하다 잘못된 행을 찾으면 다음 행동은 그 사람과 이야기하는 것이기 때문이다
+- **NT-53 (2026-10-08) — 링크(`URL` 필드)는 알림 종류와 상관없이 `{MESSENGER_LINK_BASE}/{slug}/manage`다.** 예전에는 부서장 검토
+  요청(`merge_review`)만 보관함(`/{slug}/archive`)으로 갔는데, 보관함은 홈의 지난 주차로 합쳐졌고 홈의 [병합본]은 읽기 전용이다
+  — 부서장이 고치고 승인하는 곳은 수합 관리다(PG-70 · CP-114). 이미 나간 옛 링크는 그 주소의 보내기 페이지가 수합 관리로 받는다.
+  시험 `[NT-T66]`(`tests/messenger.test.ts`)
 
 ```bash
 npx tsx scripts/notify-test.ts --who      # 지금 보내면 누구에게 갈지만 (발송 없음)
