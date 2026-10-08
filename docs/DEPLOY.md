@@ -249,6 +249,9 @@ sudo docker exec repman sqlite3 /data/db/worklog.db ".tables" | tr -s ' ' '\n' |
 
 ### 2b-롤백 — 재빌드하지 않는다 (OPS-17)
 
+> v2 전환(2026-10-12)에서 v1으로 되돌릴 때는 [LAUNCH-v2.md](LAUNCH-v2.md) §3.1 — `repman:rollback`이 아니라 그날 ①에서 붙인 고정 태그 `repman:v1.39.0`으로 한다
+> (⑥을 빌드째 두 번 돌렸으면 `repman:rollback`은 v2다).
+
 ```bash
 sudo docker tag repman:rollback repman:latest
 bash scripts/deploy.sh prod --no-build     # 지금 태그로 다시 띄우고 health까지 — 롤백 태그는 옮기지 않는다
@@ -392,8 +395,9 @@ sudo systemctl daemon-reload && sudo mount -a && findmnt /mnt/backup
 
 ## 장애 시 (OPS-18)
 
-시스템이 죽고 마감이 임박하면 **그 주는 이메일로 되돌린다**:
-`/data/worklog/divisions/AI_and_Public_Relations_Division/template/active.hwp`를 메일로 배포.
+시스템이 죽고 마감이 임박하면 **그 주는 이메일로 되돌린다**: 부서마다 `/data/worklog/divisions/<부서-slug>/template/active.hwp`를 메일로 배포
+(파일럿 때 예: `AI_and_Public_Relations_Division`). v2(2026-10-12 — 켠 부서 12 + 본부)에서는 부서·본부·전사 취합도 손으로 돌아간다 —
+누가 알리고 양식 사본을 어디 두는지는 [LAUNCH-v2.md](LAUNCH-v2.md) §5 질문 10.
 
 ## 배포 금지 시간대 (OPS-16)
 
