@@ -9,8 +9,9 @@ const schema = z.object({
   CF_ACCESS_AUD: z.string().default(''),
   MAX_UPLOAD_BYTES: z.coerce.number().int().positive().default(20 * 1024 * 1024),
   /**
-   * WA-30 · ADR-0014 — hwp 업로드 제출 스위치. 운영은 아직 hwp로 내는 부서가 있어 기본은 `on`.
-   * 테스트 서버만 `off`. 직접 읽지 말고 `submit-mode.ts`를 거친다
+   * RU-60a · ADR-0014 — 「전사」 게시판 hwp [올리기] 스위치. 직접 읽지 말고 `submit-mode.ts`를 거친다.
+   * 2026-10-08 — 부서원 업로드 제출은 코드째 없어져(WA-39) 이 값과 상관없다. [올리기]가 걷히는 다음 웨이브에서
+   * `submit-mode.ts`와 함께 지운다. 기본값은 건드리지 않았다 — [올리기]의 동작을 바꾸는 일이라 그쪽 작업에 둔다
    */
   SUBMIT_HWP_UPLOAD: z.enum(['on', 'off']).default('on'),
   // HM-24 — 병합 보조 모델. 비워두면 결정론 병합만 수행한다 (모델은 얹는 것이지 의존 대상이 아니다).
