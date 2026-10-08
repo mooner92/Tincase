@@ -79,6 +79,9 @@ acquire_lock() {
 # 긴 빌드가 끝난 뒤에야 비밀번호를 물으면 자리를 비운 사이 멈춰 있다 — 처음에 한 번 받아 둔다
 ensure_privilege() {
   [[ $(id -u) -eq 0 ]] && return 0
+  # 비밀번호 없이 되는 sudo(NOPASSWD)가 먼저다 — `sudo -v`는 sudoers에 비밀번호 규칙이 하나라도 섞여 있으면
+  # NOPASSWD여도 비밀번호를 묻고, 터미널이 없으면(백그라운드·원격 실행) 그대로 실패한다 (2026-10-08 data04에서 실측)
+  sudo -n true 2>/dev/null && return 0
   sudo -v || die "sudo 인증 실패 — docker는 sudo가 필요하다 (mhchoi는 docker 그룹이 아니다)"
 }
 
