@@ -22,6 +22,13 @@
 - 옛 주소 `/history`·`/archive`·타 부서 `/{slug}`는 보낸다(2026-12-31까지 — 홈 뼈대 아래라 HTTP는 200 + meta refresh, 브라우저는 곧바로 옮긴다). 병합 알림 링크는 모두 수합 관리 (PG-70 · NT-53)
 - 시험 번호 정리: 보관함 시험 `[PG-T90]`이 사용 안내의 `[PG-T90]`과 겹쳐 PG-T94로 옮겼다. 지운 `ArchiveList` 머리 주석의
   「CP-80~82」는 잘못 붙은 번호였다(07의 CP-80~82는 RuleEditor·TemplateManager)
+- ⚑ **운영(`main` v1.39.0)에서 이 판으로 옮길 때 끊기는 주소** (2026-10-08 접근 리뷰):
+  - 404 — 「전사 현황」 `/ops/monitor`(운영에서는 총괄·운영자 상단 메뉴였다. 보내기 없음 — R17, 새 주소는 `/org`) ·
+    `GET /api/me` · `PUT /api/me/notify` · `GET /api/my/history` · `GET /api/division/status` · `GET /api/division/slots` ·
+    `GET /api/division/download-zip` · `GET /api/submissions/{id}/versions` · `POST /api/submissions`(hwp 업로드)
+  - 405 — `GET /api/division/rule` · `GET /api/schedule/deadline`(쓰기는 그대로)
+  - 보낸다 — `/{slug}/history` · `/{slug}/archive`(이미 나간 `merge_review` 알림 링크 포함, 2026-12-31까지)
+  - 바꾸는 순간 열려 있던 옛 화면(업로드 드롭존·알림 스위치)은 404를 받는다 — 새로 고치면 된다. 스키마는 추가만이다
 
 ## v1.39.0 — 2026-10-08
 

@@ -284,7 +284,8 @@ d('격리 스위트 — 릴리스 게이트 (AU-T12~T18)', () => {
     });
     expect(r2.status).toBe(404);
   });
-  // [AU-T14] 「member가 zip → 404 · lead 자기 부서 zip → 200」 — zip 경로와 함께 폐지 2026-10-08 (R1 · PG-73)
+  // 예전 이 자리의 「member가 zip → 404 · lead 자기 부서 zip → 200」은 zip 경로와 함께 폐지 2026-10-08 (R1 · PG-73).
+  // AU-T14(남의 부서 현황 → 404)는 현황이 남은 수합 관리 화면으로 옮겨 「PG-66 부서원 홈」 스위트에서 본다
   it('[AU-T16] operator·coordinator의 타 부서 열람 → 성공 + 감사 로그', async () => {
     const { prisma } = await import('@/server/db');
     const bSub = await prisma.submission.findFirstOrThrow({ where: { division: { slug: B.slug } } });
@@ -683,7 +684,7 @@ describe('health — 양식 파일 · 경고 (API-T13)', () => {
  * 이 스위트는 제 부서(다부서)와 가짜 주차를 만들고 끝나면 지운다 — 다른 시험의 부서 수·주차를 흔들지 않게.
  * 제출물 행은 파일 없이 넣는다: 홈은 행(WeekSlot·Submission·MergeRun)만 읽고 내용은 드로어를 열 때 읽는다.
  */
-describe('PG-66 부서원 홈 (PG-T94·T97·T98·T99 · AU-T87)', () => {
+describe('PG-66 부서원 홈 (PG-T94·T97·T98·T99 · AU-T87·T14)', () => {
   const H = { slug: 'Division_H', nameKo: '다부서' };
   const HID = {
     me: 'h-me@test.kei.re.kr',
@@ -918,6 +919,27 @@ describe('PG-66 부서원 홈 (PG-T94·T97·T98·T99 · AU-T87)', () => {
     const asLead = await visit(ManagePage as never, HID.lead);
     expect(asLead.digest).toBeNull();
     expect(elements(asLead.tree).some((e) => typeof e.type === 'function' && (e.type as { name: string }).name === 'ManageView')).toBe(true);
+  });
+
+  // 현황 API가 없어진 뒤 남의 부서 현황에 닿는 길은 수합 관리 화면 하나다. 그 화면 페이지는 getDivisionView의 404를
+  // 스스로 잡지 않고 레이아웃에 맡기므로, 막는 쪽(레이아웃)을 직접 본다 — 여기가 비면 현황이 그대로 그려진다
+  it('[AU-T14] 남의 부서 lead·head는 수합 관리(현황)를 열지 못한다 — 레이아웃이 404. 내 부서 담당자는 연다 (2026-10-08 — 현황 API 폐지 뒤 남은 길)', async () => {
+    const { prisma } = await import('@/server/db');
+    const { default: DivisionLayout } = await import('@/app/[division]/layout');
+    const da = await prisma.division.findUniqueOrThrow({ where: { slug: A.slug } });
+    const head = await prisma.user.create({
+      data: { email: 'a-head-t14@test.kei.re.kr', name: 'a-head-t14', divisionId: da.id, divisionRole: 'head', mustChangePassword: false },
+    });
+    await prisma.user.updateMany({ where: { email: ID.aLead }, data: { mustChangePassword: false } });
+    try {
+      for (const who of [ID.aLead, head.email]) {
+        expect((await visit(DivisionLayout as never, who)).digest, who).toBe('NEXT_HTTP_ERROR_FALLBACK;404');
+      }
+      expect((await visit(DivisionLayout as never, HID.lead)).digest).toBeNull();
+    } finally {
+      await prisma.user.updateMany({ where: { email: ID.aLead }, data: { mustChangePassword: true } });
+      await prisma.user.delete({ where: { id: head.id } });
+    }
   });
 });
 

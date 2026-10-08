@@ -501,8 +501,8 @@ curl -m 5 http://<서버-내부-IP>:11111/          # 실패해야 정상
 |---|---|
 | AU-T12 | A부서 member가 B부서 페이지 `GET /{B-slug}` → **404** |
 | AU-T13 | A부서 lead가 B부서 submissionId 다운로드/드로어 → **404** |
-| AU-T14 | A부서 lead가 B부서 ~~zip/~~현황 API → **404** (zip은 폐지 2026-10-08) |
-| AU-T15 | member가 같은 부서 **현황 조회 → 성공(이름·여부·시각)**, 타인 파일 다운로드/드로어 → **404** |
+| AU-T14 | A부서 lead·head가 B부서 ~~zip/현황 API~~ **현황(수합 관리 `/{B}/manage`) → 404** — 레이아웃이 낸다 (2026-10-08 — zip·`GET /api/division/status` 폐지로 현황이 있는 곳은 수합 관리 화면뿐, `tests/integration.test.ts`) |
+| AU-T15 | member가 같은 부서 ~~**현황 조회 → 성공(이름·여부·시각)**~~(**폐지 2026-10-08** — TACP-11 v1.8, 뒤집은 시험은 AU-T87), 타인 파일 다운로드/드로어 → **404** |
 | AU-T16 | operator·coordinator의 타 부서 열람 → 성공 + **감사 로그 기록** (AU-15·16) |
 | AU-T17 | (member 기준) 존재하지 않는 slug와 남의 slug의 응답이 **구별 불가능** (동일 404) |
 | AU-T18 | coordinator가 타 부서 규칙/양식 **변경** 시도 → 404 (읽기 전용) |

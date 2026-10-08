@@ -50,7 +50,7 @@ describe('PG-49 활성 메뉴 판정', () => {
   const active = (path: string) => op.filter((i) => isNavActive(i.href, path, op, 'psd')).map((i) => i.label);
 
   it('[PG-T65] 「전사」를 보는 동안 `운영`이 같이 켜지지 않고, 운영 화면에서는 `전사`가 켜지지 않는다', () => {
-    // 예전 「전사」 주소 /ops/monitor는 /ops 아래라 둘이 같이 켜질 뻔했다 — 지금은 /org로 보낸다(PG-49f), 거기서 헤더를 그리지 않는다
+    // 예전 「전사」 주소 /ops/monitor는 /ops 아래라 둘이 같이 켜질 뻔했다 — 그 주소는 2026-10-08에 지웠다(R17 · PG-49f)
     expect(active('/org')).toEqual(['전사']);
     expect(active('/ops')).toEqual(['운영']);
     expect(active('/ops/audit')).toEqual(['운영']);
