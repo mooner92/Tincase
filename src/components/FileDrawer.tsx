@@ -264,7 +264,6 @@ export function FileDrawer({
           {data && !loading && editing && data.rowsByTable && (
             <SubmissionEditor
               submissionId={data.submission.id}
-              ownerName={data.submission.userName}
               version={data.submission.version}
               initial={data.rowsByTable}
               onCancel={() => {
@@ -278,7 +277,7 @@ export function FileDrawer({
                 // CP-106a — [다시 병합]을 누르라고 할 때는 무엇이 사라지는지도 말한다 (HM-49)
                 setSavedNote({
                   id: newId,
-                  text: `v${v}로 저장했습니다 — 원래 판은 그대로 있습니다. 병합본에 넣으려면 [다시 병합]을 누르세요 (병합본에서 고친 내용이 있으면 사라집니다).`,
+                  text: `v${v}로 저장 · 병합본엔 [다시 병합]`,
                 });
                 onNavigate(newId);
                 router.refresh();
@@ -294,7 +293,7 @@ export function FileDrawer({
                 <section key={t.title}>
                   <h3 className="mb-2 text-[15px] font-semibold text-ink">{t.title}</h3>
                   {t.rows.length <= 1 ? (
-                    <p className="text-sm text-muted">내용 없음{t.title.startsWith('3') && ' (표 삭제됨 — 관례상 정상)'}</p>
+                    <p className="text-sm text-muted">내용 없음</p>
                   ) : (
                     <div className="overflow-x-auto rounded-lg border border-hairline">
                       <table className="w-full min-w-[520px] text-[13px]">
@@ -327,7 +326,7 @@ export function FileDrawer({
               {data.tables.length === 2 && (
                 <section>
                   <h3 className="mb-1 text-[15px] font-semibold text-ink">3. 기타 특이사항</h3>
-                  <p className="text-sm text-muted">없음 (표 삭제됨 — 관례상 정상)</p>
+                  <p className="text-sm text-muted">내용 없음</p>
                 </section>
               )}
             </div>

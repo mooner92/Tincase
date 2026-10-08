@@ -404,7 +404,6 @@ export function MergedDrawer({
             </button>
           )}
         </div>
-        <p className="mt-1.5 text-xs text-muted">hwp로 받아 한글에서 열고, 표를 복사해 게시판에 붙여넣습니다</p>
         </div>
 
         {/* HM-47 — 승인 상태. 부서장에게는 [고칠 것 없음 · 승인] — 고쳐 저장하면 그 저장이 승인이다 */}
@@ -423,9 +422,7 @@ export function MergedDrawer({
             ) : (
               <span className="text-muted">
                 {/* CP-110 — 「고쳐서」만으로는 어디를 어떻게 고치는지 모른다. 이 화면에서 바로 된다는 것을 먼저 말한다 */}
-                {canEdit
-                  ? '아직 승인 전 — 칸을 눌러 바로 고치고 [수정 저장]하면 그 저장이 곧 승인이고, 담당자에게 알림이 갑니다'
-                  : '아직 승인 전'}
+                {canEdit ? '승인 전 · 고쳐 저장하면 승인' : '승인 전'}
               </span>
             )}
             {data.canApprove && (!data.review || data.review.changedAfter) && (
@@ -519,7 +516,7 @@ export function MergedDrawer({
                                     refocusRef.current = `${ti}-${to}`;
                                   }}
                                   aria-label={`${rowNo(t.key, ri)}행 옮기기 — 끌거나 위·아래 화살표`}
-                                  title="끌어서 옮기기 · ↑↓ 키로도 됩니다"
+                                  title="끌어서 옮기기"
                                   // 줄마다 늘 보이면 스물네 줄에 손잡이·공유·✕가 일흔두 개다 — 그 줄에 손이 갔을 때만 (넓은 화면)
                                   className="cursor-grab rounded px-1 py-1.5 text-muted-soft hover:bg-surface-soft hover:text-body focus:text-body focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink active:cursor-grabbing sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
                                 >
@@ -588,7 +585,7 @@ export function MergedDrawer({
                                   onClick={() => toggleEmphasis(ti, ri)}
                                   aria-pressed={t.emphasis?.[ri] === true}
                                   aria-label={`${rowNo(t.key, ri)}행 공유 표시`}
-                                  title="전체 공유·전달이 필요한 주요 사항 — 문서에 파란색으로 나갑니다"
+                                  title="파란색으로 나감"
                                   className={`rounded border px-1.5 py-0.5 text-xs font-semibold whitespace-nowrap transition-colors ${
                                     t.emphasis?.[ri]
                                       ? 'border-emphasis bg-emphasis text-white'
@@ -622,13 +619,6 @@ export function MergedDrawer({
               </section>
             );
           })}
-
-          {data && canEdit && (
-            <p className="text-xs leading-5 text-muted">
-              고친 내용은 [수정 저장]을 눌러야 병합본에 반영됩니다. 구분 번호(1-1, 1-2…)는 저장할 때
-              시스템이 다시 매깁니다. <strong className="font-medium">제출자가 올린 원본 파일은 바뀌지 않습니다.</strong>
-            </p>
-          )}
         </div>
       </div>
     </div>

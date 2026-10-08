@@ -80,11 +80,8 @@ export function RosterSync() {
   return (
     <section className="card">
       <h2 className="card-title">인원 최신화</h2>
-      <p className="card-desc max-w-[70ch]">
-        ERP에서 <strong className="font-medium text-ink">부서별 인원 현황</strong>을 엑셀로 내려받아 올리면
-        실별 인원을 맞춥니다. <strong className="font-medium text-ink">담당자·집계 여부·알림 설정·비밀번호는
-        그대로 둡니다</strong> — 사람이 정한 값은 엑셀이 덮지 않습니다.
-      </p>
+      {/* 어느 파일을 고르는지만 (2026-10-08 사용자: 주석 걷기 — 보존 규칙 설명은 걷었다. 규칙은 그대로다) */}
+      <p className="card-desc">ERP 「부서별 인원 현황」 엑셀</p>
 
       <div className="mt-4 flex flex-wrap items-center gap-3">
         {/* 기본 파일 입력은 브라우저 말(「Choose File」)로 그려져 화면 말과 섞인다 — 우리 버튼으로 감싼다 */}
@@ -167,7 +164,7 @@ export function RosterSync() {
           {plan.newDivisions.length > 0 && (
             <p className="text-sm text-body">
               새 부서 {plan.newDivisions.length}개 — {plan.newDivisions.map((d) => d.nameKo).join(', ')}
-              <span className="ml-1 text-muted">(비활성 상태로 만들어집니다)</span>
+              <span className="ml-1 text-muted">(비활성)</span>
             </p>
           )}
 
@@ -196,9 +193,6 @@ export function RosterSync() {
               <p className="font-medium text-ink">비밀번호 발급이 필요한 사람 {plan.needPassword.length}명</p>
               <p className="mt-0.5 text-muted">
                 {plan.needPassword.map((u) => `${u.division} ${u.name}`).join(', ')}
-              </p>
-              <p className="mt-1 text-xs text-muted">
-                비밀번호는 개인별로 전달해야 하므로 여기서 만들지 않습니다 — 위 [비밀번호 발급]에서 진행하세요.
               </p>
             </div>
           )}

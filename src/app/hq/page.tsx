@@ -107,7 +107,6 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
             runUrl="/api/rollup/hq"
             isoKey={slot.isoKey}
             ready={sent}
-            title="아직 이어 붙이지 않았습니다"
             resultWord="본부본"
           >
             {/* RU-55 — 본부장 승인. 버튼은 본부의 head에게만 (HM-47과 같은 규칙) */}
@@ -131,10 +130,6 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
               </p>
             )}
           </RunCard>
-          <p className="px-1 text-xs leading-5 text-muted">
-            본부본은 여기서 고치지 않습니다 — 단위 안의 내용은 그 실·팀의 것입니다. 고칠 곳이 있으면 그 실·팀이 고쳐 다시
-            제출하고, 여기서 다시 이어 붙이세요.
-          </p>
         </div>
       </main>
       <AppFooter />

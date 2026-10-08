@@ -204,12 +204,8 @@ export function PreviousWeekPanel({
               </div>
             )}
 
-            {/* 안내 한 줄과 받기를 한 줄에 — 받기만 홀로 한 줄을 차지하면 그만큼 표가 밀린다 */}
+            {/* 받기는 오른쪽 위 한 줄 — 「넣을 곳을 고르세요…」 안내는 2026-10-08에 걷었다(사용자: 주석 걷기) */}
             <div className="mb-1.5 flex flex-wrap items-baseline gap-x-3 gap-y-1">
-              <p className="text-xs text-muted">
-                줄 오른쪽에서 <strong className="font-medium text-body">넣을 곳</strong>을 고르세요 — 같은 일이라도
-                이번 주에는 실적일 수도, 계획일 수도 있습니다.
-              </p>
               {data.submissionId && (
                 <a
                   href={`/api/submissions/${data.submissionId}/download`}

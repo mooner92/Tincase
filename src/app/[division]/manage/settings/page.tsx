@@ -10,11 +10,14 @@ import { toPlan } from '@/server/merge/rules';
 import { latestEdits } from '@/server/merge/edits';
 import { currentWeek, toKstIso } from '@/lib/week';
 
-/** 타 부서 설정은 열람만 — 실수로 내 부서를 고치는 사고를 구조적으로 막는다 (AU-16) */
-function ReadOnlyNotice({ what, detail }: { what: string; detail?: string }) {
+/**
+ * 타 부서 설정은 열람만 — 실수로 내 부서를 고치는 사고를 구조적으로 막는다 (AU-16).
+ * 2026-10-08 — 「변경은 해당 부서 담당자가 합니다」 같은 설명을 걷고 상태만 (사용자: 주석 걷기)
+ */
+function ReadOnlyNotice({ detail }: { detail?: string }) {
   return (
     <p className="callout callout-warn">
-      다른 부서의 {what}은(는) 열람만 가능합니다. 변경은 해당 부서 담당자가 합니다.
+      읽기 전용
       {detail && <span className="ml-1 text-muted">· {detail}</span>}
     </p>
   );
@@ -52,7 +55,6 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
     <main className="pt-8">
       {/* 「← 수합 관리로」는 뺐다 — 상단 메뉴의 [수합 관리]와 같은 곳이다 */}
       <h1 className="page-title">부서 설정</h1>
-      <p className="page-sub">양식·작성 안내·병합 방식을 정합니다. 부서원에게 바로 반영됩니다.</p>
 
       <div className="mt-6 space-y-4 lg:space-y-6">
         {/* ② 부서 양식 (PG-28~30) */}
@@ -61,7 +63,6 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
             부서 양식
           </h2>
           {/* WA-33 — 업로드가 닫혀도 이 양식은 남는다. 웹 작성 제출물이 이 양식으로 만들어진다 */}
-          <p className="card-desc">부서원 업무일지가 이 hwp 양식으로 만들어집니다.</p>
           <div className="mt-4">
             {isOwn ? (
               <TemplateManager
@@ -74,7 +75,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
                 }
               />
             ) : (
-              <ReadOnlyNotice what="양식" detail={template ? `현재 v${template.version} 등록됨` : '등록된 양식 없음'} />
+              <ReadOnlyNotice detail={template ? `현재 v${template.version} 등록됨` : '등록된 양식 없음'} />
             )}
           </div>
         </section>
@@ -99,7 +100,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
               작성 안내 · 병합 설정
             </h2>
             <div className="mt-4 space-y-3">
-              <ReadOnlyNotice what="병합 설정 · 작성 안내" />
+              <ReadOnlyNotice />
               <pre className="callout callout-muted max-h-60 overflow-auto text-xs leading-5 whitespace-pre-wrap">
                 {[
                   division.mergeCategories && `분류 순서: ${division.mergeCategories}`,
@@ -120,7 +121,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
           <h2 id="roster" className="card-title">
             제출 대상
           </h2>
-          <p className="card-desc">집계에 드는 사람입니다. 취소선은 제외된 사람입니다.</p>
+          <p className="card-desc">취소선 = 집계 제외</p>
           <ul className="mt-4 grid grid-cols-2 gap-x-6 gap-y-1.5 text-sm sm:grid-cols-3">
             {users.map((u) => (
               <li key={u.id} className={u.onRoster ? 'text-ink' : 'text-muted-soft line-through'}>
@@ -129,9 +130,6 @@ export default async function SettingsPage({ params }: { params: Promise<{ divis
               </li>
             ))}
           </ul>
-          <p className="mt-4 text-xs text-muted">
-            명단·순서 변경은 운영자 소관입니다 — 운영자에게 요청하세요. {/* PG-32 */}
-          </p>
         </section>
       </div>
     </main>

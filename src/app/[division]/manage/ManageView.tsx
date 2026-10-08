@@ -243,18 +243,11 @@ export async function ManageView({
               )}
             </div>
           )}
-          {opened && (
-            <p className="callout callout-warn mt-4">
-              <strong className="font-semibold">마감을 열어 두었습니다</strong> — {openUntilKo}까지 부서원 누구나
-              제출할 수 있습니다. 시각이 지나면 저절로 닫히고,{' '}
-              {/* CP-106a · HM-49 — 고친 병합본은 닫힌 뒤에도 다시 만들지 않는다. 「한 번 더 돈다」만 말하면 늦게 낸 사람이 들어갔다고 믿는다 */}
-              {mergeState.edits
-                ? `병합본을 고친 곳이 있어 닫힌 뒤에도 다시 병합하지 않습니다.${
-                    canMerge ? ' 늦게 낸 것을 넣으려면 [다시 병합] — 고친 내용은 사라집니다.' : ''
-                  }`
-                : '닫힌 뒤 병합이 한 번 더 돕니다.'}
-            </p>
-          )}
+          {/*
+            CP-106a · HM-49 — 고친 병합본은 닫힌 뒤에도 다시 만들지 않는다. 그때만 한 줄 — 늦게 낸 사람이 들어갔다고 믿지 않게.
+            열어 둔 것 자체는 칩(「열어 둠 · …까지」)과 [지금 닫기]가 말한다 (2026-10-08 사용자: 주석 걷기)
+          */}
+          {opened && mergeState.edits && <p className="callout callout-warn mt-4">고친 병합본은 자동 재병합 안 함</p>}
         </section>
 
         {/* HM-26 — 병합 결과. 목요일 14:10에 이게 이미 준비돼 있는 게 목표다 */}
@@ -294,7 +287,7 @@ export async function ManageView({
                 전체 zip 받기 ({collected}개)
               </a>
             ) : (
-              <button disabled title="제출된 파일이 없습니다" className="btn-ghost">
+              <button disabled className="btn-ghost">
                 전체 zip 받기 (0개)
               </button>
             )
@@ -303,7 +296,7 @@ export async function ManageView({
           canDelete={canDeleteAny}
           footnote={
             offRoster.length > 0
-              ? `집계 제외: ${offRoster.map((u) => (u.note ? `${u.name}(${u.note})` : u.name)).join(', ')} — 내실 수는 있고, 내시면 «추가 제출»로 표시됩니다. 명단 변경은 운영자에게`
+              ? `집계 제외: ${offRoster.map((u) => (u.note ? `${u.name}(${u.note})` : u.name)).join(', ')}`
               : undefined
           }
         />
@@ -313,7 +306,6 @@ export async function ManageView({
           <SubmissionTableClient
             caption={`${division.nameKo} ${slot.label} 추가 제출`}
             title="추가 제출"
-            subtitle="집계 대상은 아니지만 병합에 포함됩니다"
             members={extras.map(toRow)}
             canDelete={canDeleteAny}
           />

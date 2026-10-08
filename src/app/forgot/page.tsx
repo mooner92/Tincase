@@ -10,10 +10,7 @@ export default function ForgotPage() {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/brand/tincase-stacked.svg" alt="Tincase" className="mx-auto h-[84px] w-auto" />
         <h1 className="mt-5 text-center text-xl font-semibold text-ink">비밀번호를 잊으셨나요</h1>
-        <p className="mt-2 text-center text-sm leading-6 text-muted">
-          메일 주소를 넣으시면 <strong className="font-medium text-body">사내 메신저로</strong> 재설정 링크를
-          보내 드립니다.
-        </p>
+        <p className="mt-2 text-center text-sm leading-6 text-muted">메신저로 재설정 링크를 보냅니다</p>
         <div className="mt-7">
           <ForgotForm />
         </div>

@@ -85,7 +85,7 @@ export function LoginForm() {
         href="/forgot"
         className="block text-center text-sm text-muted underline underline-offset-2 hover:text-ink"
       >
-        비밀번호를 잊으셨나요? 메신저로 재설정 링크 받기
+        비밀번호를 잊으셨나요?
       </a>
     </form>
   );

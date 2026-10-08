@@ -6,6 +6,8 @@
 // 최종본에 무엇으로 들어가나(최종본에). 막대를 누르면 남은 사람·팀이 펼쳐지고, 거기서 바로 안내문을 복사한다.
 //
 // 어느 열을 그릴지는 서버가 정해 넘긴다(TACP-9·12 — `orgPageView`). 열이 없는 사람에게는 그 열의 값도 오지 않는다.
+// [올리기]도 서버가 정한다(`canUpload` = 취합의 문 + hwp 스위치) — 2026-10-08 사용자가 「전부 웹에서 하는데 파일 업로드가 왜
+// 필요하냐」고 물었다. 웹만 받는 서버(스위치 off)에서는 그리지 않는다. [받기]·[올린 것 취소]는 스위치와 상관없이 둔다.
 import { useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -87,9 +89,12 @@ export function OrgBoard({
   weekLabel,
   deadlineText,
   head,
+  canUpload = false,
 }: {
   rows: OrgBoardRow[];
   columns: { progress: boolean; final: boolean };
+  /** RU-60 — 게시판으로 받은 섹션 hwp를 넣는 [올리기]. 최종본 열이 있고 hwp 스위치가 열린 서버에서만 */
+  canUpload?: boolean;
   /** 카드 머리 — 전사 합계와 [안내문 복사]. 숫자가 카드 밖에 떠 있지 않게 표와 한 카드에 둔다 */
   head?: ReactNode;
   isoKey: string;
@@ -132,7 +137,7 @@ export function OrgBoard({
     <section data-guide="org-board" className="card card-flush">
       {head && <div className="px-5 pt-5 pb-4 sm:px-6">{head}</div>}
       {/* RU-60 — 게시판으로 받은 섹션 파일. 제출 경로(웹 작성)와 다른 일이다 — 총괄이 받은 것을 최종본 자리에 넣는다 */}
-      {columns.final && (
+      {columns.final && canUpload && (
         <input
           ref={fileRef}
           type="file"
@@ -195,6 +200,7 @@ export function OrgBoard({
                       f={r.final}
                       hq={r.hq}
                       busy={busy}
+                      canUpload={canUpload}
                       onUpload={() => {
                         setTarget(r.final!.sectionId);
                         fileRef.current?.click();
@@ -202,7 +208,7 @@ export function OrgBoard({
                       onWithdraw={(id) => call(`del:${id}`, `/api/rollup/org/sections/upload?id=${id}`, { method: 'DELETE' })}
                     />
                   ) : (
-                    <span className="text-xs text-muted">최종본에 들어가지 않습니다</span>
+                    <span className="text-xs text-muted">—</span>
                   )}
                 </div>
               )}
@@ -230,7 +236,7 @@ function Detail({ row, p, weekLabel, deadlineText }: { row: OrgBoardRow; p: Sect
             <li key={t.id} className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)_3.5rem] items-center gap-x-3 gap-y-0.5">
               {t.isActive ? (
                 <>
-                  <Link href={`/${t.slug}/manage`} className="truncate font-medium text-ink hover:underline" title="수합 관리 열기 (읽기 전용)">
+                  <Link href={`/${t.slug}/manage`} className="truncate font-medium text-ink hover:underline" title="수합 관리 (읽기 전용)">
                     {t.name}
                   </Link>
                   <Bar value={t.submitted} max={t.roster} />
@@ -240,7 +246,7 @@ function Detail({ row, p, weekLabel, deadlineText }: { row: OrgBoardRow; p: Sect
               ) : (
                 <>
                   <span className="truncate text-muted">{t.name}</span>
-                  <span className="col-span-2 text-xs text-muted">Tincase 밖 · 게시판으로 제출</span>
+                  <span className="col-span-2 text-xs text-muted">Tincase 밖</span>
                 </>
               )}
             </li>
@@ -265,7 +271,7 @@ function Detail({ row, p, weekLabel, deadlineText }: { row: OrgBoardRow; p: Sect
           <NudgeButton names={p.missing} deadlineText={deadlineText} weekLabel={weekLabel} />
           {row.hq && (
             <Link href={row.hq.href} className="text-xs text-muted underline hover:text-ink">
-              {row.hq.name} 취합 화면 보기
+              {row.hq.name} 취합
             </Link>
           )}
         </div>
@@ -278,12 +284,14 @@ function FinalView({
   f,
   hq,
   busy,
+  canUpload,
   onUpload,
   onWithdraw,
 }: {
   f: FinalCell;
   hq: OrgBoardRow['hq'];
   busy: string | null;
+  canUpload: boolean;
   onUpload: () => void;
   onWithdraw: (uploadId: string) => void;
 }) {
@@ -300,7 +308,7 @@ function FinalView({
       {label &&
         /* 본부 대기·본부본에 없음 — 고칠 곳은 본부다. 그 본부 취합 화면으로 가는 길을 단다 */
         ((f.source === 'waiting_hq' || f.source === 'not_in_hq') && hq ? (
-          <Link href={hq.href} className="min-w-0 truncate text-xs text-muted underline hover:text-ink" title={`${label} — 본부 취합 보기`}>
+          <Link href={hq.href} className="min-w-0 truncate text-xs text-muted underline hover:text-ink" title={label}>
             {label}
           </Link>
         ) : (
@@ -310,7 +318,8 @@ function FinalView({
         ))}
       {/*
         줄 행동은 테두리 없는 버튼(CP-99) — 열두 줄에 테두리 버튼 「파일 올리기」가 늘어서면 표가 버튼 밭이 된다.
-        RU-60 — 올리기는 Tincase로 온 것이 없는 줄에만. 본부 대기 줄에도 둔다: 본부가 늦으면 게시판으로 받은 것을 넣는다
+        RU-60 — 올리기는 Tincase로 온 것이 없는 줄에만. 본부 대기 줄에도 둔다: 본부가 늦으면 게시판으로 받은 것을 넣는다.
+        hwp 스위치가 닫힌 서버에서는 없다(canUpload)
       */}
       <span className="ml-auto flex shrink-0 items-center gap-0.5">
         {f.source === 'tincase' && f.refId && (
@@ -328,8 +337,8 @@ function FinalView({
             </button>
           </>
         )}
-        {f.source !== 'tincase' && (
-          <button data-guide="org-upload" onClick={onUpload} disabled={!!busy} className="btn-ghost h-8 px-2.5" title="취합게시판으로 받은 그 섹션의 hwp를 올립니다">
+        {canUpload && f.source !== 'tincase' && (
+          <button data-guide="org-upload" onClick={onUpload} disabled={!!busy} className="btn-ghost h-8 px-2.5" title="게시판 hwp 넣기">
             {busy === `up:${f.sectionId}` ? '올리는 중…' : f.source === 'upload' ? '다시 올리기' : '올리기'}
           </button>
         )}

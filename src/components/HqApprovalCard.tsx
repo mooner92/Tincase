@@ -44,7 +44,7 @@ export function HqApprovalCard({
           <span className="text-muted">{approval.atKst}</span>
         </>
       ) : (
-        <span className="text-muted">아직 — 본부본을 받아 검토한 뒤 본부장이 [승인]을 누르면 담당자에게 알림이 갑니다</span>
+        <span className="chip chip-muted">승인 전</span>
       )}
       {canApprove && !done && (
         <button data-guide="hq-approve" onClick={approve} disabled={busy} className="btn-primary btn-sm sm:ml-auto">

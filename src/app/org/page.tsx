@@ -2,7 +2,9 @@
 //
 // 2026-10-07 (사용자: 전사 한 화면으로 단순화) — 그 전까지 「전사」 메뉴는 [현황](/ops/monitor)·[취합](/org) 두 탭이었다.
 // 같은 부서를 두 모양(본부별 팀 막대 · 섹션 판)으로 두 번 보여 주었고, 주차 고르기는 한쪽에, 일정 카드는 다른 쪽에 있었다.
-// 이제 위에서 아래로 한 번만 읽는다: 머리글(주차 · 마감 한 줄 · [일정 바꾸기]) → 섹션 표(제출 · 최종본에) → 전사 취합본 만들기.
+// 이제 위에서 아래로 한 번만 읽는다: 머리글(주차 · 다가올 마감 줄 · [일정 바꾸기]) → 섹션 표(제출 · 최종본에) → 전사 취합본 만들기.
+// 2026-10-08 (사용자: 주석 걷기·일정 카드 단순화) — 표 밑 각주 한 줄을 걷고,
+// 마감 줄은 다가올 주차만, [일정 바꾸기] 한 번에 입력칸이 열린다(WS-19l). [올리기]는 hwp 스위치를 따른다(RU-60).
 // `/ops/monitor`는 여기로 보낸다 — 옛 주소·알림 링크가 끊기지 않게.
 //
 // 무엇을 그릴지는 `orgPageView` 하나가 정한다(TACP-9·12): 제출 열·감사 링크는 전 부서를 읽는 사람(readAll),
@@ -19,16 +21,15 @@ import { OrgBoard } from '@/components/OrgBoard';
 import { OrgRunCard } from '@/components/OrgRunCard';
 import { SectionEditor } from '@/components/SectionEditor';
 import { NudgeButton } from '@/components/NudgeButton';
-import { ScheduleFold } from '@/components/ScheduleFold';
 import { WeekSchedule } from '@/components/WeekSchedule';
 import { orgBoard } from '@/server/org-board';
-import { deadlineStatus } from '@/server/slot-deadline';
+import { deadlineStatus, upcomingWeeks } from '@/server/slot-deadline';
 import { loadOrgSetting } from '@/server/rollup/tree';
 import { rollupSlot } from '@/server/rollup/slot';
-import { stageCells, stageTimes } from '@/server/rollup/schedule';
+import { stageTimes } from '@/server/rollup/schedule';
 import { weekOptions } from '@/server/rollup/view';
+import { hwpUploadOpen } from '@/server/submit-mode';
 import { currentWeek, formatDeadlineKo } from '@/lib/week';
-import { STAGE_HQ, STAGE_UNIT } from '@/lib/rollup-stages';
 
 export const dynamic = 'force-dynamic';
 
@@ -49,28 +50,18 @@ export default async function OrgPage({ searchParams }: { searchParams: Promise<
     return q ? `/org?${q}` : '/org';
   };
   const [board, weeks, nav, t] = await Promise.all([orgBoard(slot, can, weekQuery), weekOptions(slot), rollupNav(scope), stageTimes(slot)]);
-  // WS-19l — 「주차 일정」 카드는 바꿀 수 있는 것이 하나라도 있는 사람에게만: 마감 바꾸기(TACP-20) · 3단계 스위치와 간격(취합과 같은 문).
+  // WS-19l — 머리글 마감 줄. 바꾸는 칸은 바꿀 수 있는 것이 있는 사람에게만: 마감 바꾸기(TACP-20) · 3단계 스위치와 간격(취합과 같은 문).
   // 위의 읽기 뒤에 — deadlineStatus는 다음 주 주차를 만들 수 있어서(upsert) 다른 주차 읽기와 겹치지 않게 한다
   const setting = can.desk ? await loadOrgSetting() : null;
-  const schedule = can.schedule || setting ? await deadlineStatus() : null;
+  const schedule = await deadlineStatus();
+  // 다가올 주차만 — 지난 마감은 보지 않는다 (2026-10-08 사용자: 「저번 주 몇 시 마감했는지 안 봐도 상관없어」).
+  // 이번 주 줄은 그날 마지막 단계 기한까지 둔다 — 부서 마감 뒤 14~16시가 총괄이 그 기한을 보는 때다
+  const upcoming = upcomingWeeks(schedule.weeks);
   const editing = sp.edit === 'sections' ? board.editor : null; // 편집기 값은 취합을 여는 사람에게만 온다
+  // RU-60 — 게시판 hwp [올리기]는 취합의 문 + hwp 스위치(WA-30). 스위치는 submit-mode 하나에서 읽는다(WA-T33)
+  const uploadOpen = hwpUploadOpen();
 
   const deadlineKo = formatDeadlineKo(t.anchor);
-  const stages = t.enabled ? stageCells(t.anchor, t) : null;
-  const summary = (
-    <span>
-      마감 <strong className="text-ink">{deadlineKo}</strong>
-      {/* RU-59 — 두 기한은 어디서나 같은 이름 한 쌍. /hq 머리·일정 카드·알림과 같은 말이다 */}
-      {stages && (
-        <>
-          {' '}
-          · {STAGE_UNIT} {stages.unitDueKo} · {STAGE_HQ} <strong className="text-ink">{stages.hqDueKo}</strong>
-        </>
-      )}
-      {/* RU-52 — 꺼져 있을 때 최종본 열을 보는 사람은 켜는 사람(운영자)뿐이다. 총괄에게는 아직 안 보인다는 것을 잊지 않게 */}
-      {!t.enabled && can.desk && <span className="ml-2 text-xs font-semibold text-warning">3단계 꺼짐</span>}
-    </span>
-  );
   const totals = board.totals;
   const pct = totals && totals.roster > 0 ? Math.round((totals.submitted / totals.roster) * 100) : 0;
   const sectionCount = board.rows.filter((r) => r.no !== null).length;
@@ -122,17 +113,11 @@ export default async function OrgPage({ searchParams }: { searchParams: Promise<
           </nav>
         </div>
 
-        {schedule ? (
-          <ScheduleFold summary={summary}>
-            <WeekSchedule
-              weeks={schedule.weeks}
-              canSchedule={can.schedule}
-              rollup={setting && { enabled: setting.enabled, unitDueMinutes: setting.unitDueMinutes, hqDueMinutes: setting.hqDueMinutes }}
-            />
-          </ScheduleFold>
-        ) : (
-          <p className="mt-1.5 text-[15px] text-muted">{summary}</p>
-        )}
+        <WeekSchedule
+          weeks={upcoming}
+          canSchedule={can.schedule}
+          rollup={setting && { enabled: setting.enabled, unitDueMinutes: setting.unitDueMinutes, hqDueMinutes: setting.hqDueMinutes }}
+        />
 
         {editing ? (
           <div className="mt-6">
@@ -145,6 +130,7 @@ export default async function OrgPage({ searchParams }: { searchParams: Promise<
               <OrgBoard
                 rows={board.rows}
                 columns={{ progress: can.progress, final: can.desk }}
+                canUpload={can.desk && uploadOpen}
                 isoKey={slot.isoKey}
                 weekLabel={slot.label}
                 deadlineText={deadlineKo}
@@ -178,17 +164,6 @@ export default async function OrgPage({ searchParams }: { searchParams: Promise<
                 }
               />
             </div>
-            {can.progress && (
-              <p className="mt-2 px-1 text-xs leading-5 text-muted">
-                {board.excludedNote && board.excludedNote.divisions > 0 && (
-                  <>
-                    업무일지를 내지 않는 부서 {board.excludedNote.divisions}곳({board.excludedNote.people}명)은 세지 않습니다 ·{' '}
-                  </>
-                )}
-                숫자는 명단 기준 · 팀 이름을 누르면 수합 관리(읽기 전용, 기록이 남습니다)
-              </p>
-            )}
-
             {board.ready !== null && (
               <div className="mt-6">
                 <OrgRunCard isoKey={slot.isoKey} ready={board.ready} run={board.run} coverage={board.coverage ?? []} />

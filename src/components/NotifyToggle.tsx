@@ -34,10 +34,8 @@ export function NotifyToggle({ initial }: { initial: boolean }) {
       disabled={busy}
       className="flex w-full items-center justify-between gap-3 px-4 py-2 text-left text-sm text-body hover:bg-surface-soft disabled:opacity-60"
     >
-      <span>
-        알림 받기
-        <span className="mt-0.5 block text-xs text-muted">마감 1시간 전 안내</span>
-      </span>
+      {/* 2026-10-08 — 「마감 1시간 전 안내」 부제는 걷었다: 알림은 넷이라 틀린 말이었다(NT-*) */}
+      <span>알림 받기</span>
       {/* 스위치 — 켜짐/꺼짐이 색과 위치 둘 다로 보여야 한다 */}
       <span
         aria-hidden

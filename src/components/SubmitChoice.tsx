@@ -105,13 +105,10 @@ export function SubmitChoice({
       )}
 
       {uploadOpen && mode === 'upload' ? (
-        <UploadDropzone hasPrevious={hasPrevious} />
+        <UploadDropzone />
       ) : (
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
-          {composeButton}
-          {/* 두 길이 있을 때만 「둘이 같다」고 안심시킨다. 하나뿐이면 비교할 대상이 없다 */}
-          <p className="text-sm text-muted">한글 없이 화면에서 적습니다 — 파일로 올린 것과 똑같이 처리됩니다.</p>
-        </div>
+        // 2026-10-08 — 「한글 없이 화면에서 적습니다 — 파일로 올린 것과 똑같이 처리됩니다」 안내를 걷었다(사용자: 주석 걷기)
+        composeButton
       )}
 
       {composer}

@@ -2,7 +2,8 @@
 // WA-20 · TACP-22 — 담당자 첨삭. 부서원 제출물을 고쳐 **그 사람의 새 판**으로 저장한다.
 //
 // 표 모양은 웹 작성(WebComposer)과 같다 — 구분은 시스템이 다시 매기므로 번호 표시만 둔다(ABS-5).
-// 원래 판은 그대로 남는다는 것을 저장 버튼 바로 옆에 적는다 — 「내가 남의 글을 지우나」 하는 망설임을 없앤다.
+// 원래 판은 그대로 남는다 — 저장 버튼이 「고쳐서 저장 (vN)」으로 새 판 번호를 말한다.
+// 2026-10-08 (사용자: 주석 걷기) — 위의 설명 callout과 버튼 옆 [다시 병합] 안내를 걷었다. 저장 뒤 한 줄(FileDrawer)이 말한다.
 import { useLayoutEffect, useRef, useState } from 'react';
 
 type Bucket = 'achievements' | 'plans' | 'notes';
@@ -35,7 +36,6 @@ const fit = (el: HTMLTextAreaElement | null) => {
 
 export function SubmissionEditor({
   submissionId,
-  ownerName,
   version,
   initial,
   onSaved,
@@ -43,7 +43,6 @@ export function SubmissionEditor({
   onDirtyChange,
 }: {
   submissionId: string;
-  ownerName: string;
   version: number;
   initial: Record<Bucket, EditRow[]>;
   onSaved: (newId: string, newVersion: number) => void;
@@ -126,10 +125,6 @@ export function SubmissionEditor({
 
   return (
     <div ref={rootRef} className="space-y-5">
-      <p className="callout callout-info">
-        <strong>{ownerName}</strong>님의 업무일지를 고칩니다. 저장하면 <strong>새 판(v{version + 1})</strong>이 생기고,
-        지금 판(v{version})은 그대로 남습니다. 판 목록에 「고친 사람」이 함께 표시됩니다.
-      </p>
       {SECTIONS.map((s) => (
         <section key={s.key}>
           <h3 className="mb-1.5 text-[15px] font-semibold text-ink">
@@ -176,8 +171,6 @@ export function SubmissionEditor({
         <button onClick={onCancel} disabled={busy} className="btn-secondary btn-sm">
           취소
         </button>
-        {/* CP-106a — 다시 병합은 병합본에서 고친 것을 지운다. 누르라고 하면서 그걸 숨기지 않는다 */}
-        <span className="text-xs text-muted">병합본에는 [다시 병합]을 눌러야 들어갑니다 — 병합본에서 고친 내용은 사라집니다</span>
       </div>
     </div>
   );

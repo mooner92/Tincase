@@ -101,10 +101,16 @@ describe('CP-106a · CP-107 — 병합 카드의 첫 그림', () => {
     );
   const edits = { places: 3, saves: 1, by: ['머리 실장'], lastAtKst: '10-08 14:12' };
 
-  it('[CP-T98] 고친 병합본이면 「[다시 병합]을 눌러주세요」에 고친 내용이 사라진다는 말이 붙는다', () => {
-    expect(html(state())).toContain('[다시 병합]을 눌러주세요');
-    expect(html(state())).not.toContain('고친 내용은 사라집니다');
-    expect(html(state({ edits }))).toContain('[다시 병합]을 눌러주세요 — 병합본을 고친 내용은 사라집니다');
+  it('[CP-T98] 빠진 사람은 「언제 기준」과 함께 — [다시 병합]을 시키는 지시문은 없다 (2026-10-08 사용자: 주석 걷기)', () => {
+    // 시점을 박아 둔다(UX-04): 병합 뒤에 낸 사람이 위 현황표에는 «제출», 여기에는 «빠짐»으로 동시에 보이므로
+    expect(html(state())).toContain('빠진 사람 1명');
+    expect(html(state())).toContain('10-08 14:01 기준');
+    // 지시문을 걷었으니 「누르라고 하면서 사라지는 것을 숨기는」 일(CP-106a)도 생기지 않는다.
+    // 고친 내용이 사라진다는 말은 [다시 병합]을 누른 자리의 확인(CP-106)과 「규칙 바뀜」 줄이 한다
+    for (const s of [state(), state({ edits })]) {
+      expect(html(s)).not.toContain('[다시 병합]을 눌러주세요');
+      expect(html(s)).not.toContain('고친 내용은 사라집니다');
+    }
   });
 
   it('[CP-T98] 규칙이 바뀌었으면 칩과 바뀐 설정 이름 · 안 바뀌었으면 칩 없음', () => {

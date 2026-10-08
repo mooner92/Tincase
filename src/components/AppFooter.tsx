@@ -5,7 +5,7 @@ export function AppFooter() {
   return (
     <footer className="mt-16 border-t border-hairline-soft">
       <div className="mx-auto flex max-w-[1120px] flex-wrap items-center justify-between gap-2 px-5 py-6 text-[13px] text-muted">
-        <span>Tincase · 한국환경연구원 부서 업무일지 수합</span>
+        <span>Tincase</span>
         <span>
           문의{' '}
           <a href="mailto:mhchoi@kei.re.kr" className="text-body underline-offset-2 hover:underline">

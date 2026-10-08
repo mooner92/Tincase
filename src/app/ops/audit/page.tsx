@@ -128,7 +128,7 @@ export default async function AuditPage({
               최근 {days}일 · {total}건
               {crossReads > 0 && (
                 <>
-                  {' · '}타 부서 열람 <span className="font-semibold text-body">{crossReads}건</span> — 경계를 넘은 접근입니다
+                  {' · '}타 부서 열람 <span className="font-semibold text-body">{crossReads}건</span>
                 </>
               )}
             </p>
@@ -227,7 +227,7 @@ export default async function AuditPage({
 
         {total > logs.length && (
           <p className="mt-3 text-xs text-muted">
-            최근 {logs.length}건만 표시했습니다 (전체 {total}건). 기간·행동을 좁혀 보세요.
+            최근 {logs.length}건 표시 (전체 {total}건)
           </p>
         )}
       </div>

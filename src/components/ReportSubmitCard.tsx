@@ -68,9 +68,10 @@ export function ReportSubmitCard({
   const sent = state.current;
   const needsSubmit = !sent || state.changedSinceSubmit;
   const approvalWord = headApproval === 'pending' ? '부서장 승인 전' : headApproval === 'changed' ? '부서장 승인 뒤 바뀜' : null;
-  // 설명 한 줄 — 낸 것(시각·누가) · 아직 할 일이 있으면 기한과 부서장 승인 상태 · 안 냈으면 무엇이 가는지
+  // 설명 한 줄 — 낸 것(시각·누가) · 아직 할 일이 있으면 기한과 부서장 승인 상태 · 낼 것이 없으면 그 한 마디.
+  // 2026-10-08 (사용자: 주석 걷기) — 「검토가 끝나면 제출하세요…」·「제출한 뒤 바뀌었습니다…」 문장을 걷었다. 칩과 기한이 말한다
   const desc: ReactNode[] = [
-    ...(sent ? [`${sent.submittedAtKst} · ${sent.submittedBy}${sent.origin === 'import' ? ' · 지난 자료 적재' : ''}`] : []),
+    ...(sent ? [`${sent.submittedAtKst} · ${sent.submittedBy}`] : []),
     ...(needsSubmit && state.dueKo
       ? [
           <strong key="due" className="font-semibold text-ink">
@@ -85,7 +86,7 @@ export function ReportSubmitCard({
           </span>,
         ]
       : []),
-    ...(!sent ? [state.hasOutput ? `검토가 끝나면 제출하세요. 그 순간의 ${what}이 ${target}에 갑니다.` : `${what}이 생기면 제출할 수 있습니다.`] : []),
+    ...(!sent && !state.hasOutput ? [`${what} 없음`] : []),
   ];
   return (
     <section
@@ -121,12 +122,6 @@ export function ReportSubmitCard({
         )}
       </div>
 
-      {sent && state.changedSinceSubmit && (
-        <p className="callout callout-warn mt-4">
-          제출한 뒤 {what}이 바뀌었습니다 — <strong>다시 제출해야</strong> 바뀐 내용이 {target}에 갑니다. 지금은 앞서 낸 판이 가 있습니다.
-        </p>
-      )}
-
       <div className="mt-5 flex flex-wrap items-center gap-2">
         {needsSubmit && (
           <button
@@ -147,7 +142,7 @@ export function ReportSubmitCard({
         {sent &&
           (confirmWithdraw ? (
             <span className="ml-auto flex flex-wrap items-center gap-2 text-sm">
-              <span className="text-body">제출을 취소할까요? {target}에서 「미제출」로 보입니다.</span>
+              <span className="text-body">제출을 취소할까요?</span>
               <button onClick={withdraw} disabled={busy} className="btn-secondary btn-sm">
                 제출 취소
               </button>

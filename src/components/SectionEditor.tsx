@@ -59,10 +59,7 @@ export function SectionEditor({
   return (
     <section className="card">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h2 className="text-base font-semibold text-ink">
-          섹션 구성 편집
-          <span className="ml-2 text-xs font-normal text-muted">이 순서·제목 그대로 최종본에 들어갑니다 · 섹션마다 새 쪽</span>
-        </h2>
+        <h2 className="text-base font-semibold text-ink">섹션 구성 편집</h2>
         <span className="flex gap-2">
           <button onClick={save} disabled={busy || !dirty} className="btn-primary btn-sm">
             {busy ? '저장 중…' : '저장'}
@@ -97,7 +94,7 @@ export function SectionEditor({
               className="max-w-full rounded-lg border border-border-strong px-2 py-1"
               aria-label={`${i + 1}번 섹션을 채우는 부서`}
             >
-              <option value="">— Tincase 밖 (파일 올림)</option>
+              <option value="">— Tincase 밖</option>
               {divisions.map((d) => (
                 <option key={d.id} value={d.id}>
                   {d.nameKo}
@@ -109,10 +106,6 @@ export function SectionEditor({
         ))}
       </ol>
       {err && <p className="callout callout-error mt-3">{err}</p>}
-      <p className="mt-3 text-xs text-muted">
-        Tincase로 낸 섹션은 낸 사람의 서식 그대로 들어갑니다. 본부 단계가 있는 본부의 실은 본부가 총괄에 낸 판의 것이 들어갑니다.
-        올린 파일은 그 섹션의 제목·빨간 안내문을 빼고 본문만 씁니다.
-      </p>
     </section>
   );
 }

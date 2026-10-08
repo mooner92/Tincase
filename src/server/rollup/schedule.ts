@@ -25,7 +25,7 @@ export function stagesFrom(anchor: Date, s: { unitDueMinutes: number; hqDueMinut
   };
 }
 
-/** 「주차 일정」 카드 한 줄의 단계 기한 (KST ISO + 글자) */
+/** 「전사」 머리글 주차 줄의 단계 기한 (KST ISO + 글자) */
 export interface StageCells {
   unitDue: string;
   unitDueKo: string;
@@ -34,7 +34,7 @@ export interface StageCells {
 }
 
 /**
- * WS-19l · RU-58 — 「주차 일정」 카드의 주차 한 줄에 붙이는 단계 기한. 순수 — 기준 시각(그 주 부서 마감)에서 센다.
+ * WS-19l · RU-58 — 「전사」 머리글 주차 한 줄(과 마감 바꾸기 미리보기 한 줄)에 붙이는 단계 기한. 순수 — 기준 시각(그 주 부서 마감)에서 센다.
  *
  * 부서 마감과 **같은 날이면 시각만** 적는다. 대개 같은 날 한두 시간 뒤라 날짜를 세 번 되풀이하면
  * 정작 달라지는 숫자(시각)가 묻힌다. 날이 넘어가면(「다음 날 같은 시각」) 날짜까지 적는다 — 그때는 날짜가 정보다.

@@ -22,7 +22,6 @@ export function SubmissionTableClient({
   members,
   caption,
   title,
-  subtitle,
   action,
   footnote,
   canDelete = false,
@@ -31,7 +30,6 @@ export function SubmissionTableClient({
   caption: string;
   /** 카드 제목 — 「부서원 11명」 */
   title: string;
-  subtitle?: string;
   /** 표 전체에 대한 행동 하나 (전체 zip 받기) — 카드 머리 오른쪽 */
   action?: React.ReactNode;
   /** 표 아래 한 줄 (집계 제외 안내) */
@@ -51,7 +49,7 @@ export function SubmissionTableClient({
       !confirm(
         `${row.user.name} 님의 이번 주 제출을 삭제합니다.\n` +
           `${n > 1 ? `올린 파일 ${n}개가 ` : '올린 파일이 '}모두 지워지고 미제출 상태가 됩니다.\n` +
-          `되돌릴 수 없으며 감사 로그에 남습니다.`,
+          `되돌릴 수 없습니다.`,
       )
     )
       return;
@@ -127,7 +125,6 @@ export function SubmissionTableClient({
         <div className="card-head items-center px-5 pt-4 pb-3 sm:px-6">
           <div className="min-w-0">
             <h2 className="card-title">{title}</h2>
-            {subtitle && <p className="text-sm text-muted">{subtitle}</p>}
           </div>
           {action}
         </div>

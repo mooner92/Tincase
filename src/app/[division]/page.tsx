@@ -133,15 +133,14 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
                 <h2 id="this-week" className="card-title">
                   이번 주 업무일지
                 </h2>
-                <p className="card-desc">
-                  {mySubmission
-                    ? `v${mySubmission.version} · ${toKstIso(mySubmission.uploadedAt).slice(5, 16).replace('T', ' ')}에 냈습니다`
-                    : locked
-                      ? `다음 주차는 ${formatDeadlineKo(nextOpens).replace(/ \d{2}:\d{2}$/, '')} 00:00에 열립니다.`
-                      : uploadOpen
-                        ? '화면에서 바로 적거나, 한글 파일을 올려 냅니다.'
-                        : '한글을 열지 않고 화면에서 바로 적어 냅니다. 제출하면 부서 양식으로 만들어집니다.'}
-                </p>
+                {/* 2026-10-08 (사용자: 주석 걷기) — 아직 안 냈을 때의 「화면에서 바로 적어 냅니다…」 설명은 걷었다. 버튼이 말한다 */}
+                {(mySubmission || locked) && (
+                  <p className="card-desc">
+                    {mySubmission
+                      ? `v${mySubmission.version} · ${toKstIso(mySubmission.uploadedAt).slice(5, 16).replace('T', ' ')}에 냈습니다`
+                      : `다음 주차 ${formatDeadlineKo(nextOpens).replace(/ \d{2}:\d{2}$/, '')} 열림`}
+                  </p>
+                )}
               </div>
               {mySubmission ? (
                 <span className="chip chip-ok">
@@ -155,9 +154,7 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
 
             {monthly && (
               <p className="callout callout-info mt-4">
-                <strong className="font-semibold">이번 주는 {slot.month}월 월간 업무일지입니다.</strong> 그 달의 마지막 날이
-                이번 주에 있습니다 — 한 주가 아니라 <strong className="font-semibold">한 달치</strong>를 정리해 주세요.
-                마감·제출 방법은 평소와 같습니다.
+                <strong className="font-semibold">이번 주는 {slot.month}월 월간</strong> — 한 달치를 적습니다
               </p>
             )}
 
@@ -167,10 +164,7 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
             */}
             {canCompose && !scope.user.onRoster && (
               <p className="callout callout-muted mt-4">
-                집계 대상에서 빠져 있어 현황에는 이름이 표시되지 않습니다
-                {scope.user.rosterNote ? ` (사유: ${scope.user.rosterNote})` : ''}.{' '}
-                <strong className="font-semibold text-ink">제출은 지금 하실 수 있고</strong>, 내시면 담당자 화면에
-                «추가 제출»로 표시되며 병합에도 들어갑니다.
+                집계 제외{scope.user.rosterNote ? `(${scope.user.rosterNote})` : ''} — 제출은 됩니다
               </p>
             )}
 
@@ -218,7 +212,6 @@ export default async function MemberPage({ params }: { params: Promise<{ divisio
                 <div className="card-section">
                   {/* WA-10 — 「빈 양식」이었으나 지난번 낸 것도 여기서 받는다. 제목이 내용을 덮어야 한다 */}
                   <h3 className="text-[15px] font-semibold text-ink">양식 받기</h3>
-                  <p className="mt-0.5 text-sm text-muted">한글로 적어 올릴 때 · 파일명에 이번 주차가 자동으로 들어갑니다.</p>
                   <div className="mt-3 flex flex-wrap items-center gap-2">
                     {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- 파일 다운로드, 클라이언트 내비게이션 아님 */}
                     <a href="/api/template" className="btn-secondary btn-sm">

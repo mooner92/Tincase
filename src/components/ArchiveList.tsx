@@ -31,9 +31,6 @@ export function ArchiveList({
     return (
       <section className="card py-10 text-center">
         <p className="card-title">아직 병합된 업무일지가 없습니다</p>
-        <p className="mt-2 text-sm text-muted">
-          마감(목요일 14:00)이 지나면 그 주 문서가 자동으로 합쳐져 여기에 쌓입니다.
-        </p>
       </section>
     );
   }

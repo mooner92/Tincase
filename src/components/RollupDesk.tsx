@@ -135,7 +135,6 @@ export function OrderList({
           <h2 id="order-list" className="card-title">
             산하 제출 · 이어 붙이는 순서
           </h2>
-          <p className="card-desc">위에서부터 문서에 들어갑니다 · {unitWord} 안의 내용은 바꾸지 않습니다</p>
         </div>
         {/*
           순서는 한 번 정하면 거의 안 바꾼다. 그런데 ▲▼·메모·체크박스·[순서 저장]이 늘 펼쳐져 있으면 매주 보는
@@ -196,7 +195,7 @@ export function OrderList({
       {canWrite && editing && (
         <div className="card-section space-y-3">
           <label className="block text-sm">
-            <span className="text-muted">메모 — 순서를 왜 이렇게 했는지, 편집할 때 지킬 것 (사람이 읽는 것입니다. 순서는 위 목록이 정합니다)</span>
+            <span className="text-muted">메모</span>
             <textarea
               value={noteText}
               onChange={(e) => {
@@ -205,7 +204,7 @@ export function OrderList({
               }}
               rows={2}
               className="mt-1 w-full rounded-lg border border-border-strong px-3 py-2 text-sm focus:border-ink focus:outline-none"
-              placeholder="예: 기획조정실 → 연구관리실 → 인사관리실 순. 본부장 지시로 AI홍보전략실은 맨 뒤"
+              placeholder="예: 순서 이유"
             />
           </label>
           <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
@@ -226,7 +225,7 @@ export function OrderList({
           {err && <p className="callout callout-error">{err}</p>}
         </div>
       )}
-      {saved && !dirty && <p className="mt-3 text-sm text-success">저장했습니다 — 다음 이어 붙이기부터 이 순서입니다</p>}
+      {saved && !dirty && <p className="mt-3 text-sm text-success">저장했습니다</p>}
       {(!canWrite || !editing) && note && <p className="mt-3 text-sm text-muted">메모: {note}</p>}
     </section>
   );
@@ -244,7 +243,6 @@ export function RunCard({
   runUrl,
   isoKey,
   ready,
-  title,
   resultWord,
   children,
 }: {
@@ -254,7 +252,6 @@ export function RunCard({
   isoKey: string;
   /** 이어 붙일 것이 하나라도 있나 */
   ready: number;
-  title: string;
   resultWord: string;
   /** 같은 카드의 아래 구역 — 승인 · 위로 제출 (각자 `card-section`을 그린다) */
   children?: ReactNode;
@@ -262,7 +259,6 @@ export function RunCard({
   const router = useRouter();
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
-  const [showFixed, setShowFixed] = useState(false);
   const ok = run?.status === 'succeeded';
   // 다음에 할 일이 「이어 붙이기」인가 — 그때만 이 버튼이 주 버튼이다 (CP-99)
   const runIsNext = !ok || !!run?.stale;
@@ -282,8 +278,6 @@ export function RunCard({
     }
   };
 
-  const fixedUnits = run?.units.filter((u) => u.fixed?.length) ?? [];
-  const fixedCount = fixedUnits.reduce((n, u) => n + u.fixed!.length, 0);
   const total = run?.units.reduce(
     (a, u) => ({ a: a.a + u.rows.achievements, p: a.p + u.rows.plans, n: a.n + u.rows.notes, e: a.e + u.emphasis }),
     { a: 0, p: 0, n: 0, e: 0 },
@@ -308,9 +302,9 @@ export function RunCard({
               ) : run?.status === 'failed' ? (
                 <span className="text-error">{run.errorText}</span>
               ) : ready > 0 ? (
-                `${title} — 제출된 ${ready}개를 순서대로 이어 붙입니다.`
+                `${ready}곳 제출됨`
               ) : (
-                `${title} — 아직 제출된 것이 없습니다.`
+                '제출된 것 없음'
               )}
             </p>
           </div>
@@ -329,12 +323,6 @@ export function RunCard({
             <span className="chip chip-muted">아직 안 붙임</span>
           )}
       </div>
-
-      {ok && run!.stale && (
-        <p className="callout callout-warn mt-4">
-          이어 붙인 뒤 제출이 바뀌었습니다(새로 냄·취소·순서 변경) — <strong>다시 이어 붙이기</strong>를 누르세요.
-        </p>
-      )}
 
       {(ok || canWrite) && (
         <div className="mt-5 flex flex-wrap items-center gap-2">
@@ -379,30 +367,9 @@ export function RunCard({
       )}
       {/*
         RU-19 — 엔진이 이미 고친 것은 주황 상자에 넣지 않는다. 할 일이 없는 줄이 [승인] 바로 위에서 경고처럼 뜨면
-        「무엇을 확인하라는 거지?」로 멈춘다(2026-10-08). 전사 카드처럼 중립 글자로 접어 두고, 궁금하면 펼친다
+        「무엇을 확인하라는 거지?」로 멈춘다(2026-10-08). 접어 두던 「자동으로 고친 것 N건」도 같은 날 걷었다 — 전사 카드의
+        「섹션별 처리」와 같은 이유(사용자: 「이게 뭐야」). 기록(run.units[].fixed)은 그대로 둔다
       */}
-      {ok && fixedUnits.length > 0 && (
-        <div className="mt-3 text-sm">
-          <button onClick={() => setShowFixed((v) => !v)} aria-expanded={showFixed} className="flex items-center gap-2 text-muted hover:text-ink hover:underline">
-            <span
-              aria-hidden
-              className={`relative -top-px inline-block h-1.5 w-1.5 border-r-[1.5px] border-b-[1.5px] border-current transition-transform ${
-                showFixed ? 'rotate-45' : '-rotate-45'
-              }`}
-            />
-            자동으로 고친 것 {fixedCount}건
-          </button>
-          {showFixed && (
-            <ul className="mt-2 space-y-1 pl-4 text-xs text-muted">
-              {fixedUnits.map((u, i) => (
-                <li key={`${u.name}-${i}`}>
-                  <span className="text-body">{u.name}</span> — {u.fixed!.join(' · ')}
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-      )}
       {err && <p className="callout callout-error mt-4">{err}</p>}
       {children}
     </section>

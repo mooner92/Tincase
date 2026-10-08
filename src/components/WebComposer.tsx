@@ -254,13 +254,10 @@ export function WebComposer({
         aria-label="업무일지 작성"
         className="absolute inset-y-0 right-0 flex h-full w-full max-w-5xl flex-col border-l border-hairline bg-canvas shadow-[0_8px_32px_rgba(0,0,0,0.12)]"
       >
-        {/* 머리 — 제목 하나 + 붙여넣기 한 줄. 이걸 모르면 한 칸씩 옮겨 적는다 */}
+        {/* 머리 — 제목 하나. 붙여넣기는 첫 칸의 placeholder가 말한다 (2026-10-08 사용자: 주석 걷기 — 설명 줄을 걷었다) */}
         <div className="flex items-start justify-between gap-3 border-b border-hairline px-4 py-4 sm:px-7">
           <div className="min-w-0">
             <h2 className="card-title">업무일지 작성</h2>
-            <p className="mt-0.5 text-sm text-muted">
-              제출하면 부서 양식으로 만들어집니다 · 한글 표를 복사(Ctrl+C)해 첫 칸에 붙여넣을 수 있습니다
-            </p>
           </div>
           <div className="flex shrink-0 items-center gap-2">
             {pasted && <span className="text-sm font-medium text-success">{pasted}</span>}
@@ -276,7 +273,6 @@ export function WebComposer({
           {from === 'submission' && initialVersion !== undefined && (
             <p className="mb-4 text-sm text-body">
               <span className="font-semibold text-ink">지금 낸 v{initialVersion}에서 시작합니다</span>
-              <span className="ml-1.5 text-muted">· 고쳐서 제출하면 v{initialVersion + 1}로 저장됩니다</span>
             </p>
           )}
           {from === 'draft' && (
@@ -387,7 +383,7 @@ export function WebComposer({
                         value={row.content}
                         onChange={(e) => set(s.key, i, 'content', e.target.value)}
                         onPaste={(e) => onPaste(s.key, i, e)}
-                        placeholder={isPasteTarget ? '여기에 한글 표를 붙여넣으세요 (Ctrl+V) · 직접 입력해도 됩니다' : ''}
+                        placeholder={isPasteTarget ? '한글 표 붙여넣기 (Ctrl+V)' : ''}
                         aria-label={`${s.title} ${i + 1}번째 줄 업무 내용`}
                         aria-describedby={looksEmpty ? `empty-hint-${s.key}-${i}` : undefined}
                         className={`${cell} sm:flex-1 ${
@@ -439,7 +435,7 @@ export function WebComposer({
                           onClick={() => toggleEmphasis(s.key, i)}
                           aria-pressed={row.emphasis === true}
                           aria-label={`${i + 1}번째 줄 공유 표시`}
-                          title="전체 공유·전달이 필요한 주요 사항 — 병합본에 파란색으로 나갑니다"
+                          title="파란색으로 나감"
                           className={`h-8 w-10 shrink-0 rounded-md border px-1 text-center text-xs font-semibold whitespace-nowrap transition-colors ${
                             row.emphasis
                               ? 'border-emphasis bg-emphasis text-white'
@@ -458,8 +454,7 @@ export function WebComposer({
                 */}
                 {emptyWords.length > 0 && data[s.key].some((r) => flagWordOf(r.content, emptyWords)) && (
                   <p className="border-t border-hairline-soft px-2.5 py-1.5 text-xs leading-5 text-body">
-                    <span className="font-medium text-ink">「없음」이라고 적으신 칸이 있어요.</span>{' '}
-                    적을 내용이 없으면 <strong className="font-medium">비워두셔도 됩니다</strong> — 그대로 두셔도 제출은 됩니다.
+                    「없음」 칸은 비워도 됩니다
                   </p>
                 )}
               </div>
@@ -467,12 +462,8 @@ export function WebComposer({
           ))}
 
           <p className="pb-2 text-xs leading-6 text-muted">
-            {/* WA-36 — 「공유」의 뜻. 툴팁은 터치·좁은 화면에서 안 뜬다 */}
-            <span className="font-medium text-emphasis">공유</span> — 전 직원에게 전할 주요 사항에 누릅니다. 병합본에
-            파란색으로 나갑니다
-            <br />
-            일자는 특정 날짜가 있는 업무만 적습니다 (상시 업무는 비워 두세요) ·
-            빈 줄은 저장되지 않습니다 · 구분 번호는 제출할 때 다시 매겨집니다
+            {/* WA-36 — 「공유」의 뜻. 툴팁은 터치·좁은 화면에서 안 뜬다. 2026-10-08 — 일자·빈 줄·번호 안내 줄은 걷었다 */}
+            <span className="font-medium text-emphasis">공유</span> = 전 직원 공유 사항(파란색)
           </p>
         </div>
 

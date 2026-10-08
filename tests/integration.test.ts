@@ -1209,7 +1209,11 @@ d('WS-19 주차 마감 예외 — 총괄이 정한다', () => {
       expect((c.props('OrgBoard')?.rows as { final: unknown; hq: unknown }[]).every((r) => r.final === null && r.hq === null)).toBe(true);
       expect(c.has('OrgRunCard')).toBe(false);
       expect(c.props('WeekSchedule')).toMatchObject({ canSchedule: true, rollup: null });
-      expect(c.has('ScheduleFold')).toBe(true);
+      // WS-19l (2026-10-08) — 머리글 줄은 다가올 주차만. 지난 마감은 넘기지도 않는다
+      expect((c.props('WeekSchedule')?.weeks as { passed: boolean }[]).every((w) => !w.passed)).toBe(true);
+      expect((c.props('WeekSchedule')?.weeks as unknown[]).length).toBeGreaterThan(0);
+      // RU-60 — 최종본 열이 없으면 [올리기]도 없다
+      expect(c.props('OrgBoard')?.canUpload).toBe(false);
       expect(c.hrefs).toContain('/ops/audit');
       expect(c.hrefs).not.toContain('/ops');
       expect(c.hrefs.some((h) => h.includes('edit=sections'))).toBe(false);
@@ -1224,6 +1228,8 @@ d('WS-19 주차 마감 예외 — 총괄이 정한다', () => {
       expect((o.props('OrgBoard')?.rows as { no: number | null; final: unknown }[]).filter((r) => r.no !== null).every((r) => r.final !== null)).toBe(true);
       expect(o.has('OrgRunCard')).toBe(true);
       expect(o.props('WeekSchedule')).toMatchObject({ canSchedule: true, rollup: { enabled: false } });
+      // RU-60 — 최종본 열 + hwp 스위치(이 스위트는 기본값 on) → [올리기]가 있다. off 서버는 web-only-submit.test가 본다
+      expect(o.props('OrgBoard')?.canUpload).toBe(true);
       expect(o.hrefs).toEqual(expect.arrayContaining(['/ops', '/ops/audit', '/org?edit=sections']));
       const oe = await renderOrg(ID.op, { edit: 'sections' });
       expect([oe.has('SectionEditor'), oe.has('OrgBoard')]).toEqual([true, false]);

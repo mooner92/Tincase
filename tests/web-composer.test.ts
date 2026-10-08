@@ -28,7 +28,8 @@ describe('WA-35 「다시 작성」은 지금 낸 판에서', () => {
       initialVersion: 2,
     });
     expect(html).toContain('지금 낸 v2에서 시작합니다');
-    expect(html).toContain('v3로 저장됩니다');
+    // 2026-10-08 — 「고쳐서 제출하면 v3로 저장됩니다」는 걷었다(사용자: 주석 걷기). 시작점 한 줄만 남는다
+    expect(html).not.toContain('v3로 저장됩니다');
     expect(html).toContain('value="보도자료 배포"');
     expect(html).toContain('value="다음 주 계획"');
     expect(html).toMatch(/aria-pressed="true"[^>]*aria-label="1번째 줄 공유 표시"/);
@@ -50,7 +51,7 @@ describe('WA-36 「공유」 칸의 이름과 뜻 · 일자 예시', () => {
   it('[WA-T50] 머리글에 「공유」가 있고, 표 아래 한 줄이 뜻을 말한다 (툴팁은 터치에서 안 뜬다)', () => {
     const html = render();
     expect(html).toMatch(/<span class="w-10[^"]*"><span aria-hidden="true"[^>]*><\/span>공유<\/span>/);
-    expect(html).toContain('전 직원에게 전할 주요 사항에 누릅니다. 병합본에 파란색으로 나갑니다');
+    expect(html).toMatch(/<span class="[^"]*text-emphasis[^"]*">공유<\/span> = 전 직원 공유 사항\(파란색\)/);
   });
 
   it('[WA-T49] 일자 예시는 이번 주 화요일 · 계획 표는 다음 주 — 고정 「8/20」이 아니다', () => {

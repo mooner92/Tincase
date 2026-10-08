@@ -44,9 +44,10 @@ const DOW = ['', '월', '화', '수', '목', '금', '토', '일'];
  *
  * 답이 나온 뒤에도 «확인 필요»를 남겨두면, 볼 때마다 이미 끝난 확인을 다시 하게 된다.
  */
+// 2026-10-08 (사용자: 주석 걷기) — 탭 아래 설명 한 줄(「온보딩 1순위」 등)은 걷었다. 탭 이름이 말한다
 const TABS = [
-  { key: 'confirmed', label: '제출 확인', hint: '취합게시판에 제출일이 확인된 부서 — 온보딩 1순위' },
-  { key: 'none', label: '이력 없음', hint: '업무일지를 쓰지 않는 부서 (대부분 연구부서) · 상위 조직이 대표로 내는 경우' },
+  { key: 'confirmed', label: '제출 확인' },
+  { key: 'none', label: '이력 없음' },
 ] as const;
 
 export function OpsClient() {
@@ -138,13 +139,13 @@ export function OpsClient() {
   /**
    * AU-30 — 설정 링크 보내기.
    *
-   * 확인 문구에 **「바뀌지 않습니다」를 먼저** 쓴다. 운영자가 제일 무서워하는 건
+   * 확인 문구에 **「지금 비밀번호 유지」를** 넣는다. 운영자가 제일 무서워하는 건
    * 「이미 쓰고 있는 사람 비밀번호를 날리는 것」이고, 그 걱정이 남아 있으면
-   * 한 명씩 골라 보내게 된다 — 그러면 이 기능을 만든 뜻이 없다.
+   * 한 명씩 골라 보내게 된다 — 그러면 이 기능을 만든 뜻이 없다. (2026-10-08 — 네 줄 → 한 줄)
    */
   const sendSetupLink = (userIds: string[]) => {
     const n = userIds.length;
-    if (!confirm(`${n}명에게 비밀번호 설정 링크를 메신저로 보냅니다.\n\n· 지금 쓰고 있는 비밀번호는 바뀌지 않습니다\n· 본인이 링크를 눌러 새로 정할 때만 바뀝니다\n· 링크는 1회용이고 3일 뒤 사라집니다`))
+    if (!confirm(`${n}명에게 설정 링크를 보냅니다 (지금 비밀번호 유지)`))
       return;
     setBusy(true);
     fetch('/api/ops/setup-link', {
@@ -228,16 +229,13 @@ export function OpsClient() {
         <section className="card border-warning/50" aria-labelledby="issued">
           <div className="card-head items-center">
             <h2 id="issued" className="card-title">
-              발급된 임시 비밀번호 — 지금 전달하세요
+              발급된 임시 비밀번호
             </h2>
             <button onClick={() => setIssued([])} className="btn-ghost">
               목록 지우기
             </button>
           </div>
-          <p className="callout callout-warn mt-3">
-            서버에는 해시만 저장되어 <strong>이 화면을 닫으면 다시 볼 수 없습니다.</strong> 개인별로 전달하세요
-            (단체 메시지 금지).
-          </p>
+          <p className="callout callout-warn mt-3">닫으면 다시 볼 수 없습니다</p>
           <ul className="mt-4 space-y-2">
             {issued.map((x) => (
               <li key={x.userId} className="flex flex-wrap items-center gap-2 text-sm">
@@ -287,7 +285,7 @@ export function OpsClient() {
               </button>
             ))}
           </div>
-          <p className="py-3 text-sm text-muted">{TABS.find((t) => t.key === tab)?.hint}</p>
+          <div className="h-3" aria-hidden />
           {/* PG-64 — 실패는 실패라고 말하고 다시 부를 길을 둔다. 이미 받은 목록이 있으면 그대로 두고 위에 알린다 */}
           {loadErr && (
             <div role="alert" className="callout callout-error mb-4 flex flex-wrap items-center gap-3">
@@ -332,7 +330,7 @@ export function OpsClient() {
                       */}
                       {d.templateState === 'missing' ? (
                         <span
-                          title="등록 기록은 있는데 파일이 저장소에 없습니다 — 부서 설정에서 다시 올려주세요"
+                          title="파일 없음 — 다시 등록"
                           className="chip chip-warn text-xs"
                         >
                           파일 없음

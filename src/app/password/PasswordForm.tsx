@@ -96,7 +96,6 @@ export function PasswordForm({ first, hasPassword }: { first: boolean; hasPasswo
       >
         {busy ? '변경 중…' : '비밀번호 변경'}
       </button>
-      <p className="text-center text-xs text-muted">변경하면 다른 기기의 로그인은 모두 해제됩니다.</p>
     </form>
   );
 }

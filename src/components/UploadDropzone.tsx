@@ -12,7 +12,7 @@ type UploadState =
 
 const MAX_BYTES = 20 * 1024 * 1024;
 
-export function UploadDropzone({ hasPrevious }: { hasPrevious: boolean }) {
+export function UploadDropzone() {
   const [state, setState] = useState<UploadState>({ kind: 'idle' });
   const inputRef = useRef<HTMLInputElement>(null);
   const lastFileRef = useRef<File | null>(null);
@@ -155,7 +155,7 @@ export function UploadDropzone({ hasPrevious }: { hasPrevious: boolean }) {
               hwp 파일을 끌어다 놓거나 <span className="underline underline-offset-4">클릭해서 선택</span>
             </p>
             <p className="mt-2 text-[13px] text-muted">
-              .hwp · 최대 20MB{hasPrevious && ' · 다시 올리면 새 버전으로 저장됩니다'}
+              .hwp · 최대 20MB
             </p>
           </>
         )}

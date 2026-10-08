@@ -33,9 +33,7 @@ export function ForgotForm() {
           없는 메일이어도 같은 화면이 뜨므로(명단이 새지 않게), 안 오는 경우를 여기서 안내한다.
         */}
         <p className="text-sm leading-6 text-body">
-          <strong className="font-semibold text-ink">메신저를 확인해 주세요.</strong>
-          <br />
-          쪽지가 오지 않으면 등록되지 않은 주소이거나 사번이 없는 경우입니다 — 운영자에게 문의해 주세요.
+          <strong className="font-semibold text-ink">메신저를 확인해 주세요.</strong> 안 오면 운영자에게.
         </p>
         {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- 인증 밖 페이지 */}
         <a href="/login" className="btn-secondary mt-6 w-full">

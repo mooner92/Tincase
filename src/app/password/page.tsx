@@ -21,11 +21,8 @@ export default async function PasswordPage({
       <h1 className="page-title">
         {isFirst ? '비밀번호를 변경해 주세요' : '비밀번호 변경'}
       </h1>
-      <p className="mt-1 mb-6 text-sm text-muted">
-        {isFirst
-          ? '처음 발급받은 임시 비밀번호는 사용을 계속할 수 없습니다. 본인만 아는 값으로 바꿔 주세요.'
-          : `${ps.scope.user.name} 님`}
-      </p>
+      {/* 2026-10-08 — 첫 변경의 「임시 비밀번호는 계속 쓸 수 없습니다…」 설명은 걷었다. 제목이 말한다 */}
+      <p className="mt-1 mb-6 text-sm text-muted">{ps.scope.user.name} 님</p>
       <PasswordForm first={isFirst} hasPassword={!!ps.scope.user.passwordHash} />
       </div>
     </main>

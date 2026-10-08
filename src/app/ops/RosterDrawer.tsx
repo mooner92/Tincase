@@ -238,7 +238,7 @@ export function RosterDrawer({
                       <button
                         disabled={busy}
                         onClick={() => onSendSetupLink([u.id])}
-                        title="이 사람 메신저로 설정 링크를 보냅니다 — 기존 비밀번호는 바뀌지 않습니다"
+                        title="설정 링크 (비밀번호 유지)"
                         className="rounded border border-border-strong bg-canvas px-2 py-0.5 text-xs font-medium whitespace-nowrap text-ink hover:border-ink hover:bg-surface-soft disabled:opacity-50"
                       >
                         링크 보내기
@@ -251,7 +251,7 @@ export function RosterDrawer({
                       <button
                         disabled={busy}
                         onClick={() => onResetPassword(u)}
-                        title="임시 비밀번호를 화면에 한 번 띄웁니다 (메신저를 못 받는 경우에만)"
+                        title="임시 비밀번호 표시"
                         className="rounded px-1.5 py-0.5 text-xs whitespace-nowrap text-muted-soft hover:text-ink disabled:opacity-50"
                       >
                         직접

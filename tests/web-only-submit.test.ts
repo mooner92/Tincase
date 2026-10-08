@@ -193,6 +193,30 @@ d('WA-33 닫는 것은 업로드 하나 — 나머지는 그대로', () => {
   });
 });
 
+describe('RU-60 「전사」 게시판 hwp 올리기 — 업로드가 닫힌 서버', () => {
+  it('[WA-T31d] 운영자도 410 · 아무것도 남기지 않는다 / 취합 밖의 사람은 예전처럼 404', async () => {
+    const { prisma } = await import('@/server/db');
+    const op = 'w-op@test.kei.re.kr';
+    const div = await prisma.division.findUniqueOrThrow({ where: { slug: 'Wo_A' } });
+    await prisma.user.upsert({ where: { email: op }, create: { email: op, name: 'w-op', divisionId: div.id, isOperator: true }, update: {} });
+    const { POST } = await import('@/app/api/rollup/org/sections/upload/route');
+    const send = (who: string) => {
+      const fd = new FormData();
+      fd.set('file', new File([new Uint8Array(Buffer.from('이건 hwp가 아니다'))], '섹션.hwp'));
+      fd.set('sectionId', 'nope');
+      return POST(nx('/api/rollup/org/sections/upload', who, { method: 'POST', body: fd }));
+    };
+    const before = { files: storedFiles(), rows: await prisma.orgSectionUpload.count() };
+
+    const res = await send(op);
+    expect(res.status).toBe(410);
+    expect((await res.json()).error).toBe('upload_closed');
+    expect((await send(ID.member)).status).toBe(404);
+
+    expect({ files: storedFiles(), rows: await prisma.orgSectionUpload.count() }).toEqual(before);
+  });
+});
+
 // 판정이 갈라지지 않게 — 스위치를 읽는 곳이 하나이고, 화면이 그 판정으로 그려지는지를 코드로 본다
 describe('WA-30·32 스위치는 한 곳에서 읽고, 화면은 그 판정으로 그린다', () => {
   const src = (rel: string) => readFileSync(path.join(ROOT, rel), 'utf8');
@@ -213,6 +237,21 @@ describe('WA-30·32 스위치는 한 곳에서 읽고, 화면은 그 판정으�
     expect(gate).toBeLessThan(route.indexOf('req.formData()'));
     // 웹 작성 라우트에는 걸지 않는다 (WA-34)
     expect(src('src/app/api/submissions/compose/route.ts')).not.toContain('assertHwpUploadOpen');
+  });
+
+  it('[WA-T33d] RU-60 — 「전사」의 게시판 hwp 올리기도 같은 스위치를 본다: 취합의 문 다음, 파일 읽기 전', () => {
+    const route = src('src/app/api/rollup/org/sections/upload/route.ts');
+    const post = route.slice(route.indexOf('export const POST'), route.indexOf('export const DELETE'));
+    const door = post.indexOf('requireOrgRollup(');
+    const gate = post.indexOf('assertHwpUploadOpen()');
+    expect(door).toBeGreaterThan(-1);
+    // 밖의 사람에게는 여전히 404(존재 은닉) — 스위치는 문 안쪽에서 본다
+    expect(gate).toBeGreaterThan(door);
+    expect(gate).toBeLessThan(post.indexOf('req.formData()'));
+    // 취소(DELETE)는 걸지 않는다 — 이미 올라온 것을 치우는 일이다
+    expect(route.slice(route.indexOf('export const DELETE'))).not.toContain('assertHwpUploadOpen');
+    // 화면도 같은 판정으로 [올리기]를 그린다
+    expect(src('src/app/org/page.tsx')).toContain('const uploadOpen = hwpUploadOpen();');
   });
 
   it('[WA-T33c] 부서원 화면·안내는 hwpUploadOpen()으로 그린다 (PG-11)', () => {
