@@ -31,6 +31,9 @@ services:
       MERGE_PAUSE_UNTIL: "2026-09-21T09:00:00+09:00"
       MERGE_MODEL: hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M
       MERGE_MODEL_URL: http://host.docker.internal:11437
+      # HM-52 · HM-57 — 모델 호출 한 번의 제한. 모델 문을 통과한 **뒤부터** 잰다(줄에서 기다린 시간은 빼고).
+      # 코드 기본값과 같지만 적어 둔다 — 기본값에 기대면 「지금 몇 초인가」를 코드에서 찾아야 한다
+      MERGE_MODEL_TIMEOUT_MS: "60000"
       # CF_ACCESS_AUD는 .env.production(env_file)에서. 누락 시 앱 env 가드가 기동 거부 (OPS-06)
       # NT-01 — 메신저 주소·허용 사번도 .env.production에서 받는다.
       # 사내 IP를 여기 적지 않는 이유: 이 파일은 커밋된다 (공개 저장소).

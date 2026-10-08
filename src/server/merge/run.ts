@@ -21,6 +21,7 @@ import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
 import { latestEdits } from './edits';
 import { ruleSnapshotOf } from './rule-snapshot';
 import { noticeMergeHeld } from '../notify/merge-notices';
+import { claimMergeUnit, freshRunningRun, mergeInFlight, recoverStaleMergeRuns, MERGING_TEXT } from './inflight';
 
 /** HM-35 — 마감 후 이만큼 지나서 시작한다. 마감 정각에 들어온 제출이 커밋될 시간 */
 export const MERGE_DELAY_MINUTES = 1;
@@ -32,8 +33,10 @@ export const MERGE_DELAY_MINUTES = 1;
 export const RETRY_BACKOFF_MINUTES = [1, 5, 15, 30] as const;
 
 export interface MergeRunResult {
+  /** `busy`면 이미 돌고 있는 실행의 id (아직 기록을 만들기 전이면 빈 문자열) */
   runId: string;
-  status: 'succeeded' | 'failed';
+  /** `busy` — 같은 부서·주차 병합이 이미 돌고 있어 시작하지 않았다 (HM-58). 기록도 남기지 않는다 */
+  status: 'succeeded' | 'failed' | 'busy';
   errorText: string | null;
   outcome: MergeOutcome | null;
 }
@@ -41,8 +44,29 @@ export interface MergeRunResult {
 /**
  * 병합 1회 + `MergeRun` 기록.
  * 던지지 않는다 — 실패도 결과다. 화면이 원인을 보여주고 담당자가 재실행할 수 있어야 한다.
+ *
+ * HM-58 — 같은 부서·주차가 이미 돌고 있으면 **시작하지 않고** `busy`를 돌려준다. 겹치면 늦게 끝난 쪽이
+ * 그 사이 사람이 고친 판을 덮는다(inflight.ts). [지금 병합]과 스케줄러가 먼저 묻지만(mergeInFlight),
+ * 둘이 같은 순간에 물으면 둘 다 「없음」을 본다 — 그래서 여기서 한 번 더, 잡으면서 확인한다.
  */
 export async function runMergeRecorded(
+  divisionId: string,
+  weekSlotId: string,
+  trigger: 'auto' | 'manual',
+): Promise<MergeRunResult> {
+  const release = claimMergeUnit(divisionId, weekSlotId);
+  if (!release) return { runId: '', status: 'busy', errorText: MERGING_TEXT, outcome: null };
+  try {
+    // 다른 프로세스가 돌리는 것 (이 프로세스 것은 위에서 걸렀다)
+    const other = await freshRunningRun(divisionId, weekSlotId);
+    if (other) return { runId: other.id, status: 'busy', errorText: MERGING_TEXT, outcome: null };
+    return await recordMerge(divisionId, weekSlotId, trigger);
+  } finally {
+    release();
+  }
+}
+
+async function recordMerge(
   divisionId: string,
   weekSlotId: string,
   trigger: 'auto' | 'manual',
@@ -207,6 +231,16 @@ export async function runDueMerges(now = new Date(), opts: DueMergeOptions = {})
    */
   const slot = await ensureCurrentSlot(now);
 
+  /*
+   * HM-55 — 멈춘 실행부터 치운다. running으로 남은 행은 최종본도 실패도 아니라서, 그대로 두면 아래의 재시도 셈(HM-43)도
+   * 병합 안내도 그 부서를 영영 기다린다. 치우면 실패 하나로 세어져 재시도 간격대로 다시 돈다.
+   */
+  try {
+    await recoverStaleMergeRuns(now);
+  } catch (e) {
+    console.error('[merge] 멈춘 실행 회수 오류', e);
+  }
+
   const divisions = await prisma.division.findMany({ where: { isActive: true } });
   let ran = 0;
   let skipped = 0;
@@ -236,6 +270,14 @@ export async function runDueMerges(now = new Date(), opts: DueMergeOptions = {})
     if (await hasFinalMerge(division.id, slot.id, deadline)) {
       skipped++;
       continue; // 마감 후에 됐다 — 재실행은 담당자가 버튼으로
+    }
+    /*
+     * HM-58 — 담당자가 [지금 병합]으로 돌리고 있으면 건너뛴다. 같이 돌면 늦게 끝난 쪽이 그 사이 고친 판을 덮는다.
+     * 그 실행이 마감 뒤에 시작했으면 끝나는 대로 최종본이 되고, 실패하면 다음 주기에 재시도 셈에 들어간다.
+     */
+    if (await mergeInFlight(division.id, slot.id, now)) {
+      skipped++;
+      continue;
     }
     /*
      * HM-49 — 마감 열기가 닫혀 기준이 밀렸는데 그 전 최종본을 사람이 고쳤으면 **덮지 않는다.**
@@ -283,6 +325,10 @@ export async function runDueMerges(now = new Date(), opts: DueMergeOptions = {})
     }
 
     const result = await runMergeRecorded(division.id, slot.id, 'auto');
+    if (result.status === 'busy') {
+      skipped++; // 바로 위 확인과 이 사이에 누가 시작했다 (HM-58)
+      continue;
+    }
     ran++;
     if (result.status === 'failed') {
       console.warn(

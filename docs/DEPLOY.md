@@ -405,7 +405,12 @@ extra_hosts:
 environment:
   MERGE_MODEL: hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M
   MERGE_MODEL_URL: http://host.docker.internal:11437
+  MERGE_MODEL_TIMEOUT_MS: "60000"   # 호출 한 번의 제한 — 모델 문을 통과한 뒤부터 잰다 (HM-52·57)
 ```
+
+함께 읽는 값(compose에 없으면 기본값): `MERGE_JOB_BUDGET_MS`(병합 한 번의 예산, 기본 240000 — 이것 + 6분이 지난
+`running`은 멈춘 실행으로 회수, 기동 때는 남은 `running`을 모두 회수, HM-55) · `MERGE_MODEL_RETRIES`(시간 초과·연결 실패·5xx 때 다시 부르는 횟수, 기본 1).
+스케줄러가 켜진 서버는 마감 10분 전에 모델을 한 번 데운다(HM-53) — 로그 `[merge] 모델 데우기`.
 
 ### 9.4 확인
 

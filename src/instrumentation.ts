@@ -26,12 +26,26 @@ export async function register() {
   // 빌드 단계·엣지 런타임에서는 돌지 않는다
   if (process.env.NEXT_RUNTIME !== 'nodejs') return;
   if (process.env.NEXT_PHASE === 'phase-production-build') return;
+
+  /*
+   * HM-55 — 기동할 때 남은 병합 실행(running)을 **모두** 치운다 — 병합을 돌리는 프로세스는 이것 하나라, 뜨기 전에 시작한
+   * 실행은 살아 있을 수 없다. 10분을 기다리면 끊긴 부서가 그동안 「이미 병합 중」으로 막힌다. 스케줄러가 꺼진 서버도 —
+   * [지금 병합]만 쓰는 테스트 서버에도 재시작에 끊긴 기록이 남는다. 그 뒤로는 스케줄러가 매분 10분 넘은 것을 치운다.
+   */
+  try {
+    const { recoverStaleMergeRuns } = await import('./server/merge/inflight');
+    await recoverStaleMergeRuns(new Date(), { atBoot: true });
+  } catch (e) {
+    console.error('[merge] 기동 시 멈춘 실행 회수 실패', e);
+  }
+
   if (process.env.MERGE_SCHEDULER === 'off') {
     console.log('[merge] 스케줄러 꺼짐 (MERGE_SCHEDULER=off)');
     return;
   }
 
   const { runDueMerges } = await import('./server/merge/run');
+  const { warmModelIfDue } = await import('./server/merge/warmup');
   const { mergePauseState } = await import('./server/merge/pause');
   const { runDueReminders } = await import('./server/notify/deadline-reminder');
   const { runDueMergeNotices } = await import('./server/notify/merge-notices');
@@ -118,6 +132,9 @@ export async function register() {
         }
         return; // finally에서 running이 풀린다
       }
+
+      // HM-53 — 마감 10분 전이면 모델을 올려 둔다. 기다리지 않는다 — 올리는 데 수십 초가 걸리고, 그동안 이 주기의 일은 계속 간다
+      void warmModelIfDue(new Date()).catch((e) => console.error('[merge] 모델 데우기 오류', e));
 
       /*
        * HM-50 — 부서 하나를 병합할 때마다 알림을 다시 본다. 예전에는 모든 부서 병합이 끝난 뒤에 한 번 봤다 —

@@ -5,6 +5,8 @@
 // 결정론 결과를 쓴다 — 병합본이 안 나오는 것보다 안 묶인 게 낫다.
 
 import { env } from '../env';
+import { callModel, type FallbackKind } from './gate';
+import type { MergeBudget } from './budget';
 import {
   dropWeakGroups,
   exactDuplicates,
@@ -27,16 +29,32 @@ export interface GroupingResult {
   elapsedMs: number;
   /** 글자 겹침이 모자라 버린 묶음 — 화면에 "이건 안 묶었다"로 보여줄 수 있다 */
   rejected: { ids: number[]; ratio: number }[];
+  /**
+   * HM-57 — 못 쓴 이유의 종류 (썼으면 null). 「시간 초과·연결 실패·5xx·예산」은 다시 하면 될 수 있는 폴백이고,
+   * 나중에 알림·점검 요약·2차 병합이 이것으로 가른다. 옛 결과·흉내 낸 결과에는 없다
+   */
+  fallbackKind?: FallbackKind | null;
+  /** HM-57 — 서버에 보낸 횟수 · 모델 문 앞에서 기다린 시간 (HM-52) */
+  attempts?: number;
+  waitedMs?: number;
 }
 
 /** 모델 없이 낸 결과 — 결정론 중복은 그대로 반영한다 (아무것도 안 묶는 게 아니다) */
-function withoutModel(rows: readonly MergeRow[], reason: string, elapsedMs = 0): GroupingResult {
+function withoutModel(
+  rows: readonly MergeRow[],
+  reason: string,
+  elapsedMs = 0,
+  kind: FallbackKind = 'skipped',
+  call: { attempts: number; waitedMs: number } = { attempts: 0, waitedMs: 0 },
+): GroupingResult {
   return {
     groups: expandToPartition(rows, exactDuplicates(rows)),
     usedModel: false,
     fallbackReason: reason,
     elapsedMs,
     rejected: [],
+    fallbackKind: kind,
+    ...call,
   };
 }
 
@@ -107,11 +125,14 @@ function buildPrompt(rows: readonly MergeRow[], extraRule: string): string {
 
 /**
  * 중복 업무 묶기. 실패는 예외가 아니라 **폴백**이다 — 병합은 어떤 경우에도 완결된다.
+ *
+ * 모델은 문(HM-52)을 지나서만 부른다. 제한 시간은 문을 통과한 뒤부터 재고, 일시적 실패는 한 번 더 부른다(HM-57).
+ * `budget`은 실행 예산 — 다 되면 부르지 않고 폴백한다.
  */
 export async function groupDuplicates(
   rows: readonly MergeRow[],
   extraRule = '',
-  signal?: AbortSignal,
+  opts: { budget?: MergeBudget | null; label?: string } = {},
 ): Promise<GroupingResult> {
   if (!env.MERGE_MODEL) return withoutModel(rows, '모델이 설정되지 않았습니다');
   if (rows.length < 2) return withoutModel(rows, '묶을 행이 없습니다');
@@ -120,44 +141,33 @@ export async function groupDuplicates(
   }
 
   const started = Date.now();
-  const timer = AbortSignal.timeout(env.MERGE_MODEL_TIMEOUT_MS);
-  const abort = signal ? AbortSignal.any([signal, timer]) : timer;
-
-  let text: string;
-  try {
-    const res = await fetch(`${env.MERGE_MODEL_URL}/api/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      signal: abort,
-      body: JSON.stringify({
-        model: env.MERGE_MODEL,
-        system: SYSTEM,
-        prompt: buildPrompt(rows, extraRule),
-        stream: false,
-        format: DUPLICATES_SCHEMA, // 모양까지 강제 — 'json'만으로는 부족했다
-        options: { temperature: 0, num_ctx: 8192 }, // 재현 가능해야 감사할 수 있다
-      }),
-    });
-    if (!res.ok) return withoutModel(rows, `모델 응답 오류 (HTTP ${res.status})`, Date.now() - started);
-    text = ((await res.json()) as { response?: string }).response ?? '';
-  } catch (e) {
-    const why = e instanceof Error && e.name === 'TimeoutError' ? '시간 초과' : '연결 실패';
-    return withoutModel(rows, `모델 호출 ${why}`, Date.now() - started);
-  }
+  const reply = await callModel({
+    label: opts.label ?? '중복 묶기',
+    budget: opts.budget,
+    body: {
+      system: SYSTEM,
+      prompt: buildPrompt(rows, extraRule),
+      format: DUPLICATES_SCHEMA, // 모양까지 강제 — 'json'만으로는 부족했다
+      options: { temperature: 0, num_ctx: 8192 }, // 재현 가능해야 감사할 수 있다
+    },
+  });
+  const call = { attempts: reply.attempts, waitedMs: reply.waitedMs };
+  if (!reply.ok) return withoutModel(rows, reply.reason, Date.now() - started, reply.kind, call);
+  const text = reply.text;
 
   let duplicates: RowGroup[];
   try {
     const parsed = JSON.parse(text) as { duplicates?: RowGroup[] };
     if (!Array.isArray(parsed.duplicates)) {
-      return withoutModel(rows, 'duplicates 배열이 없습니다', Date.now() - started);
+      return withoutModel(rows, 'duplicates 배열이 없습니다', Date.now() - started, 'invalid', call);
     }
     duplicates = parsed.duplicates;
   } catch {
-    return withoutModel(rows, '모델이 JSON을 내지 않았습니다', Date.now() - started);
+    return withoutModel(rows, '모델이 JSON을 내지 않았습니다', Date.now() - started, 'invalid', call);
   }
 
   const problem = validateGroups(rows, duplicates);
-  if (problem) return withoutModel(rows, `묶음 검증 실패 — ${problem}`, Date.now() - started);
+  if (problem) return withoutModel(rows, `묶음 검증 실패 — ${problem}`, Date.now() - started, 'invalid', call);
 
   // 글자가 너무 안 겹치는 묶음은 버린다 — 주제가 같은 것과 같은 업무인 것은 다르다
   const { kept, dropped } = dropWeakGroups(rows, duplicates);
@@ -171,5 +181,7 @@ export async function groupDuplicates(
     fallbackReason: null,
     elapsedMs: Date.now() - started,
     rejected: dropped,
+    fallbackKind: null,
+    ...call,
   };
 }

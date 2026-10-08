@@ -22,6 +22,7 @@ import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
 import { slotKind } from '@/lib/week';
 import { describeFlagged, type FlaggedRow } from '@/lib/empty-content';
 import { approvalOf } from '../merge/review';
+import { mergeStaleBefore } from '../merge/budget';
 import type { MergeEdits } from '../merge/edits';
 import { toKstIso } from '@/lib/week';
 import type { Division, WeekSlot } from '@prisma/client';
@@ -374,14 +375,19 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
        * 아직 없어요»를 보내면, 담당자는 멀쩡히 되고 있는 걸 다시 누르러 간다 —
        * 그리고 그 알림은 `NotifyLog`에 «보냄»으로 박혀서 진짜 검토 요청이 못 나간다.
        * 창이 12분이므로 1분 주기로 최대 열두 번 다시 본다. 창을 넘기면 그때는 실패로 친다.
+       *
+       * HM-55 — 단, **멈춘 running은 기다리지 않는다.** 예산 + 여유(기본 10분)보다 오래된 running은 재시작 등으로 끊긴
+       * 기록이다. 그걸 「돌고 있음」으로 보면 이 부서는 「병합본이 아직 없어요」도 +30분 안내도 영영 못 받는다
+       * (운영 DB의 2026-09-03 14:18:50 행). 스케줄러가 곧 실패로 회수하지만, 회수 전에도 여기서는 기다리지 않는다.
        */
       if (!run) {
+        const staleBefore = mergeStaleBefore(now);
         const inFlight = await prisma.mergeRun.findFirst({
           where: {
             divisionId: division.id,
             weekSlotId: slot.id,
             status: 'running',
-            startedAt: { gte: deadline },
+            startedAt: { gte: staleBefore > deadline ? staleBefore : deadline },
           },
           select: { id: true },
         });
