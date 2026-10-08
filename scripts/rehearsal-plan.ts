@@ -138,6 +138,8 @@ export interface Facts {
   hqHead: Person;
   hqApprovedAt: number | null;
   coordinators: Person[];
+  /** 「병합 점검」을 받는 사람 — 운영자 ∪ 총괄이 있는 부서의 lead (활성 · 알림 켬 · 사번 있음 — TACP-30 · NT-60) */
+  batchAudience: Person[];
 }
 
 export interface Expect {
@@ -165,6 +167,9 @@ const SLACK_AFTER = 90_000;
 const EVENT_SLACK = 2 * MIN;
 /** 창이 열린 뒤 스케줄러의 첫 틱까지 — 1분 주기 + 한 바퀴 일하는 시간 */
 const FIRST_TICK = 2 * MIN;
+/** 자동 병합은 마감 +1분부터(HM-25) · 「병합 점검」 첫 통은 줄이 빈 순간, 늦어도 마감 +15분(HM-54b) */
+const MERGE_DELAY = 1;
+const BATCH_BY = 15;
 
 /**
  * 「이 사람에게 이 알림이 [창] 안에 한 번」의 목록. 규칙은 messenger.md §4·4-2·4-3의 표 그대로:
@@ -228,6 +233,21 @@ export function expectNotices(f: Facts): Expect[] {
       } else if (settled <= start + WINDOW * MIN) {
         timed('ru_unit_due_soon', u.head, start, WINDOW, `${u.div} 기한 임박(병합이 창 안에 끝남)`, false);
       }
+    }
+  }
+
+  // NT-60 · HM-54 — 「병합 점검」: 운영자와 기획조정실 담당에게. 첫 통은 줄이 빈 순간(늦어도 +15분) — 그때 남은 부서가 있었으면
+  // 다 끝나는 순간 「완료」 한 통 더. 낸 사람이 있는 단위가 다 병합돼야 「다 끝남」이다(없는 단위는 「제출 없음」으로 끝난 것)
+  {
+    const merging = f.units.filter((u) => u.submitted > 0);
+    const lastMerged = merging.every((u) => u.mergedAt !== null) ? Math.max(f.deadline, ...merging.map((u) => u.mergedAt!)) : null;
+    const firstEnd = at(BATCH_BY) + FIRST_TICK;
+    for (const p of f.batchAudience) {
+      if (firstEnd < f.runStart) continue; // 첫 통의 창이 시작 전에 끝났다 — 「완료」도 그 첫 통이 있어야 간다
+      timed('merge_batch', p, at(MERGE_DELAY), BATCH_BY - MERGE_DELAY + FIRST_TICK / MIN, '병합 점검');
+      if (lastMerged === null || lastMerged + FIRST_TICK < at(BATCH_BY)) continue; // 다 끝나지 않았다 · 첫 통이 이미 「다 끝남」
+      const required = lastMerged > at(BATCH_BY) + FIRST_TICK; // +15분에 남은 곳이 있었다 — 첫 통이 「n곳 남음」
+      push({ kind: 'merge_batch_done', to: p, from: required ? lastMerged : Math.min(lastMerged, at(BATCH_BY)), until: lastMerged + FIRST_TICK, required, why: '병합 점검 완료' });
     }
   }
 

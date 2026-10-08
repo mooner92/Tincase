@@ -50,6 +50,7 @@ function perfectWeek(): Facts {
     hqHead: P('hq-head'),
     hqApprovedAt: at(35.5), // 「본부 → 총괄」 15분 전(D+35) 알림을 받고
     coordinators: [P('coord')],
+    batchAudience: [P('coord')], // 기획조정실 담당 = 총괄(가짜 조직) · 리허설 운영자는 알림 끔
   };
 }
 
@@ -116,8 +117,11 @@ describe('[OPS-T31] ★ 기대 알림 — 「누구에게 · 언제 · 한 번�
         'ru_hq_ready hq-head',
         // RU-57 — 본부 → 총괄 기한에 일부로 (ea·sd가 없다)
         'ru_org_ready coord',
+        // NT-60 — 「병합 점검」: 줄이 빈 순간(D+1.5) 한 통. 그때 다 끝났으니 「완료」는 없다
+        'merge_batch coord',
       ].sort(),
     );
+    expect(es.map(keyOf)).not.toContain('merge_batch_done coord');
     // 받고 나서 움직이는 사람의 알림은 「와도 되는」 쪽으로 남는다 — 안 왔으면 리허설이 기다리다 넘긴 승인(note)이 실패로 잡는다
     const optional = es.filter((e) => !e.required).map(keyOf);
     expect(optional).toEqual(expect.arrayContaining(['merge_review pco-head', 'ru_unit_due_soon hr-head', 'ru_hq_due_soon hq-head']));
@@ -145,6 +149,24 @@ describe('[OPS-T31] ★ 기대 알림 — 「누구에게 · 언제 · 한 번�
     expect(es.find((e) => keyOf(e) === 'merge_done slow-lead')?.from).toBe(at(30));
     expect(es.map(keyOf)).not.toContain('merge_review late-head');
     expect(es.map(keyOf)).not.toContain('merge_done late-lead');
+  });
+
+  it('「병합 점검」(NT-60) — +15분에 남은 곳이 있었으면 다 끝나는 순간 「완료」가 반드시 · 경계면 「와도 되는」 · 병합이 안 끝난 곳이 있으면 「완료」 없음', () => {
+    const f = perfectWeek();
+    f.units = [unit('a', { mergedAt: at(3) }), unit('b', { mergedAt: at(23) }), unit('none', { submitted: 0, mergedAt: null })];
+    const es = expectNotices(f);
+    const first = es.find((e) => keyOf(e) === 'merge_batch coord')!;
+    expect([first.from, first.until, first.required]).toEqual([at(1), at(17), true]);
+    const done = es.find((e) => keyOf(e) === 'merge_batch_done coord')!;
+    expect([done.from, done.until, done.required]).toEqual([at(23), at(25), true]);
+    // +15분 언저리에 끝남 — 첫 통이 「다 끝남」일 수도, 「1곳 남음」 뒤 「완료」일 수도
+    f.units = [unit('a', { mergedAt: at(16) })];
+    expect(expectNotices(f).find((e) => keyOf(e) === 'merge_batch_done coord')?.required).toBe(false);
+    // 낸 곳의 병합이 끝나지 않았다(실패) — 「완료」는 기대하지 않는다(오면 뜻밖)
+    f.units = [unit('a', { mergedAt: at(3) }), unit('b', { mergedAt: null })];
+    expect(expectNotices(f).map(keyOf)).not.toContain('merge_batch_done coord');
+    // 받는 사람이 없으면 아무것도
+    expect(expectNotices({ ...perfectWeek(), batchAudience: [] }).filter((e) => e.kind.startsWith('merge_batch'))).toEqual([]);
   });
 
   it('리허설을 시작하기 전에 지난 창은 기대하지 않는다 · 창 도중에 시작했으면 「와도 되는」 (알림은 소급하지 않는다, NT-43)', () => {

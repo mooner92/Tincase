@@ -79,6 +79,8 @@ export const SINK_KIND_LABEL: Record<string, string> = {
   merge_held: '재병합 보류',
   merge_approved: '승인 완료',
   merge_reapprove: '다시 승인',
+  merge_batch: '병합 점검',
+  merge_batch_done: '병합 점검 완료',
   ru_unit_due_soon: '실·팀장 15분 전',
   ru_hq_ready: '본부본 준비',
   ru_hq_complete: '본부본 다 모임',

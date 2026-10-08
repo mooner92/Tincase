@@ -572,12 +572,23 @@ async function collectFacts(
   }
   const hq = await prisma.division.findFirstOrThrow({ where: { nameKo: HQ_DIV }, include: { users: true } });
   const coordinators = await prisma.user.findMany({ where: { isCoordinator: true, isActive: true, notifyEnabled: true, employeeNo: { not: null } } });
+  // NT-60 — 「병합 점검」 받는 사람: 운영자 ∪ 총괄이 있는 부서의 lead (TACP-30 표를 옮겨 적었다 — authz.ts를 부르지 않는다)
+  const coordDivisions = await prisma.division.findMany({ where: { users: { some: { isCoordinator: true, isActive: true } } }, select: { id: true } });
+  const batchAudience = await prisma.user.findMany({
+    where: {
+      isActive: true,
+      notifyEnabled: true,
+      employeeNo: { not: null },
+      OR: [{ isOperator: true }, { divisionRole: 'lead', divisionId: { in: coordDivisions.map((d) => d.id) } }],
+    },
+  });
   return {
     ...t,
     units,
     hqHead: person(hq.users.find((x) => x.divisionRole === 'head')!),
     hqApprovedAt: approvals.find((a) => a.kind === 'hq')?.doneAt ?? null,
     coordinators: coordinators.map(person),
+    batchAudience: batchAudience.map(person),
   };
 }
 

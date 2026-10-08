@@ -274,3 +274,48 @@ describe('[NT-T79] 시험 서버 compose — 알림은 같은 컨테이너의 �
     expect(prod).not.toContain('MESSENGER_SINK');
   });
 });
+
+describe('[NT-T80] 보내는 곳은 모두 종류를 싣는다 (NT-56c) — 빠지면 수신함에 「종류 없음」, 리허설은 뜻밖의 알림으로 잡는다', () => {
+  it('src의 sendAlert 호출마다 `kind` — 갈래를 합칠 때 새 알림(「병합 점검」)이 빠졌던 자리', async () => {
+    const { readdirSync, statSync } = await import('node:fs');
+    const walk = (dir: string): string[] =>
+      readdirSync(dir).flatMap((n) => {
+        const p = path.join(dir, n);
+        return statSync(p).isDirectory() ? walk(p) : /\.tsx?$/.test(p) ? [p] : [];
+      });
+    const calls: { at: string; args: string }[] = [];
+    for (const file of walk(path.join(root, 'src'))) {
+      const src = readFileSync(file, 'utf8');
+      for (const m of src.matchAll(/\bsendAlert\(/g)) {
+        if (/function\s+sendAlert\($/.test(src.slice(Math.max(0, m.index - 30), m.index + 10))) continue; // 정의
+        // 괄호를 맞춰 인자 전체를 잘라 낸다
+        let depth = 0;
+        let end = m.index + m[0].length - 1;
+        for (; end < src.length; end++) {
+          if (src[end] === '(') depth++;
+          else if (src[end] === ')' && --depth === 0) break;
+        }
+        calls.push({ at: `${path.relative(root, file)}:${src.slice(0, m.index).split('\n').length}`, args: src.slice(m.index, end + 1) });
+      }
+    }
+    // 객체의 맨 위 칸만 본다 — `...batchMessage(p, slot, report, kind, now)`처럼 다른 함수에 넘기는 `kind`는 싣는 것이 아니다
+    const topLevel = (args: string) => {
+      let depth = 0;
+      let out = '';
+      for (const ch of args) {
+        if ('([{'.includes(ch)) depth++;
+        if (depth === 2) out += ch;
+        if (')]}'.includes(ch)) depth--;
+      }
+      return out;
+    };
+    expect(calls.length).toBeGreaterThanOrEqual(9);
+    expect(calls.filter((c) => !/\bkind\b/.test(topLevel(c.args))).map((c) => c.at)).toEqual([]);
+  });
+
+  it('수신함 화면은 「병합 점검」을 이름으로 보인다', async () => {
+    const { SINK_KIND_LABEL, kindBase } = await import('@/lib/messenger-sink');
+    expect(SINK_KIND_LABEL[kindBase('merge_batch:1760504400000:u1')]).toBe('병합 점검');
+    expect(SINK_KIND_LABEL[kindBase('merge_batch_done:1760504400000:u1')]).toBe('병합 점검 완료');
+  });
+});

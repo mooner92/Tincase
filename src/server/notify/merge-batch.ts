@@ -248,13 +248,15 @@ async function deliverBatch(
   let targets = 0;
   for (const p of people) {
     // 기록을 먼저 잡는다(결정 f) — 스케줄러와 일꾼이 같은 순간에 판정해도 한 번
-    const claim = await claimNotice(p.divisionId, slot.id, kindOf(p), detail);
+    const logKind = kindOf(p);
+    const claim = await claimNotice(p.divisionId, slot.id, logKind, detail);
     if (!claim) continue;
     targets++;
     const out: string[] = [];
     try {
       const url = p.operator && env.MESSENGER_LINK_BASE ? `${env.MESSENGER_LINK_BASE}/ops` : undefined;
-      const r = await sendAlert({ recvIds: [p.employeeNo], ...batchMessage(p, slot, report, kind, now), url });
+      // NT-56 — NotifyLog와 같은 종류를 싣는다(가짜 알림 수신함으로 갈 때만 머리로 — 한 주 리허설이 이 값으로 판정한다)
+      const r = await sendAlert({ recvIds: [p.employeeNo], ...batchMessage(p, slot, report, kind, now), url, kind: logKind });
       out.push(...r.sent);
     } finally {
       await settleNotice(claim, out, detail);

@@ -20,11 +20,11 @@ vi.setConfig({ testTimeout: 30_000 });
 
 const sha = (b: string) => createHash('sha256').update(b).digest('hex');
 
-const msgr = vi.hoisted(() => ({ on: true, outbox: [] as { to: string; subject: string; contents: string; url?: string; at: number }[] }));
+const msgr = vi.hoisted(() => ({ on: true, outbox: [] as { to: string; subject: string; contents: string; url?: string; kind?: string; at: number }[] }));
 vi.mock('@/server/messenger', () => ({
   messengerStatus: () => (msgr.on ? { enabled: true, reason: '', allow: '전원' } : { enabled: false, reason: 'MESSENGER_URL 미설정', allow: '' }),
-  sendAlert: async (input: { recvIds: string[]; subject: string; contents: string; url?: string }) => {
-    for (const to of input.recvIds) msgr.outbox.push({ to, subject: input.subject, contents: input.contents, url: input.url, at: Date.now() });
+  sendAlert: async (input: { recvIds: string[]; subject: string; contents: string; url?: string; kind?: string }) => {
+    for (const to of input.recvIds) msgr.outbox.push({ to, subject: input.subject, contents: input.contents, url: input.url, kind: input.kind, at: Date.now() });
     return { requested: input.recvIds.length, sent: input.recvIds, blocked: [], disabled: false, errors: [] };
   },
 }));
@@ -179,6 +179,8 @@ describe('HM-54 「병합 점검」 요약 — 언제 · 누구에게', () => {
     // NT-T90 — 기록은 사람마다, 그 사람의 부서로
     const logs = await prisma.notifyLog.findMany({ where: { kind: { startsWith: 'merge_batch' } }, orderBy: { kind: 'asc' } });
     expect(logs.map((l) => l.kind).sort()).toEqual([`merge_batch:${D.getTime()}:${P.op.id}`, `merge_batch:${D.getTime()}:${P.coordLead.id}`].sort());
+    // NT-56c — 보낼 때 NotifyLog와 같은 종류를 싣는다(가짜 알림 수신함 · 한 주 리허설이 이 값으로 판정한다)
+    expect(msgr.outbox.map((m) => m.kind).sort()).toEqual(logs.map((l) => l.kind).sort());
   });
 
   it('[HM-T169] ★ 남은 부서가 있으면 +15분에 목록과 예상 끝 — 다 끝나는 순간 「완료」 한 통 더 · 한 기준 시각에 사람마다 많아야 두 통', async () => {
@@ -214,6 +216,7 @@ describe('HM-54 「병합 점검」 요약 — 언제 · 누구에게', () => {
     expect((await runDueMergeBatchNotices(at(20))).map((r) => r.kind)).toEqual(['merge_batch_done']);
     const done = to('coordLead').at(-1)!;
     expect(done.subject).toBe('[Tincase] 병합 점검 완료 14:20 · 3/3 끝');
+    expect(done.kind).toBe(`merge_batch_done:${D.getTime()}:${P.coordLead.id}`); // NT-56c
     expect(done.contents).toContain('마지막 끝 14:20:00');
 
     for (const m of [21, 40, 120]) {
