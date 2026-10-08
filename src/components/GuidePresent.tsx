@@ -9,14 +9,24 @@
 //
 // 발표자 창(?view=notes)은 같은 슬라이드 목록을 노트북 화면에 띄운다: 지금 장 · 다음 장 · 메모 · 지난 시간.
 // 두 창은 BroadcastChannel로 어느 쪽에서 넘겨도 같이 넘어간다 — 프레젠터가 어느 창에 초점이 있든 상관없게.
+//
+// 2026-10-08 — 무대는 게임 튜토리얼식 코치 마크다(CP-101). 마우스로 밝게 뚫린 곳(누를 곳)이나 말풍선 [다음]을 누르면
+// 다음 장, 어두운 곳을 누르면 넘기지 않고 「여기를 누르세요」를 다시 보인다 — 이것도 리듀서 하나(`deckNav`의 click)가 정한다.
+// 프레젠터·키로 **버튼 단계**에서 넘길 때는 무대에 눌린 모양(손이 누르고 손끝에 물결)을 200ms 보인 뒤 넘긴다 — 컷만 바뀌면
+// 「그 버튼을 눌러서 이 화면이 됐다」가 안 보였다(2026-10-08 검토). 눌린 모양은 두 창이 같이 보인다(`press` 알림).
+// 메모(발표자가 말할 것)는 발표자 창에만 있다 — 강당 화면에는 말풍선 한 문장뿐이다.
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { DECK, presentSlides, type Slide } from '@/lib/guide/deck';
-import { deckNav, isDeckKey, type DeckNavAction, type DeckNavState } from '@/lib/guide/nav';
+import { deckNav, isDeckKey, keyPressMs, type DeckNavAction, type DeckNavState, type StageTarget } from '@/lib/guide/nav';
 import { shotOf } from '@/lib/guide/manifest';
-import { GuideStage } from './GuideStage';
+import { GuideStage, pressable } from './GuideStage';
 
 const CHANNEL = 'tincase-guide';
-type Msg = { t: 'hello'; from: string } | { t: 'state'; from: string; index: number; black: boolean };
+type Msg =
+  | { t: 'hello'; from: string }
+  | { t: 'state'; from: string; index: number; black: boolean }
+  /** 넘기기 직전의 눌린 모양 — 받은 창도 같은 장에서 손이 누른다(넘기는 것은 곧 오는 state가 한다) */
+  | { t: 'press'; from: string; index: number };
 
 function indexFromHash(slides: Slide[]): number {
   if (typeof window === 'undefined') return 0;
@@ -43,8 +53,8 @@ function usePreload(slides: Slide[], index: number) {
   }, [slides, index]);
 }
 
-/** 두 창 동기화 — 바뀐 쪽이 알리고, 받은 쪽은 다시 알리지 않는다 */
-function useDeckSync(state: DeckNavState, dispatch: (a: DeckNavAction) => void) {
+/** 두 창 동기화 — 바뀐 쪽이 알리고, 받은 쪽은 다시 알리지 않는다. 돌려주는 함수는 눌린 모양을 상대 창에 알린다 */
+function useDeckSync(state: DeckNavState, dispatch: (a: DeckNavAction) => void, onPress: (index: number) => void) {
   // 내 창의 이름 — 내가 보낸 것을 내가 다시 받지 않게. 그릴 때 만들지 않고 채널을 열 때 만든다
   const me = useRef('');
   const chan = useRef<BroadcastChannel | null>(null);
@@ -55,9 +65,11 @@ function useDeckSync(state: DeckNavState, dispatch: (a: DeckNavAction) => void) 
    */
   const known = useRef({ index: state.index, black: state.black });
   const latest = useRef(state);
+  const pressRef = useRef(onPress);
   useEffect(() => {
     latest.current = state;
-  }, [state]);
+    pressRef.current = onPress;
+  }, [state, onPress]);
 
   useEffect(() => {
     if (typeof BroadcastChannel === 'undefined') return;
@@ -74,6 +86,8 @@ function useDeckSync(state: DeckNavState, dispatch: (a: DeckNavAction) => void) 
       } else if (m.t === 'state') {
         known.current = { index: m.index, black: m.black };
         dispatch({ type: 'sync', index: m.index, black: m.black });
+      } else if (m.t === 'press') {
+        pressRef.current(m.index);
       }
     };
     // 새로 연 창은 지금 어디인지 묻는다 — 발표 도중에 발표자 창을 열어도 같은 장에서 시작한다
@@ -90,6 +104,8 @@ function useDeckSync(state: DeckNavState, dispatch: (a: DeckNavAction) => void) 
     known.current = { index: state.index, black: state.black };
     chan.current?.postMessage({ t: 'state', from: me.current, index: state.index, black: state.black } satisfies Msg);
   }, [state.index, state.black]);
+
+  return useCallback((index: number) => chan.current?.postMessage({ t: 'press', from: me.current, index } satisfies Msg), []);
 }
 
 function useIdle(ms: number) {
@@ -124,7 +140,7 @@ export function GuidePresent({ view }: { view: 'stage' | 'notes' }) {
   const [state, dispatch] = useReducer(
     (s: DeckNavState, a: DeckNavAction) => deckNav(s, a, total),
     undefined,
-    () => ({ index: 0, black: false, buffer: '' }),
+    () => ({ index: 0, black: false, buffer: '', hint: 0 }),
   );
   const [started, setStarted] = useState(view === 'notes');
   /*
@@ -154,8 +170,57 @@ export function GuidePresent({ view }: { view: 'stage' | 'notes' }) {
     if (key && window.location.hash !== `#${key}`) window.history.replaceState(null, '', `#${key}`);
   }, [slides, state.index]);
 
-  useDeckSync(state, dispatch);
+  // 지금 상태 — 키 처리기가 기다렸다 넘길 때 그 순간의 장을 본다
+  const latest = useRef(state);
+  useEffect(() => {
+    latest.current = state;
+  }, [state]);
+  // 눌린 모양 — 올라가면 무대의 손이 누른다(GuideStage `press`). 다른 창이 알려 와도 같은 장이면 같이 누른다
+  const [press, setPress] = useState(0);
+  const onRemotePress = useCallback((index: number) => {
+    if (index === latest.current.index) setPress((p) => p + 1);
+  }, []);
+  const sendPress = useDeckSync(state, dispatch, onRemotePress);
   usePreload(slides, state.index);
+
+  /*
+   * 넘기기 키 — 버튼 단계면 눌린 모양을 KEY_PRESS_MS 보인 뒤 넘긴다. 기다리는 동안 또 누르면(프레젠터 연타) 기다리던 것을
+   * 바로 넘기고 이번 키도 바로 처리한다 — 연타가 200ms씩 밀려 쌓이면 발표자는 몇 장 넘어갔는지 모른다
+   */
+  const pending = useRef<{ timer: number; key: string } | null>(null);
+  const flush = useCallback(() => {
+    const p = pending.current;
+    if (!p) return false;
+    window.clearTimeout(p.timer);
+    pending.current = null;
+    dispatch({ type: 'key', key: p.key });
+    return true;
+  }, []);
+  useEffect(() => () => void (pending.current && window.clearTimeout(pending.current.timer)), []);
+  const advance = useCallback(
+    (key: string) => {
+      if (flush()) {
+        dispatch({ type: 'key', key });
+        return;
+      }
+      const s = latest.current;
+      const ms = keyPressMs(s, key, slides.length, pressable(slides[s.index]));
+      if (ms > 0) {
+        setPress((p) => p + 1);
+        sendPress(s.index);
+        pending.current = {
+          key,
+          timer: window.setTimeout(() => {
+            pending.current = null;
+            dispatch({ type: 'key', key });
+          }, ms),
+        };
+        return;
+      }
+      dispatch({ type: 'key', key });
+    },
+    [flush, sendPress, slides],
+  );
 
   const onKey = useCallback(
     (e: KeyboardEvent) => {
@@ -179,9 +244,15 @@ export function GuidePresent({ view }: { view: 'stage' | 'notes' }) {
       }
       // 버튼에 초점이 있을 때 Space·Enter가 그 버튼을 누르지 않게 — 발표 중의 Space는 언제나 「다음」이다
       e.preventDefault();
-      dispatch({ type: 'key', key: e.key });
+      // 키를 오래 누르고 있으면(자동 반복) 눌린 모양 없이 그대로 넘긴다
+      if (e.repeat) {
+        flush();
+        dispatch({ type: 'key', key: e.key });
+        return;
+      }
+      advance(e.key);
     },
-    [dispatch, started],
+    [dispatch, started, advance, flush],
   );
   useEffect(() => {
     window.addEventListener('keydown', onKey);
@@ -190,10 +261,19 @@ export function GuidePresent({ view }: { view: 'stage' | 'notes' }) {
 
   const idle = useIdle(2000);
   const slide = slides[state.index];
-  const go = (key: string) => dispatch({ type: 'key', key });
+  const go = advance;
+  const click = useCallback(
+    (target: StageTarget) => {
+      flush();
+      dispatch({ type: 'click', target });
+    },
+    [flush],
+  );
 
   if (view === 'notes') {
-    return <NotesView slides={slides} state={state} go={go} jump={(index) => dispatch({ type: 'goto', index })} />;
+    return (
+      <NotesView slides={slides} state={state} press={press} go={go} click={click} jump={(index) => dispatch({ type: 'goto', index })} />
+    );
   }
 
   return (
@@ -201,7 +281,7 @@ export function GuidePresent({ view }: { view: 'stage' | 'notes' }) {
       className={`fixed inset-0 flex items-center justify-center bg-stage text-canvas ${idle || state.black ? 'cursor-none' : ''}`}
     >
       <div className="w-[min(100vw,calc(100dvh*16/9))]">
-        <PresentFrame slides={slides} index={state.index} />
+        <PresentFrame slides={slides} index={state.index} hint={state.hint} press={press} onStageClick={started ? click : undefined} />
       </div>
 
       {/* 숫자 + Enter — 누르는 중인 숫자를 구석에 보인다 */}
@@ -214,7 +294,7 @@ export function GuidePresent({ view }: { view: 'stage' | 'notes' }) {
       {/* 마우스를 움직일 때만 — 프레젠터만 쓰는 동안에는 아무것도 떠 있지 않다 */}
       {started && !idle && !state.black && (
         <div className="fixed right-4 bottom-4 flex items-center gap-2 text-sm">
-          <span className="hidden text-stage-muted md:inline">→ 다음 · ← 이전 · B 검은 화면 · F 전체 화면</span>
+          <span className="hidden text-stage-muted md:inline">밝은 곳 누르기 · → 다음 · ← 이전 · B 검은 화면 · F 전체 화면</span>
           <button onClick={openNotes} className="rounded-lg border border-stage-line bg-stage-soft px-3 py-1.5 text-canvas hover:border-stage-muted">
             발표자 창
           </button>
@@ -292,7 +372,10 @@ function StartPanel({ onStart, onClose, slide, index }: { onStart: () => void; o
             ))}
           </tbody>
         </table>
-        <p className="mt-3 text-[15px] text-stage-muted">무선 프레젠터의 넘김 버튼도 그대로 됩니다.</p>
+        <p className="mt-3 text-[15px] text-stage-muted">
+          무선 프레젠터의 넘김 버튼도 그대로 됩니다. 마우스로는 밝게 뚫린 곳(누를 버튼)을 누르면 다음 장, 어두운 곳을 누르면 「여기를
+          누르세요」를 다시 보입니다.
+        </p>
         <div className="mt-7 flex flex-wrap items-center gap-2">
           <button
             onClick={openNotes}
@@ -316,31 +399,44 @@ function StartPanel({ onStart, onClose, slide, index }: { onStart: () => void; o
 }
 
 /**
- * 16:9 무대 한 장 — 발표 화면·발표자 창·혼자 보기의 「크게 보기」가 같은 것을 쓴다. 글자 크기는 무대 폭 기준(cqw):
- * 1920px 무대에서 제목 3cqw = 58px, 장 이름 1.4cqw = 27px (PG-59: 1080p에서 40px 이상). 제목은 줄이지 않는다 —
- * 24자 이하라 한 줄에 들어가고(PG-T84), 혹시 넘쳐도 「…」로 잘리는 것보다 두 줄이 낫다.
+ * 16:9 무대 한 장 — 발표 화면·발표자 창·혼자 보기의 「크게 보기」가 같은 것을 쓴다.
+ *
+ * 2026-10-08 — 위의 검은 제목 띠를 걷었다. 글은 무대 안의 말풍선이 맡고(「제출: 다 적었으면 여기를 눌러요」),
+ * 장·순번은 구석의 작은 알약(「부서원 3/8」, GuideStage)이 맡는다 — 띠가 화면을 깎아 먹고 「발표 자료」처럼 읽혔다.
+ * 맨 아래 얇은 진행 막대만 남는다. 초록은 이 막대와 작은 글자에만 (CP-105)
  */
-export function PresentFrame({ slides, index, still = false }: { slides: Slide[]; index: number; still?: boolean }) {
+export function PresentFrame({
+  slides,
+  index,
+  still = false,
+  hint = 0,
+  press = 0,
+  onStageClick,
+}: {
+  slides: Slide[];
+  index: number;
+  still?: boolean;
+  hint?: number;
+  /** 넘기기 직전의 눌린 모양 (GuideStage `press`) */
+  press?: number;
+  /** 무대를 누른 곳 — 없으면 누를 것을 그리지 않는다(다음 장 그림·시작 화면 뒤) */
+  onStageClick?: (target: StageTarget) => void;
+}) {
   const slide = slides[index];
-  const step = slide.step;
-  const shot = step?.kind === 'shot';
   const pct = ((index + 1) / slides.length) * 100;
-  const where = `${slide.chapter.title} · ${slide.n}/${slide.of}`;
   return (
-    <div className="@container relative flex aspect-video w-full flex-col overflow-hidden bg-stage text-canvas">
-      {shot && (
-        <div key={slide.key} className={`shrink-0 px-[5cqw] pt-[2cqw] pb-[1.4cqw] ${still ? '' : 'guide-caption-in'}`}>
-          <p className="text-[1.4cqw] leading-tight font-semibold text-brand-tint tabular-nums">{where}</p>
-          <h1 className="mt-[0.4cqw] text-[3cqw] leading-[1.15] font-bold tracking-[-0.02em]">{step.caption}</h1>
-        </div>
-      )}
-      <GuideStage slide={slide} index={index} theme="dark" still={still} className="min-h-0 flex-1" />
-      {/* 역할 장 안의 글자 단계(알림 등)도 그림 단계와 같은 자리에 「실·팀장 · 1/5」 — 지금 어느 장인지 놓치지 않게 */}
-      {!shot && step && slide.chapter.lede && (
-        <p className="absolute top-[2cqw] left-[5cqw] text-[1.4cqw] leading-tight font-semibold text-brand-tint tabular-nums">{where}</p>
-      )}
-      {/* 진행 — 무대 맨 아래 얇은 막대. 초록은 이 막대와 글자에만 (CP-105) */}
-      <div className="h-[0.32cqw] w-full shrink-0 bg-stage-soft" aria-hidden>
+    <div className="@container relative aspect-video w-full overflow-hidden bg-stage text-canvas">
+      <GuideStage
+        slide={slide}
+        index={index}
+        theme="dark"
+        still={still}
+        hint={hint}
+        press={press}
+        onClick={onStageClick}
+        className="absolute inset-0"
+      />
+      <div className="pointer-events-none absolute inset-x-0 bottom-0 h-[0.32cqw] bg-stage-soft/80" aria-hidden>
         <div className="h-full bg-brand-tint transition-[width] duration-500 ease-out" style={{ width: `${pct}%` }} />
       </div>
     </div>
@@ -372,12 +468,16 @@ export function sentencesOf(notes: string): string[] {
 function NotesView({
   slides,
   state,
+  press,
   go,
+  click,
   jump,
 }: {
   slides: Slide[];
   state: DeckNavState;
+  press: number;
   go: (key: string) => void;
+  click: (target: StageTarget) => void;
   jump: (index: number) => void;
 }) {
   const slide = slides[state.index];
@@ -387,6 +487,8 @@ function NotesView({
   const [target, setTarget] = useState(25);
   const clock = new Date(now).toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit', hour12: false });
   const notes = slide.step ? slide.step.notes : (slide.chapter.notes ?? slide.chapter.lede ?? '');
+  // 강당 화면에 지금 떠 있는 말풍선 — 메모와 함께 보여 발표자가 화면과 다른 말을 하지 않게
+  const bubble = slide.step ? `${slide.step.label}: ${slide.step.say}` : slide.chapter.lede ?? '';
   const left = target * 60 - secs;
   // 질의응답 때 「담당자 화면 다시 보여 주세요」에 바로 가도록 — 장마다 첫 장(역할 장이면 장 제목)으로
   const starts = DECK.map((c) => ({ c, i: slides.findIndex((s) => s.chapter.id === c.id) })).filter((x) => x.i >= 0);
@@ -435,12 +537,12 @@ function NotesView({
 
       <div className="grid min-h-0 gap-5 lg:grid-cols-[minmax(0,1.55fr)_minmax(0,1fr)]">
         <section aria-label="지금 장" className="self-start overflow-hidden rounded-xl border border-stage-line">
-          <PresentFrame slides={slides} index={state.index} />
+          <PresentFrame slides={slides} index={state.index} hint={state.hint} press={press} onStageClick={click} />
         </section>
         <aside className="flex min-h-0 flex-col gap-5">
           <div>
             <p className="mb-2 text-sm font-semibold text-stage-muted tabular-nums">
-              {next ? `다음 · ${state.index + 2} ${next.chapter.title} ${next.n > 0 ? `${next.n}/${next.of}` : '장 제목'}` : '다음'}
+              {next ? `다음 · ${state.index + 2} ${next.chapter.title} ${next.n > 0 ? `${next.n}/${next.of}` : '장 카드'}` : '다음'}
             </p>
             {next ? (
               <div className="overflow-hidden rounded-xl border border-stage-line opacity-90">
@@ -451,6 +553,7 @@ function NotesView({
             )}
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto rounded-xl bg-stage-soft p-5">
+            {bubble && <p className="mb-3 text-sm text-stage-muted">화면 · {bubble}</p>}
             <p className="text-sm font-semibold text-stage-muted">메모</p>
             <div className="mt-2 space-y-2 text-[24px] leading-[1.55]">
               {sentencesOf(notes).map((t, i) => (

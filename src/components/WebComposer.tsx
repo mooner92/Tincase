@@ -384,6 +384,8 @@ export function WebComposer({
                     >
                       <span className="text-center text-xs text-muted tabular-nums sm:w-9 sm:shrink-0">{no}</span>
                       <input
+                        // CP-104 — 사용 안내의 「업무 내용」 단계는 실적 표 첫 칸(붙여넣는 자리)을 가리킨다
+                        data-guide={s.key === 'achievements' && i === 0 ? 'compose-first' : undefined}
                         value={row.content}
                         onChange={(e) => set(s.key, i, 'content', e.target.value)}
                         onPaste={(e) => onPaste(s.key, i, e)}
@@ -436,6 +438,8 @@ export function WebComposer({
                           켜진 줄만 눈에 띄면 된다.
                         */}
                         <button
+                          // CP-104 — 사용 안내의 「공유」 단계는 실적 표 첫 줄의 이 버튼을 가리킨다
+                          data-guide={s.key === 'achievements' && i === 0 ? 'compose-share' : undefined}
                           onClick={() => toggleEmphasis(s.key, i)}
                           aria-pressed={row.emphasis === true}
                           aria-label={`${i + 1}번째 줄 공유 표시`}

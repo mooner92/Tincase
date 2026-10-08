@@ -531,6 +531,8 @@ export function MergedDrawer({
                               <td key={ci} className="px-1 py-0.5 align-top">
                                 {canEdit && ci > 0 ? (
                                   <textarea
+                                    // CP-104 — 사용 안내의 「업무실적 내용」 단계는 첫 표 첫 줄의 내용 칸을 가리킨다(「칸을 눌러 고친다」)
+                                    data-guide={ti === 0 && ri === 0 && ci === 1 ? 'merged-cell' : undefined}
                                     value={cell}
                                     rows={1}
                                     ref={fit}

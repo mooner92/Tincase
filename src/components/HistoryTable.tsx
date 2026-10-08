@@ -29,12 +29,18 @@ export function HistoryTable({
   userName: string;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
+  /** 낸 주 중 맨 위 — 사용 안내의 「열기」가 가리키는 줄 */
+  const firstOpen = rows.find((r) => r.submissionId)?.slotId;
 
-  /** 열기·받기 — 표와 카드가 같은 것을 쓴다 (두 벌이면 갈라진다) */
-  const actions = (r: HistoryRow) =>
+  /**
+   * 열기·받기 — 표와 카드가 같은 것을 쓴다 (두 벌이면 갈라진다).
+   * `guide`면 사용 안내가 가리키는 [열기](CP-104) — 넓은 화면의 표에만 단다: 좁은 화면의 카드 목록은 숨겨져 있어,
+   * 같은 앵커가 거기에도 있으면 찍기 도구가 숨은 쪽을 먼저 집는다
+   */
+  const actions = (r: HistoryRow, guide = false) =>
     r.submissionId && (
       <span className="inline-flex gap-0.5">
-        <button onClick={() => setOpenId(r.submissionId)} className="btn-ghost">
+        <button data-guide={guide ? 'history-open' : undefined} onClick={() => setOpenId(r.submissionId)} className="btn-ghost">
           열기
         </button>
         <a href={`/api/submissions/${r.submissionId}/download`} className="btn-ghost">
@@ -126,7 +132,7 @@ export function HistoryTable({
                   )}
                 </td>
                 <td className="text-body">{r.uploadedAtKst ?? '—'}</td>
-                <td className="py-0 text-right">{actions(r)}</td>
+                <td className="py-0 text-right">{actions(r, r.slotId === firstOpen)}</td>
               </tr>
             ))}
           </tbody>

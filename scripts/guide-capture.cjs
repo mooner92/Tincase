@@ -10,7 +10,8 @@
  *   3. `--verify`로 표식을 확인한다. 틀리면 찍지 않는다
  *   4. 이 체크아웃에서 `next dev`를 띄운다 (그 DB · 웹 작성만 · 알림·스케줄러·모델 끔)
  *   5. 역할별 세션으로 로그인해 단계마다 그 상태를 만들고(승인·제출·이어 붙이기는 화면에서 실제로 누른다),
- *      `data-guide` 앵커의 사각형을 재서 `public/guide/deck/<단계>.webp`와 `manifest.json`을 쓴다
+ *      `data-guide` 앵커(무대의 구멍 = 누를 곳)와 카메라 사각형을 재서 `public/guide/deck/<단계>.webp`와 `manifest.json`을 쓴다.
+ *      단계 순서는 「누르면 다음 화면」이다 — 한 단계의 구멍을 실제로 누른 결과가 다음 단계의 그림이 되게 찍는다
  *   6. 서버를 끄고, `next dev`가 고쳐 쓴 CLAUDE.md·AGENTS.md·next-env.d.ts를 되돌리고, 임시 디렉터리를 지운다
  *
  * 다른 서버·다른 DB를 겨냥하는 옵션은 **일부러 없다.** 테스트 서버의 DB도 운영의 사본이라 실명이 들어 있다 —
@@ -33,7 +34,7 @@
  * 배율 2인 이유: 발표 무대(1920px)에서 카메라가 버튼 둘레로 2.2배까지 다가간다 — 1.5배로 찍으면 그림을 늘려 그려 글자가
  * 번졌다(2026-10-08 검토). 무대는 찍은 배율의 1.15배까지만 키운다(camera.ts OVERZOOM).
  *
- * 카메라 사각형(`frame`)은 단계의 `frameClip`으로, 창보다 큰 앵커의 스포트라이트는 `focusClip`으로 줄여 manifest에 남긴다 — 카드 하나를 통째로 담으면 덜 다가가 글자가
+ * 카메라 사각형(`frame`)은 단계의 `frameClip`으로, 창보다 큰 앵커의 구멍(누를 곳)은 `focusClip`으로 줄여 manifest에 남긴다 — 카드 하나를 통째로 담으면 덜 다가가 글자가
  * 작다. 찍기 전에 그 사각형의 가운데가 창 높이 45%에 오게 스크롤한다(페이지 맨 끝의 카드도 올라오도록 찍는 동안만
  * 바닥에 50vh를 덧댄다). 아래쪽에 붙은 채로 찍으면 강당에서 버튼이 화면 맨 아래 — 앞사람 머리 높이 — 에 놓인다.
  */
@@ -249,6 +250,46 @@ async function rectOf(page, id, clip) {
   return { x: r(x), y: r(y), w: r(w), h: r(h) };
 }
 
+/**
+ * 바닥색 — 그림 맨 아래 한 줄을 색 토막으로(manifest `ground`). 무대가 그림 아래를 비울 때 그 자리를 이 색으로 칠한다(CP-101).
+ * 비슷한 색(채널 차 12 이하)은 한 토막, 폭 2% 미만의 토막(글자·테두리 한 획)은 왼쪽 토막에 붙인다
+ */
+async function groundOf(png) {
+  const sharp = require(require.resolve('sharp', { paths: [REPO] }));
+  const { data, info } = await sharp(png).extract({ left: 0, top: VIEW.height * SCALE - 1, width: VIEW.width * SCALE, height: 1 }).removeAlpha().raw().toBuffer({ resolveWithObject: true });
+  const W = info.width;
+  const px = (i) => [data[i * 3], data[i * 3 + 1], data[i * 3 + 2]];
+  const near = (a, b) => Math.max(Math.abs(a[0] - b[0]), Math.abs(a[1] - b[1]), Math.abs(a[2] - b[2])) <= 12;
+  // 토막의 색은 그 토막에서 가장 많은 색 — 첫 픽셀은 경계의 번진 색일 수 있다
+  const runs = [];
+  for (let i = 0; i < W; i++) {
+    const c = px(i);
+    const last = runs[runs.length - 1];
+    if (last && near(last.c, c)) {
+      last.n++;
+      const k = c.join(',');
+      last.hist.set(k, (last.hist.get(k) ?? 0) + 1);
+    } else runs.push({ x: i, n: 1, c, hist: new Map([[c.join(','), 1]]) });
+  }
+  const kept = [];
+  for (const r of runs) {
+    const last = kept[kept.length - 1];
+    if (last && (r.n < W * 0.02 || near(last.c, r.c))) {
+      last.n += r.n;
+      for (const [k, v] of r.hist) last.hist.set(k, (last.hist.get(k) ?? 0) + v);
+    } else kept.push({ ...r, hist: new Map(r.hist) });
+  }
+  // 맨 왼쪽이 가는 토막(테두리 한 획)이면 오른쪽 토막에 붙인다
+  if (kept.length > 1 && kept[0].n < W * 0.02) {
+    for (const [k, v] of kept[0].hist) kept[1].hist.set(k, (kept[1].hist.get(k) ?? 0) + v);
+    kept[1].x = 0;
+    kept.shift();
+  }
+  for (const r of kept) r.c = [...r.hist].sort((a, b) => b[1] - a[1])[0][0].split(',').map(Number);
+  const hex = (c) => `#${c.map((v) => v.toString(16).padStart(2, '0')).join('')}`;
+  return kept.map((r, i) => ({ x: i === 0 ? 0 : Math.round((r.x / W) * 10000) / 10000, color: hex(r.c) }));
+}
+
 async function toWebp(png) {
   const sharp = require(require.resolve('sharp', { paths: [REPO] }));
   for (let q = 82; ; q -= 6) {
@@ -303,7 +344,8 @@ function plan(ai, notice) {
     },
     { id: 'member-previous', role: 'memberPending' },
     {
-      id: 'member-submit',
+      // [계획 2줄을 이번 주 실적으로]를 누른 뒤의 화면 — 지난주 계획이 실적 칸에 들어와 있다(구멍을 누르면 다음 = 그 결과)
+      id: 'member-share',
       role: 'memberPending',
       act: async (p) => {
         await click('previous-to-achievements')(p);
@@ -314,6 +356,16 @@ function plan(ai, notice) {
         await away(p);
         await p.waitForTimeout(900); // 「계획 N줄을 실적에 넣었습니다」가 사라질 때까지
       },
+      // 실적 첫 줄의 「공유」를 켠다 — 병합본에서 그 줄이 파랗게 나가는 것까지 이야기가 이어진다
+      after: async (p) => {
+        await p.locator(sel('compose-share')).first().click();
+        await away(p);
+        await p.waitForTimeout(300);
+      },
+    },
+    {
+      id: 'member-submit',
+      role: 'memberPending',
       after: async (p, fix) => {
         await p.locator(sel('compose-submit')).click();
         await p.getByText('제출되었습니다').waitFor({ timeout: 30_000 });
@@ -583,7 +635,8 @@ async function main() {
       const { buf, q } = await toWebp(png);
       const file = `${step.id}.webp`;
       fs.writeFileSync(path.join(OUT, file), buf);
-      shots[step.id] = { file, width: VIEW.width * SCALE, height: VIEW.height * SCALE, focus, frame, anchor: step.anchor };
+      const ground = await groundOf(png);
+      shots[step.id] = { file, width: VIEW.width * SCALE, height: VIEW.height * SCALE, focus, frame, anchor: step.anchor, ground };
       log(`${step.id.padEnd(16)} ${Math.round(buf.length / 1024)}KB q${q}`);
       if (st.after) await st.after(p, fix);
     }

@@ -69,7 +69,9 @@ export function LoginForm() {
           {error}
         </p>
       )}
+      {/* CP-104 — 사용 안내의 첫 단계가 이 버튼을 가리킨다(카드 전체가 아니라 누를 곳 하나) */}
       <button
+        data-guide="login-submit"
         type="submit"
         disabled={busy}
         className="btn-primary w-full"

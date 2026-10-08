@@ -152,7 +152,8 @@ export default async function OrgPage({ searchParams }: { searchParams: Promise<
                   <div className="card-head items-center">
                     <p className="flex flex-wrap items-baseline gap-x-6 gap-y-1 text-sm text-muted">
                       {totals && (
-                        <span>
+                        // CP-104 — 사용 안내의 「제출」 단계(전사에서 몇 명이 냈나)가 이 합계를 가리킨다
+                        <span data-guide="org-total">
                           제출 <strong className="text-[26px] font-semibold text-ink tabular-nums">{totals.submitted}</strong>
                           <span className="tabular-nums"> / {totals.roster}명 · {pct}%</span>
                         </span>

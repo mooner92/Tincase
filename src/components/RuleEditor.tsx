@@ -206,25 +206,28 @@ export function RuleEditor(props: RuleEditorProps) {
         {/* CP-104 — 사용 안내가 가리키는 두 설정(분류·정렬). 감싸는 것은 화면에 아무 영향이 없다 */}
         <div data-guide="merge-order">
         <Field first title="분류 순서" hint="병합본을 이 순서로 묶습니다">
-          <input
-            value={categories}
-            onChange={(e) => setCategories(e.target.value)}
-            className={FIELD}
-            placeholder="AI-홍보-시스템-도서관   (쉼표·가운뎃점·하이픈 아무거나)"
-          />
-          <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted">
-            {parsed.length === 0 ? (
-              <span>{sort === 'date' ? '비우면 표 전체를 일자 순으로 놓습니다.' : '비우면 제출자 순서로 넣습니다.'}</span>
-            ) : (
-              <>
-                {parsed.map((c) => (
-                  <span key={c} className="chip chip-muted text-xs">
-                    {c}
-                  </span>
-                ))}
-                <span className="chip text-xs text-muted ring-1 ring-hairline ring-inset">기타</span>
-              </>
-            )}
+          {/* CP-104 — 사용 안내의 「분류 순서」 단계는 적는 칸과 그 밑의 칩만 밝힌다(설정 카드 전체가 아니라) */}
+          <div data-guide="merge-categories">
+            <input
+              value={categories}
+              onChange={(e) => setCategories(e.target.value)}
+              className={FIELD}
+              placeholder="AI-홍보-시스템-도서관   (쉼표·가운뎃점·하이픈 아무거나)"
+            />
+            <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-muted">
+              {parsed.length === 0 ? (
+                <span>{sort === 'date' ? '비우면 표 전체를 일자 순으로 놓습니다.' : '비우면 제출자 순서로 넣습니다.'}</span>
+              ) : (
+                <>
+                  {parsed.map((c) => (
+                    <span key={c} className="chip chip-muted text-xs">
+                      {c}
+                    </span>
+                  ))}
+                  <span className="chip text-xs text-muted ring-1 ring-hairline ring-inset">기타</span>
+                </>
+              )}
+            </div>
           </div>
         </Field>
 
