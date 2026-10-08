@@ -65,7 +65,14 @@ interface Gate {
   lastWarmup: CallRecord | null;
 }
 
-const gates = new Map<string, Gate>();
+/*
+ * 문 표는 `globalThis`에 둔다 — rollup/lock.ts의 잠금 표와 같은 이유. Next는 같은 파일을 번들 층마다 따로 싣는다:
+ * 스케줄러(instrumentation)와 [지금 병합](라우트 처리기)이 서로 다른 이 모듈의 사본을 가지면, 모듈 변수로 둔 문은 서로를 못 본다 —
+ * HM-52가 막으려던 바로 그 겹침(자동 병합과 [지금 병합]이 모델 서버에 함께 들어가 서로의 60초를 먹는다)이 그대로 난다.
+ * 한 프로세스라는 전제(ADR-0003)는 그대로이고, 그 프로세스 안의 사본끼리 표 하나를 나눈다.
+ */
+const shared = globalThis as unknown as { __tincaseModelGates?: Map<string, Gate> };
+const gates = (shared.__tincaseModelGates ??= new Map<string, Gate>());
 
 function gateOf(url: string): Gate {
   let g = gates.get(url);

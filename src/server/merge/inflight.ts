@@ -40,7 +40,13 @@ export const MERGING_TEXT = '이미 병합 중입니다';
 interface Claim {
   since: number;
 }
-const claims = new Map<string, Claim>();
+/*
+ * 잡은 표는 `globalThis`에 둔다 — rollup/lock.ts · gate.ts와 같은 이유. Next는 같은 파일을 번들 층마다 따로 싣는다:
+ * 스케줄러(instrumentation)와 [지금 병합](라우트 처리기)이 이 모듈의 다른 사본을 가지면 모듈 변수로 둔 표는 서로를 못 본다 —
+ * 그러면 「1) 프로세스 안」 막이가 없는 것과 같고, 둘 다 DB에 running 행을 만들기 전의 틈으로 함께 들어간다.
+ */
+const shared = globalThis as unknown as { __tincaseMergeClaims?: Map<string, Claim> };
+const claims = (shared.__tincaseMergeClaims ??= new Map<string, Claim>());
 const unitKey = (divisionId: string, weekSlotId: string) => `${divisionId}:${weekSlotId}`;
 
 function liveClaim(divisionId: string, weekSlotId: string, now: number): Claim | null {
