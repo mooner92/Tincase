@@ -45,13 +45,16 @@
   --color-brand-soft: #eef4ef; /* 아주 옅은 배경 */
 
   /*
-   * CP-105 — 발표 무대(프로젝터). 바탕이 검정인 이유: 프로젝터의 검정과 화면 가장자리가 섞여
-   * 레터박스가 「띠」로 보이지 않는다. 회색 바닥·흰 카드(CP-97)의 예외는 이 무대 하나다.
+   * CP-105 개정 · PG-82 (2026-10-08 v2) — 발표 무대는 **흰 바탕**이다. 사용자: 「배경을 검은색 말고 흰색으로 — 프레젠터로
+   * 발표할 거라 흰 배경」. 강당 프로젝터는 바탕에 빛이 더해져 대비가 떨어지므로 무대 글자는 7:1 이상(AAA), 경계는 3:1 이상 —
+   * UI-T94가 이 값들로 계산한다. `brand-tint`는 흰 바탕에서 2.28:1이라 무대에서 쓰지 않는다(강조는 `brand`).
    */
-  --color-stage: #000000;
-  --color-stage-soft: #161816; /* 무대 안의 면 — 글자 슬라이드의 상자, 발표자 창의 칸 */
-  --color-stage-line: #2e322e; /* 무대 안 구분선 */
-  --color-stage-muted: #a9aea9; /* 보조 글자 — stage 위 9.4:1 · stage-soft 위 7.9:1 */
+  --color-stage: #ffffff;
+  --color-stage-soft: #f3f4f3; /* 무대 안의 면 — 흐름 칸·발표자 창의 칸 (= ground) */
+  --color-stage-line: #d6d6d6; /* 무대 안 구분선 (= hairline, 장식) */
+  --color-stage-muted: #555555; /* 보조 글자 — stage 위 7.46:1 · stage-soft 위 6.76:1 */
+  --color-stage-ink: #111111; /* 무대 글자 — stage 위 18.88:1 */
+  --color-blackout: #000000; /* 검은 화면(B) 전용 — 무대가 희어도 검은 화면은 검다 */
 
   /* 상태 — 「-soft」 위에 같은 이름의 글자를 얹는다. 비율은 그 조합으로 쟀다 */
   --color-success: #0a7d2c;
@@ -72,6 +75,17 @@
      뒤의 목록은 글꼴이 뜨기 전·못 뜰 때만 쓰인다 (한글 있는 것으로만 골랐다) */
   --font-sans: var(--font-paperlogy), Pretendard, "Malgun Gothic",
     "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
+}
+
+/*
+ * PG-80 — 스크롤바가 생기고 없어질 때 폭이 9~17px 흔들리지 않게(Windows 고정 스크롤바). 체험하기의 무대는 폭으로 높이를
+ * 정하므로(16:9) 폭이 흔들리면 그 밑의 도크가 위아래로 움직였다. 발표 화면은 스크롤이 없으므로 빈 띠를 두지 않는다
+ */
+html {
+  scrollbar-gutter: stable;
+}
+html:has([data-present]) {
+  scrollbar-gutter: auto;
 }
 
 body {
@@ -311,17 +325,18 @@ body {
 
   /*
    * 2026-10-08 — **게임 튜토리얼식 코치 마크** (사용자: 「누를 버튼만 빼고 검은 필터를 씌우고, 옆에 팝업 말풍선으로」).
-   *   .coach-dim     누를 곳(구멍)만 남기고 무대 전체를 검정으로 덮는 그늘(--coach-dim: 발표 78% · 혼자 보기 70%).
+   *   .coach-dim     누를 곳(구멍)만 남기고 무대 전체를 덮는 그늘(--coach-dim 55% — PG-82 「흰,검 비율」).
    *                  구멍 자체가 그늘을 드리우는 상자다 — 판과 같이 움직이므로 카메라가 옮겨 가는 동안에도 구멍이
-   *                  버튼에서 어긋나지 않는다. 판 안에서는 cqw가 배율만큼 커 보이므로 둥글기·여백은 배율(--cam-scale)로 나눈다
-   *   .coach-ring    구멍 둘레의 흰 실선 + 2초마다 밖으로 퍼지며 사라지는 흰 고리 — 「여기」를 말한다
+   *                  버튼에서 어긋나지 않는다. 둥글기는 GuideStage가 계획의 구멍에서 계산해 단다(PG-81)
+   *   .coach-ring    구멍 가장자리 위에 걸친 흰 띠 + 2초마다 밖으로 퍼지며 사라지는 흰 고리 — 「여기」를 말한다
    *   .coach-hand    누르라는 손 — 버튼 모서리를 세 번 두드리고(손끝에 흰 물결) 멈춘다
-   *   .coach-bubble  말풍선 「이름: 한 문장」 + 꼬리말 「버튼을 눌러 계속」 + [다음]. 흰 바탕 · 검은 글자 —
-   *                  어두운 그늘 위에서 가장 먼저 눈이 가는 면이다
+   *   .coach-bubble  말풍선 「이름: 한 문장」(+ 체험하기 첫 단계에만 꼬리말). 흰 바탕 · 짙은 글자
    *   .coach-press   눌린 모양 — 구멍을 누른 자리(키로 넘기면 손끝)에 흰 물결, 구멍이 살짝 들어간다(data-press)
-   * 고리·손·말풍선은 무대 좌표에 놓고 카메라가 도착한 뒤(--coach-delay) 나타난다 — 움직이는 동안 같이 미끄러지면
+   * 고리·손·말풍선은 무대 좌표에 놓고 카메라가 도착한 뒤(data-settled) 나타난다 — 움직이는 동안 같이 미끄러지면
    * 눈이 그것을 쫓느라 화면을 못 본다. 어두운 곳을 누르면(PG-T90) 셋이 처음부터 다시 움직인다.
-   * 글자는 무대 폭 기준(cqw) × 말풍선 배율(--k) — 1920px 무대에서 이름 40px · 문장 31px · 꼬리말 21px. 숫자는 coach.ts BUBBLE과 같다.
+   *
+   * 길이 단위는 `--cu` — 무대에서는 없다(= 1cqw, 무대 폭의 1%), 실제 화면 위의 둘러보기(PG-84)는 9px. 같은 말풍선·고리를
+   * 두 곳이 쓴다(CP-120). 글자는 단위 × 말풍선 배율(--k) — 1920px 무대에서 이름 40px · 문장 31px. 숫자는 coach.ts BUBBLE과 같다.
    */
   /* 그림 아래 — 카메라가 그림 밑을 비울 때(BOTTOM_SLACK) 그 그림의 바닥색(manifest ground)이 이어진다 */
   .guide-ground {
@@ -333,15 +348,14 @@ body {
   .coach-dim {
     position: absolute;
     pointer-events: none;
-    border-radius: calc(0.9cqw / var(--cam-scale, 1));
-    box-shadow: 0 0 0 calc(6000px / var(--cam-scale, 1)) rgb(0 0 0 / var(--coach-dim, 0.7));
+    box-shadow: 0 0 0 calc(6000px / var(--cam-scale, 1)) rgb(0 0 0 / var(--coach-dim, 0.55));
     transition: transform 90ms ease-out;
   }
   .coach-over {
     position: absolute;
     inset: 0;
     pointer-events: none;
-    animation: coach-in 200ms ease-out var(--coach-delay, 0ms) both;
+    animation: coach-in 200ms ease-out both;
   }
   .coach-over > * {
     pointer-events: auto;
@@ -357,53 +371,60 @@ body {
     }
   }
   /*
-   * 고리 — 속이 빈 흰 테. 예전에는 brand-tint(#7fb98c) 그림자를 0.2 → 1.8cqw로 키웠는데, 프로젝터에서 두꺼운 회녹색 띠로
-   * 번졌다(2026-10-08 검토). 이제 0.3cqw 흰 테가 밖으로 1.1cqw 퍼지며 사라진다. 배율(scale)이 아니라 바깥 여백(inset)을
-   * 키운다 — 넓은 칸(실적 표 첫 칸)을 배율로 키우면 가로로만 수십 px 늘어 고리가 납작한 타원처럼 보인다
+   * PG-81 — 고리 = **구멍 가장자리 위에 걸친 한 띠.** 예전에는 상자 바깥 그림자(0.17cqw)였는데, 그늘 구멍(판 좌표)과 고리(무대 좌표)가
+   * 같은 선을 따로 안티앨리어싱해 그 사이에 회색 실선(이중 테두리)이 비쳤다 — 그림자는 상자 바깥에만 있어 그 줄을 못 덮는다.
+   * 이제 `outline`이 안쪽 --ring-in부터 바깥 0.17cu까지 덮는다 — 그늘의 반투명 가장자리 픽셀이 불투명한 흰 띠 밑에 숨는다.
+   * 바깥으로 보이는 굵기는 예전과 같다. `outline`은 둥글기를 따른다(Chrome 94+). 둥글기 --hole-r은 버튼과 동심(PG-81)
    */
   .coach-ring {
+    --ring-in: max(2px, calc(0.12 * var(--cu, 1cqw)));
     position: absolute;
-    border-radius: 0.9cqw;
-    box-shadow: 0 0 0 0.17cqw var(--color-canvas);
+    border-radius: var(--hole-r, calc(0.9 * var(--cu, 1cqw)));
+    outline: calc(0.17 * var(--cu, 1cqw) + var(--ring-in)) solid var(--color-canvas);
+    outline-offset: calc(-1 * var(--ring-in));
     transition: transform 90ms ease-out;
   }
+  /*
+   * 퍼지는 고리 — 속이 빈 흰 테가 밖으로 1.1cu 퍼지며 사라진다. 배율(scale)이 아니라 바깥 여백(inset)을 키운다 — 넓은 칸을
+   * 배율로 키우면 가로로만 수십 px 늘어 고리가 납작한 타원처럼 보인다
+   */
   .coach-ring::after {
     content: '';
     position: absolute;
-    inset: -0.3cqw;
-    border: 0.3cqw solid var(--color-canvas);
-    border-radius: 1.2cqw;
+    inset: calc(-0.3 * var(--cu, 1cqw));
+    border: calc(0.3 * var(--cu, 1cqw)) solid var(--color-canvas);
+    border-radius: calc(var(--hole-r, calc(0.9 * var(--cu, 1cqw))) + 0.3 * var(--cu, 1cqw));
     opacity: 0;
-    animation: coach-pulse 2s ease-out var(--coach-delay, 0ms) infinite;
+    animation: coach-pulse 2s ease-out infinite;
   }
   @keyframes coach-pulse {
     from {
-      inset: -0.3cqw;
+      inset: calc(-0.3 * var(--cu, 1cqw));
       opacity: 0.9;
     }
     to {
-      inset: -1.4cqw;
+      inset: calc(-1.4 * var(--cu, 1cqw));
       opacity: 0;
     }
   }
-  /* 구멍 위의 투명한 버튼 — 누르면 다음 (그 버튼을 누른 뒤의 화면이 다음 단계다). 키보드 초점은 흰 실선으로 */
+  /* 구멍 위의 투명한 버튼 — 누르면 다음 (그 버튼을 누른 뒤의 화면이 다음 단계다). 키보드 초점은 짙은 실선으로 */
   .coach-hit {
     position: absolute;
-    border-radius: 0.9cqw;
+    border-radius: var(--hole-r, calc(0.9 * var(--cu, 1cqw)));
     cursor: pointer;
     background: transparent;
   }
   .coach-hit:focus-visible {
-    outline: 0.25cqw solid var(--color-canvas);
-    outline-offset: 0.3cqw;
+    outline: calc(0.25 * var(--cu, 1cqw)) solid var(--color-stage-ink);
+    outline-offset: calc(0.3 * var(--cu, 1cqw));
   }
-  /* 손 — 손끝(24% 4%)을 축으로 기울이고 뒤집는다(transform은 GuideStage가 단다) */
+  /* 손 — 손끝(24% 4%)을 축으로 기울이고 뒤집는다(transform은 GuideStage가 단다). 윤곽은 짙은 잉크 — 흰 구멍 위에서도 보인다 */
   .coach-hand {
     position: absolute;
     pointer-events: none;
     overflow: visible;
     transform-origin: 24% 4%;
-    filter: drop-shadow(0 0.2cqw 0.35cqw rgb(0 0 0 / 0.45));
+    filter: drop-shadow(0 0.2cqw 0.35cqw rgb(0 0 0 / 0.35));
   }
   /*
    * 두드리기 — 손끝이 다가가 한 번 누르고(작아짐) 물러난다. **세 번 하고 멈춘다**(약 4초): 발표자가 40초 말하는 동안
@@ -412,12 +433,12 @@ body {
    */
   .coach-hand-tap {
     transform-origin: 24% 4%;
-    animation: coach-tap 1.3s ease-in-out var(--coach-delay, 0ms) 3;
+    animation: coach-tap 1.3s ease-in-out 3;
   }
   .coach-hand path,
   .coach-hand rect {
     fill: var(--color-canvas);
-    stroke: var(--color-stage);
+    stroke: var(--color-stage-ink);
     stroke-width: 1.5;
     stroke-linejoin: round;
   }
@@ -440,16 +461,16 @@ body {
   .coach-tap-ripple,
   .coach-press {
     position: absolute;
-    width: 1.2cqw;
-    height: 1.2cqw;
-    margin: -0.6cqw 0 0 -0.6cqw;
+    width: calc(1.2 * var(--cu, 1cqw));
+    height: calc(1.2 * var(--cu, 1cqw));
+    margin: calc(-0.6 * var(--cu, 1cqw)) 0 0 calc(-0.6 * var(--cu, 1cqw));
     border-radius: 999px;
     background: var(--color-canvas);
     pointer-events: none;
     opacity: 0;
   }
   .coach-tap-ripple {
-    animation: coach-tap-ripple 1.3s ease-out var(--coach-delay, 0ms) 3;
+    animation: coach-tap-ripple 1.3s ease-out 3;
   }
   @keyframes coach-tap-ripple {
     0%,
@@ -497,14 +518,15 @@ body {
       transform: translate(0, 0) scale(0.9);
     }
   }
+  /* 말풍선 — 흰 면(55% 그늘 위 4.7:1). 그림자는 가볍게: 흰 무대에서 짙은 그림자는 얼룩으로 보였다 */
   .coach-bubble {
     position: absolute;
-    border-radius: calc(1cqw * var(--k, 1));
-    padding: calc(1.1cqw * var(--k, 1)) calc(1.4cqw * var(--k, 1));
+    border-radius: calc(1 * var(--cu, 1cqw) * var(--k, 1));
+    padding: calc(1.1 * var(--cu, 1cqw) * var(--k, 1)) calc(1.4 * var(--cu, 1cqw) * var(--k, 1));
     background: var(--color-canvas);
-    color: var(--color-ink);
-    box-shadow: 0 0.6cqw 2.4cqw rgb(0 0 0 / 0.45);
-    animation: coach-pop 220ms cubic-bezier(0.22, 1, 0.36, 1) var(--coach-delay, 0ms) both;
+    color: var(--color-stage-ink);
+    box-shadow: 0 calc(0.4 * var(--cu, 1cqw)) calc(1.6 * var(--cu, 1cqw)) rgb(0 0 0 / 0.28);
+    animation: coach-pop 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
     cursor: default;
   }
   @keyframes coach-pop {
@@ -515,7 +537,7 @@ body {
   }
   /* 마지막 줄에 「합쳐져요」 한 낱말만 남지 않게(pretty). balance는 쓰지 않는다 — 이름 뒤에서 줄을 끊어 「검토 요청: 마감」처럼 머리만 남았다 */
   .coach-text {
-    font-size: calc(1.6cqw * var(--k, 1));
+    font-size: calc(1.6 * var(--cu, 1cqw) * var(--k, 1));
     line-height: 1.3;
     font-weight: 500;
     word-break: keep-all;
@@ -523,38 +545,23 @@ body {
     text-wrap: pretty;
   }
   .coach-label {
-    font-size: calc(2.1cqw * var(--k, 1));
+    font-size: calc(2.1 * var(--cu, 1cqw) * var(--k, 1));
     font-weight: 700;
     letter-spacing: -0.01em;
   }
   .coach-foot {
-    margin-top: calc(0.7cqw * var(--k, 1));
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: calc(1.2cqw * var(--k, 1));
-    /* 혼자 보기 무대(800px 남짓)에서 꼬리말이 11px 밑으로 내려가지 않게 */
-    font-size: max(11px, calc(1.1cqw * var(--k, 1)));
+    margin-top: calc(0.7 * var(--cu, 1cqw) * var(--k, 1));
+    /* 혼자 보기 무대(800px 남짓)에서 꼬리말이 12px 밑으로 내려가지 않게 */
+    font-size: max(12px, calc(1.1 * var(--cu, 1cqw) * var(--k, 1)));
     line-height: 1.3;
-    color: var(--color-muted);
+    color: var(--color-stage-muted);
     white-space: nowrap;
   }
-  .coach-next {
-    border-radius: calc(0.6cqw * var(--k, 1));
-    background: var(--color-brand);
-    color: var(--color-canvas);
-    padding: calc(0.35cqw * var(--k, 1)) calc(0.9cqw * var(--k, 1));
-    font-weight: 600;
-  }
-  .coach-next:focus-visible {
-    outline: 0.2cqw solid var(--color-brand-tint);
-    outline-offset: 0.15cqw;
-  }
-  /* 꼬리 — 말풍선과 같은 흰 마름모의 반쪽이 구멍 쪽 변에서 튀어나온다. 2.0cqw — 1.4cqw는 강당에서 「모서리의 점」으로 보였다 */
+  /* 꼬리 — 말풍선과 같은 흰 마름모의 반쪽이 구멍 쪽 변에서 튀어나온다. 2.0cu — 1.4cu는 강당에서 「모서리의 점」으로 보였다 */
   .coach-arrow {
     position: absolute;
-    width: calc(2cqw * var(--k, 1));
-    height: calc(2cqw * var(--k, 1));
+    width: calc(2 * var(--cu, 1cqw) * var(--k, 1));
+    height: calc(2 * var(--cu, 1cqw) * var(--k, 1));
     background: var(--color-canvas);
     transform: translate(-50%, -50%) rotate(45deg);
   }
@@ -571,8 +578,8 @@ body {
     top: 100%;
   }
   /*
-   * 구석 알약 「부서원 3/8」(발표 무대에만) — 85% 검정 + 둘레에 옅은 검은 띠. 62%였을 때는 밑의 앱 글자(「전사」·「8」·
-   * 「보도자료」)가 알약 글자와 겹쳐 읽혔다(2026-10-08 검토)
+   * 구석 알약 「부서원 3/8」(발표 무대에만) — 흰 면 + 잉크 글자 + 옅은 테(PG-82). 그늘 위에서는 흰 면이 먼저 보이고,
+   * 그늘이 없는 글자 슬라이드 위에서는 테가 경계를 만든다
    */
   .coach-pill {
     position: absolute;
@@ -583,26 +590,23 @@ body {
     height: calc(2.8cqw * var(--k, 1));
     padding: 0 calc(1.2cqw * var(--k, 1));
     border-radius: 999px;
-    background: rgb(0 0 0 / 0.85);
-    box-shadow:
-      0 0 0 0.5cqw rgb(0 0 0 / 0.35),
-      inset 0 0 0 0.1cqw rgb(255 255 255 / 0.22);
-    color: var(--color-canvas);
-    font-size: max(11px, calc(1.25cqw * var(--k, 1)));
+    background: var(--color-canvas);
+    box-shadow: 0 0 0 0.1cqw rgb(0 0 0 / 0.1);
+    color: var(--color-stage-ink);
+    font-size: max(12px, calc(1.25cqw * var(--k, 1)));
     font-weight: 600;
     font-variant-numeric: tabular-nums;
     white-space: nowrap;
     pointer-events: none;
   }
-  /* 휴대폰·인쇄의 잘라 낸 한 장 — 재지 않고 비율로 놓는다. 그늘은 그림 상자가 자른다 */
+  /* 휴대폰·인쇄의 잘라 낸 한 장 — 재지 않고 비율로 놓는다. 그늘은 그림 상자가 자른다. 테두리는 가장자리 위에 걸친 한 띠(PG-81) */
   .coach-static-hole {
     position: absolute;
     pointer-events: none;
     border-radius: 8px;
-    box-shadow:
-      0 0 0 2px var(--color-canvas),
-      0 0 0 5px rgb(255 255 255 / 0.55),
-      0 0 0 3000px rgb(0 0 0 / 0.6);
+    outline: 3px solid var(--color-canvas);
+    outline-offset: -1px;
+    box-shadow: 0 0 0 3000px rgb(0 0 0 / 0.45);
   }
   .coach-still .coach-over,
   .coach-still .coach-bubble,
@@ -611,11 +615,66 @@ body {
   .coach-still .coach-tap-ripple {
     animation: none;
   }
+
+  /*
+   * PG-80 · CP-121 — 도크. 넘기기 단추는 화면마다 한 곳, **칸 폭·높이 고정**이다 — 글자가 「다음 →」에서 「끝」으로 바뀌어도,
+   * 장 이름이 「부서원」에서 「부서담당자」로 길어져도 칸은 그대로다. 그래서 같은 자리를 계속 눌러도 늘 같은 단추를 누른다.
+   * `contain`으로 안쪽 변화가 바깥 배치로 새지 않게 한다
+   */
+  .coach-dock {
+    display: grid;
+    grid-template-columns: 7rem 9rem 7rem;
+    grid-template-rows: 2.75rem;
+    align-items: stretch;
+    column-gap: 0.5rem;
+    contain: layout paint;
+  }
+  .coach-dock > * {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .coach-dock-count {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-stage-muted);
+  }
+  /* 덮개(크게 보기·둘러보기) 바닥 가운데에 뜨는 도크 — 폭이 고정이라 translateX(-50%)도 늘 같은 자리다 */
+  .coach-dock-float {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: max(1rem, calc(env(safe-area-inset-bottom) + 0.75rem));
+    padding: 0.5rem;
+    border-radius: 0.875rem;
+    background: var(--color-canvas);
+    box-shadow:
+      0 0 0 1px rgb(0 0 0 / 0.08),
+      0 8px 24px rgb(0 0 0 / 0.18);
+  }
+  .coach-dock-float.coach-dock-skip {
+    grid-template-columns: 7rem 9rem 7rem 5rem;
+  }
+  @media (max-width: 480px) {
+    /* 휴대폰 — 칸은 좁지만 여전히 고정 폭이다(단계와 상관없다) */
+    .coach-dock {
+      grid-template-columns: 5rem 6.5rem 5rem;
+      column-gap: 0.375rem;
+    }
+    .coach-dock-float.coach-dock-skip {
+      grid-template-columns: 4.5rem 6rem 4.5rem 4.25rem;
+    }
+  }
+
   @media (prefers-reduced-motion: reduce) {
     .guide-layer {
       transition: none;
     }
-    /* 움직이지 않는다 — 고리는 0.3cqw 흰 테 한 겹으로 서 있고, 손은 버튼을 짚은 채 멈춰 있다 */
+    /* 움직이지 않는다 — 고리는 0.3cu 흰 테 한 겹으로 서 있고, 손은 버튼을 짚은 채 멈춰 있다 */
     .coach-over,
     .coach-bubble,
     .coach-hand-tap,

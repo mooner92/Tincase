@@ -56,6 +56,7 @@ Excel에서 한글이 깨지면 인코딩 문제다 — `--bom`으로 다시 뽑
 
 - [ ] `main` 최신 (`git pull`)
 - [ ] 로컬 검증: `npm test` **전부** 통과, `npx tsc --noEmit -p .` 통과
+- [ ] 사용 안내·무대·둘러보기를 만진 판이면: `PLAYWRIGHT=<…/node_modules/playwright> node scripts/guide-check.cjs` 통과 (가짜 앱에서 도크·구멍·둘러보기를 잰다 — PG-T140·141·153)
 - [ ] **재배포면 §2b부터** — §1·§2는 첫 설치 한 번뿐이다
 
 ## 1. 호스트 준비 (1회, sudo 필요)
@@ -207,6 +208,37 @@ cd ~/repman && bash scripts/deploy.sh prod
 | `빌드 실패` · `기동 실패` | 돌던 컨테이너는 그대로다. 찌꺼기는 `bash scripts/deploy.sh prune` |
 | `health가 … ok:true가 아니다` | 본문의 checks를 읽고, 배포 탓이면 아래 롤백 |
 | `다른 deploy.sh가 돌고 있다` | 겹치면 이쪽 청소가 저쪽 빌드의 스테이지 이미지를 지울 수 있다. 끝난 뒤 다시 |
+
+### 2b-5. v2 전환 — 한 번 (2026-10-12, `main` v1.39.0 → v2)
+
+절차는 2b-0 ~ 2b-4 그대로다. 다른 것은 2b-3의 `db push`가 **이번에는 반드시 무언가를 만든다**는 것뿐 — 「already in sync」면 체크아웃이 v2가 아니다.
+바뀌는 것은 전부 **더하기만**이라 프롬프트 없이 끝나야 한다. 데이터 손실 경고·확인을 물으면 멈춘다(그럴 변경이 없다 — 체크아웃을 의심한다).
+
+| 무엇 | 더해지는 것 | 어디서 |
+|---|---|---|
+| 새 표 | `ReportSubmission` · `RollupRun` · `OrgRollupSetting` · `OrgSection` · `OrgSectionUpload` | 3단계 자동 진행 · 「전사」 (RU-*) |
+| 새 표 | `MergeJob` | 병합 줄 (HM-59 · ADR-0019) |
+| 새 표 | `GuideTourSeen` | 첫 로그인 둘러보기 기록 (DM-25 · API-60) |
+| 새 열 | `Division.rollupOrder` · `rollupNote` · `rollupPageBreak` · `rollupSelf` · `MergeReview.filePath` | 3단계 |
+| 새 열 | `MergeRun.outputSha` (옛 실행은 null) | 「병합 점검」이 파일과 기록을 맞춘다 (HM-56e) |
+| 관계만 (열 없음) | `Division`·`WeekSlot`의 `reportSubmissions`·`rollupRuns` · `User.guideTours` | — |
+| 없음 | 가짜 알림 수신함 — DB가 아니라 저장소 파일(`dev/messenger-sink.jsonl`), 시험·시연 서버에만 | NT-56 |
+
+```bash
+DATABASE_URL=file:/data/worklog/db/worklog.db npx prisma db push --skip-generate    # 2b-3과 같은 줄 — 스냅샷(2b-2) 뒤
+sudo docker exec repman sqlite3 /data/db/worklog.db ".tables" | tr -s ' ' '\n' | grep -cE '^(ReportSubmission|RollupRun|OrgRollupSetting|OrgSection|OrgSectionUpload|MergeJob|GuideTourSeen)$'
+#   7이어야 한다
+```
+
+기동한 뒤(2b-4):
+
+- [ ] 로그에 `[merge] 자동 병합 스케줄러 등록 (1분 주기)` — 기동 env 검사(OPS-46)가 통과했다는 뜻이기도 하다. 운영 compose에 `TINCASE_ENV`·`MESSENGER_SINK`가 없다
+- [ ] `/ops` — 「병합 줄」 카드(이번 주 병합 없음), 머리에 [알림 수신함]이 **없다**(운영은 수신함이 닫혀 있다 — `/ops/notify-sink` 404)
+- [ ] 본부 부서(문서가 없는 본부)의 **알림 스위치가 꺼져 있다** — 켜 두면 본부 담당자에게 마감 독촉·「병합본이 아직 없어요」가 간다(CHANGELOG 「주말 시험」 ⚑)
+- [ ] 첫 마감 뒤: `[merge] 자동 병합 n건 줄에 넣음` → `[merge] 줄 k/n — …` · 마감 +15분 안에 「병합 점검」이 운영자와 기획조정실 담당에게 한 통(NT-60)
+- [ ] 아무 계정으로 처음 로그인하면 오른쪽 아래 둘러보기 카드 — [괜찮아요] 뒤 다른 PC에서도 다시 뜨지 않는다(`GuideTourSeen`, 운영자에게는 카드 없음)
+
+롤백(아래)은 옛 이미지로 그대로 된다 — 옛 앱은 새 표·열을 모르고 지나간다.
 
 ### 2b-롤백 — 재빌드하지 않는다 (OPS-17)
 

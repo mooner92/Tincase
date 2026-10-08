@@ -4,7 +4,7 @@
 > 코드·스펙·UI가 이 문서와 어긋나면 **문서가 아니라 코드가 틀린 것**이다.
 > 규칙을 바꾸려면 §10 절차를 따른다. 코드를 먼저 고치는 것은 위반이다.
 
-버전 1.11 · 2026-10-08 · 대상 코드 v1.41.0 (feat/org-rollup) — v1.9 위에 v1.10(병합 줄 · 「병합 점검」 TACP-30 — feat/merge-queue)과 v1.11(가짜 알림 수신함 TACP-26)을 차례로 합쳤다
+버전 1.12 · 2026-10-08 · 대상 코드 v1.41.0 (feat/org-rollup) — v1.9 위에 세 갈래를 이력 순서대로 합쳤다: v1.10(병합 줄 · 「병합 점검」 TACP-30 — feat/merge-queue) · v1.11(가짜 알림 수신함 TACP-26) · v1.12 노트(화면 둘러보기 — 새 권한 없음, feat/guide-v2)
 관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md) · [ADR-0008](docs/adr/0008-head-principal.md) · [ADR-0012](docs/adr/0012-upward-submission.md) · [ADR-0015](docs/adr/0015-approval-is-handoff.md) · [ADR-0016](docs/adr/0016-division-status-visibility.md) · [ADR-0017](docs/adr/0017-foreign-read-chip.md) · [ADR-0018](docs/adr/0018-manage-settings-trim.md) · [ADR-0019](docs/adr/0019-merge-queue.md)
 
 변경 이력:
@@ -67,12 +67,18 @@
   ③ **「병합 점검」 요약은 운영자와 기획조정실 담당(총괄이 있는 부서의 lead)이 받는다** — 새로 허용된 것: 그 lead가 다른 부서들의 병합 **상태**(부서 이름 · 끝/실패/대기 ·
   모델을 못 쓴 표와 사유 · 늦게 낸 수)를 한 통으로 받는다. 문서 내용 · 사람 이름은 없다. 판정은 `authz.ts`의 `mergeBatchAudience` 하나(TACP-12).
   새로 금지된 것: 다른 부서의 lead · head · member와 (lead가 아닌) 총괄은 받지 않는다 · 남의 부서 작업 id로 상태를 물으면 404. 시험 HM-T171 · API-T25
-
 - v1.11 — **TACP-26 신설: 가짜 알림 수신함은 시험·시연 서버의 운영자만 본다** (2026-10-08 — v2 전환 전 주말 시험, NT-56). 새 Resource 「수신함 기록」과
   새 경로 셋: 받는 곳 `POST·GET /api/dev/messenger-sink`(신원을 묻지 않는다 — §6에 넷째 공개 경로로, **시험·시연 서버에서만**), 화면 `/ops/notify-sink`, 비우기
   `DELETE /api/ops/notify-sink`(운영자). 문의 첫 판정은 역할이 아니라 **서버**다 — 수신함이 닫힌 서버(운영)면 신원을 보기 전에 누구에게나 404(§5 `messengerSinkOpen`).
   새로 허용된 것: 시험·시연 서버의 operator가 수신함을 보고 비운다. 새로 금지된 것: 운영에서는 operator에게도 404 · 시험 서버의 member·lead·head·coordinator는 404.
   불변식(§4)은 건드리지 않는다 — 공개 경로는 쓰기만 하고 기록을 내주지 않으며(§4 TACP-4 「격리가 기본값」은 읽기에 대한 것이다), 운영에는 없다. 시험 NT-T77·T78
+- v1.12 — **노트 (규칙 변경 없음 — 새 권한 없음, 2026-10-08)**: 화면 둘러보기(PG-84) · 기록 `GuideTourSeen`(DM-25) · `POST /api/me/tour`(API-60).
+  §10 절차의 1·3·4만 해당한다(불변식·게이트 칸이 바뀌지 않는다). ① **보이는 것이 늘지 않는다** — 둘러보기는 그 사람에게 이미 그려진 화면(TACP-9가 거른 DOM)의
+  앵커만 가리키고, 없으면 건너뛴다. 새 데이터를 읽거나 숨은 단추를 그리지 않는다 ② **판정은 한 곳** — 어떤 장을 권할지는 `guideCaps`(체험하기와 같은 함수),
+  운영자에게 카드를 띄우지 않는 것은 `authz.ts`의 화면 판정 `tourEligible` — 라우트·컴포넌트가 역할 플래그를 비교하지 않는다(TACP-12)
+  ③ **새 기록은 자기 것만** — 쓰는 사람 = 세션의 Principal(TACP-1), 본문이 사람을 고르지 못한다, 남의 기록을 읽는 길이 없다(GET 없음). 부서 문서·권한·경계와
+  무관해 TACP-6·8·10의 대상이 아니다 ④ **실제 동작을 일으키지 않는다** — 덮개 밖은 `inert`, 구멍은 누를 수 없다, 둘러보기가 보내는 요청은 기록 하나.
+  새 Resource의 격리 시험은 PG-T151(내 줄만 — 남의 `userId`를 실어도 내 줄)
 
 ---
 
@@ -682,6 +688,7 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | `requireDeletableSubmission(scope, id)` | 제출물 **삭제** 판정 (TACP-14) | **404** / 409 |
 | `requireSubmitter(headers)` | 제출 진입점. 부서원이면 통과 (DM-16) | 401 / 403 |
 | `getDivisionView(slug)` | 페이지용 — 위를 묶어 `{division, isOwn, canManage, canSubmit}` | 404 |
+| `tourEligible(scope)` | 화면 판정 — 첫 로그인 둘러보기 카드를 띄울 사람인가(운영자 제외). 권하는 장은 `guideCaps`가 정한다 (v1.12 노트 — 권한 아님) | 카드 없음 |
 
 ### 판정 순서
 
@@ -766,6 +773,7 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | **NT-T78** | **시험·시연 서버: 수신함 화면·비우기는 operator만 200** — member·head 404 (v1.11 새로 허용된 것 · 그대로 금지인 것) · 받는 경로는 신원 없이 쓰기만 |
 | **AU-T89** | **member는 병합 규칙을 읽지 못한다** — 부서 설정 화면 404 · 규칙 GET 없음 · 저장 404 (v1.6.4 — 작성 안내가 없어진 칸, 새로 금지된 것) |
 | **HM-T171** | **「병합 점검」은 운영자와 기획조정실 담당(총괄이 있는 부서의 lead)만 받는다** (v1.10 새로 허용된 것) — 다른 부서의 lead · head · member와 (lead가 아닌) 총괄은 받지 않는다(새로 금지된 것) · **병합 작업 상태는 내 부서 것만** — 남의 부서 작업 id → 404, member → 404, 내 부서 lead · head 200 (TACP-30) |
+| **PG-T151** | **둘러보기 기록은 내 줄만** — 본문에 남의 `userId`를 실어도 세션의 사람 줄만 생긴다 · 가지지 않은 장은 무시 · 로그인 없음 401 (v1.12 노트 — 새 Resource `GuideTourSeen`의 격리) |
 
 새 Resource를 추가하면 **그 Resource의 격리 테스트를 같은 커밋에 넣는다.**
 

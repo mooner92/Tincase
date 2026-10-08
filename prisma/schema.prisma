@@ -131,6 +131,8 @@ model User {
   submissions Submission[]
   sessions    Session[]
   setupTokens SetupToken[]
+  /// DM-25 — 화면 둘러보기 기록. 관계 필드만이라 User 표에 열이 생기지 않는다
+  guideTours  GuideTourSeen[]
 
   @@index([divisionId, isActive, onRoster, sortOrder])
 }
@@ -563,4 +565,20 @@ model OrgSectionUpload {
   withdrawnAt DateTime?
 
   @@index([sectionId, weekSlotId, uploadedAt])
+}
+
+/// DM-25 · PG-84 — 화면 둘러보기(첫 로그인 안내)를 권했고 사람이 고른 기록. 장마다 한 줄.
+/// 고르지 않았으면 줄이 없다 — 그러면 다음에 또 권한다. 「봤다」를 브라우저에 두지 않는 이유: 다른 PC·브라우저에서 또 뜬다.
+/// User 열로 두지 않은 이유: 인원 최신화(DM-20)가 User 행을 고친다 — 보존 규칙과 섞이지 않게 따로 둔다. 더하기만이라
+/// `prisma db push`가 표 하나를 만들 뿐 기존 행·열은 그대로다
+model GuideTourSeen {
+  userId    String
+  chapter   String // 'member' | 'lead' | 'head' | 'hq' | 'org'
+  outcome   String // 'dismissed' | 'started' | 'done' | 'skipped'
+  version   Int      @default(1) // 둘러보기의 판 — 내용이 크게 바뀌어 다시 권해야 할 때 올린다
+  decidedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, chapter])
 }

@@ -6,6 +6,7 @@ import { canUseHandoffEscape, HttpError, isReviewer, resolveHqView, rollupNav } 
 import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
+import { getTour } from '@/server/tour';
 import { OrderList, RunCard } from '@/components/RollupDesk';
 import { WeekPicker } from '@/components/WeekPicker';
 import { HqApprovalCard } from '@/components/HqApprovalCard';
@@ -64,6 +65,7 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
         readAll={scope.readAll}
         {...nav}
         viaCloudflare={scope.source === 'cloudflare'}
+        tour={await getTour(scope, false)}
       />
       <main className="mx-auto w-full max-w-[1120px] flex-1 px-5 pt-8 pb-10">
         <div className="page-head">

@@ -13,6 +13,7 @@ import { noticeFor } from '@/components/Notice';
 import { canOperate, rollupNav } from '@/server/authz';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
+import { getTour } from '@/server/tour';
 import { toKstIso } from '@/lib/week';
 
 export const dynamic = 'force-dynamic';
@@ -118,6 +119,7 @@ export default async function AuditPage({
         readAll={scope.readAll}
         {...(await rollupNav(scope))}
         viaCloudflare={scope.source === 'cloudflare'}
+        tour={await getTour(scope, false)}
       />
       <div className="mx-auto w-full max-w-[1120px] flex-1 px-5 pt-8 pb-8">
         {/* 제목은 다른 화면과 같은 크기 — 「60 건」 같은 큰 숫자가 제목 자리에 있으면 무슨 화면인지 한 번 더 읽어야 한다 */}

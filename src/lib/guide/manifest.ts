@@ -23,6 +23,13 @@ export interface ShotInfo {
    * 그대로 밑으로 이어진다. 검정으로 두면 가장 중요한 단계에서 화면 아래가 검은 띠였다(2026-10-08 검토)
    */
   ground: GroundStop[];
+  /**
+   * PG-81 — 찍을 때 잰 앵커의 둥글기(그림 px, 왼쪽 위 모서리 — 높이 절반까지). 구멍 둥글기 = 이것 × 배율 + 여백이면 버튼과
+   * 동심이다. 옛 그림에는 없다(그때는 8px로 본다)
+   */
+  radius?: number;
+  /** PG-81 — 그림 파일의 sha256. 그림만 다시 찍히고 사각형이 낡은 것을 테스트가 잡는다(PG-T143) */
+  sha256?: string;
 }
 
 export interface GroundStop {

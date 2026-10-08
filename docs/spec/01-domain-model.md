@@ -504,6 +504,28 @@ v2 전환(10/12) 전 주말에 알림을 **실제로 보내지 않고** 끝까�
 | RS-T05~08 | 보존 규칙 (멱등 · 수동 예외 · 첫 채움 방향 · 양방향 추적) |
 | DM-T18 | `head`도 `lead`도 아닌 사람은 병합본을 못 고친다 |
 
+### DM-25 — 화면 둘러보기 기록 `GuideTourSeen` (2026-10-08 · PG-84) — 더하기만
+
+```prisma
+/// 화면 둘러보기(첫 로그인 안내)를 권했고 사람이 고른 기록. 장마다 한 줄. 고르지 않았으면 줄이 없다 — 그러면 다음에 또 권한다
+model GuideTourSeen {
+  userId    String
+  chapter   String   // 'member' | 'lead' | 'head' | 'hq' | 'org'
+  outcome   String   // 'dismissed' | 'started' | 'done' | 'skipped'
+  version   Int      @default(1)   // 둘러보기의 판 — 내용이 크게 바뀌어 다시 권해야 할 때 올린다
+  decidedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([userId, chapter])
+}
+// model User { … guideTours GuideTourSeen[] } — 관계 필드만(열이 생기지 않는다)
+```
+
+- **더하기만** — `prisma db push`가 표 하나를 만들 뿐 기존 행·열은 그대로다. 운영을 이 판으로 덮어써도 데이터가 남고, 옛 코드로 되돌려도 이 표를 모른 채 돈다
+- `User` 열로 두지 않은 이유: 인원 최신화(DM-20)가 `User` 행을 고친다 — 보존 규칙과 섞이지 않게 따로 둔다
+- 「봤다」를 브라우저에 두지 않는 이유: 다른 PC·브라우저에서 또 뜬다. 사용자는 지우지 않으므로(DM-03) Cascade는 형식이다
+- 쓰는 곳은 `POST /api/me/tour`(API-60) 하나, 읽는 곳은 페이지의 제안 계산(`src/server/tour.ts`) 하나 — 둘 다 세션의 사람 것만
+
 ### DM-20 — 인원 최신화는 **계획하고 승인한다** (RS-01~16)
 
 ERP에 API가 없어 주 1회 운영자가 「부서별 인원 현황」 엑셀을 올린다.
