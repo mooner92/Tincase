@@ -12,6 +12,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { stageCells } from '@/server/rollup/schedule';
 import { upcomingWeeks } from '@/server/slot-deadline';
 import { OrgRunCard } from '@/components/OrgRunCard';
+import { OrgBoard, type OrgBoardRow } from '@/components/OrgBoard';
 import { RuleEditor } from '@/components/RuleEditor';
 import { offsetLabel, WeekSchedule } from '@/components/WeekSchedule';
 
@@ -208,5 +209,48 @@ describe('PG-49f 「전사」 한 화면 · WS-19l 일정은 머리글 한 곳',
     expect(rules).toContain('분류 순서');
     expect(rules).not.toContain('확인할 낱말');
     for (const gone of ['어떤 설정으로도 바꿀 수 없습니다', '뺄지는 사람이 정합니다', '문서는 그대로 둡니다']) expect(rules, gone).not.toContain(gone);
+  });
+});
+
+describe('RU-60a 「전사」 게시판 hwp — 올리기와 취소는 같은 스위치를 따른다 (2026-10-08)', () => {
+  // 스위치가 꺼진 테스트 서버(11112)에서 시드가 만든 올린 파일마다 「올린 것 취소」가 보였다 — [올리기]는 없는데 취소만 있는 화면
+  const row = (source: 'upload' | 'missing' | 'tincase', refId: string | null): OrgBoardRow => ({
+    key: `k-${source}`,
+    no: 1,
+    title: `섹션-${source}`,
+    offline: source !== 'tincase',
+    progress: null,
+    final: { sectionId: `s-${source}`, source, label: source === 'upload' ? '총괄 업로드 10-08 09:00 · a.hwp' : '', refId },
+    hq: null,
+  });
+  const html = (canUpload: boolean) =>
+    renderToStaticMarkup(
+      createElement(OrgBoard, {
+        rows: [row('upload', 'up1'), row('missing', null), row('tincase', 'rep1')],
+        columns: { progress: false, final: true },
+        canUpload,
+        isoKey: '2026-W41',
+        weekLabel: '10월 1주차',
+        deadlineText: '10월 8일(목) 14:00',
+      }),
+    );
+
+  it('[PG-T160] 스위치가 꺼지면(canUpload=false) [올리기]·[다시 올리기]·「올린 것 취소」가 모두 없다 — 이미 올라온 파일의 [받기]만 남는다', () => {
+    const off = html(false);
+    for (const gone of ['올린 것 취소', '다시 올리기', '>올리기<']) expect(off, gone).not.toContain(gone);
+    expect(off).toContain('/api/rollup/org/sections/upload/up1'); // 받기 — 최종본에 든 것을 꺼내 보는 일
+    const on = html(true);
+    expect(on).toContain('올린 것 취소');
+    expect(on).toContain('다시 올리기');
+  });
+
+  it('[PG-T160b] 시연·안내 시드도 스위치를 따른다 — 꺼졌으면 총괄이 올린 섹션 파일을 만들지 않는다', () => {
+    const demo = src('scripts/demo-seed.ts');
+    expect(demo).toContain('const uploads = hwpUploadOpen();');
+    expect(demo).toContain('planWeek({ cast: castOf(), stage, monday, deadline, end, uploads })');
+    const guide = src('scripts/guide-seed.ts');
+    expect(guide).toMatch(/if \(hwpUploadOpen\(\)\) \{\s*try \{\s*const sec = await prisma\.orgSection/);
+    // 시연 시드 절차는 11112와 같은 스위치로 돈다
+    expect(src('docs/DEMO.md')).toContain('SUBMIT_HWP_UPLOAD=off');
   });
 });

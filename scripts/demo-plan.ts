@@ -171,6 +171,11 @@ export interface WeekPlanInput {
   deadline: Date;
   /** 이야기의 「지금」 — 모든 일이 이 전에 일어난다 */
   end: Date;
+  /**
+   * RU-60a — 총괄이 게시판 hwp를 올린 섹션을 넣나. 시드는 hwp 스위치(`hwpUploadOpen()`)를 그대로 넘긴다 — 스위치가 꺼진 서버
+   * (테스트·시연 11112, 2026-10-12부터 운영도 전 섹션 Tincase)에 「올린 파일」·[올린 것 취소]가 보이지 않게. 계획만 볼 때는 기본 true
+   */
+  uploads?: boolean;
 }
 
 const without = (list: string[], ...drop: string[]) => list.filter((x) => !drop.includes(x));
@@ -193,7 +198,7 @@ function interleave(groups: [string, string[]][]): Action[] {
  * 어디까지 가는지는 단계가 정한다 — 지난주는 늘 `done`으로 부른다.
  */
 export function planWeek(input: WeekPlanInput): Planned[] {
-  const { cast: c, stage, monday, deadline, end } = input;
+  const { cast: c, stage, monday, deadline, end, uploads = true } = input;
   if (stage === 'open') return [];
   const past = end.getTime() >= deadline.getTime();
 
@@ -211,7 +216,7 @@ export function planWeek(input: WeekPlanInput): Planned[] {
   const trigger = past ? 'auto' : 'manual';
   const whole = stage === 'hq' || stage === 'done'; // AI홍보전략실까지 승인했나
   for (const div of [PCO, RMO, CA, ...(whole ? [AI] : [])]) after.push({ kind: 'merge', div, trigger });
-  for (const section of past ? HISTORY_UPLOADS : LIVE_UPLOADS) after.push({ kind: 'upload', section, who: c.coordinator });
+  if (uploads) for (const section of past ? HISTORY_UPLOADS : LIVE_UPLOADS) after.push({ kind: 'upload', section, who: c.coordinator });
   // RU-70 — 실장 승인 = 위로 제출. 기획조정실·연구관리실은 본부로, 기후대기(본부 단계 없는 본부)는 바로 총괄로(RU-07)
   after.push(
     { kind: 'approve', div: PCO, who: c.pcHead },

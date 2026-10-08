@@ -15,6 +15,7 @@
  *   --until  이야기의 「지금」 — 시드가 만든 일이 모두 이 시각 전에 일어난 것으로 찍힌다. 「09:40」(오늘, KST) 또는 ISO.
  *            기본은 지금. 새벽에 시드하면 「03:12 제출」이 강당에 뜨므로 **회의 시작 조금 전**을 준다.
  *            화면에서 누를 일(제출·병합·승인)은 이 시각 **뒤**여야 한다 — 「가장 최근」을 시각으로 고르는 곳이 있다
+ *   SUBMIT_HWP_UPLOAD=off  (11112와 같게) 총괄이 올린 섹션 파일을 만들지 않는다(RU-60a — hwp 스위치를 그대로 따른다)
  *   --keep-open  그 주의 마감을 일요일 20:00으로 미룬다(주차 마감 예외, WS-18 — 화면에 이유가 보인다).
  *            목 14:00 마감이 지난 금요일 리허설에서 부서원 [제출]을 눌러 보려고. 회의 날(월)에는 주지 않는다
  *
@@ -52,6 +53,7 @@ import { syncOrg } from '../src/server/rollup/auto';
 import { fileSha } from '../src/server/rollup/report';
 import { settleLater } from '../src/server/after';
 import { loadSections, uploadSectionFile } from '../src/server/rollup/sections';
+import { hwpUploadOpen } from '../src/server/submit-mode';
 import { currentWeek, deadlineFor, describeWeek, toKstIso } from '../src/lib/week';
 import {
   CLOCK_COLS, PEOPLE, ROLES, approveAs, createFakeOrg, delegate, emailOf, foreignUserCount, hwpBuilder, loadFakeOrg, restoreFakeOrg, scopeOf, UNIT_HEADS,
@@ -292,6 +294,8 @@ async function seedWeek(
   end: Date,
   keepOpen = false,
 ): Promise<{ slot: WeekSlot; plan: Planned[]; deadline: Date }> {
+  // RU-60a — hwp 스위치가 꺼졌으면(11112와 같게 SUBMIT_HWP_UPLOAD=off) 총괄이 올린 섹션 파일을 만들지 않는다 — 꺼진 서버에 「올린 파일」이 보이지 않게
+  const uploads = hwpUploadOpen();
   let slot = await ensureCurrentSlot(new Date(monday.getTime() + MIN));
   if (keepOpen) {
     slot = await prisma.weekSlot.update({
@@ -300,7 +304,7 @@ async function seedWeek(
     });
   }
   const deadline = deadlineFor(slot, org.div[AI]); // 켜진 부서는 모두 기본 마감(목 14:00) — 주차 예외는 슬롯이 들고 온다
-  const plan = planWeek({ cast: castOf(), stage, monday, deadline, end });
+  const plan = planWeek({ cast: castOf(), stage, monday, deadline, end, uploads });
   const ctx: Ctx = { org, slot, build, versions: new Map() };
   for (const p of plan) {
     await perform(ctx, p.action, p.at);
@@ -330,7 +334,7 @@ async function summary(slot: WeekSlot, org: FakeOrg) {
   const uploads = await prisma.orgSectionUpload.count({ where: { weekSlotId: slot.id, withdrawnAt: null } });
   const orgRun = await prisma.rollupRun.count({ where: { level: 'org', weekSlotId: slot.id, status: 'succeeded' } });
   lines.push(`    ${pad(HQ, 22)}${hq ? '본부장 승인 · 총괄로 감' : '본부장 승인 전'}`);
-  lines.push(`    ${pad('전사', 22)}총괄이 올린 섹션 ${uploads}곳 · 전사본 ${orgRun ? '있음(저절로)' : '아직'}`);
+  lines.push(`    ${pad('전사', 22)}${hwpUploadOpen() ? `총괄이 올린 섹션 ${uploads}곳 · ` : ''}전사본 ${orgRun ? '있음(저절로)' : '아직'}`);
   return lines.join('\n');
 }
 
@@ -412,6 +416,8 @@ async function main() {
     `  이야기 시각  ${kst(end)} KST — 화면에서 누르는 일은 이 시각 뒤여야 순서가 맞습니다`,
     `  마감        ${kst(cur.deadline)}${args.keepOpen ? ` (${KEEP_OPEN.note})` : ''}${end >= cur.deadline || realNow >= cur.deadline ? '  ⚠ 지났습니다 — 부서원 제출은 화면에서 할 수 없습니다(잠김). 리허설이면 --keep-open' : ''}`,
     `  지난주      ${prev.slot.label} (${prev.slot.isoKey}) — 끝까지(본부장 승인 · 전사본까지)`,
+    // RU-60a — 11112는 꺼져 있다. 켜진 채 시드하면 꺼진 서버에 「올린 파일」이 생긴다(화면에는 [올린 것 취소] 없이)
+    `  hwp 올리기  ${hwpUploadOpen() ? '켜짐 — 총괄이 올린 섹션 파일을 만들었습니다  ⚠ 11112는 꺼져 있습니다(SUBMIT_HWP_UPLOAD=off로 다시 시드)' : '꺼짐 — 섹션 파일 없음 (11112와 같다)'}`,
     ...(reset ? [`  되돌림      ${reset}`] : []),
     `  DB          ${dbFile}`,
     '',

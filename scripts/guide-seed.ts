@@ -30,6 +30,7 @@ import { hashPassword } from '../src/server/password';
 import { currentWeek } from '../src/lib/week';
 import { settleLater } from '../src/server/after';
 import { loadSections, uploadSectionFile } from '../src/server/rollup/sections';
+import { hwpUploadOpen } from '../src/server/submit-mode';
 import { CLOCK_COLS, UNIT_HEADS, approveAs, createFakeOrg, delegate, foreignUserCount, hwpBuilder, scopeOf } from './fake-org';
 
 const MARK_ACTOR = 'guide-seed@example.invalid';
@@ -168,12 +169,15 @@ async function seed() {
     await approveAs(org.person[local], div[d], slot);
   }
   await settleLater();
-  // 아직 Tincase를 안 쓰는 섹션 하나는 총괄이 게시판으로 받은 파일을 올려 두었다 — 「최종본에」 열에 「올린 파일」이 보이게
-  try {
-    const sec = await prisma.orgSection.findFirst({ where: { title: '국토환경연구본부' } });
-    if (sec) await uploadSectionFile(scopeOf(roles.coordinator, div['기획조정실']), sec.id, slot, build(99, now), '국토환경연구본부_주간업무.hwp');
-  } catch (e) {
-    console.log('section upload skipped:', (e as Error).message);
+  // 아직 Tincase를 안 쓰는 섹션 하나는 총괄이 게시판으로 받은 파일을 올려 두었다 — 「최종본에」 열에 「올린 파일」이 보이게.
+  // RU-60a — hwp 스위치가 꺼졌으면(찍기는 off로 띄운다 — 2026-10-12부터 전 섹션 Tincase) 만들지 않는다: 꺼진 서버에는 올린 파일이 없다
+  if (hwpUploadOpen()) {
+    try {
+      const sec = await prisma.orgSection.findFirst({ where: { title: '국토환경연구본부' } });
+      if (sec) await uploadSectionFile(scopeOf(roles.coordinator, div['기획조정실']), sec.id, slot, build(99, now), '국토환경연구본부_주간업무.hwp');
+    } catch (e) {
+      console.log('section upload skipped:', (e as Error).message);
+    }
   }
 
   // ── 시각 ── 엔진이 채운 시각을 가짜 시계에 맞춘 **뒤에** 제출 시각을 넣는다 — 넣은 시각이 다시 옮겨지지 않게(장부에 이미 있다)

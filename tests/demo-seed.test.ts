@@ -156,6 +156,18 @@ describe('[RU-T82] ★ 단계 — 시연자가 화면에서 누를 것이 남아
     expect(p[p.length - 1].action).toEqual({ kind: 'approve', div: 'AI홍보전략실', who: 'head' });
   });
 
+  it('[RU-T150] hwp 스위치가 꺼졌으면(uploads=false) 총괄이 올린 섹션이 계획에 없다 — 나머지 일은 그대로 (RU-60a)', () => {
+    for (const stage of ['ready', 'hq', 'done'] as const) {
+      const off = planWeek({ cast: CAST, stage, monday: W45, deadline: W45_DEADLINE, end: MORNING, uploads: false });
+      expect(kinds(off), stage).not.toContain('upload');
+      expect(off.filter((x) => x.action.kind !== 'upload').map((x) => x.action), stage).toEqual(
+        plan(stage).filter((x) => x.action.kind !== 'upload').map((x) => x.action),
+      );
+    }
+    const past = planWeek({ cast: CAST, stage: 'done', monday: W44, deadline: W44_DEADLINE, end: at('2026-11-02T09:40:00+09:00'), uploads: false });
+    expect(kinds(past)).not.toContain('upload');
+  });
+
   it('done — 본부장 승인이 마지막(전사본은 그 뒤 저절로)', () => {
     expect(plan('done').at(-1)?.action).toEqual({ kind: 'hqApprove', div: '기획경영본부', who: 'hq-head' });
   });

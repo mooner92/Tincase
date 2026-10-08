@@ -7,7 +7,8 @@
 //
 // 어느 열을 그릴지는 서버가 정해 넘긴다(TACP-9·12 — `orgPageView`). 열이 없는 사람에게는 그 열의 값도 오지 않는다.
 // [올리기]도 서버가 정한다(`canUpload` = 취합의 문 + hwp 스위치) — 2026-10-08 사용자가 「전부 웹에서 하는데 파일 업로드가 왜
-// 필요하냐」고 물었다. 웹만 받는 서버(스위치 off)에서는 그리지 않는다. [받기]·[올린 것 취소]는 스위치와 상관없이 둔다.
+// 필요하냐」고 물었다. 웹만 받는 서버(스위치 off)에서는 그리지 않는다. [올린 것 취소]도 같은 판정을 따른다(2026-10-08 — 스위치가 꺼진
+// 테스트 서버에 시드가 만든 올린 파일마다 「올린 것 취소」가 보였다). 이미 올라온 파일의 [받기]만 스위치와 상관없이 둔다 — 최종본에 든 것을 꺼내 보는 일이다.
 import { useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -340,9 +341,12 @@ function FinalView({
             <a href={`/api/rollup/org/sections/upload/${f.refId}`} className="btn-ghost h-8 px-2.5">
               받기
             </a>
-            <button onClick={() => onWithdraw(f.refId!)} disabled={!!busy} className="btn-link-danger mx-1.5 text-xs">
-              올린 것 취소
-            </button>
+            {/* RU-60a — [올리기]와 같은 판정(취합의 문 + hwp 스위치). 꺼진 서버에서는 올린 파일을 다루지 않는다 */}
+            {canUpload && (
+              <button onClick={() => onWithdraw(f.refId!)} disabled={!!busy} className="btn-link-danger mx-1.5 text-xs">
+                올린 것 취소
+              </button>
+            )}
           </>
         )}
         {canUpload && f.source !== 'tincase' && (

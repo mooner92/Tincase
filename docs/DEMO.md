@@ -12,7 +12,7 @@
 | | 운영 11111 | 테스트 11112 — 평소 | **테스트 11112 — 시연 모드** |
 |---|---|---|---|
 | DB | 실제 | 운영 **사본 — 실명 있음** | **가짜 사람만** (`@example.invalid`) |
-| 알림 | 실제로 나감 | 꺼짐 | 꺼짐 |
+| 알림 | 실제로 나감 | 가짜 수신함 — 밖으로 안 나감 (`/ops/notify-sink`, NT-56) | 가짜 수신함 |
 | 자동 병합(14:01) | 켜짐 | 꺼짐 | 꺼짐 — 버튼으로만 |
 | 데이터 | `/data/worklog` | `/data/worklog-test` | `/data/worklog-demo` |
 | 세션 쿠키 | `repman_session` | `repman_test_session` | `repman_demo_session` |
@@ -57,7 +57,7 @@ sudo bash scripts/demo-snapshot.sh status       # 「11112: 시연 데이터 —
 | `--stage` | 그 주의 상태 | 남은 것 (화면에서 누른다) |
 |---|---|---|
 | `open` | 비어 있다 | 전부 |
-| `ready` (기본) | 25명 중 21명 제출 — **남시우**·채온유 등 실·팀마다 한두 명 남음 · 기획조정실·연구관리실·기후대기 병합·**실장 승인**(= 저절로 올라감) · 기획경영본부 본부본은 둘로 모여 **본부장 승인 전** · AI홍보전략실 **병합 전** · 게시판 섹션 5곳 올림 | 부서원 제출 → [지금 병합] → 실장 [고칠 것 없음 · 승인] → 본부장 [검토 완료 · 승인] → [전사본 받기] |
+| `ready` (기본) | 25명 중 21명 제출 — **남시우**·채온유 등 실·팀마다 한두 명 남음 · 기획조정실·연구관리실·기후대기 병합·**실장 승인**(= 저절로 올라감) · 기획경영본부 본부본은 둘로 모여 **본부장 승인 전** · AI홍보전략실 **병합 전** · 게시판 섹션 올림 없음(hwp 스위치 off — 11112와 같다, RU-60a) | 부서원 제출 → [지금 병합] → 실장 [고칠 것 없음 · 승인] → 본부장 [검토 완료 · 승인] → [전사본 받기] |
 | `hq` | `ready` + AI홍보전략실 병합·**실장 승인**(본부본은 셋 다 모였다) | 부서원 제출 → [다시 병합] / 본부장 [검토 완료 · 승인] → [전사본 받기] |
 | `done` | `hq` + 본부장 승인(총괄로 갔고 전사본까지 저절로) | 받기만 |
 
@@ -139,7 +139,7 @@ sudo chown -R mhchoi:mhchoi /data/worklog-demo
 #    11112는 평소 모드로 켜 둔 채로 한다 — 평소 모드 컨테이너는 /data/worklog-demo를 건드리지 않는다
 cd ~/repman-c
 ls fixtures/master-template.hwp                 # 없으면 DEMO_TEMPLATE=~/repman/fixtures/master-template.hwp
-export DATABASE_URL=file:/data/worklog-demo/db/worklog.db STORAGE_ROOT=/data/worklog-demo CF_ACCESS_TEAM=tincase-demo-disabled
+export DATABASE_URL=file:/data/worklog-demo/db/worklog.db STORAGE_ROOT=/data/worklog-demo CF_ACCESS_TEAM=tincase-demo-disabled SUBMIT_HWP_UPLOAD=off
 npx prisma db push --skip-generate
 npx tsx scripts/demo-seed.ts --stage=ready      # 이번 주(W44). 끝에 비밀번호가 한 번 나온다 → docs/private/demo-accounts.md
 
@@ -152,7 +152,7 @@ sudo docker logs repman-test --tail 5           # [boot] 4/4 서버 시작 (Divi
 sqlite3 /data/worklog-demo/db/worklog.db "SELECT COUNT(*) FROM User WHERE email NOT LIKE '%@example.invalid';"   # 0
 ```
 
-브라우저로 `http://<서버-내부-IP>:11112` → 맨 위 띠가 「시연 —」인지 → `coord@example.invalid`로 로그인 → `/org`에 이번 주 상태(본부 대기 3 · 올린 파일 5 · 미제출 4)가 보이면 된다.
+브라우저로 `http://<서버-내부-IP>:11112` → 맨 위 띠가 「시연 —」인지 → `coord@example.invalid`로 로그인 → `/org`에 이번 주 상태(본부 대기 · Tincase · 미제출)가 보이면 된다 — 「올린 파일」은 없다(hwp 스위치 off, RU-60a).
 
 확인이 끝나면 **되돌린다**(테스트 서버를 쓰는 사람이 있다):
 
@@ -173,7 +173,7 @@ W44는 목 14:00에 마감됐다. 리허설에서 부서원 [제출]을 눌러 �
 cd ~/repman-c
 sudo bash scripts/demo-snapshot.sh status       # 평소 모드여야 한다. 시연 모드면 먼저 되돌린다(시드는 띄우는 중인 저장소에 하지 않는다)
 sudo bash scripts/demo-snapshot.sh perms        # 컨테이너가 만든 디렉터리에 다시 쓸 수 있게
-export DATABASE_URL=file:/data/worklog-demo/db/worklog.db STORAGE_ROOT=/data/worklog-demo CF_ACCESS_TEAM=tincase-demo-disabled
+export DATABASE_URL=file:/data/worklog-demo/db/worklog.db STORAGE_ROOT=/data/worklog-demo CF_ACCESS_TEAM=tincase-demo-disabled SUBMIT_HWP_UPLOAD=off
 npx tsx scripts/demo-seed.ts --stage=hq --keep-open --until=<리허설 시작 10분 전, 예: 13:50>
 sudo bash scripts/demo-snapshot.sh perms        # 시드한 파일을 컨테이너가 읽게
 TINCASE_TEST_MODE=demo bash scripts/deploy.sh test --no-build    # 시연 모드 — 리허설 끝까지
@@ -213,7 +213,7 @@ sudo docker compose -f docker-compose.test.yml -p repman-test start   # start �
 cd ~/repman-c
 sudo bash scripts/demo-snapshot.sh status       # 평소 모드여야 한다(D-3 뒤 되돌렸다). 시연 모드면 먼저 되돌린다
 sudo bash scripts/demo-snapshot.sh perms
-export DATABASE_URL=file:/data/worklog-demo/db/worklog.db STORAGE_ROOT=/data/worklog-demo CF_ACCESS_TEAM=tincase-demo-disabled
+export DATABASE_URL=file:/data/worklog-demo/db/worklog.db STORAGE_ROOT=/data/worklog-demo CF_ACCESS_TEAM=tincase-demo-disabled SUBMIT_HWP_UPLOAD=off
 npx tsx scripts/demo-seed.ts --stage=hq --week=2026-W45 --until=09:40   # 회의 시작 20분 전쯤 (회의가 10:00일 때)
 sudo bash scripts/demo-snapshot.sh perms
 TINCASE_TEST_MODE=demo bash scripts/deploy.sh test --no-build    # 시연 모드 — 회의 끝까지
@@ -247,7 +247,7 @@ sudo bash scripts/demo-snapshot.sh save d0-0700
 3. `Win+1` 슬라이드 — 실·팀장 → 본부(승인하면 자동으로 올라감 · 본부본이 저절로 모임)는 슬라이드로
 4. **실제 화면 ②** — 본부 장의 `hq-approve`에서
    - `Win+6` 편무진: `/hq` — 본부본이 「자동으로 이어 붙임 · 산하 3/3」 → [검토 완료 · 승인] → 「승인 · 총괄로 감」
-   - `Win+7` 봉하늘: `/org` — 기획경영본부 섹션이 방금 「Tincase」로 바뀌었다. 13개 섹션의 출처(Tincase · 올린 파일 · 미제출)를 위에서 아래로 →
+   - `Win+7` 봉하늘: `/org` — 기획경영본부 섹션이 방금 「Tincase」로 바뀌었다. 13개 섹션의 출처(Tincase · 미제출)를 위에서 아래로 →
      전사본 카드가 이미 「자동 · 기획경영본부 승인으로」 다시 만들어져 있다 → [전사본 받기] → **한글로 연다**
 5. `Win+1` 슬라이드 — 일정 바꾸기 → 마무리. 마지막 주소 장은 위 「슬라이드는 어디서」대로
 
