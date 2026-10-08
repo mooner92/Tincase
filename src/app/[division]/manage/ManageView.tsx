@@ -22,7 +22,8 @@ import { HandoffCard } from '@/components/HandoffCard';
 import { handoffHint, unitHandoffView } from '@/server/rollup/state';
 import { rollupEnabled } from '@/server/rollup/schedule';
 import { latestReview } from '@/server/merge/review';
-import { latestEdits } from '@/server/merge/edits';
+import { HELD_TEXT, latestEdits } from '@/server/merge/edits';
+import { activeMergeJob, jobView } from '@/server/merge/queue';
 import { readStoredFile, sha256 } from '@/server/storage';
 import { boardTitle } from '@/lib/docname';
 import { differingGroups } from '@/lib/merge-rows';
@@ -85,10 +86,26 @@ export async function ManageView({
   const handoffTo = rollupOn ? await handoffHint(division.id) : null;
 
   // HM-26 — 최신 실행 하나만 본다. 재실행하면 새 기록이 쌓이고 최신이 유효하다
-  const lastRun = await prisma.mergeRun.findFirst({
+  let lastRun = await prisma.mergeRun.findFirst({
     where: { divisionId: division.id, weekSlotId: slot.id },
     orderBy: { startedAt: 'desc' },
   });
+  /*
+   * HM-61d · CP-130 — 가장 최근 실행이 「병합하는 동안 고친 판이 있어 덮지 않았어요」면 그 병합은 **일부러 쓰지 않은 것**이다 — 파일은 사람이
+   * 고친 그대로이고 가장 최근 성공 실행이 그 판을 가리킨다. 그 판을 그대로 그리고(승인 · 내용 보기가 그대로 된다) 문구만 한 줄 덧붙인다.
+   * 다른 실패는 예전처럼 실패로 그린다.
+   */
+  const held = lastRun?.status === 'failed' && lastRun.errorText === HELD_TEXT;
+  if (held) {
+    lastRun =
+      (await prisma.mergeRun.findFirst({
+        where: { divisionId: division.id, weekSlotId: slot.id, status: 'succeeded', outputPath: { not: null } },
+        orderBy: { startedAt: 'desc' },
+      })) ?? lastRun;
+  }
+  // CP-130 — 줄의 작업(대기 · 병합 중). 화면이 서버에서 받은 자리로 버튼을 막는다 — 탭의 `busy`는 그 탭에만 있었다
+  const activeJob = await activeMergeJob(division.id, slot.id);
+  const jobState = activeJob ? await jobView(activeJob, now) : null;
   const review = lastRun?.reviewJson ? (JSON.parse(lastRun.reviewJson) as ReviewPayload) : null;
   // HM-47 — 이 화면이 보여 주는 **판**. [승인]이 이 판에만 붙도록 그대로 돌려보낸다
   let mergedSha: string | null = null;
@@ -117,6 +134,11 @@ export async function ManageView({
     hasHead: (await prisma.user.count({ where: { divisionId: division.id, isActive: true, divisionRole: 'head' } })) > 0,
     // HM-49 — 마지막 실행이 실패했어도 덮이는 것은 최신 **성공** 실행의 파일이다. 그래서 따로 찾는다
     edits: (await latestEdits(division.id, slot.id))?.edits ?? null,
+    job:
+      activeJob && jobState && (jobState.status === 'queued' || jobState.status === 'running')
+        ? { id: activeJob.id, status: jobState.status, position: jobState.position ?? 1, etaMinutes: jobState.etaMinutes }
+        : null,
+    held: held && lastRun?.status === 'succeeded',
   };
 
   const deadline = effectiveDeadline(slot, division);

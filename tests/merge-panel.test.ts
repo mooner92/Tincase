@@ -102,6 +102,33 @@ describe('CP-106a · CP-117 — 병합 카드의 첫 그림', () => {
     for (const gone of ['규칙 바뀜', '빠진 사람', '기준']) expect(out, gone).not.toContain(gone);
   });
 
+  it('[CP-T110] ★ (CP-130) 줄의 자리 — 대기면 「줄 n번째 · 약 n분」, 병합 중이면 「병합 중…」, 둘 다 버튼이 눌리지 않는다 · 병합본이 없으면 칩도 · 작업이 없으면 예전 그대로', () => {
+    const job = (status: 'queued' | 'running', position: number, etaMinutes: number | null = 2) => ({ id: 'j1', status, position, etaMinutes });
+    const queued = html(state({ job: job('queued', 3) }));
+    expect(queued).toMatch(/<button[^>]*disabled[^>]*>줄 3번째 · 약 2분<\/button>/);
+    expect(queued).toContain('준비됨'); // 지금 병합본은 그대로 있다 — 다시 병합이 줄에 섰을 뿐
+    const running = html(state({ job: job('running', 1) }));
+    expect(running).toMatch(/<button[^>]*disabled[^>]*>병합 중…<\/button>/);
+    // 아직 병합본이 없을 때는 머리 칩이 줄의 상태를 말한다
+    const first = html(state({ status: 'none', rowCounts: null, runId: null, job: job('queued', 2, null) }));
+    expect(first).toContain('>대기 중<');
+    expect(first).toMatch(/>줄 2번째<\/button>/);
+    expect(html(state({ status: 'none', rowCounts: null, runId: null, job: job('running', 1) }))).toContain('>병합 중<');
+    // 작업이 없으면 예전 그대로 — [다시 병합]이 눌린다
+    const idle = html(state());
+    expect(idle).toMatch(/<button[^>]*>다시 병합<\/button>/);
+    expect(idle).not.toMatch(/<button[^>]*disabled[^>]*>다시 병합/);
+    expect(idle).not.toContain('줄 ');
+  });
+
+  it('[CP-T110] (HM-61d) 병합하는 동안 고친 판을 지켜 쓰지 않았으면 — 「준비됨」 그대로 + 그 한 줄. 실패 칩이 아니다', () => {
+    const out = html(state({ held: true }));
+    expect(out).toContain('준비됨');
+    expect(out).toContain('병합하는 동안 고친 판이 있어 덮지 않았어요');
+    expect(out).not.toContain('병합 실패');
+    expect(html(state())).not.toContain('덮지 않았어요');
+  });
+
   it('[CP-T101] 「내용 다른 묶음」은 글자까지 같은 묶음을 세지 않는다 · 옛 실행(identical 없음)은 원문으로 되짚는다', () => {
     const src = (...c: string[]) => c.map((content) => ({ content }));
     expect(
