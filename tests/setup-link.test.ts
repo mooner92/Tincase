@@ -80,7 +80,8 @@ describe('AU-30 링크 발급 — 보내도 계정은 그대로다', () => {
     const { readSetupToken } = await import('@/server/setup-token');
     const 첫번째 = await issue(새사람);
     const 두번째 = await issue(새사람);
-    expect((await readSetupToken(첫번째.token, new Date(), db)).ok).toBe(false);
+    // AU-30a — 죽은 이유는 「밀림」이다. 「이미 사용함」이면 받은 사람이 비밀번호가 정해진 줄 안다 (AU-T94)
+    expect(await readSetupToken(첫번째.token, new Date(), db)).toEqual({ ok: false, reason: 'superseded' });
     expect((await readSetupToken(두번째.token, new Date(), db)).ok).toBe(true);
   });
 });
@@ -285,18 +286,29 @@ describe('AU-32 비밀번호 재설정 요청', () => {
 describe('[AU-T90] 설정 링크 쪽지 — 주소가 `URL` 필드에도 실린다', () => {
   const url = 'http://tincase.test/setup/abcdefghijklmnop';
 
-  it('운영자가 보낸 것 · 본인이 요청한 것(처음 · 다시) 모두 url = 본문의 주소', async () => {
+  // 2026-10-16(금) 08:30 KST — 기한은 날짜·시각으로 적는다(2026-10-10 알림 점검: 「3일 안에」는 언제 받았는지 기억해야 셀 수 있다)
+  const expiresAt = new Date('2026-10-15T23:30:00Z');
+
+  it('운영자가 보낸 것 · 본인이 요청한 것(처음 · 다시) 모두 url = 본문의 주소 · 「제목을 누르면」 · 기한은 시각으로', async () => {
     const { setupLinkMessage, forgotMessage, SETUP_TOKEN_DAYS } = await import('@/server/setup-token');
-    for (const m of [setupLinkMessage('새사람', url), forgotMessage('새사람', url, true), forgotMessage('새사람', url, false)]) {
+    for (const m of [setupLinkMessage('새사람', url, expiresAt), forgotMessage('새사람', url, true, expiresAt), forgotMessage('새사람', url, false, expiresAt)]) {
       expect(m.url).toBe(url);
       expect(m.contents.split('\n')).toContain(url); // 본문의 주소는 남는다 — 알림이 브라우저를 못 여는 PC에서 복사할 길
-      expect(m.contents).toContain(`${SETUP_TOKEN_DAYS}일 안에`);
+      expect(m.contents).toContain('제목을 누르면 설정 화면이 열립니다'); // forgot에도(예전에는 setup_link에만 있었다)
+      expect(m.contents).toContain(`10월 16일(금) 08:30까지(${SETUP_TOKEN_DAYS}일)`);
+      expect(m.contents).not.toContain(`${SETUP_TOKEN_DAYS}일 안에`);
     }
-    expect(setupLinkMessage('새사람', url).subject).toBe('[Tincase] 비밀번호를 설정해 주세요');
-    expect(setupLinkMessage('새사람', url).contents).toContain('제목을 누르면 설정 화면이 열립니다');
-    expect(forgotMessage('새사람', url, true).subject).toBe('[Tincase] 비밀번호 설정 링크입니다');
-    expect(forgotMessage('새사람', url, false).subject).toBe('[Tincase] 비밀번호 재설정 링크입니다');
-    expect(forgotMessage('새사람', url, false).contents.split('\n')[0]).toBe('새사람님, 비밀번호를 새로 정해 주세요.');
+    expect(setupLinkMessage('새사람', url, expiresAt).subject).toBe('[Tincase] 비밀번호를 설정해 주세요');
+    expect(forgotMessage('새사람', url, true, expiresAt).subject).toBe('[Tincase] 비밀번호 설정 링크입니다');
+    expect(forgotMessage('새사람', url, false, expiresAt).subject).toBe('[Tincase] 비밀번호 재설정 링크입니다');
+    expect(forgotMessage('새사람', url, false, expiresAt).contents.split('\n')[0]).toBe('새사람님, 비밀번호를 새로 정해 주세요.');
+  });
+
+  it('「지금 비밀번호는 그대로입니다」는 비밀번호가 있는 사람에게만 — 없는 사람에게는 사실이 아니다', async () => {
+    const { forgotMessage } = await import('@/server/setup-token');
+    expect(forgotMessage('새사람', url, false, expiresAt).contents).toContain('지금 비밀번호는 그대로입니다.');
+    expect(forgotMessage('새사람', url, true, expiresAt).contents).not.toContain('지금 비밀번호는 그대로');
+    expect(forgotMessage('새사람', url, true, expiresAt).contents).toContain('요청하지 않으셨다면 이 쪽지를 지워 주세요.');
   });
 
   it('두 라우트가 이 꼴을 그대로 쓴다 — 라우트에서 본문을 따로 적으면 url이 다시 빠진다', () => {

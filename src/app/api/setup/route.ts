@@ -10,10 +10,24 @@ import { handler, json, rateLimit } from '@/server/http';
 import { audit } from '@/server/audit';
 import { hashPassword, validatePasswordPolicy } from '@/server/password';
 import { destroyAllSessions } from '@/server/session';
-import { consumeSetupToken, readSetupToken } from '@/server/setup-token';
+import { consumeSetupToken, readSetupToken, type TokenState } from '@/server/setup-token';
 import { logger } from '@/server/logger';
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * AU-30a — 못 쓰는 링크는 **왜 못 쓰는지** 말한다(화면 `/setup/[token]`과 같은 상태). 밀린 링크를 「이미 사용한 링크」라고 하면
+ * 받은 사람은 비밀번호가 정해진 줄 알고 로그인하러 갔다가 막힌다(2026-10-10 점검) — 밀린 것은 가장 최근 쪽지를 쓰면 된다.
+ */
+const REFUSAL: Record<Exclude<TokenState, { ok: true }>['reason'], string> = {
+  unknown: '쓸 수 없는 링크입니다. 운영자에게 다시 요청해 주세요.',
+  superseded: '더 새 링크가 나갔어요 — 가장 최근 쪽지의 링크를 쓰세요.',
+  used: '이미 사용한 링크입니다. 로그인 화면에서 들어가 주세요.',
+  expired: '기한이 지난 링크입니다. 로그인 화면의 「비밀번호를 잊으셨나요?」로 새 링크를 받을 수 있습니다.',
+};
+function refuse(reason: keyof typeof REFUSAL): never {
+  throw new HttpError(410, `token_${reason}`, REFUSAL[reason]);
+}
 
 export const POST = handler(async (req: NextRequest) => {
   const body = (await req.json().catch(() => null)) as { token?: unknown; password?: unknown } | null;
@@ -26,14 +40,7 @@ export const POST = handler(async (req: NextRequest) => {
   rateLimit(`setup:${req.headers.get('cf-connecting-ip') ?? req.headers.get('x-forwarded-for') ?? 'unknown'}`, 20, 10 * 60_000);
 
   const state = await readSetupToken(token);
-  if (!state.ok) {
-    const msg = {
-      unknown: '쓸 수 없는 링크입니다. 운영자에게 다시 요청해 주세요.',
-      used: '이미 사용한 링크입니다. 로그인 화면에서 들어가 주세요.',
-      expired: '기한이 지난 링크입니다. 운영자에게 다시 요청해 주세요.',
-    }[state.reason];
-    throw new HttpError(410, `token_${state.reason}`, msg);
-  }
+  if (!state.ok) refuse(state.reason);
 
   const bad = validatePasswordPolicy(password, { email: state.user.email, name: state.user.name });
   if (bad) throw new HttpError(422, 'weak_password', bad);
@@ -44,7 +51,9 @@ export const POST = handler(async (req: NextRequest) => {
    * `updateMany`의 `usedAt: null` 조건이 딱 하나만 통과시킨다.
    */
   if (!(await consumeSetupToken(token))) {
-    throw new HttpError(410, 'token_used', '이미 사용한 링크입니다.');
+    // 읽은 뒤 태우기 전 사이에 쓰였거나 **더 새 링크에 밀렸다**(AU-30a) — 무엇이었는지 다시 읽어 그대로 말한다
+    const now = await readSetupToken(token);
+    refuse(now.ok ? 'used' : now.reason);
   }
 
   const user = await prisma.user.update({

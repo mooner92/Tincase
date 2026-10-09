@@ -3,7 +3,7 @@
 // 2026-10-09 v2 전환 점검: 운영 main(v1.39.0) 스키마 DB에 이 판을 띄우면 health는 `ok:true`인데 화면은 모두 500,
 // 병합 줄은 로그 오류만 남겼다(조용한 실패). 지키는 것:
 //   ① 판정 — 없는 표 · 있는 표의 없는 열을 잡고, DB에만 있는 것(지난 판 · 옛 앱)은 문제로 치지 않는다
-//   ② 기준 — 이 판의 Prisma 클라이언트에서 나온다. v2 전환으로 더해지는 표 7 · 열 6(DEPLOY.md §2b-5)이 모두 들어 있다
+//   ② 기준 — 이 판의 Prisma 클라이언트에서 나온다. v2 전환으로 더해지는 표 7 · 열 7(DEPLOY.md §2b-5)이 모두 들어 있다
 //   ③ 실제 DB — push한 DB는 모자람 0, 표 하나·열 하나를 지우면 그 둘을 이름으로 말한다
 //   ④ 기동 — instrumentation이 회수·스케줄러보다 먼저 부르고, 모자라면 멈춘다(process.exit). push하면 다시 뜬다
 //
@@ -33,6 +33,8 @@ const V2_COLUMNS = [
   'Division.rollupSelf',
   'MergeReview.filePath',
   'MergeRun.outputSha',
+  // AU-30a · ADR-0020 (2026-10-10) — 더 새 링크에 밀린 설정 링크. 「쓴 시각」과 다른 칸
+  'SetupToken.supersededAt',
 ];
 
 beforeAll(() => {
@@ -62,7 +64,7 @@ describe('[OPS-T35] 기동 스키마 검사 — push를 빠뜨리면 뜨지 않�
     expect(schemaGaps(expected, new Map([['A', new Set(['id', 'x'])], ['B', new Set(['id', 'extra'])]]))).toEqual({ tables: [], columns: [] });
   });
 
-  it('② 기준은 이 판의 클라이언트 — v2로 더해지는 표 7 · 열 6이 모두 있고, 관계 필드는 열이 아니다', async () => {
+  it('② 기준은 이 판의 클라이언트 — v2로 더해지는 표 7 · 열 7이 모두 있고, 관계 필드는 열이 아니다', async () => {
     const { expectedSchema } = await import('@/server/schema-check');
     const exp = expectedSchema();
     for (const t of V2_TABLES) expect(exp.has(t), t).toBe(true);
@@ -77,6 +79,7 @@ describe('[OPS-T35] 기동 스키마 검사 — push를 빠뜨리면 뜨지 않�
     // DEPLOY.md가 같은 목록을 적고 있다 — 표가 늘면 두 곳이 함께 늘어야 한다
     const deploy = read('docs/DEPLOY.md');
     for (const t of V2_TABLES) expect(deploy, t).toContain(t);
+    for (const tc of V2_COLUMNS) expect(deploy, tc).toContain(tc.split('.')[1]);
   });
 
   it('③ push한 DB는 모자람 0 — 표 하나 · 열 하나를 지우면 그 둘을 이름으로 말하고 할 일(db push)을 적는다', async () => {

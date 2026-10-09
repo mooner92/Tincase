@@ -40,7 +40,8 @@ v1.11(가짜 알림 수신함 TACP-26) → **v1.12**(화면 둘러보기 노트 
   데이터 손실 경고를 물으면 멈춘다(그럴 변경이 없다). `main` 대비 더해지는 것 전부:
   - 새 표 7: `ReportSubmission` · `RollupRun` · `OrgRollupSetting` · `OrgSection` · `OrgSectionUpload`(3단계 자동 진행 · 「전사」) · **`MergeJob`**(병합 줄 — HM-59) ·
     **`GuideTourSeen`**(둘러보기 기록 — DM-25)
-  - 새 열: `Division.rollupOrder`·`rollupNote`·`rollupPageBreak`·`rollupSelf` · `MergeReview.filePath` · **`MergeRun.outputSha`**(HM-56e — 옛 실행은 null)
+  - 새 열: `Division.rollupOrder`·`rollupNote`·`rollupPageBreak`·`rollupSelf` · `MergeReview.filePath` · **`MergeRun.outputSha`**(HM-56e — 옛 실행은 null) ·
+    **`SetupToken.supersededAt`**(2026-10-10 출시 전 점검 — 밀린 설정 링크, AU-30a)
   - 관계 필드만(열 없음): `Division.reportSubmissions`·`rollupRuns` · `WeekSlot.reportSubmissions`·`rollupRuns` · `User.guideTours`
   - 가짜 알림 수신함은 **스키마가 없다** — 기록은 저장소 파일(`$STORAGE_ROOT/dev/messenger-sink.jsonl`)이고 시험·시연 서버에만 생긴다. 운영 compose에는
     `TINCASE_ENV`·`MESSENGER_SINK`를 넣지 않는다 — 운영의 `MESSENGER_URL`이 수신함 주소면 기동이 거부한다(OPS-46)
@@ -48,7 +49,7 @@ v1.11(가짜 알림 수신함 TACP-26) → **v1.12**(화면 둘러보기 노트 
   - 본부 부서(문서가 없는 본부)의 **알림 스위치는 꺼 둔다** — 아래 「주말 시험」 절의 ⚑
   - `Division`은 열 넷이 기본값 있는 NOT NULL이라 Prisma가 **표를 새로 만들어 옮긴다**(행·외래 키 그대로 — main 스키마 DB 사본에서 원래 열 값 같음 ·
     `foreign_key_check` 0 · 데이터 손실 확인 없이 끝남을 확인). 옮긴 DB에서 옛(main) 앱의 읽기·쓰기도 그대로 돈다 — 롤백은 이미지만
-  - **`db push`를 빠뜨리면 새 앱이 뜨지 않는다(OPS-48)** — 로그 첫 줄 `[boot] FATAL: DB 스키마가 이 판보다 오래됐습니다`에 없는 표 7 · 열 6. push 뒤 `--no-build`로 다시 띄운다
+  - **`db push`를 빠뜨리면 새 앱이 뜨지 않는다(OPS-48)** — 로그 첫 줄 `[boot] FATAL: DB 스키마가 이 판보다 오래됐습니다`에 없는 표 7 · 열 7(2026-10-10 — `SetupToken.supersededAt`이 더해졌다). push 뒤 `--no-build`로 다시 띄운다
 - **합친 뒤 검증에서 고친 것** (2026-10-09):
   - **기동 스키마 검사(OPS-48)** — main 스키마 DB에 이 판을 띄워 보니 **조용히 틀렸다**: 기동되고 health `ok:true`(deploy.sh 성공)인데 부서를 읽는 화면은
     모두 500(`Division.rollupOrder` 없음), 병합 줄은 로그 오류뿐(`MergeJob` 없음) — 목요일 자동 병합이 하나도 안 도는 것을 15:00에야 알 판이었다.

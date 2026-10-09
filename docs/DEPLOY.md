@@ -219,7 +219,7 @@ cd ~/repman && bash scripts/deploy.sh prod
 그날은 운영 DB에 push하기 전에 **2b-2 스냅샷의 사본**에 같은 push를 먼저 돌린다(LAUNCH-v2 ⑤-0) — 이행 리허설은 지어낸 사람의 DB로만 돌았다.
 바뀌는 것은 전부 **더하기만**이라 프롬프트 없이 끝나야 한다. 데이터 손실 경고·확인을 물으면 멈춘다(그럴 변경이 없다 — 체크아웃을 의심한다).
 `Division`은 열 넷이 기본값 있는 NOT NULL이라 Prisma가 **표를 새로 만들어 옮긴다**(행·외래 키 그대로 — 2026-10-09 main 스키마 DB 사본으로 확인). 그래서 스냅샷이 먼저다.
-빠뜨리고 띄우면 새 앱이 **뜨지 않는다** — 로그 첫 줄 `[boot] FATAL: DB 스키마가 이 판보다 오래됐습니다`에 없는 표 7 · 열 6이 적힌다(OPS-48). 그때는 push 뒤 `--no-build`로 다시 띄운다.
+빠뜨리고 띄우면 새 앱이 **뜨지 않는다** — 로그 첫 줄 `[boot] FATAL: DB 스키마가 이 판보다 오래됐습니다`에 없는 표 7 · 열 7이 적힌다(OPS-48). 그때는 push 뒤 `--no-build`로 다시 띄운다.
 
 | 무엇 | 더해지는 것 | 어디서 |
 |---|---|---|
@@ -228,6 +228,7 @@ cd ~/repman && bash scripts/deploy.sh prod
 | 새 표 | `GuideTourSeen` | 첫 로그인 둘러보기 기록 (DM-25 · API-60) |
 | 새 열 | `Division.rollupOrder` · `rollupNote` · `rollupPageBreak` · `rollupSelf` · `MergeReview.filePath` | 3단계 |
 | 새 열 | `MergeRun.outputSha` (옛 실행은 null) | 「병합 점검」이 파일과 기록을 맞춘다 (HM-56e) |
+| 새 열 | `SetupToken.supersededAt` (NULL 허용 — 옛 행은 null) | 더 새 링크에 밀린 설정 링크를 「이미 사용함」과 따로 적는다 (AU-30a · [ADR-0020](adr/0020-public-password-paths.md), 2026-10-10) |
 | 관계만 (열 없음) | `Division`·`WeekSlot`의 `reportSubmissions`·`rollupRuns` · `User.guideTours` | — |
 | 없음 | 가짜 알림 수신함 — DB가 아니라 저장소 파일(`dev/messenger-sink.jsonl`), 시험·시연 서버에만 | NT-56 |
 

@@ -236,7 +236,7 @@ rm -f "$R" "$R-wal" "$R-shm" "$R-journal"
 ### ⑤ 07:25 `prisma db push` — 운영 DB
 
 **무엇이 더해지나** — [DEPLOY.md](DEPLOY.md) §2b-5 표: 새 표 7(`ReportSubmission` · `RollupRun` · `OrgRollupSetting` · `OrgSection` · `OrgSectionUpload` ·
-`MergeJob` · `GuideTourSeen`) · 새 열 6(`Division.rollupOrder`·`rollupNote`·`rollupPageBreak`·`rollupSelf` · `MergeReview.filePath` · `MergeRun.outputSha`).
+`MergeJob` · `GuideTourSeen`) · 새 열 7(`Division.rollupOrder`·`rollupNote`·`rollupPageBreak`·`rollupSelf` · `MergeReview.filePath` · `MergeRun.outputSha` · `SetupToken.supersededAt` — 2026-10-10, 밀린 설정 링크 AU-30a).
 **전부 더하기만**이다. `Division`은 기본값 있는 NOT NULL 열 넷 때문에 Prisma가 표를 새로 만들어 옮긴다(행·외래 키 그대로) — 그래서 ④가 먼저다.
 
 ```bash
@@ -815,7 +815,7 @@ sudo docker logs --since 5m repman 2>&1 | grep -E '\[자동\]' | tail -5        
 | `main`을 앞으로만 감기 | `--no-ff` 합치기 | `main`에 `711fb76`이 있다(같은 변경이 브랜치에 `4143baf`) |
 | compose에 `SUBMIT_HWP_UPLOAD: "off"` 한 줄 | 넣지 않는다 | 부서원 hwp 제출은 코드째 지웠다(WA-39). 스위치는 「전사」 [올리기]만 — 운영은 기본 `on`으로 Tincase 밖 섹션을 받는다 |
 | `docker compose build && up -d`를 손으로, 롤백 태그도 손으로 | `bash scripts/deploy.sh prod` | 금지 시간대·디스크·롤백 태그·health·찌꺼기 청소를 한 번에(OPS-43) |
-| 새 표 5 · 열 4 | 새 표 7 · 새 열 6 | `MergeJob`(병합 줄) · `GuideTourSeen`(둘러보기) · `MergeReview.filePath` · `MergeRun.outputSha` |
+| 새 표 5 · 열 4 | 새 표 7 · 새 열 7 | `MergeJob`(병합 줄) · `GuideTourSeen`(둘러보기) · `MergeReview.filePath` · `MergeRun.outputSha` · `SetupToken.supersededAt`(밀린 설정 링크 — 2026-10-10) |
 | push를 빠뜨리면 health는 초록인데 화면이 500 | 뜨지 않고 없는 표·열을 말한다 | 기동 스키마 검사(OPS-48) |
 | 스냅샷 사본에서 스키마 리허설(`migrate diff` · push) | **한다** — ⑤-0, 그날 스냅샷의 사본에 같은 push (3초) | 2026-10-09 이행 리허설은 지어낸 사람의 DB(v1.39.0 코드로 만든 모양)로만 돌았다 — 실제 데이터로는 그날 스냅샷이 처음이다. 10/07의 `.bak-20261007-pre-rollup`은 v1.39.0 전이라 출발점이 아니다 |
 | 롤백은 `repman:rollback` | `repman:v1.39.0` 고정 태그(①) | ⑥을 빌드째 다시 돌리면 `repman:rollback`이 v2로 옮겨지고 v1 이미지가 청소에 지워진다 |

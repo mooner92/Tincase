@@ -177,7 +177,7 @@ production에서 `DEV_IDENTITY`가 설정돼 있으면 **거부**한다.
 
 `deploy.sh`는 health에 닿지 못하면(본문이 JSON이 아니면) 「앱이 기동하다 멈췄다 — 로그의 FATAL 줄」을 덧붙인다 — 운영자가 곧장 롤백하지 않고 이유부터 보게(스키마면 push 뒤 `--no-build`).
 
-시험 `[OPS-T35]`(`tests/schema-check.test.ts` — 판정 · v2로 더해지는 표 7·열 6이 기준에 있음 · 표 하나·열 하나를 지운 DB에서 이름으로 말하고 멈춤 · push하면 뜸 · 기동 순서) ·
+시험 `[OPS-T35]`(`tests/schema-check.test.ts` — 판정 · v2로 더해지는 표 7·열 7이 기준에 있음 · 표 하나·열 하나를 지운 DB에서 이름으로 말하고 멈춤 · push하면 뜸 · 기동 순서) ·
 `[OPS-T35b]`(`tests/deploy-script.test.ts` — health에 닿지 못할 때만 FATAL 안내).
 
 ### OPS-49 — 운영 파일을 이 판의 읽기로 한 번 열어 본다 (2026-10-09)

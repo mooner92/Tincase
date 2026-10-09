@@ -64,7 +64,7 @@ export const POST = handler(async (req: NextRequest) => {
      */
     const r = await sendAlert({
       recvIds: [u.employeeNo],
-      ...setupLinkMessage(u.name, url),
+      ...setupLinkMessage(u.name, url, expiresAt),
       kind: 'setup_link', // NT-56
     });
 

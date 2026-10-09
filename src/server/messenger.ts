@@ -69,6 +69,16 @@ export function messengerStatus(): { enabled: boolean; reason: string; allow: st
   return { enabled: true, reason: '', allow: all ? '전원' : [...ids].join(',') };
 }
 
+/**
+ * AU-32a — 이 사번에게 **지금 쪽지가 갈 수 있나**(주소 있음 · 허용 목록 안). 보내기 전에 무언가를 바꾸는 길이 묻는다 —
+ * 비밀번호 찾기는 새 링크를 만들면 그 사람의 옛 링크(운영자가 보낸 것)를 죽인다. 쪽지가 못 가는데 만들면 이미 간 링크만 쪽지 없이 죽는다.
+ */
+export function canReach(employeeNo: string): boolean {
+  if (!env.MESSENGER_URL) return false;
+  const { all, ids } = allowlist();
+  return all || ids.has(employeeNo.trim());
+}
+
 /** 문서 3장 — 텍스트 필드는 값과 인코딩을 **쌍으로** 보낸다. 빠지면 한글이 깨진다 */
 function appendEncoded(form: URLSearchParams, key: string, value: string): void {
   form.append(key, value);

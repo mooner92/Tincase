@@ -270,16 +270,19 @@ model StandardTemplate {
 /// **링크를 보내는 것만으로는 기존 비밀번호가 바뀌지 않는다.** 쓰는 순간에만 바뀐다 —
 /// 그래서 이미 쓰고 있는 사람에게 잘못 보내도 그 사람은 아무 영향을 받지 않는다.
 model SetupToken {
-  id        String    @id @default(cuid())
-  userId    String
+  id           String    @id @default(cuid())
+  userId       String
   /// 원문은 어디에도 저장하지 않는다 (세션 토큰과 같은 방식)
-  tokenHash String    @unique
-  expiresAt DateTime
+  tokenHash    String    @unique
+  expiresAt    DateTime
   /// 쓴 시각. 한 번 쓰면 죽는다
-  usedAt    DateTime?
-  /// 누가 보냈나 — 계정 관련 행위에는 언제나 이름이 붙는다
-  createdBy String
-  createdAt DateTime  @default(now())
+  usedAt       DateTime?
+  /// AU-30a (2026-10-10) — 더 새 링크가 나가 죽은 시각. 「쓴 시각」과 다른 칸이다 — 같은 칸에 두면 밀린 링크가
+  /// 「비밀번호가 이미 설정되었습니다」로 보여, 받은 사람이 로그인하러 갔다가 막힌다 (ADR-0020)
+  supersededAt DateTime?
+  /// 누가 보냈나 — 계정 관련 행위에는 언제나 이름이 붙는다. 본인 요청(AU-32)은 `self:<메일>`
+  createdBy    String
+  createdAt    DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 

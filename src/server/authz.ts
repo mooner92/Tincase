@@ -53,6 +53,20 @@ export function isDocumentManager(user: Pick<User, 'divisionRole'>): boolean {
   return user.divisionRole === 'lead' || user.divisionRole === 'head';
 }
 
+/**
+ * AU-04b · TACP §5 판정 순서 2 (v1.14) — **이 사람이 지금 Tincase에 들어올 수 있나.** 활성 계정 그리고 (부서 켜짐 또는 운영자).
+ *
+ * `requireScope`(아니면 403)와 비밀번호 찾기(AU-32a — 아니면 링크를 보내지 않는다)가 같은 식을 본다. 비밀번호 찾기가 이 식을 따로 적지
+ * 않고 여기를 부르는 이유: 2026-10-10까지 그 길은 부서 켜짐을 보지 않아, 꺼진 부서 사람(정해도 로그인할 수 없는 사람)에게도 실제 쪽지가 갔다.
+ * 두 곳이 같은 판정을 따로 적으면 다음에 한쪽만 바뀐다 (TACP-12).
+ */
+export function canSignIn(
+  user: Pick<User, 'isActive' | 'isOperator'>,
+  division: Pick<Division, 'isActive'>,
+): boolean {
+  return user.isActive && (division.isActive || user.isOperator);
+}
+
 /** AU-04/04b — 신원 → 활성 사용자 + 부서. 신원 출처(세션/Cloudflare)는 여기서 흡수된다 */
 export async function requireScope(headers: Headers): Promise<Scope> {
   const identity = await verifyAccess(headers);
@@ -62,7 +76,7 @@ export async function requireScope(headers: Headers): Promise<Scope> {
   if (!user || !user.isActive) {
     throw new HttpError(403, 'not_registered', '등록되지 않은 사용자입니다. 운영자에게 문의하세요.');
   }
-  if (!user.division.isActive && !user.isOperator) {
+  if (!canSignIn(user, user.division)) {
     throw new HttpError(
       403,
       'division_not_onboarded',
