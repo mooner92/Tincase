@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useEffect, useRef, useState } from 'react';
 import { buildNav, isNavActive } from '@/lib/nav';
+import { clearComposerDrafts } from '@/lib/composer';
 import type { TourProp } from '@/server/tour';
 import { TourHost } from './Tour';
 export type { NavItem } from '@/lib/nav';
@@ -78,6 +79,15 @@ export function AppHeader({
   const navBelow = foreign ? 'lg:hidden' : 'md:hidden';
 
   const logout = () => {
+    /*
+     * WA-35d — 이 브라우저에 남은 웹 작성 임시본을 지운다(옛 열쇠 포함). 열쇠가 사람마다라 다음 사람에게 보이지는 않지만,
+     * 함께 쓰는 PC에 안 낸 글을 남기고 떠나지 않게 한다. 저장소를 못 쓰면(사생활 보호 모드) 지울 것도 없다
+     */
+    try {
+      clearComposerDrafts(window.localStorage);
+    } catch {
+      /* 지우지 못해도 로그아웃은 한다 */
+    }
     if (viaCloudflare) {
       // Cloudflare 엣지 엔드포인트 — 앱 라우트가 아니다 (AU-08)
       // eslint-disable-next-line @next/next/no-location-assign-relative-destination

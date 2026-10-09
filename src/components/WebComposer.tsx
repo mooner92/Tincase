@@ -10,7 +10,7 @@ import { flagWordOf, parseFlagWords } from '@/lib/empty-content';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { parseClipboardTable } from '@/lib/paste-table';
-import { composerStart, dateHint, sameRows, submitBlocked, type ComposerFrom } from '@/lib/composer';
+import { composerDraftKey, composerStart, dateHint, sameRows, submitBlocked, type ComposerFrom } from '@/lib/composer';
 import { PreviousWeekPanel, type PrevRow } from './PreviousWeekPanel';
 
 export interface ComposerRow {
@@ -38,34 +38,39 @@ const SECTIONS: { key: Bucket; no: number; title: string; hint: string }[] = [
 ];
 
 const blank = (): ComposerRow => ({ content: '', date: '', place: '', attendee: '', emphasis: false });
-const draftKey = (isoKey: string) => `tincase.compose.${isoKey}`;
+
+/*
+ * 브라우저 임시본 — 열쇠는 **사람 + 주차**다(WA-35d · `composerDraftKey`). 주차만이던 때는 한 브라우저를 쓰는 다음 사람이
+ * 앞사람의 안 낸 임시본을 열어 그대로 낼 수 있었다(2026-10-10 점검). 옛 열쇠는 읽지 않는다 — 로그아웃이 지운다(AppHeader).
+ */
 
 /** 브라우저 임시본 쓰기·지우기 — 저장소를 못 쓰면 임시 보관만 못 할 뿐이다 */
-function writeDraft(isoKey: string, data: unknown) {
+function writeDraft(key: string, data: unknown) {
   try {
-    localStorage.setItem(draftKey(isoKey), JSON.stringify(data));
+    localStorage.setItem(key, JSON.stringify(data));
   } catch {
     /* 사생활 보호 모드 등 */
   }
 }
-function dropDraft(isoKey: string) {
+function dropDraft(key: string) {
   try {
-    localStorage.removeItem(draftKey(isoKey));
+    localStorage.removeItem(key);
   } catch {
     /* 지우지 못해도 다음에 열 때 내용 비교(WA-37)가 다시 판정한다 */
   }
 }
 
 /** 브라우저 임시본 읽기 — 사생활 보호 모드 등에서 저장소가 던지면 없는 것으로 친다 */
-function readDraft(isoKey: string): string | null {
+function readDraft(key: string): string | null {
   try {
-    return typeof window === 'undefined' ? null : window.localStorage.getItem(draftKey(isoKey));
+    return typeof window === 'undefined' ? null : window.localStorage.getItem(key);
   } catch {
     return null;
   }
 }
 
 export function WebComposer({
+  userId,
   isoKey,
   title,
   editedNote = null,
@@ -76,6 +81,8 @@ export function WebComposer({
   onClose,
   emptyWordsRaw = '',
 }: {
+  /** WA-35d — 임시본 열쇠의 사람(세션의 사람 — 홈 카드의 `me.id`). 주차만으로 열쇠를 만들면 같은 브라우저의 다음 사람이 앞사람 임시본을 연다 */
+  userId: string;
   isoKey: string;
   /** WA-38 — 「10월 1주차 업무일지」 · 「9월 월간 업무일지」. 「업무일지 작성」은 어느 주인지 말하지 않는다 */
   title: string;
@@ -99,7 +106,8 @@ export function WebComposer({
    * `start`를 따로 들고 있는 것은 WA-35b 때문이다 — 사람이 아무것도 안 바꿨으면 임시본을 쓰지 않는다.
    * 연 것만으로 쓰면 빈 표·옛 판이 임시본이 되어, 다음에 열 때 지금 낸 판을 가린다.
    */
-  const [start, setStart] = useState(() => composerStart(readDraft(isoKey), initial, blank));
+  const draftKey = composerDraftKey(userId, isoKey);
+  const [start, setStart] = useState(() => composerStart(readDraft(draftKey), initial, blank));
   const [data, setData] = useState<Record<Bucket, ComposerRow[]>>(start.data);
   const from: ComposerFrom = start.from;
   const [busy, setBusy] = useState(false);
@@ -123,22 +131,22 @@ export function WebComposer({
     // WA-35b·37 — 내용이 시작점으로 돌아왔으면 임시본도 시작점으로: 임시본에서 시작했으면 그 내용, 아니면 없음.
     // 지연 저장이 써 둔 중간 내용(쳤다 지운 것)이 남아 다음에 낸 판을 가리지 않게
     if (unchanged) {
-      if (start.from === 'draft') writeDraft(isoKey, data);
-      else dropDraft(isoKey);
+      if (start.from === 'draft') writeDraft(draftKey, data);
+      else dropDraft(draftKey);
       return;
     }
-    const t = setTimeout(() => writeDraft(isoKey, data), 800);
+    const t = setTimeout(() => writeDraft(draftKey, data), 800);
     return () => clearTimeout(t);
-  }, [data, isoKey, done, unchanged, start.from]);
+  }, [data, draftKey, done, unchanged, start.from]);
 
   /**
    * WA-38 — 닫기(×·바탕·Esc). 바뀐 것이 있으면 임시본을 **바로** 쓰고 닫는다 — 800ms 지연 저장을 기다리면
    * 빨리 닫은 사람의 마지막 글자가 사라진다. 다음에 열면 이어 쓰므로 「닫을까요?」를 묻지 않는다.
    */
   const close = useCallback(() => {
-    if (!done && !unchanged) writeDraft(isoKey, data);
+    if (!done && !unchanged) writeDraft(draftKey, data);
     onClose();
-  }, [done, unchanged, isoKey, data, onClose]);
+  }, [done, unchanged, draftKey, data, onClose]);
 
   // WA-38 — 열면 제목에 초점, Tab은 드로어 안에서 돈다, Esc로 닫는다 (FileDrawer CP-75와 같은 방식)
   useEffect(() => {
@@ -173,7 +181,7 @@ export function WebComposer({
   /** WA-35a — 임시본을 버리고 지금 낸 판에서 다시. 적던 것이 사라지므로 묻는다 */
   const restartFromSubmitted = () => {
     if (!initial || !confirm(`작성하던 임시본을 지우고 지금 낸 v${initialVersion}에서 다시 시작할까요?`)) return;
-    dropDraft(isoKey); // 지우지 못해도 아래에서 다시 시작한다 — 손대지 않으면 다시 쓰지 않는다
+    dropDraft(draftKey); // 지우지 못해도 아래에서 다시 시작한다 — 손대지 않으면 다시 쓰지 않는다
     const next = composerStart(null, initial, blank);
     setStart(next);
     setData(next.data);
@@ -270,7 +278,7 @@ export function WebComposer({
           return;
         }
         setDone(true); // 지연 저장이 다시 쓰지 못하게 먼저 막는다
-        dropDraft(isoKey);
+        dropDraft(draftKey);
         // WA-35c — 표는 그대로 둔다. 다시 열면 방금 낸 판에서 시작하므로 「빈 화면」이라고 하지 않는다
         setMsg({ ok: true, text: `제출되었습니다 (v${body.version}).` });
         router.refresh();

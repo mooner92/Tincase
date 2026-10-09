@@ -1,6 +1,6 @@
 // WA-35 · WA-36a — 웹 작성의 시작점과 일자 예시.
 import { describe, expect, it } from 'vitest';
-import { composerStart, dateHint, sameRows, submitBlocked } from './composer';
+import { clearComposerDrafts, composerDraftKey, composerStart, dateHint, DRAFT_PREFIX, sameRows, submitBlocked } from './composer';
 
 type Row = { content: string; date: string; place: string; attendee: string; emphasis?: boolean };
 const blank = (): Row => ({ content: '', date: '', place: '', attendee: '', emphasis: false });
@@ -107,5 +107,41 @@ describe('WA-37 — 「바뀌었나」는 내용으로', () => {
     expect(submitBlocked({ ...ok, from: 'submission', unchanged: false })).toBe(false);
     // 임시본·빈 표에서 시작했으면 「그대로」여도 낼 수 있다(아직 안 낸 내용이다)
     expect(submitBlocked({ ...ok, from: 'draft', unchanged: true })).toBe(false);
+  });
+});
+
+describe('WA-35d — 임시본 열쇠는 사람 + 주차 (2026-10-10)', () => {
+  /** localStorage 흉내 — 넣은 순서대로 key(i) */
+  const fakeStorage = (init: Record<string, string>) => {
+    const m = new Map(Object.entries(init));
+    return {
+      get length() {
+        return m.size;
+      },
+      key: (i: number) => [...m.keys()][i] ?? null,
+      removeItem: (k: string) => void m.delete(k),
+      keys: () => [...m.keys()],
+    };
+  };
+
+  it('[WA-T60] 같은 주라도 사람이 다르면 열쇠가 다르다 — 옛 열쇠(주차만)와도 다르다', () => {
+    const a = composerDraftKey('user-a', '2026-W42');
+    const b = composerDraftKey('user-b', '2026-W42');
+    expect(a).not.toBe(b);
+    expect(a).not.toBe(`${DRAFT_PREFIX}2026-W42`); // 옛 열쇠는 읽지 않는다 — 누구 것인지 모른다
+    expect(a.startsWith(DRAFT_PREFIX)).toBe(true); // 로그아웃이 지우는 범위 안
+    expect(composerDraftKey('user-a', '2026-W43')).not.toBe(a);
+  });
+
+  it('[WA-T60] 로그아웃 — 이 앱의 임시본(옛 열쇠 포함)만 지운다, 다른 저장소는 그대로', () => {
+    const st = fakeStorage({
+      [`${DRAFT_PREFIX}2026-W41`]: '{}', // 옛 열쇠
+      [composerDraftKey('user-a', '2026-W42')]: '{}',
+      [composerDraftKey('user-b', '2026-W42')]: '{}',
+      'other.app.key': 'keep',
+      'tincase.tour.seen': 'keep', // 같은 앱의 다른 것도 임시본이 아니면 둔다
+    });
+    expect(clearComposerDrafts(st)).toBe(3);
+    expect(st.keys()).toEqual(['other.app.key', 'tincase.tour.seen']);
   });
 });

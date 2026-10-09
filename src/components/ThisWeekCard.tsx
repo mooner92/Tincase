@@ -246,6 +246,7 @@ export function ThisWeekCard({
       */}
       {composing && (
         <WebComposer
+          userId={me.id}
           isoKey={week.isoKey}
           title={title}
           editedNote={composing.editedNote}

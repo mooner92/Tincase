@@ -18,7 +18,7 @@ const row = (content: string, extra: object = {}) => ({ content, date: '', place
 
 const render = (props: Partial<Parameters<typeof WebComposer>[0]> = {}) =>
   renderToStaticMarkup(
-    createElement(WebComposer, { isoKey: '2026-W41', title: '10월 1주차 업무일지', weekStartMs: W41, onClose: () => {}, ...props }),
+    createElement(WebComposer, { userId: 'user-me', isoKey: '2026-W41', title: '10월 1주차 업무일지', weekStartMs: W41, onClose: () => {}, ...props }),
   );
 
 describe('WA-35 「다시 작성」은 지금 낸 판에서', () => {
@@ -86,5 +86,46 @@ describe('WA-37·38 — 낸 판으로 연 화면 · 제목 · 군더더기 (2026
     expect(src).not.toContain('guideLines');
     // 닫을 때 임시본을 바로 쓰고 묻지 않는다 — 「닫을까요?」 확인이 없다
     expect(src).not.toMatch(/confirm\([^)]*닫을까요/);
+  });
+});
+
+describe('WA-35d — 한 브라우저를 여럿이 써도 남의 임시본으로 열리지 않는다 (2026-10-10)', () => {
+  const DRAFT_LINE = '저장하지 않은 임시본에서 이어 씁니다';
+  const draft = JSON.stringify({ achievements: [row('앞사람이 적다 만 줄')], plans: [], notes: [] });
+
+  /** 첫 그림에서 임시본을 읽게 브라우저 저장소를 흉내 낸다 — 그리는 동안만 */
+  function withStorage(items: Record<string, string>, fn: () => string): string {
+    const g = globalThis as unknown as { window?: unknown };
+    const before = g.window;
+    g.window = { localStorage: { getItem: (k: string) => items[k] ?? null } };
+    try {
+      return fn();
+    } finally {
+      g.window = before;
+    }
+  }
+
+  it('[WA-T60] 옛 열쇠(주차만)·다른 사람의 열쇠에 든 임시본은 열지 않는다 — 내 열쇠의 것만 연다', async () => {
+    const { composerDraftKey } = await import('@/lib/composer');
+    const legacy = withStorage({ 'tincase.compose.2026-W41': draft }, () => render());
+    expect(legacy).not.toContain(DRAFT_LINE);
+    expect(legacy).not.toContain('앞사람이 적다 만 줄');
+    const others = withStorage({ [composerDraftKey('user-before', '2026-W41')]: draft }, () => render());
+    expect(others).not.toContain(DRAFT_LINE);
+    const mine = withStorage({ [composerDraftKey('user-me', '2026-W41')]: draft }, () => render());
+    expect(mine).toContain(DRAFT_LINE);
+    expect(mine).toContain('value="앞사람이 적다 만 줄"');
+  });
+
+  it('[WA-T60] 화면이 같은 열쇠를 쓴다 — 홈 카드가 세션의 사람을 넘기고, 로그아웃이 이 앱의 임시본을 지운다', () => {
+    const read = (f: string) => readFileSync(path.resolve(__dirname, '..', f), 'utf8');
+    const composer = read('src/components/WebComposer.tsx');
+    expect(composer).toContain('composerDraftKey(userId, isoKey)');
+    expect(composer).not.toMatch(/tincase\.compose\.\$\{isoKey\}/); // 옛 열쇠를 만들지 않는다
+    expect(read('src/components/ThisWeekCard.tsx')).toMatch(/<WebComposer\s+userId=\{me\.id\}/);
+    const header = read('src/components/AppHeader.tsx');
+    const logout = header.slice(header.indexOf('const logout = () =>'), header.indexOf('return (', header.indexOf('const logout = () =>')));
+    expect(logout).toContain('clearComposerDrafts(window.localStorage)');
+    expect(logout.indexOf('clearComposerDrafts')).toBeLessThan(logout.indexOf('viaCloudflare')); // Cloudflare 길로 나가도 지운다
   });
 });

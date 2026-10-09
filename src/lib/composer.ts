@@ -10,6 +10,29 @@ export type ComposerFrom = 'draft' | 'submission' | 'blank';
 const hasContent = <R extends { content: string }>(d: Partial<Buckets<R>> | null | undefined) =>
   !!d && BUCKETS.some((b) => d[b]?.some((r) => typeof r?.content === 'string' && r.content.trim() !== ''));
 
+/** WA-35d — 이 앱의 브라우저 임시본 열쇠는 모두 이것으로 시작한다(옛 열쇠 `tincase.compose.{주차}`도) */
+export const DRAFT_PREFIX = 'tincase.compose.';
+
+/**
+ * WA-35d (2026-10-10) — 임시본 열쇠 = **사람 + 주차**. 예전 열쇠는 주차뿐이라(`tincase.compose.2026-W42`) 한 브라우저를 여럿이 쓰면
+ * 다음 사람이 [작성하기]를 누르는 순간 앞사람의 안 낸 임시본이 「저장하지 않은 임시본에서 이어 씁니다」로 열리고, 그대로 [제출]하면
+ * **남의 글이 내 이름으로** 나갔다. 옛 열쇠는 읽지 않는다(누구 것인지 모른다) — 로그아웃이 지운다(`clearComposerDrafts`).
+ */
+export function composerDraftKey(userId: string, isoKey: string): string {
+  return `${DRAFT_PREFIX}u:${userId}:${isoKey}`;
+}
+
+/** WA-35d — 로그아웃할 때 이 앱의 임시본을 모두 지운다(옛 열쇠 포함). 다른 앱의 저장소는 건드리지 않는다. 지운 수를 돌려준다 */
+export function clearComposerDrafts(storage: Pick<Storage, 'length' | 'key' | 'removeItem'>): number {
+  const doomed: string[] = [];
+  for (let i = 0; i < storage.length; i++) {
+    const k = storage.key(i);
+    if (k?.startsWith(DRAFT_PREFIX)) doomed.push(k);
+  }
+  for (const k of doomed) storage.removeItem(k); // 다 모은 뒤에 지운다 — 돌면서 지우면 번호가 밀려 하나씩 건너뛴다
+  return doomed.length;
+}
+
 /** 브라우저 임시본. 모양이 틀리면(깨졌거나 옛 형식) 없는 것으로 친다 — 조용히 버린다 */
 function parseDraft<R extends { content: string }>(raw: string | null): Buckets<R> | null {
   if (!raw) return null;
