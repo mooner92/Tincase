@@ -110,7 +110,7 @@ export async function uploadSubmission(input: UploadInput, now = new Date()): Pr
       data: { isLatest: false },
     });
     const version = (last?.version ?? 0) + 1;
-    const rel = submissionRelPath(division.slug, slot.year, slot.label, user.name, version);
+    const rel = submissionRelPath(division.slug, slot.year, slot.label, user, version); // ST-02a — 이름 + 사람 꼬리
     const created = await tx.submission.create({
       data: {
         divisionId: division.id, // DM-12: 서버가 채운다. 요청 값 아님
@@ -183,7 +183,7 @@ export async function reviseSubmission(input: {
     target.division.slug,
     target.weekSlot.year,
     target.weekSlot.label,
-    target.user.name,
+    target.user, // ST-02a — 주인(그 부서원)의 꼬리. 고친 사람이 아니다
     version,
     `e${randomUUID().slice(0, 8)}`,
   );
@@ -409,6 +409,14 @@ export async function deleteSubmission(
   });
 
   for (const s of siblings) {
+    /*
+     * ST-34 (2026-10-10) — **그 제출물만 가리키는 파일만** 지운다. 꼬리(ST-02a) 전의 경로는 이름만이라, 같은 부서의 동명이인이
+     * 같은 주에 내면 두 행이 한 파일을 가리켰다. 그때 한 사람이 취소하면 다른 사람의 파일이 지워졌다 — 남은 행이 가리키면 둔다.
+     */
+    if ((await prisma.submission.count({ where: { filePath: s.filePath } })) > 0) {
+      logger.warn({ submissionId: s.id, relPath: s.filePath }, 'delete: 다른 제출물이 같은 파일을 가리켜 파일은 남긴다 (ST-34)');
+      continue;
+    }
     try {
       await unlink(resolveInRoot(s.filePath));
     } catch (e) {
