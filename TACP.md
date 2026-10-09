@@ -4,8 +4,8 @@
 > 코드·스펙·UI가 이 문서와 어긋나면 **문서가 아니라 코드가 틀린 것**이다.
 > 규칙을 바꾸려면 §10 절차를 따른다. 코드를 먼저 고치는 것은 위반이다.
 
-버전 1.13 · 2026-10-09 · 대상 코드 v1.41.0 (feat/org-rollup) — v1.9 위에 세 갈래를 이력 순서대로 합쳤다: v1.10(병합 줄 · 「병합 점검」 TACP-30 — feat/merge-queue) · v1.11(가짜 알림 수신함 TACP-26) · v1.12 노트(화면 둘러보기 — 새 권한 없음, feat/guide-v2) · v1.13 노트(부서 알림 스위치를 운영자 화면으로 — 새 권한 없음)
-관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md) · [ADR-0008](docs/adr/0008-head-principal.md) · [ADR-0012](docs/adr/0012-upward-submission.md) · [ADR-0015](docs/adr/0015-approval-is-handoff.md) · [ADR-0016](docs/adr/0016-division-status-visibility.md) · [ADR-0017](docs/adr/0017-foreign-read-chip.md) · [ADR-0018](docs/adr/0018-manage-settings-trim.md) · [ADR-0019](docs/adr/0019-merge-queue.md)
+버전 1.14 · 2026-10-10 · 대상 코드 v2.0.0 후보 (feat/pre-launch) — v1.9 위에 세 갈래를 이력 순서대로 합쳤다: v1.10(병합 줄 · 「병합 점검」 TACP-30 — feat/merge-queue) · v1.11(가짜 알림 수신함 TACP-26) · v1.12 노트(화면 둘러보기 — 새 권한 없음, feat/guide-v2) · v1.13 노트(부서 알림 스위치를 운영자 화면으로 — 새 권한 없음) · v1.14(출시 전 점검 — 감사 로그 화면의 문 · §6 공개 경로 정정)
+관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md) · [ADR-0008](docs/adr/0008-head-principal.md) · [ADR-0012](docs/adr/0012-upward-submission.md) · [ADR-0015](docs/adr/0015-approval-is-handoff.md) · [ADR-0016](docs/adr/0016-division-status-visibility.md) · [ADR-0017](docs/adr/0017-foreign-read-chip.md) · [ADR-0018](docs/adr/0018-manage-settings-trim.md) · [ADR-0019](docs/adr/0019-merge-queue.md) · [ADR-0020](docs/adr/0020-public-password-paths.md)
 
 변경 이력:
 - v1.1 — `delete` Action 신설, TACP-8에 예외 하나(TACP-14) 추가
@@ -83,6 +83,15 @@
   §3.1 「명단 · 역할 · 부서 활성화」 칸에 「부서 알림」을 적는다 — operator만 `manage`, 나머지 `—`(404). 같은 문(`requireOperator` — TACP-12) · 같은 API(`PUT /api/ops/divisions`) ·
   같은 감사(`rule_update`). 그동안은 화면이 없어 운영 DB에 SQL로 바꿨다 — 서버에 닿는 사람은 operator뿐이므로(§8) 바뀌는 사람은 없고, 감사 기록이 없던 길이 기록이 남는 길로 바뀐 것이다.
   §10 절차의 1·4·5만 해당한다(불변식·게이트가 바뀌지 않는다 — 단추는 운영자 문 안의 표에만 있다). 시험 API-T26(담당·부서장·부서원·총괄 404)
+- v1.14 — **위반 정정 둘 (2026-10-10 출시 전 점검 — 칸은 그대로, 코드와 표가 칸을 따르게)**. 불변식(§4)은 건드리지 않는다.
+  ① **감사 로그는 운영자만**(§3.1 그대로). `/ops/audit`가 readAll로 문을 열어 총괄이 남의 행동 기록 전부(로그인·비밀번호 초기화·내려받기·actor 거르기 없음)를 읽었고,
+  「전사」 화면이 총괄에게 그 링크를 그렸다 — 기획조정실(총괄의 부서)을 켜는 10/13에 열릴 참이었다. 판정 `canReadAuditLog`를 authz.ts에 두고 페이지의 문과 링크(`/ops` · 「전사」 `orgPageView().audit`)가 그 하나를 본다(TACP-9·12).
+  readAll의 「전 부서 읽기」(TACP-8)는 **부서 문서**에 대한 것이다 — 행동 기록은 부서 문서가 아니다. 새로 금지된 것: 총괄의 `/ops/audit` → 404 · 「전사」의 감사 로그 링크 없음. 시험 AU-T91
+  ② **§6 공개 경로에 비밀번호 찾기·설정이 빠져 있었다** — AU-30·32(설정 링크·비밀번호 찾기)를 더하며 §10을 거치지 않았다. 표에 올리며 그 길의 규칙을 적는다:
+  같은 응답 · **로그인할 수 있는 사람에게만 보낸다**(`canSignIn` — `requireScope`와 같은 식: 활성 계정 그리고 부서 켜짐 또는 운영자) ·
+  **한도는 요청 머리에 기대지 않는다**(`cf-connecting-ip`·`x-forwarded-for`는 보내는 쪽이 고른다 — 전체 한도와 사람마다 한도, IP는 거들 뿐) ·
+  더 새 링크에 밀린 옛 링크는 「이미 사용함」이 아니라 **「더 새 링크가 나감」**이다(`SetupToken.supersededAt`). 새로 금지된 것: 꺼진 부서 사람에게 링크가 가는 것(AU-T92) ·
+  머리를 바꿔 한도를 넘는 것(AU-T93). 그대로 허용인 것: 꺼진 부서의 운영자(AU-T92) · 밀린 링크는 쓰지 못한다(AU-T94). 결정 [ADR-0020](docs/adr/0020-public-password-paths.md)
 
 ---
 
@@ -216,7 +225,7 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
 | 병합 실행 | — | write | write | write | write |
 | **마감 잠시 열기·닫기** | — | write | write | — | write |
 | 명단 · 역할 · 부서 활성화 · 부서 알림 (v1.13) | — | — | — | — | manage |
-| 감사 로그 | — | — | — | — | read |
+| 감사 로그 (`/ops/audit` — 문은 `canReadAuditLog`, v1.14) | — | — | — | — | read |
 
 ### 3.2 병합본 (Resource: `MergeRun` · 결과 파일)
 
@@ -693,6 +702,8 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | `requireSubmitter(headers)` | 제출 진입점. 부서원이면 통과 (DM-16) | 401 / 403 |
 | `getDivisionView(slug)` | 페이지용 — 위를 묶어 `{division, isOwn, canManage, canSubmit}` | 404 |
 | `tourEligible(scope)` | 화면 판정 — 첫 로그인 둘러보기 카드를 띄울 사람인가(운영자 제외). 권하는 장은 `guideCaps`가 정한다 (v1.12 노트 — 권한 아님) | 카드 없음 |
+| `canReadAuditLog(user)` | 감사 로그를 읽는가 — **operator만** (§3.1). `/ops/audit`의 문과 그리로 가는 링크(`/ops` · 「전사」 `orgPageView().audit`)가 이 하나를 본다. readAll이 아니다 — 행동 기록은 부서 문서가 아니다 (v1.14) | **404** · 링크 없음 |
+| `canSignIn(user, division)` | 등록·활성 판정 — 활성 계정 **그리고** (부서 켜짐 **또는** operator). `requireScope`(아니면 403)와 비밀번호 찾기(§6 — 아니면 보내지 않는다, 응답은 같다)가 같은 식을 본다 (v1.14) | 403 / 보내지 않음 |
 
 ### 판정 순서
 
@@ -711,7 +722,8 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 
 ## 6. 공개 엔드포인트
 
-게이트를 통과하지 않는 경로는 **넷뿐이며(넷째는 시험·시연 서버에만 있다), 늘리려면 §10을 거친다.**
+게이트를 통과하지 않는 경로는 **여섯뿐이며(넷째는 시험·시연 서버에만 있다), 늘리려면 §10을 거친다.**
+다섯째·여섯째(비밀번호 찾기·설정)는 v1.14에서 표에 올렸다 — 그 전부터 있던 길인데 표에 없었다(§9).
 
 | 경로 | 이유 |
 |---|---|
@@ -719,6 +731,8 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | `POST /api/auth/logout` | 세션 파기는 항상 가능해야 한다 |
 | `GET /api/health` | 컨테이너 헬스체크. 개인정보·부서 정보를 담지 않는다 |
 | `POST·GET /api/dev/messenger-sink` | (v1.11) **시험·시연 서버에서만** — 가짜 알림 수신함(TACP-26 · NT-56). 메신저 클라이언트가 보내는 폼을 받아 적기만 한다. 기록을 내주지 않는다(GET은 「열려 있다」만). 운영에서는 404 |
+| `POST /api/forgot` (화면 `/forgot`) | (v1.14 — 표에 올림) 비밀번호를 잊은 사람이 **본인 메신저로** 설정 링크를 받는다(AU-32). 링크가 그 사람 메신저로만 가므로 신원 확인을 메신저 계정이 대신한다. 규칙: **누구에게나 같은 응답**(있는 사람인지 드러내지 않는다) · 보내는 것은 `canSignIn`인 사람에게만(꺼진 부서는 보내지도 적지도 않는다) · **한도는 요청 머리에 기대지 않는다** — 전체 한도와 사람마다 한도(DB에 남은 링크로 센다), IP 한도는 거들 뿐 · 본문이 사람을 고르는 것은 메일 주소 하나다 |
+| `POST /api/setup` (화면 `/setup/[token]`) | (v1.14 — 표에 올림) 링크로 **본인이** 비밀번호를 정한다(AU-30). 대상은 토큰이 정한다 — 요청이 사람을 고르지 못한다(TACP-6의 결). 토큰은 32바이트 · 해시만 저장 · 한 번 · 3일 · 더 새 링크가 나가면 죽고 「더 새 링크가 나감」으로 보인다(`supersededAt` — 「이미 사용함」과 다르다) |
 
 ---
 
@@ -778,6 +792,10 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | **AU-T89** | **member는 병합 규칙을 읽지 못한다** — 부서 설정 화면 404 · 규칙 GET 없음 · 저장 404 (v1.6.4 — 작성 안내가 없어진 칸, 새로 금지된 것) |
 | **HM-T171** | **「병합 점검」은 운영자와 기획조정실 담당(총괄이 있는 부서의 lead)만 받는다** (v1.10 새로 허용된 것) — 다른 부서의 lead · head · member와 (lead가 아닌) 총괄은 받지 않는다(새로 금지된 것) · **병합 작업 상태는 내 부서 것만** — 남의 부서 작업 id → 404, member → 404, 내 부서 lead · head 200 (TACP-30) |
 | **PG-T151** | **둘러보기 기록은 내 줄만** — 본문에 남의 `userId`를 실어도 세션의 사람 줄만 생긴다 · 가지지 않은 장은 무시 · 로그인 없음 401 (v1.12 노트 — 새 Resource `GuideTourSeen`의 격리) |
+| **AU-T91** | **감사 로그는 운영자만** (v1.14 — 고친 위반) — `/ops/audit`: 총괄(coordinator) 404 · 부서원 404 · 담당 404 · 운영자 200. 「전사」(`/org`)의 감사 로그 링크는 운영자에게만, 감사 문서·CSV는 readAll 그대로 (`tests/audit-access.test.ts`) |
+| **AU-T92** | **비밀번호 찾기는 로그인할 수 있는 사람에게만** (v1.14 새로 금지된 것) — 꺼진 부서 사람: 같은 응답 · 쪽지 0 · 토큰 0 · 감사 `setup_link` 0. 꺼진 부서의 운영자에게는 간다(그대로 허용인 것) (`tests/setup-link.test.ts`) |
+| **AU-T93** | **한도는 요청 머리로 넘지 못한다** (v1.14 새로 금지된 것) — `x-forwarded-for`를 매번 바꿔도 전체 한도에서 429 · 한 사람에게는 하루 3통까지(넘으면 같은 응답, 보내지 않음) (`tests/setup-link.test.ts`) |
+| **AU-T94** | **밀린 링크는 「더 새 링크가 나감」** (v1.14) — 새 링크를 보내면 옛 링크는 `superseded`(「이미 사용함」 아님) · 그 링크로 설정 410 `token_superseded` · 쓴 링크는 그대로 `used` (`tests/setup-link.test.ts`) |
 
 새 Resource를 추가하면 **그 Resource의 격리 테스트를 같은 커밋에 넣는다.**
 
@@ -807,6 +825,8 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | 2026-08-26 | 병합본 **수정** 판정이 라우트 안에 `if (!scope.isLead)`로 적혀 있었다 (`merged/content`·`merge` 2곳). §3.2에서 두 칸(수정·실행)의 coordinator 권한이 다른데 코드는 같은 식을 복사해 써서, 병합 **실행**이 문서보다 좁게(coordinator 불가) 동작했다 | TACP-12 | `requireOwnManager`(수정) / `requireManager`(실행) 두 게이트로 분리 (v1.23.0) |
 | 2026-10-07 | 제출물 **읽기** 게이트(`findAccessibleSubmission`)가 `scope.isLead`로 적혀 있었다. §3.1은 head도 read인데, 부서장은 [고치기]는 받고(첨삭 게이트는 `isManager`) 정작 열면 404였다 | TACP-16 | `isManager`로 통일 + WA-T44 |
 | 2026-10-08 | 본부본 승인 라우트(`rollup/hq/approve`)가 `requireHqManager` 뒤에 `isReviewer`를 **라우트 안에서** 다시 불러 판정을 조립했고, 승인은 화면이 본 판이 아니라 「가장 최근 본부본」에 붙었다 — 자동으로 다시 이어 붙는 순간 본부장이 보지 않은 판이 승인·제출될 수 있었다 | TACP-12 · TACP-23 | `requireHqReviewer` 게이트로 통합 · 본 판(runId·sha)이 아니면 409 + RU-T119 (v1.7) |
+| 2026-10-10 | **감사 로그 화면이 readAll(총괄)에게 열려 있었다** — `/ops/audit` 페이지가 `if (!scope.readAll) notFound()`로 문을 열었고(주석: 「총괄에게도 여는 이유: 자기 확인」), actor 거르기도 없어 남의 로그인·비밀번호 초기화·내려받기 기록 전부가 보였다. 「전사」 화면이 그 링크를 readAll에게 그렸다. §3.1의 감사 로그 칸은 처음부터 operator만이었다 | §3.1 · TACP-12 | `canReadAuditLog` 하나로 문과 링크(`orgPageView().audit`) · AU-T91 (v1.14) |
+| 2026-10-10 | **공개 경로 둘이 §6에 없었다** — `POST /api/forgot`(AU-32)·`POST /api/setup`(AU-30)이 §10 없이 생겼다. 그 사이 비밀번호 찾기가 꺼진 부서 사람에게도 실제 메신저 쪽지를 보냈고(그 사람은 로그인할 수 없다), IP 한도는 보내는 쪽이 고르는 머리(`x-forwarded-for`)로 셌으며, 새 링크가 운영자가 보낸 링크를 「이미 사용한 링크」로 바꿔 보이게 했다 | §6 · TACP-4 | §6에 올리고 규칙을 적음 · `canSignIn` · 머리에 기대지 않는 한도 · `supersededAt` · AU-T92~94 · [ADR-0020](docs/adr/0020-public-password-paths.md) (v1.14) |
 
 ---
 
