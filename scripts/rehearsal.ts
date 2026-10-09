@@ -161,7 +161,8 @@ async function prepare(rootArg: string, wipe: boolean): Promise<string> {
     const hash = await hashPassword(randomBytes(18).toString('base64url')); // 아무도 모르는 비밀번호 — 로그인은 세션으로
     const org = await fake.createFakeOrg(template, hash);
 
-    // 13개 단위 모두 켠다 — 2026-10-12(월)부터 전 섹션이 Tincase다. 본부(기획경영본부) 자신은 문서가 없어 부서 알림을 끈다:
+    // 13개 단위 모두 켠다 — 전 섹션이 Tincase인 날(부서를 다 켜고 3단계도 켠 뒤의 모양)을 미리 보려는 것이다. 10/13 전환의 모양(두 부서 ·
+    // 3단계 끔)은 e2e 출시 범위(OPS-50h — e2e-seed.ts --scope=launch)가 이 저장소를 줄여서 본다. 본부(기획경영본부) 자신은 문서가 없어 부서 알림을 끈다:
     // 켜 두면 본부 담당자에게 마감 독촉과 「병합본이 아직 없어요」(NT-40)가 간다. 본부장에게 가는 3단계 알림은 이 스위치를 보지 않는다(RU-52)
     for (const d of fake.DIVS) {
       const div = org.div[d.ko];
