@@ -14,6 +14,8 @@ interface DivisionRow {
   slug: string;
   nameKo: string;
   isActive: boolean;
+  /** PG-91 · NT-61 — 부서 알림 스위치. 켜짐과 따로다 — 켜짐 **그리고** 이것일 때만 그 부서에 쪽지가 간다(NT-30) */
+  notifyEnabled: boolean;
   deadlineDow: number;
   deadlineTime: string;
   memberCount: number;
@@ -48,6 +50,47 @@ const TABS = [
   { key: 'confirmed', label: '제출 확인' },
   { key: 'none', label: '이력 없음' },
 ] as const;
+
+/**
+ * PG-91 — 알림 칸 하나를 바꾼다. 누른 즉시 바뀐 값으로 그리고(`show`), 저장이 거절되거나 네트워크가 끊기면 원래 값으로 되돌린다.
+ *
+ * 이 칸만 먼저 그리는 이유: 다른 칸(켜짐·마감)은 서버가 거절할 일이 있어(양식 없음 409 · 마감 정책 422) 저장한 뒤 다시 불러 그리지만,
+ * 알림은 거절될 일이 권한·세션뿐이다. 다시 불러오기 전까지 옛 값이 보이면 안 눌린 줄 알고 한 번 더 눌러 원래대로 돌려 놓기 쉽다 — 단추 하나짜리 스위치라서다.
+ * 돌려주는 글은 화면이 띄운다 — 거절이면 서버 문구(세션이 끊겼으면 그 말이 할 일을 말한다).
+ */
+export async function toggleNotify(
+  row: Pick<DivisionRow, 'id' | 'notifyEnabled'>,
+  show: (on: boolean) => void,
+  put: (body: { id: string; notifyEnabled: boolean }) => Promise<Response>,
+): Promise<{ ok: boolean; message: string }> {
+  const before = row.notifyEnabled;
+  show(!before);
+  try {
+    const r = await put({ id: row.id, notifyEnabled: !before });
+    if (r.ok) return { ok: true, message: '저장됨' };
+    const b = (await r.json().catch(() => ({}))) as { message?: string };
+    show(before);
+    return { ok: false, message: b.message ?? '실패' };
+  } catch {
+    show(before);
+    return { ok: false, message: '네트워크 오류로 저장하지 못했습니다.' };
+  }
+}
+
+/**
+ * PG-91 — 「알림」 칸. 읽기는 칩, [편집]한 줄에서는 켜짐 단추와 같은 꼴(PG-55). 칸만 따로 둔 것은 첫 그림을 시험이 그려 보게 하려는 것이다 —
+ * 표의 줄은 불러온 뒤에야 생긴다(PG-64). 단추 이름에 부서를 붙인다 — 「켬 · 끄기」만으로는 화면 읽기에서 어느 줄인지 모른다
+ */
+export function NotifyCell({ name, on, editing, busy, onToggle }: { name: string; on: boolean; editing: boolean; busy: boolean; onToggle: () => void }) {
+  const label = on ? '켬 · 끄기' : '끔 · 켜기';
+  return editing ? (
+    <button disabled={busy} onClick={onToggle} aria-pressed={on} aria-label={`${name} 알림 ${label}`} className="btn-secondary h-8 px-3 text-sm">
+      {label}
+    </button>
+  ) : (
+    <span className={`chip text-xs ${on ? 'chip-ok' : 'chip-muted'}`}>{on ? '켬' : '끔'}</span>
+  );
+}
 
 export function OpsClient() {
   /*
@@ -115,6 +158,21 @@ export function OpsClient() {
         const b = await r.json();
         flash(r.ok ? '저장됨' : (b.message ?? '실패'));
         loadDivisions();
+      })
+      .finally(() => setBusy(false));
+  };
+
+  /** PG-91 — 알림만은 누른 즉시 바꿔 그린다(이유는 `toggleNotify`). 되돌리기도 그 함수가 한다 */
+  const flipNotify = (d: DivisionRow) => {
+    setBusy(true);
+    const show = (on: boolean) =>
+      setDivisions((rows) => rows && rows.map((x) => (x.id === d.id ? { ...x, notifyEnabled: on } : x)));
+    const put = (body: { id: string; notifyEnabled: boolean }) =>
+      fetch('/api/ops/divisions', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    void toggleNotify(d, show, put)
+      .then((r) => {
+        flash(r.message);
+        if (r.ok) loadDivisions();
       })
       .finally(() => setBusy(false));
   };
@@ -307,6 +365,7 @@ export function OpsClient() {
                 <th>마감</th>
                 <th>업무일지</th>
                 <th>상태</th>
+                <th>알림</th>
                 <th className="text-right">편집 · 인원</th>
               </tr>
             </thead>
@@ -405,6 +464,16 @@ export function OpsClient() {
                         </span>
                       )}
                     </td>
+                    <td className="whitespace-nowrap">
+                      {/* PG-91 — 켜짐 바로 옆. 꺼진 부서의 「켬」도 그대로 보인다 — 켜는 순간 쪽지가 가기 시작한다 */}
+                      <NotifyCell
+                        name={d.nameKo}
+                        on={d.notifyEnabled}
+                        editing={editing}
+                        busy={busy}
+                        onToggle={() => flipNotify(d)}
+                      />
+                    </td>
                     <td className="py-0 text-right whitespace-nowrap">
                       <button onClick={() => setEditingId(editing ? null : d.id)} className="btn-ghost">
                         {editing ? '완료' : '편집'}
@@ -419,7 +488,7 @@ export function OpsClient() {
               {/* PG-64 — 「없습니다」는 불러온 뒤 정말 없을 때만 */}
               {shown.length === 0 && (
                 <tr>
-                  <td colSpan={7} className="py-6 text-center text-sm text-muted">
+                  <td colSpan={8} className="py-6 text-center text-sm text-muted">
                     {divisions
                       ? '이 분류에 해당하는 부서가 없습니다.'
                       : loadErr

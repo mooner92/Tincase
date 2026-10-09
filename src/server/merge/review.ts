@@ -87,7 +87,13 @@ export interface NotifyResult {
 async function notifyLeads(review: MergeReview, reviewer: string, slot: WeekSlot, changes: RowChange[], handedOffTo: string | null): Promise<NotifyResult> {
   if (!messengerStatus().enabled) return { sent: 0, targets: 0 };
   const division = await prisma.division.findUnique({ where: { id: review.divisionId } });
-  if (!division?.notifyEnabled) return { sent: 0, targets: 0 };
+  /*
+   * NT-30 — 부서 알림은 켜짐 **그리고** 스위치다. 다른 부서 알림은 켜진 부서만 도는 루프(마감 전·병합 뒤·나무의 기여 단위)에서
+   * 불려 켜짐을 따로 볼 일이 없지만, 승인은 요청에서 온다 — 운영자는 꺼진 부서에 속해도 들어오므로(requireScope) 운영자 겸
+   * 부서장의 승인이 꺼진 부서 담당에게 갈 수 있었다. 스위치를 화면에서 켜고 끄게 되면서(NT-61) 「꺼진 부서에 켜 둔 스위치」를
+   * 운영자가 단추 하나로 만든다 — 부르는 쪽에 기대지 않고 여기서 본다
+   */
+  if (!division?.isActive || !division.notifyEnabled) return { sent: 0, targets: 0 };
   const leads = await prisma.user.findMany({
     where: { divisionId: division.id, isActive: true, divisionRole: 'lead', notifyEnabled: true, employeeNo: { not: null } },
     select: { name: true, employeeNo: true },

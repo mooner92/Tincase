@@ -1,4 +1,4 @@
-// GET /api/ops/divisions · PUT — 테넌시 관리 (operator 전용, API-32/33)
+// GET /api/ops/divisions · PUT — 테넌시 관리 (operator 전용, API-32/33 · 부서 알림 스위치 API-66)
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
 import { templateProblem, templateState, templateStates } from '@/server/template-state';
@@ -33,6 +33,8 @@ export const GET = handler(async (req: NextRequest) => {
       shortSlug: d.shortSlug,
       nameKo: d.nameKo,
       isActive: d.isActive,
+      /** API-66 · PG-91 — 부서 알림 스위치. 켜짐과 따로 보인다 — 꺼진 부서에 켜 둔 것도 운영자가 알아야 한다 */
+      notifyEnabled: d.notifyEnabled,
       deadlineDow: d.deadlineDow,
       deadlineTime: d.deadlineTime,
       memberCount: d._count.users,
@@ -50,6 +52,8 @@ export const PUT = handler(async (req: NextRequest) => {
   const body = (await req.json().catch(() => null)) as {
     id?: string;
     isActive?: boolean;
+    /** API-66 — 타입을 믿지 않는다. 아래에서 불리언인지 본다 */
+    notifyEnabled?: unknown;
     deadlineDow?: number;
     deadlineTime?: string;
     shortSlug?: string | null;
@@ -69,6 +73,17 @@ export const PUT = handler(async (req: NextRequest) => {
       if (problem) throw new HttpError(409, 'no_template', problem);
     }
     data.isActive = body.isActive;
+  }
+  /*
+   * API-66 · NT-61 — 부서 알림 스위치. 켜짐과 **따로** 저장한다: 꺼진 부서에 미리 켜 둬도 켜기 전까지는 아무것도 나가지 않는다
+   * (부서 알림은 켜짐 그리고 스위치 — NT-30). 위의 isActive처럼 불리언이 아니면 조용히 건너뛰지 않고 422다 — 「끄기」가 문자열
+   * "false"로 와서 무시되면 운영자는 껐다고 믿는데 쪽지는 계속 나간다.
+   */
+  if (body.notifyEnabled !== undefined) {
+    if (typeof body.notifyEnabled !== 'boolean') {
+      throw new HttpError(422, 'invalid_request', 'notifyEnabled 값이 올바르지 않습니다.');
+    }
+    data.notifyEnabled = body.notifyEnabled;
   }
   if (body.deadlineDow !== undefined || body.deadlineTime !== undefined) {
     const policy = {
@@ -91,8 +106,12 @@ export const PUT = handler(async (req: NextRequest) => {
   if (Object.keys(data).length === 0) throw new HttpError(422, 'invalid_request', '변경할 내용이 없습니다.');
 
   const updated = await prisma.division.update({ where: { id: div.id }, data });
-  await audit(scope.user.email, 'rule_update', div.id, `ops:division:${div.slug}`, { changed: Object.keys(data) });
+  await audit(scope.user.email, 'rule_update', div.id, `ops:division:${div.slug}`, {
+    changed: Object.keys(data),
+    // NT-61 — 스위치는 「바꿨다」만으로는 어느 쪽으로 바꿨는지 모른다. SQL로 바꾸던 때 그날 명령 출력이 하던 일을 이 기록이 한다
+    ...(typeof data.notifyEnabled === 'boolean' && { notifyEnabled: data.notifyEnabled }),
+  });
   // RU-72 — 나무(상위부서·켜짐)가 바뀌면 받는 곳·기여 단위가 바뀐다 — 이번 주를 위에서 아래로 맞춘다
   laterSyncCurrentWeek({ cause: 'tree', causedBy: scope.user.email });
-  return json({ ok: true, division: { id: updated.id, isActive: updated.isActive } });
+  return json({ ok: true, division: { id: updated.id, isActive: updated.isActive, notifyEnabled: updated.notifyEnabled } });
 });
