@@ -394,7 +394,8 @@ export const DECK: readonly GuideChapter[] = [
         message: {
           from: 'Tincase',
           subject: '[Tincase] {week} 주간 병합본 검토 부탁드려요',
-          lines: ['{week} 주간 업무일지 병합본이 준비됐어요.', 'Tincase에서 내용을 확인하고 고칠 부분을 알려주세요.'],
+          // NT-44b (2026-10-10) — 실제 쪽지와 같은 할 일(단추 이름) — merge-notices.ts composeNotice
+          lines: ['{week} 주간 업무일지 병합본이 준비됐어요.', 'Tincase 수합 관리에서 확인하고, 고칠 것이 없으면 [고칠 것 없음 · 승인]을 눌러 주세요.'],
         },
         notes:
           '목요일 두 시 십 분, 실장님 팀장님께 메신저로 이 알림이 갑니다. 병합이 성공했을 때만 갑니다. 알림을 받으면 Tincase의 수합 관리에서 병합본을 엽니다.',

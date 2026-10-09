@@ -88,6 +88,11 @@ export interface MergeFacts {
   submitDue?: string | null;
   /** HM-49 — 자동 재병합을 멈추게 한 사람 수정 (NT-51 `merge_held`에서만) */
   edits?: MergeEdits | null;
+  /**
+   * NT-44a (2026-10-10) — 이 주에 낸 사람 수(각자 최신 판). 병합본이 없을 때 **왜 없는지** 가른다: 0이면 만들 것이 없었던 것이라
+   * [지금 병합]을 누를 일이 없다 — 예전 쪽지는 그래도 「[지금 병합]을 눌러주세요」라고 했다. 모르면(옛 호출) 두 경우를 함께 말한다
+   */
+  submitted?: number;
 }
 
 /**
@@ -111,7 +116,11 @@ export function submitLines(f: Pick<MergeFacts, 'submitTo' | 'submitDue'> & Part
 function approvalBlock(f: MergeFacts): string[] {
   // 승인한 뒤 병합본이 바뀌었으면 「승인 완료」라고 말하지 않는다 — 화면의 「승인 뒤 바뀜」과 같은 말을 한다
   if (f.approval?.changedAfter) {
-    return ['', `${f.approval.by}님이 승인한 뒤 병합본이 바뀌었어요 — 다시 확인을 받아주세요.`];
+    /*
+     * NT-47a (2026-10-10) — 이 줄은 3단계가 꺼졌을 때만 나간다(compose: `staged`면 submitLines가 대신 말한다). 꺼져 있으면 부서장에게
+     * 「다시 승인해 주세요」(NT-52)가 가지 않는다 — 담당자가 기다리면 아무도 부서장에게 말하지 않는다. 그래서 할 일을 적는다
+     */
+    return ['', `${f.approval.by}님이 승인한 뒤 병합본이 바뀌었어요 — 다시 확인을 받아주세요.`, '부서장에게는 쪽지가 가지 않으니 직접 부탁해 주세요.'];
   }
   if (f.approval) return ['', `${f.approval.by}님 승인 완료 (${toKstIso(f.approval.at).slice(11, 16)} · ${f.approval.summary})`];
   if (f.hasHead) return ['', '아직 부서장 승인 전이에요 — 확인한 뒤 제출해주세요.'];
@@ -194,8 +203,9 @@ function rowsLine(f: MergeFacts): string {
  *
  * 토스 말투를 따른다: 사실 한 줄 → 빈 줄 → 다음에 할 일 한 줄.
  * 「~해야 합니다」가 아니라 「~해주세요」다. 매주 오는 알림이라 명령조는 금방 피로해진다.
+ * 순수 함수다 — 문구를 시험이 직접 본다(NT-T86).
  */
-function compose(kind: NoticeKind, who: Person, slotLabel: string, monthly: boolean, f: MergeFacts) {
+export function composeNotice(kind: NoticeKind, who: Person, slotLabel: string, monthly: boolean, f: MergeFacts) {
   const label = `${slotLabel} ${monthly ? '월간' : '주간'}`;
   const head = `[${who.employeeNo}]${who.name}님`;
 
@@ -210,7 +220,12 @@ function compose(kind: NoticeKind, who: Person, slotLabel: string, monthly: bool
         '',
         ...flagBlock(f.flagged),
         '',
-        'Tincase에서 내용을 확인하고 고칠 부분을 알려주세요.',
+        /*
+         * NT-44b (2026-10-10) — 할 일을 단추 이름으로. 예전 「Tincase에서 내용을 확인하고 고칠 부분을 알려주세요」는 담당자에게 말하라는 뜻으로 읽혔다 —
+         * 부서장은 직접 고쳐 저장하거나(그것이 승인 — HM-47) [고칠 것 없음 · 승인]을 누른다. 단추 이름은 화면(MergePanel·MergedDrawer)과 글자까지 같다
+         */
+        'Tincase 수합 관리에서 확인하고, 고칠 것이 없으면 [고칠 것 없음 · 승인]을 눌러 주세요.',
+        '고칠 곳은 직접 고쳐 저장하면 그것이 승인입니다 — 담당자에게 바로 알려집니다.',
         '각 항목을 누가 냈는지도 함께 보입니다.',
       ]
         .filter((l, i, a) => !(l === '' && a[i - 1] === ''))
@@ -233,14 +248,23 @@ function compose(kind: NoticeKind, who: Person, slotLabel: string, monthly: bool
     };
   }
 
+  /*
+   * NT-44a (2026-10-10) — 병합본이 없는 **이유**에 따라 할 일이 다르다. 낸 사람이 없으면 만들 것이 없었던 것이라 [지금 병합]을 누를 일이 없다 —
+   * 예전 쪽지는 그때도 「[지금 병합]을 눌러주세요」였다. 「제출된 파일」은 v1 낱말이다(이제 파일을 올리지 않는다 — 웹 작성, WA-39)
+   */
+  const noneSubmitted = f.submitted === 0;
+  const why = noneSubmitted
+    ? ['이번 주 제출이 한 건도 없어 병합본을 만들지 않았어요.']
+    : [f.submitted === undefined ? '제출이 없거나 병합에 실패했을 수 있어요.' : '병합에 실패했어요.'];
+
   if (kind === 'merge_missing') {
     return {
       subject: `[Tincase] ${slotLabel} 병합본이 아직 없어요`,
       contents: [
         `${head} ${slotLabel} 병합본이 만들어지지 않았어요.`,
         '',
-        '제출된 파일이 없거나 병합에 실패했을 수 있어요.',
-        'Tincase 수합 관리에서 확인하고 [지금 병합]을 눌러주세요.',
+        ...why,
+        ...(noneSubmitted ? [] : ['Tincase 수합 관리에서 확인하고 [지금 병합]을 눌러주세요.']),
       ].join('\n'),
     };
   }
@@ -252,8 +276,7 @@ function compose(kind: NoticeKind, who: Person, slotLabel: string, monthly: bool
       contents: [
         `${head} ${slotLabel} 병합본이 아직 없어요.`,
         '',
-        '대외업무 마감이 얼마 남지 않았어요.',
-        'Tincase 수합 관리에서 [지금 병합]을 눌러주세요.',
+        ...(noneSubmitted ? why : ['대외업무 마감이 얼마 남지 않았어요.', 'Tincase 수합 관리에서 [지금 병합]을 눌러주세요.']),
       ].join('\n'),
     };
   }
@@ -316,7 +339,7 @@ async function deliver(
   const sent: string[] = [];
   const blocked: string[] = [];
   for (const p of people) {
-    const r = await sendAlert({ recvIds: [p.employeeNo], ...compose(kind, p, slotLabel, monthly, facts), url, kind });
+    const r = await sendAlert({ recvIds: [p.employeeNo], ...composeNotice(kind, p, slotLabel, monthly, facts), url, kind });
     sent.push(...r.sent);
     blocked.push(...r.blocked);
   }
@@ -493,6 +516,8 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
         hasHead: (await prisma.user.count({ where: { divisionId: division.id, isActive: true, divisionRole: 'head' } })) > 0,
         ok: !!run,
         sources: used.size,
+        // NT-44a — 병합본이 없을 때 「낸 사람이 없어서」인지 가른다
+        submitted: await prisma.submission.count({ where: { divisionId: division.id, weekSlotId: slot.id, isLatest: true } }),
         counts: run?.rowCounts ? JSON.parse(run.rowCounts) : null,
       };
       const base = env.MESSENGER_LINK_BASE ? `${env.MESSENGER_LINK_BASE}/${division.slug}` : undefined;
@@ -575,7 +600,7 @@ export async function noticeMergeHeld(opts: {
   const sent: string[] = [];
   const blocked: string[] = [];
   for (const p of people) {
-    const r = await sendAlert({ recvIds: [p.employeeNo], ...compose('merge_held', p, slot.label, monthly, facts), url, kind: logKind });
+    const r = await sendAlert({ recvIds: [p.employeeNo], ...composeNotice('merge_held', p, slot.label, monthly, facts), url, kind: logKind });
     sent.push(...r.sent);
     blocked.push(...r.blocked);
   }
