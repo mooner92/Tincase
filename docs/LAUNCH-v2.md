@@ -66,10 +66,12 @@
       비어 있는 것으로 본다 — v2 후보 `9728f6f` 뒤로는 스크립트·시험·문서만 더해졌다(2026-10-09). 문서를 더 고치면 해시가 바뀌니 마지막 커밋 뒤에 적는다.
       예외 하나 — 같은 날 `/ops` 부서 표의 「알림」 칸(NT-61 · 9-5)이 src에 더해졌다. 11112에는 없던 코드라 이 diff에 그것만 나오고, 그 커밋에서 아래 e2e 스모크를 다시 돌린다.
       개발 쪽 게이트(`npm test` · `tsc` · `check-secrets.sh`)는 **종료 코드로** 판정한다(`| tail` 금지).
-      2026-10-10 출시 준비 갈래(`feat/pre-launch` — 74ab230에서)는 src에서 기동 로그 한 줄만 바꿨다(`src/instrumentation.ts` · 새 `src/lib/notify-boot.ts` — NT-32: 「발송 부서」는
-      켜짐 그리고 알림만 센다). 나머지는 시험·e2e 스크립트·문서다. 그 갈래를 합친 뒤의 끝이 릴리스 커밋이고, 위 diff에는 그 두 파일이 더 나온다.
+      2026-10-10 출시 준비 갈래(`feat/pre-launch` — 74ab230에서)는 src에서 둘만 바꿨다 — 기동 로그 한 줄(`src/instrumentation.ts` · 새 `src/lib/notify-boot.ts` — NT-32:
+      「발송 부서」는 켜짐 그리고 알림만 센다)과 월간 주의 감사 문서 이름(`src/server/report.ts` · `src/app/api/ops/report/route.ts` — WS-15). 나머지는 시험·e2e 스크립트·문서다.
+      그 갈래를 합친 뒤의 끝이 릴리스 커밋이고, 위 diff에는 그 네 파일이 더 나온다.
       `npm test`는 env가 있어야 한다 — 없으면 아홉 파일이 `[env] 환경변수 검증 실패`로 떨어진다(코드 탓이 아니다):
-      `STORAGE_ROOT=$(mktemp -d) CF_ACCESS_TEAM=t DATABASE_URL=file:$(mktemp -u)/x.db npm test; echo $?` (2026-10-09 e2e 스모크 커밋 뒤: 60파일 1006개 통과 · 「알림」 칸을 더한 `940b4a6`에서: 62파일 1025개 통과).
+      `STORAGE_ROOT=$(mktemp -d) CF_ACCESS_TEAM=t DATABASE_URL=file:$(mktemp -u)/x.db npm test; echo $?` (2026-10-09 e2e 스모크 커밋 뒤: 60파일 1006개 통과 · 「알림」 칸을 더한 `940b4a6`에서: 62파일 1025개 통과 ·
+      2026-10-10 출시 준비 끝 `1923c49`에서: 64파일 1044개 통과 · `tsc` 0 · `check-secrets` 0).
       ~~체크아웃이 `/tmp` 아래면 OPS-T37 한 개가 환경 탓으로 떨어진다~~ — 2026-10-10 고쳤다(시험이 하위 프로세스에 빈 임시 디렉터리를 준다). 어느 체크아웃에서 돌려도 같은 답이다.
       시간대: 같은 판을 `TZ=Asia/Seoul`·`UTC`·`America/New_York`로 세 번 돌려 셋 다 위 OPS-T37 하나 말고 모두 통과(2026-10-09 — `npm run test:tz`와 같은 뜻).
 - [ ] **11112를 원래대로** — 리허설이 끝나면 리허설 덧붙임(`TINCASE_REHEARSAL=on`) 없이 다시 올려 스케줄러가 꺼진 상태로. 11112와 운영은
@@ -84,7 +86,7 @@
       원본은 `/etc/fstab.bak-20261010` · `findmnt --verify` 오류 0 · `systemctl daemon-reload` 뒤 `mnt-backup.mount`가 생겨 붙어 있다. 이제 재부팅해도 백업이 `[backup] FATAL`로 멈추지 않는다(DEPLOY §7).
 - [ ] **브라우저 e2e 스모크 — 두 범위** — 릴리스 커밋에서 `node scripts/e2e-v2.cjs; echo $?` → `0` **그리고** `node scripts/e2e-v2.cjs --scope=launch; echo $?` → `0`
       (각 약 15분 · [REHEARSAL.md](REHEARSAL.md) OPS-50 · 기본: 2026-10-09 `b05207d`에서 32/32 · 「알림」 칸을 더한 `940b4a6`에서 다시 32/32, 16분 ·
-      출시 범위(OPS-50h — 10/13의 모양 그대로: 두 부서 · 3단계 끔)는 2026-10-10 `feat/pre-launch`에서 — 결과는 REHEARSAL.md 「출시 범위」 실측).
+      출시 범위(OPS-50h — 10/13의 모양 그대로: 두 부서 · 3단계 끔)는 2026-10-10 출시 준비 끝 `1923c49`에서 35/35, 같은 커밋에서 기본도 32/32 — 각 13분 · REHEARSAL.md 「출시 범위」 실측).
       운영·11112·docker·`/data`를 건드리지 않지만 같은 서버의 CPU를 쓰니 화요일 ⑥의 빌드와 겹치지 않게 **월요일까지** 돌린다. 위 `git diff --stat`이 비어 있으면(문서만 바뀜) 다시 돌릴 필요는 없다.
 - [x] **수신 허용 목록 · 링크 주소** — 2026-10-09 확인: `.env.production`에 `MESSENGER_ALLOWLIST="*"` · `MESSENGER_LINK_BASE` 있음 → **⑥ 전에 바꿀 것 없음**.
       누가 받는지는 부서 켜짐 + 부서 알림 스위치(9-5)와 사람마다의 알림 칸이 정한다(범위). ⑦ 기동 로그에서 `(수신 허용: 전원)`만 본다.
