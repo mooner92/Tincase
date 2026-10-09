@@ -10,9 +10,12 @@
 
 import type { OrgLayout } from '@/lib/orgtree';
 import { bundledPath, RADII } from '@/lib/orgtree';
+import { kindLabel, type WeekKind } from '@/lib/week';
 
 export interface ReportMeta {
   weekLabel: string;
+  /** WS-15 — 그 주가 월간이면 문서 이름도 「월간 업무일지」다. 라벨(「10월 4주차」)은 그대로 둔다 */
+  kind: WeekKind;
   isoKey: string;
   deadlineKst: string;
   capturedAtKst: string;
@@ -44,7 +47,7 @@ export function reportCsv(layout: OrgLayout, meta: ReportMeta): string {
     }
   }
   const header = [
-    `# 한국환경연구원 주간 업무일지 제출 현황`,
+    `# 한국환경연구원 ${kindLabel(meta.kind)} 제출 현황`,
     `# ${meta.weekLabel} (${meta.isoKey}) · 마감 ${meta.deadlineKst}`,
     `# 기준 ${meta.capturedAtKst} · 출력 ${meta.capturedBy}`,
     `# 제출 ${layout.totals.submitted} / 대상 ${layout.totals.roster} (집계 대상 ${layout.totals.divisions}개 부서)`,
@@ -152,7 +155,7 @@ export function reportHtml(layout: OrgLayout, meta: ReportMeta): string {
 
   return `<!doctype html>
 <html lang="ko"><head><meta charset="utf-8">
-<title>주간 업무일지 제출 현황 — ${esc(meta.weekLabel)}</title>
+<title>${kindLabel(meta.kind)} 제출 현황 — ${esc(meta.weekLabel)}</title>
 <style>
   :root { --ink:#0a0a0a; --body:#3a3a3a; --muted:#6a6a6a; --line:#e5e5e5; }
   * { box-sizing: border-box; }
@@ -186,7 +189,7 @@ export function reportHtml(layout: OrgLayout, meta: ReportMeta): string {
   }
 </style></head>
 <body><div class="wrap">
-  <h1>주간 업무일지 제출 현황</h1>
+  <h1>${kindLabel(meta.kind)} 제출 현황</h1>
   <p class="meta">${esc(meta.weekLabel)} (${esc(meta.isoKey)}) · 마감 ${esc(meta.deadlineKst)}</p>
   <p class="big">${layout.totals.submitted}<span> / ${layout.totals.roster}명</span></p>
   <p class="meta">집계 대상 ${layout.totals.divisions}개 부서${

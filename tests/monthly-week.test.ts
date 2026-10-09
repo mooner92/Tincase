@@ -58,7 +58,7 @@ const T = {
 };
 const DEADLINE = KST('2026-10-29T14:00:00');
 const DIV = { slug: 'Monthly_A', nameKo: '월간실' };
-const ID = { lead: 'm-lead@test.local', head: 'm-head@test.local', a: 'm-a@test.local', b: 'm-b@test.local', late: 'm-late@test.local' };
+const ID = { lead: 'm-lead@test.local', head: 'm-head@test.local', a: 'm-a@test.local', b: 'm-b@test.local', late: 'm-late@test.local', op: 'm-op@test.local' };
 const NO = { lead: 'M101', head: 'M102', a: 'M103', b: 'M104', late: 'M105' };
 
 function nx(url: string, identity?: string, init?: RequestInit) {
@@ -99,6 +99,8 @@ beforeAll(async () => {
   await mk(ID.a, NO.a);
   await mk(ID.b, NO.b);
   await mk(ID.late, NO.late); // 끝까지 안 낸다 — 마감 전 쪽지를 받을 사람
+  // 감사 문서를 받을 운영자 — 명단 밖 · 사번 없음(쪽지 판정에 끼지 않는다)
+  await prisma.user.create({ data: { email: ID.op, name: '운영', divisionId: div.id, isOperator: true, onRoster: false } });
   if (existsSync(path.join(FIX, 'master-template.hwp'))) {
     const { writeFileAtomic } = await import('@/server/storage');
     const rel = `divisions/${DIV.slug}/template/active.hwp`;
@@ -235,6 +237,21 @@ d('[WS-T78] 이번 주가 월간(10/26 주 — W44)일 때', () => {
     const [done] = sent(NO.lead, 'merge_done');
     expect(done?.subject).toBe('[Tincase] 10월 4주차 월간 병합본 제출해주세요');
     expect(done.contents).toContain('10월 4주차 월간 병합본이 준비됐어요');
+  });
+
+  it('감사 문서(OPS-30) — 월간 주는 「월간 업무일지 제출 현황」, 주간 주는 그대로 · 라벨(「10월 4주차」)은 그대로 (WS-15 kindLabel)', async () => {
+    const { GET } = await import('@/app/api/ops/report/route');
+    const header = (csv: string) => csv.replace(/^\uFEFF/, '').split('\n').find((l) => l.startsWith('# 한국환경연구원'));
+    const html = await (await GET(nx('/api/ops/report?isoKey=2026-W44', ID.op))).text();
+    expect(html).toContain('<title>월간 업무일지 제출 현황 — 10월 4주차</title>');
+    expect(html).toContain('<h1>월간 업무일지 제출 현황</h1>');
+    expect(header(await (await GET(nx('/api/ops/report?isoKey=2026-W44&format=csv', ID.op))).text())).toBe('# 한국환경연구원 월간 업무일지 제출 현황');
+    // 견줄 주간 주 — 다음 주가 아니라 그 앞 주(10/19 주 · W43)
+    const { ensureCurrentSlot } = await import('@/server/worklog');
+    expect((await ensureCurrentSlot(KST('2026-10-21T10:00:00'))).isoKey).toBe('2026-W43');
+    const weekly = await (await GET(nx('/api/ops/report?isoKey=2026-W43', ID.op))).text();
+    expect(weekly).toContain('<title>주간 업무일지 제출 현황 — 10월 3주차</title>');
+    expect(header(await (await GET(nx('/api/ops/report?isoKey=2026-W43&format=csv', ID.op))).text())).toBe('# 한국환경연구원 주간 업무일지 제출 현황');
   });
 
   it('병합 점검 — 머리 줄이 「10월 4주차 월간」', async () => {
