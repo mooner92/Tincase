@@ -285,7 +285,7 @@ sudo chown -R 10001:mhchoi /data/worklog && sudo chmod -R g+rwX,o-rwx /data/work
 sudo docker compose up -d && sleep 15 && curl -fsS http://127.0.0.1:11111/api/health | python3 -m json.tool
 ```
 
-- 파일 묶음은 **2026-10-08부터 매일**이다. 그 전 날짜는 일요일 것만 있고, `org/`(3단계 취합)는 들어 있지 않다.
+- 파일 묶음은 **2026-10-09부터 매일**이다(크론을 그날 바꿨다 — 그날 것은 11:46쯤 손으로 한 번, 자동은 10/10 03:30부터). 그 전 날짜는 일요일 것만(마지막 10/04) 있고, `org/`(3단계 취합)는 들어 있지 않다.
 - 파일 묶음(03:30)이 DB(03:00)보다 30분 늦다. 그 사이에 낸 파일은 행 없이 남는다 — 화면에 안 보일 뿐 해가 없다.
 - 복원한 뒤 health의 `checks.template`이 fail이면 양식 파일이 빠진 부서가 있다는 뜻이다 (OPS-41).
 
@@ -396,7 +396,7 @@ sudo systemctl daemon-reload && sudo mount -a && findmnt /mnt/backup
 ## 장애 시 (OPS-18)
 
 시스템이 죽고 마감이 임박하면 **그 주는 이메일로 되돌린다**: 부서마다 `/data/worklog/divisions/<부서-slug>/template/active.hwp`를 메일로 배포
-(파일럿 때 예: `AI_and_Public_Relations_Division`). v2(2026-10-12 — 켠 부서 12 + 본부)에서는 부서·본부·전사 취합도 손으로 돌아간다 —
+(파일럿 때 예: `AI_and_Public_Relations_Division`). v2(2026-10-12 — 켠 부서 2곳에서 시작해 부서마다 늘어난다 · 3단계를 켜면 본부·전사 취합도)에서도 손으로 돌아간다 —
 누가 알리고 양식 사본을 어디 두는지는 [LAUNCH-v2.md](LAUNCH-v2.md) §5 질문 10.
 
 ## 배포 금지 시간대 (OPS-16)
