@@ -51,7 +51,7 @@
       예외 하나 — 같은 날 `/ops` 부서 표의 「알림」 칸(NT-61 · 9-5)이 src에 더해졌다. 11112에는 없던 코드라 이 diff에 그것만 나오고, 그 커밋에서 아래 e2e 스모크를 다시 돌린다.
       개발 쪽 게이트(`npm test` · `tsc` · `check-secrets.sh`)는 **종료 코드로** 판정한다(`| tail` 금지).
       `npm test`는 env가 있어야 한다 — 없으면 아홉 파일이 `[env] 환경변수 검증 실패`로 떨어진다(코드 탓이 아니다):
-      `STORAGE_ROOT=$(mktemp -d) CF_ACCESS_TEAM=t DATABASE_URL=file:$(mktemp -u)/x.db npm test; echo $?` (2026-10-09 e2e 스모크 커밋 뒤: 60파일 1006개 통과).
+      `STORAGE_ROOT=$(mktemp -d) CF_ACCESS_TEAM=t DATABASE_URL=file:$(mktemp -u)/x.db npm test; echo $?` (2026-10-09 e2e 스모크 커밋 뒤: 60파일 1006개 통과 · 「알림」 칸을 더한 `940b4a6`에서: 62파일 1025개 통과).
       체크아웃이 `/tmp` 아래(임시 디렉터리 안)면 OPS-T37 한 개가 환경 탓으로 떨어진다 — 그 시험은 체크아웃을 「임시 디렉터리 밖」의 예로 쓴다. `~/repman-rollup`에서 돌린다.
       시간대: 같은 판을 `TZ=Asia/Seoul`·`UTC`·`America/New_York`로 세 번 돌려 셋 다 위 OPS-T37 하나 말고 모두 통과(2026-10-09 — `npm run test:tz`와 같은 뜻).
 - [ ] **11112를 원래대로** — 리허설이 끝나면 리허설 덧붙임(`TINCASE_REHEARSAL=on`) 없이 다시 올려 스케줄러가 꺼진 상태로. 11112와 운영은
@@ -63,7 +63,7 @@
 - [x] **백업 크론** ([DEPLOY.md](DEPLOY.md) §7) — 2026-10-09 files를 매일로 바꿨다(`30 3 * * *` — `crontab -l | grep backup.sh` → 두 줄 모두 `* * *`).
       같은 날 11:46쯤 files를 손으로 한 번 돌렸다(`divisions-2026-10-09.tar.gz`) — 10/06에 등록한 대상 부서 양식이 이제 백업에 있다. 월요일 ①의 「오늘 03:30 files 성공」이 생긴다.
 - [ ] **fstab** — `/mnt/backup`은 아직 손으로 붙인 마운트라 fstab에 없다(재부팅하면 백업이 `[backup] FATAL`로 멈춘다). 운영자 · sudo — DEPLOY §7(`findmnt /mnt/backup`으로 확인).
-- [ ] **브라우저 e2e 스모크** — 릴리스 커밋에서 `node scripts/e2e-v2.cjs; echo $?` → `0` (약 15분 · [REHEARSAL.md](REHEARSAL.md) OPS-50 · 2026-10-09 `b05207d`에서 32/32).
+- [ ] **브라우저 e2e 스모크** — 릴리스 커밋에서 `node scripts/e2e-v2.cjs; echo $?` → `0` (약 15분 · [REHEARSAL.md](REHEARSAL.md) OPS-50 · 2026-10-09 `b05207d`에서 32/32 · 「알림」 칸을 더한 `940b4a6`에서 다시 32/32, 16분).
       운영·11112·docker·`/data`를 건드리지 않지만 같은 서버의 CPU를 쓰니 ⑥의 빌드와 겹치지 않게 **일요일까지** 돌린다. 위 `git diff --stat`이 비어 있으면(문서만 바뀜) 다시 돌릴 필요는 없다.
 - [x] **수신 허용 목록 · 링크 주소** — 2026-10-09 확인: `.env.production`에 `MESSENGER_ALLOWLIST="*"` · `MESSENGER_LINK_BASE` 있음 → **⑥ 전에 바꿀 것 없음**.
       누가 받는지는 부서 켜짐 + 부서 알림 스위치(9-5)와 사람마다의 알림 칸이 정한다(범위). ⑦ 기동 로그에서 `(수신 허용: 전원)`만 본다.
