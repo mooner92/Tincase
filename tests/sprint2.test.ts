@@ -217,8 +217,17 @@ d('template 교체 (API-40/41, ST-19)', () => {
   it('교체 → v2 active, v1 비활성 (DM-14)', async () => {
     const { POST } = await import('@/app/api/division/template/route');
     const { prisma } = await import('@/server/db');
+    // ST-19a (2026-10-10) — 예전에는 여기서 표 둘인 취합본(3번 표 없음)을 양식으로 받았다. 그날부터 부서 전원의 웹 작성이 500이었다 — 이제 422
+    const two = new FormData();
+    two.set('file', new File([new Uint8Array(filled)], '양식2.hwp'));
+    const rejected = await POST(nx('/api/division/template', ID.lead, { method: 'POST', body: two }));
+    expect(rejected.status).toBe(422);
+    expect((await rejected.json()).error).toBe('invalid_template');
+    // 5칸 표 셋인 다른 양식(같은 양식을 이 엔진으로 한 줄 채운 것 — sha가 다르다)은 받는다
+    const { buildWorklogHwp } = await import('@/server/worklog-doc');
+    const v2 = buildWorklogHwp(hwp, { achievements: [{ content: '양식 v2 예시 줄' }] }).bytes;
     const fd = new FormData();
-    fd.set('file', new File([new Uint8Array(filled)], '양식2.hwp'));
+    fd.set('file', new File([new Uint8Array(v2)], '양식2.hwp'));
     const res = await POST(nx('/api/division/template', ID.lead, { method: 'POST', body: fd }));
     expect(res.status).toBe(201);
     const rows = await prisma.template.findMany({ where: { division: { slug: A.slug } }, orderBy: { version: 'asc' } });

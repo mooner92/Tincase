@@ -504,8 +504,9 @@ function describeMismatch(g: MergedGroup, got: string | undefined): string {
 /**
  * HM-22 — 저장 전 자체 점검. **4번(내용 무손실)이 핵심이다.**
  * 실패하면 저장하지 않는다. 잘못된 병합본이 나가는 것보다 안 나가는 편이 낫다.
+ * ST-19b (2026-10-10) — 부서 양식을 받기 전의 시험 병합(`template-check.ts`)도 이 판정을 그대로 쓴다 — 받을 때와 병합할 때 같은 눈으로 본다.
  */
-function verifyMerged(out: Buffer, grouped: Record<Bucket, MergedGroup[]>, tableCount: number): string | null {
+export function verifyMerged(out: Buffer, grouped: Record<Bucket, MergedGroup[]>, tableCount: number): string | null {
   let back;
   try {
     back = readWorklog(out);

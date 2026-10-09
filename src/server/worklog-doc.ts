@@ -9,6 +9,7 @@ import { parseRecords, serializeRecords } from '@/lib/hwp/record';
 import { fillTable, packHwp, plainShapeIdOf } from '@/lib/hwp/writer';
 import { BLUE, ensureColorShape } from '@/lib/hwp/charshape';
 import { readWorklog } from '@/lib/hwp/reader';
+import { worklogShapeProblem } from '@/lib/hwp/template-shape';
 
 const MAX_ROWS = 200;
 const MAX_CELL = 500;
@@ -94,6 +95,16 @@ export function buildWorklogHwp(templateBytes: Buffer, body: DocInput, logContex
 
   const file = openHwp(templateBytes);
   const recs = parseRecords(file.sections[0]);
+  /*
+   * ST-19a (2026-10-10) — 양식 모양이 틀리면(표 셋이 아님 · 5칸 아님) 채우다 터지기 전에 이유를 말한다.
+   * 이제 그런 양식은 등록에서 막히지만(template-check), 그 전에 들어간 양식은 남아 있을 수 있다 — 예전에는 부서 전원이
+   * 「일시적인 오류입니다」(500)만 받아 무엇을 고쳐야 하는지 아무도 몰랐다.
+   */
+  const shape = worklogShapeProblem(recs);
+  if (shape) {
+    logger.error({ ...logContext, shape }, '[웹작성] 부서 양식 모양이 맞지 않음');
+    throw new HttpError(409, 'template_broken', `부서 양식을 쓸 수 없습니다 — ${shape} 담당자에게 알려 주세요.`);
+  }
   /*
    * WA-08 — 세 표를 **전부** 채운다. 빈 표라고 건너뛰지 않는다.
    *
