@@ -69,9 +69,14 @@
       2026-10-10 출시 준비 갈래(`feat/pre-launch` — 74ab230에서)는 src에서 둘만 바꿨다 — 기동 로그 한 줄(`src/instrumentation.ts` · 새 `src/lib/notify-boot.ts` — NT-32:
       「발송 부서」는 켜짐 그리고 알림만 센다)과 월간 주의 감사 문서 이름(`src/server/report.ts` · `src/app/api/ops/report/route.ts` — WS-15). 나머지는 시험·e2e 스크립트·문서다.
       그 갈래를 합친 뒤의 끝이 릴리스 커밋이고, 위 diff에는 그 네 파일이 더 나온다.
+      같은 날 **출시 전 점검 고침**(`4d76451` 뒤 커밋들 — CHANGELOG 「출시 전 점검 고침」)이 더 바꿨다: **스키마 열 하나**(`SetupToken.supersededAt` — ⑤의 push에 함께, 새 열 7) ·
+      `docker-compose.yml` 두 줄(`TINCASE_ENV: ""` · `MESSENGER_SINK: "off"`) · `scripts/entrypoint.sh` · 새 `src/proxy.ts` · src 여럿(감사 로그 문 · 비밀번호 찾기 · 양식 검사 ·
+      제출 파일 경로 · 임시본 열쇠 · 로그인 뒤 돌아가기 · 쪽지 문구) · `scripts/deploy.sh` · `scripts/backup.sh`. 그래서 위 diff에 그것들도 나온다 —
+      11112에서 본 코드와 다른 그 부분은 그 끝 `b67d6f6`에서 다시 봤다: `vitest run` 72파일 1093개 0 · `e2e-v2.cjs` 32/32 0 · `--scope=launch` 35/35 0 · `tsc` 0 · `check-secrets` 0.
+      미룬 것은 [KNOWN-ISSUES-v2.md](KNOWN-ISSUES-v2.md).
       `npm test`는 env가 있어야 한다 — 없으면 아홉 파일이 `[env] 환경변수 검증 실패`로 떨어진다(코드 탓이 아니다):
       `STORAGE_ROOT=$(mktemp -d) CF_ACCESS_TEAM=t DATABASE_URL=file:$(mktemp -u)/x.db npm test; echo $?` (2026-10-09 e2e 스모크 커밋 뒤: 60파일 1006개 통과 · 「알림」 칸을 더한 `940b4a6`에서: 62파일 1025개 통과 ·
-      2026-10-10 출시 준비 끝 `1923c49`에서: 64파일 1044개 통과 · `tsc` 0 · `check-secrets` 0).
+      2026-10-10 출시 준비 끝 `1923c49`에서: 64파일 1044개 통과 · `tsc` 0 · `check-secrets` 0 · 출시 전 점검 고침 끝 `b67d6f6`에서: 72파일 1093개 통과).
       ~~체크아웃이 `/tmp` 아래면 OPS-T37 한 개가 환경 탓으로 떨어진다~~ — 2026-10-10 고쳤다(시험이 하위 프로세스에 빈 임시 디렉터리를 준다). 어느 체크아웃에서 돌려도 같은 답이다.
       시간대: 같은 판을 `TZ=Asia/Seoul`·`UTC`·`America/New_York`로 세 번 돌려 셋 다 위 OPS-T37 하나 말고 모두 통과(2026-10-09 — `npm run test:tz`와 같은 뜻).
 - [ ] **11112를 원래대로** — 리허설이 끝나면 리허설 덧붙임(`TINCASE_REHEARSAL=on`) 없이 다시 올려 스케줄러가 꺼진 상태로. 11112와 운영은
