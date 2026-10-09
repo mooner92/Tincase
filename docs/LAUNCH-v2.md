@@ -158,8 +158,8 @@ sudo docker logs repman 2>&1 | grep -E '\[알림\] (켜짐|꺼짐)' | tail -1 > 
 sudo docker image inspect repman:latest --format '{{.Id}} {{.Created}}' > ~/deploy-$TS/image-before.txt
 ```
 
-- **v1 이미지를 고정 태그로 붙잡는다** — 롤백(§3)의 근거다. ⑥의 `deploy.sh`도 `repman:rollback`을 붙이지만, ⑥을 **빌드째 다시** 돌리면
-  (첫 번째가 빌드를 마친 뒤 health에서 멈췄을 때 등) 그 태그가 v2로 옮겨지고 v1 이미지는 태그 없는 찌꺼기가 되어 그 실행의 청소에 지워진다.
+- **v1 이미지를 고정 태그로 붙잡는다** — 롤백(§3)의 근거다. ⑥의 `deploy.sh`도 `repman:rollback`을 붙이지만(지금 떠서 건강한 운영 컨테이너의 이미지에만 — OPS-17a, 2026-10-10),
+  ⑥을 **빌드째 다시** 돌리면 그 태그가 v2로 옮겨질 수 있다(첫 번째 v2가 health는 통과했는데 화면이 틀린 경우) — 그러면 v1 이미지는 태그 없는 찌꺼기가 되어 그 실행의 청소에 지워진다.
   `repman:v1.39.0`은 deploy.sh가 옮기지도 지우지도 않는다(청소는 태그 없는 것만 — OPS-43). 디스크는 더 들지 않는다(같은 이미지).
 
 ```bash
@@ -209,7 +209,7 @@ sudo docker exec repman sqlite3 /data/db/worklog.db ".backup '/data/db/worklog.d
 ls -l /data/worklog/db/          # worklog.db.predeploy-$TS 가 worklog.db와 비슷한 크기로 있다
 ```
 
-`repman:rollback` 태그는 ⑥이 빌드 직전에 붙인다 — 손으로 하지 않는다(롤백은 ①의 고정 태그 `repman:v1.39.0`으로 한다 — §3.1).
+`repman:rollback` 태그는 ⑥이 빌드 직전에 붙인다 — 지금 떠서 health가 ok인 v1 컨테이너의 이미지에(OPS-17a). 손으로 하지 않는다(롤백은 ①의 고정 태그 `repman:v1.39.0`으로 한다 — §3.1).
 
 ### ⑤-0 07:22 스냅샷 **사본**에 먼저 push — 실제 데이터로
 
@@ -270,9 +270,9 @@ cd ~/repman && bash scripts/deploy.sh prod 2>&1 | tee ~/deploy-$TS/deploy.txt; e
 - 기대: `exit=0`, 끝에 health 본문 `ok:true`. 멈추는 경우와 할 일은 [DEPLOY.md](DEPLOY.md) §2b-4 표 — 이날 가장 그럴듯한 둘:
   - 로그 `[boot] FATAL: DB 스키마가 이 판보다 오래됐습니다` → ⑤를 빠뜨렸다(OPS-48). **롤백하지 않는다** — ⑤ 뒤 `bash scripts/deploy.sh prod --no-build`
   - `checks.template`만 fail → 배포 탓이 아니다(OPS-41). 롤백하지 않고 ⑨-3(양식 「있음」 확인 — 켠 부서는 지금 AI홍보전략실 하나다)
-- ⚠ **⑥을 다시 돌릴 때는 `--no-build`만.** 첫 실행이 빌드를 마친 뒤(health에서) 멈췄는데 빌드째 다시 돌리면, deploy.sh가 `repman:rollback`을
-  **지금의 `repman:latest`(= 방금 구운 v2)**로 옮기고 v1 이미지는 그 실행의 청소에 지워진다. ①의 `repman:v1.39.0`이 있으면 롤백은 그대로 되지만,
-  다시 구울 이유가 없다 — 코드를 고친 게 아니면 `bash scripts/deploy.sh prod --no-build`.
+- ⚠ **⑥을 다시 돌릴 때는 `--no-build`만.** 첫 실행이 빌드를 마친 뒤(health에서) 멈췄는데 빌드째 다시 돌리면 다시 굽는 데 5~10분이 든다 — 코드를 고친 게 아니면 `bash scripts/deploy.sh prod --no-build`.
+  (2026-10-10부터 둘째 실행은 아픈 v2에 `repman:rollback`을 옮기지 않는다 — 지금 떠서 health가 ok인 이미지에만 붙인다(OPS-17a). 롤백은 그래도 ①의 `repman:v1.39.0`으로 한다 — §3.1.)
+  실패하면 `deploy.sh`가 되돌리는 명령을 적는다 — 고정 태그 `repman:v1.39.0`이 있으면 그쪽을 먼저 적는다.
 
 ### ⑦ 07:45 health · 기동 로그
 
@@ -818,7 +818,7 @@ sudo docker logs --since 5m repman 2>&1 | grep -E '\[자동\]' | tail -5        
 | 새 표 5 · 열 4 | 새 표 7 · 새 열 7 | `MergeJob`(병합 줄) · `GuideTourSeen`(둘러보기) · `MergeReview.filePath` · `MergeRun.outputSha` · `SetupToken.supersededAt`(밀린 설정 링크 — 2026-10-10) |
 | push를 빠뜨리면 health는 초록인데 화면이 500 | 뜨지 않고 없는 표·열을 말한다 | 기동 스키마 검사(OPS-48) |
 | 스냅샷 사본에서 스키마 리허설(`migrate diff` · push) | **한다** — ⑤-0, 그날 스냅샷의 사본에 같은 push (3초) | 2026-10-09 이행 리허설은 지어낸 사람의 DB(v1.39.0 코드로 만든 모양)로만 돌았다 — 실제 데이터로는 그날 스냅샷이 처음이다. 10/07의 `.bak-20261007-pre-rollup`은 v1.39.0 전이라 출발점이 아니다 |
-| 롤백은 `repman:rollback` | `repman:v1.39.0` 고정 태그(①) | ⑥을 빌드째 다시 돌리면 `repman:rollback`이 v2로 옮겨지고 v1 이미지가 청소에 지워진다 |
+| 롤백은 `repman:rollback` | `repman:v1.39.0` 고정 태그(①) | ⑥을 빌드째 다시 돌리면 `repman:rollback`이 v2로 옮겨질 수 있다(2026-10-10부터 아픈 v2에는 붙이지 않는다 — OPS-17a) |
 | 병합 규칙 초안이 지침·정렬까지 넣는다 | 분류 순서 둘만 | HM-51 · ADR-0018 |
 | 3단계 쪽지 `ru_hq_collect` · `hq_approved` · 당일 09:00 알림 | 없다 | 막고 있는 사람에게만(ADR-0015) · R13 |
 | 섹션 13개는 「섹션 구성 편집」에서 그대로 저장 | 운영자가 「전사」를 열면 생긴다 | 편집기의 [저장]은 바뀐 것이 있어야 눌린다. 여는 순간 기본 13개를 저장한다 |

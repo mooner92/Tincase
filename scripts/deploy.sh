@@ -33,6 +33,9 @@ LOCK_FILE='/tmp/repman-deploy.lock'
 
 PROD_IMAGE='repman:latest'
 ROLLBACK_IMAGE='repman:rollback'
+# OPS-17a — 사람이 붙여 두는 **고정 태그**. deploy.sh는 옮기지도 지우지도 않는다(청소는 태그 없는 것만 — OPS-43).
+# v2 전환(LAUNCH-v2 ①)에서 그 아침에 돌던 v1을 이 이름으로 붙잡는다. 다음 고정 태그를 붙이면 여기를 바꾼다
+PINNED_ROLLBACK_IMAGE='repman:v1.39.0'
 PROD_CONTAINER='repman'
 TEST_CONTAINER='repman-test'
 
@@ -401,28 +404,54 @@ require_main_branch() {
   [[ -z $dirty ]] || warn "커밋하지 않은 변경이 운영에 들어간다 (빌드면 이미지로, --no-build면 compose 설정으로):"$'\n'"$dirty"
 }
 
-tag_rollback() {
+# 지금 롤백 태그가 가리키는 것 — 옮기지 않을 때 무엇이 남았는지 말하려고
+rollback_now() {
   local id
-  if ! id=$(dk image inspect --format '{{.Id}}' "$PROD_IMAGE" 2>/dev/null); then
-    log "$PROD_IMAGE 이 없다 — 첫 설치로 보고 롤백 태그 없이 간다"
+  id=$(dk image inspect --format '{{.Id}}' "$ROLLBACK_IMAGE" 2>/dev/null || true)
+  if [[ -n $id ]]; then printf ' (그대로: %s)' "${id:7:12}"; else printf ' (지금 없음)'; fi
+}
+
+# OPS-17a (2026-10-10) — 롤백 태그는 **지금 떠서 health가 ok인 운영 컨테이너의 이미지**에 붙인다. 그 밖이면 옮기지 않는다.
+#   예전에는 빌드 직전에 늘 `repman:latest`를 repman:rollback으로 옮겼다. 그런데 latest는 「돌고 있는 것」이 아니다 —
+#   ⑥을 빌드째 두 번 돌리면(첫 번째가 빌드 뒤 health에서 멈춤) 둘째의 태그가 방금 구운 v2를 가리켜 v1 이미지가 태그를 잃고 그 실행의 청소에 지워졌다.
+#   누가 빌드만 하고 띄우지 않은 경우도 같다. 그래서 「되돌아갈 곳」의 조건 둘을 직접 본다: 지금 **도는** 이미지이고, 지금 **건강하다**.
+tag_rollback() { # <health url>
+  local url=$1 id
+  if ! container_running "$PROD_CONTAINER"; then
+    log "운영 컨테이너가 떠 있지 않다 — 되돌아갈 곳을 모르니 롤백 태그($ROLLBACK_IMAGE)를 옮기지 않는다$(rollback_now)"
     return 0
   fi
-  dk tag "$PROD_IMAGE" "$ROLLBACK_IMAGE" || die "$ROLLBACK_IMAGE 태그 실패 — 되돌릴 길 없이 빌드하지 않는다"
-  log "롤백 태그: $ROLLBACK_IMAGE = 지금 $PROD_IMAGE (${id:7:12}) — 그 전 세대는 태그가 떨어져 이번 청소에 지워진다"
+  id=$(dk inspect --format '{{.Image}}' "$PROD_CONTAINER" 2>/dev/null || true)
+  if [[ -z $id ]]; then
+    warn "운영 컨테이너의 이미지를 읽지 못했다 — 롤백 태그($ROLLBACK_IMAGE)를 옮기지 않는다$(rollback_now)"
+    return 0
+  fi
+  if ! probe_health "$url"; then
+    warn "지금 운영 health가 ok:true가 아니다 — 그 이미지는 되돌아갈 곳이 아니다. 롤백 태그($ROLLBACK_IMAGE)를 옮기지 않는다$(rollback_now)"
+    return 0
+  fi
+  dk tag "$id" "$ROLLBACK_IMAGE" || die "$ROLLBACK_IMAGE 태그 실패 — 되돌릴 길 없이 빌드하지 않는다"
+  log "롤백 태그: $ROLLBACK_IMAGE = 지금 떠서 health ok인 운영 컨테이너의 이미지 (${id:7:12}) — 그 전 세대는 태그가 떨어져 이번 청소에 지워진다"
 }
 
 # ---------------------------------------------------------------------------------------------------------------
 # health (OPS-13) — ok:true가 올 때까지. compose healthcheck의 start_period가 20초라 그보다 넉넉히 기다린다
 # ---------------------------------------------------------------------------------------------------------------
 HEALTH_BODY=''
+# 한 번만 묻는다 — 200 그리고 본문에 "ok":true. 본문은 HEALTH_BODY에 남는다
+probe_health() { # <url>
+  local res code
+  res=$(curl -sS --max-time 5 -w $'\n%{http_code}' "$1" 2>&1 || true)
+  code=${res##*$'\n'}
+  HEALTH_BODY=${res%$'\n'*}
+  [[ $code == 200 && $HEALTH_BODY == *'"ok":true'* ]]
+}
+
 wait_for_health() { # <url>
-  local url=$1 give_up_at res code
+  local url=$1 give_up_at
   give_up_at=$(($(date +%s) + HEALTH_TIMEOUT_SEC))
   while :; do
-    res=$(curl -sS --max-time 5 -w $'\n%{http_code}' "$url" 2>&1 || true)
-    code=${res##*$'\n'}
-    HEALTH_BODY=${res%$'\n'*}
-    if [[ $code == 200 && $HEALTH_BODY == *'"ok":true'* ]]; then return 0; fi
+    if probe_health "$url"; then return 0; fi
     (($(date +%s) < give_up_at)) || return 1
     sleep 3
   done
@@ -515,7 +544,7 @@ main() {
 
   if ((build)); then
     ensure_disk_for_build "$target"
-    [[ $target != prod ]] || tag_rollback
+    [[ $target != prod ]] || tag_rollback "$health_url"
     log "빌드: docker ${compose_args[*]} build"
     dk ${env_args[@]+"${env_args[@]}"} "${compose_args[@]}" build ||
       die "빌드 실패 — 돌고 있는 컨테이너는 그대로다. 남은 찌꺼기는 bash scripts/deploy.sh prune"
@@ -551,8 +580,15 @@ main() {
       "${compose_args[*]}" >&2
   fi
   if [[ $target == prod ]]; then
-    printf '         되돌리기(OPS-17): sudo docker tag %s %s && bash scripts/deploy.sh prod --no-build --ignore-window\n' \
-      "$ROLLBACK_IMAGE" "$PROD_IMAGE" >&2
+    # OPS-17a — 고정 태그가 있으면 그쪽을 먼저 권한다. repman:rollback은 「이번 배포 전에 떠서 건강하던 것」이라 대개 맞지만,
+    # 같은 날 배포를 거듭하면 그것도 새 판일 수 있다 — 사람이 붙인 고정 태그(v2 전환의 v1)는 deploy.sh가 옮기지 않는다
+    local back=$ROLLBACK_IMAGE note=''
+    if dk image inspect --format '{{.Id}}' "$PINNED_ROLLBACK_IMAGE" >/dev/null 2>&1; then
+      back=$PINNED_ROLLBACK_IMAGE
+      note="   ← 고정 태그(LAUNCH-v2 §3.1). 직전에 떠서 건강하던 이미지로 가려면 $ROLLBACK_IMAGE"
+    fi
+    printf '         되돌리기(OPS-17): sudo docker tag %s %s && bash scripts/deploy.sh prod --no-build --ignore-window%s\n' \
+      "$back" "$PROD_IMAGE" "$note" >&2
   fi
   exit 1
 }

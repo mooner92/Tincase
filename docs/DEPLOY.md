@@ -169,7 +169,8 @@ ls -l /data/worklog/db/
 git -C ~/repman log -1 --oneline    # 지금 돌고 있는 커밋 — 적어 둔다
 ```
 
-롤백 태그(`repman:latest` → `repman:rollback`)는 **`deploy.sh prod`가 빌드 직전에 붙인다** — 손으로 하지 않는다.
+롤백 태그(`repman:rollback`)는 **`deploy.sh prod`가 빌드 직전에 붙인다** — 손으로 하지 않는다. 붙이는 곳은 **지금 떠서 health가 ok인 운영 컨테이너의
+이미지**다(OPS-17a, 2026-10-10 — 예전에는 `repman:latest`였다). 컨테이너가 멈췄거나 health가 ok가 아니면 옮기지 않는다 — 그 이미지는 되돌아갈 곳이 아니다.
 빌드가 `repman:latest`를 덮으면 옛 이미지는 태그 없는 찌꺼기가 되어 배포 끝 청소에 지워지는데, 태그가 붙잡고 있으면 닿지 않는다.
 
 ### 2b-3. 코드 · 스키마 · 권한
@@ -250,8 +251,9 @@ sudo docker exec repman sqlite3 /data/db/worklog.db ".tables" | tr -s ' ' '\n' |
 
 ### 2b-롤백 — 재빌드하지 않는다 (OPS-17)
 
-> v2 전환(2026-10-13)에서 v1으로 되돌릴 때는 [LAUNCH-v2.md](LAUNCH-v2.md) §3.1 — `repman:rollback`이 아니라 그날 ①에서 붙인 고정 태그 `repman:v1.39.0`으로 한다
-> (⑥을 빌드째 두 번 돌렸으면 `repman:rollback`은 v2다).
+> v2 전환(2026-10-13)에서 v1으로 되돌릴 때는 [LAUNCH-v2.md](LAUNCH-v2.md) §3.1 — `repman:rollback`이 아니라 그날 ①에서 붙인 고정 태그 `repman:v1.39.0`으로 한다.
+> 2026-10-10부터 `deploy.sh`는 지금 떠서 건강한 이미지에만 롤백 태그를 붙이므로(OPS-17a) ⑥을 빌드째 두 번 돌려도 아픈 v2로 옮기지는 않지만,
+> 첫 번째 v2가 health는 통과했는데 화면이 틀린 경우라면 둘째 실행이 그 v2에 붙인다 — 그래서 그날은 고정 태그다. 배포가 실패하면 `deploy.sh`의 안내도 고정 태그가 있으면 그쪽을 먼저 적는다.
 
 ```bash
 sudo docker tag repman:rollback repman:latest

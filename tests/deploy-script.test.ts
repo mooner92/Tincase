@@ -409,8 +409,18 @@ describe('OPS-43b·g·h 입구에서 끝까지 — main을 가짜 dk로 돌린�
        dk() {
          printf '%s\\n' "$*" >> "$STATE/calls"
          case "$1 $2" in
-           "inspect --format") [ "$3" = '{{.State.Running}}' ] && echo false || true ;;
-           "image inspect") echo sha256:0123456789abcdef0123 ;;
+           "inspect --format")
+             # 운영 컨테이너 — RUNNING(기본 false) · 그 컨테이너가 쓰는 이미지 RUNNING_IMAGE (OPS-17a)
+             case "$3" in
+               '{{.State.Running}}') echo "\${RUNNING:-false}" ;;
+               '{{.Image}}') echo "\${RUNNING_IMAGE:-}" ;;
+             esac ;;
+           "image inspect")
+             # 고정 태그(repman:v1.39.0)는 PINNED가 있을 때만 있다. 그 밖의 이미지는 있다
+             case "\${@: -1}" in
+               repman:v1.39.0) if [ -n "\${PINNED:-}" ]; then echo sha256:pinned0123456789ab; else return 1; fi ;;
+               *) echo sha256:0123456789abcdef0123 ;;
+             esac ;;
            "image prune") echo 'Total reclaimed space: 0B' ;;
          esac
          return 0
@@ -429,9 +439,10 @@ describe('OPS-43b·g·h 입구에서 끝까지 — main을 가짜 dk로 돌린�
   const idx = (calls: string[], re: RegExp) => calls.findIndex((c) => re.test(c));
 
   it('[OPS-T23] prod — 롤백 태그 → 빌드 → 기동 → 표식 청소 순서. 지우는 명령은 표식 prune뿐이다', () => {
-    const r = runMain('prod');
+    // 운영 컨테이너가 떠서 건강하다 — 롤백 태그는 그 컨테이너의 이미지에 붙는다(OPS-17a). 금지 시간대 판정은 실제 시계를 보므로 건너뛴다(OPS-T19가 따로 본다)
+    const r = runMain('prod --ignore-window', { env: { RUNNING: 'true', RUNNING_IMAGE: 'sha256:running0123456789' } });
     expect(r.code, r.err).toBe(0);
-    const tag = idx(r.calls, /^tag repman:latest repman:rollback$/);
+    const tag = idx(r.calls, /^tag sha256:running0123456789 repman:rollback$/);
     const build = idx(r.calls, /^compose -f docker-compose\.yml -p repman build$/);
     const up = idx(r.calls, /^compose -f docker-compose\.yml -p repman up -d$/);
     const prune = idx(r.calls, /^image prune -f --filter label=org\.tincase\.app=repman$/);
@@ -443,6 +454,61 @@ describe('OPS-43b·g·h 입구에서 끝까지 — main을 가짜 dk로 돌린�
       expect(c).toBe('image prune -f --filter label=org.tincase.app=repman');
     }
   });
+
+  /** 첫 curl 응답(빌드 전 지금의 health)과 그 뒤(새 컨테이너의 health)를 따로 — 몇 번째인지 $STATE에 센다 */
+  const curlSeq = (first: string, rest: string) =>
+    `local n; n=$(cat "$STATE/curl_n" 2>/dev/null || echo 0); echo $((n + 1)) > "$STATE/curl_n"; if [ "$n" = 0 ]; then ${first}; else ${rest}; fi`;
+  const OK = `printf '{"ok":true}\\n200'`;
+  const DOWN = `printf 'curl: (7) Failed to connect\\n000'`;
+  const SICK = `printf '{"ok":false,"checks":{"db":"fail"}}\\n503'`;
+
+  it('[OPS-T40] ★ 롤백 태그는 지금 떠서 건강한 운영 컨테이너의 이미지에만 — latest가 아니다 · 아프거나 멈췄으면 옮기지 않는다 (OPS-17a)', () => {
+    const running = { RUNNING: 'true', RUNNING_IMAGE: 'sha256:v1running0000aaaa' };
+    // 떠서 건강하다 → 그 이미지(sha)에 태그. `repman:latest`(빌드만 하고 안 띄운 것일 수 있다)는 쓰지 않는다
+    const healthy = runMain('prod --ignore-window', { env: running, curl: curlSeq(OK, OK) });
+    expect(healthy.code, healthy.err).toBe(0);
+    expect(healthy.calls).toContain('tag sha256:v1running0000aaaa repman:rollback');
+    expect(healthy.calls.some((c) => /^tag repman:latest /.test(c))).toBe(false);
+    // 떠 있지만 health가 ok가 아니다(첫 배포가 health에서 멈춘 v2를 다시 빌드하는 경우) → 옮기지 않는다
+    const sick = runMain('prod --ignore-window', { env: running, curl: curlSeq(SICK, OK) });
+    expect(sick.code, sick.err).toBe(0);
+    expect(sick.calls.some((c) => c.startsWith('tag '))).toBe(false);
+    expect(sick.err).toContain('롤백 태그(repman:rollback)를 옮기지 않는다');
+    // 컨테이너가 멈춰 있다 → 옮기지 않는다(되돌아갈 곳을 모른다). 멈춘 컨테이너에는 health를 묻지도 않으므로 첫 curl이 새 컨테이너의 것이다
+    const down = runMain('prod --ignore-window', { env: { RUNNING: 'false' }, curl: curlSeq(OK, OK) });
+    expect(down.code, down.err).toBe(0);
+    expect(down.calls.some((c) => c.startsWith('tag '))).toBe(false);
+    expect(down.out).toContain('롤백 태그(repman:rollback)를 옮기지 않는다');
+  }, 30_000);
+
+  it('[OPS-T40] 화요일 ⑥을 빌드째 두 번 — 첫 번째가 health에서 멈춰도 둘째는 롤백 태그를 v2로 옮기지 않는다', () => {
+    // 첫 번째: v1이 떠서 건강 → v1에 태그 → 빌드·기동 → 새 health 실패(exit 1)
+    const first = runMain('prod --ignore-window', {
+      env: { RUNNING: 'true', RUNNING_IMAGE: 'sha256:v1running0000aaaa' },
+      curl: curlSeq(OK, DOWN),
+    });
+    expect(first.code).toBe(1);
+    expect(first.calls).toContain('tag sha256:v1running0000aaaa repman:rollback');
+    // 둘째: 지금 도는 것은 첫 번째가 띄운 v2이고 아프다 → 태그를 옮기지 않는다(v1을 가리킨 채) · 빌드는 한다
+    const second = runMain('prod --ignore-window', {
+      env: { RUNNING: 'true', RUNNING_IMAGE: 'sha256:v2build10000bbbb' },
+      curl: curlSeq(DOWN, OK),
+    });
+    expect(second.code, second.err).toBe(0);
+    expect(second.calls.some((c) => c.startsWith('tag '))).toBe(false);
+    expect(second.calls.some((c) => / build$/.test(c))).toBe(true);
+  }, 30_000);
+
+  it('[OPS-T41] 실패 안내는 고정 태그(repman:v1.39.0)가 있으면 그것을 권한다 — 없으면 repman:rollback', () => {
+    const pinned = runMain('prod --no-build --ignore-window', { env: { PINNED: '1' }, curl: `printf '{"ok":false,"checks":{"db":"fail"}}\\n503'` });
+    expect(pinned.code).toBe(1);
+    expect(pinned.err).toContain('sudo docker tag repman:v1.39.0 repman:latest && bash scripts/deploy.sh prod --no-build --ignore-window');
+    expect(pinned.err).toContain('직전에 떠서 건강하던 이미지로 가려면 repman:rollback');
+    const plain = runMain('prod --no-build --ignore-window', { curl: `printf '{"ok":false,"checks":{"db":"fail"}}\\n503'` });
+    expect(plain.code).toBe(1);
+    expect(plain.err).toContain('sudo docker tag repman:rollback repman:latest && bash scripts/deploy.sh prod --no-build --ignore-window');
+    expect(plain.err).not.toContain('repman:v1.39.0');
+  }, 30_000);
 
   it('[OPS-T23a] prod --no-build — 롤백 태그를 옮기지 않고 빌드 없이 다시 만든다', () => {
     const r = runMain('prod --no-build');

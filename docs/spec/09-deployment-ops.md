@@ -330,7 +330,7 @@ Phase 3 리마인드의 밑거름이 되고, 그 전에도 Sean이 로그만 봐
 | 0 | 이번 주 마감 확인 → 금지 시간대면 멈춘다. `deploy.sh prod`도 빌드 전에 같은 계산으로 막는다 | OPS-16. 연휴 주는 마감이 당겨진다(WS-19) |
 | 1 | 디스크: `df -h /` 여유 5G 이상. 모자라면 `deploy.sh prune`(우리 찌꺼기만) · npm/pip 캐시. `deploy.sh`도 빌드 전에 보고, 모자라면 빌드하지 않는다 | 빌드가 루트 디스크에 쌓인다(OPS-42·43). 2G대에서 빌드하면 도중에 ENOSPC로 죽는다 |
 | 2 | DB 스냅샷 — 컨테이너 안에서 `sqlite3 .backup` → `/data/db/worklog.db.predeploy-시각` | `cp` 금지(OPS-07). `tmp/`는 기동 때 지워지므로 거기 두지 않는다. 야간본(`backup.sh db`)을 손으로 돌리면 **그날 야간본을 덮는다**. 4단계(`db push`)보다 먼저여야 하므로 스크립트에 넣지 않았다 |
-| 3 | 지금 이미지를 `repman:rollback`으로 태그 — `deploy.sh prod`가 빌드 직전에 한다 | 빌드가 `repman:latest`를 덮으면 옛 이미지는 태그 없는(dangling) 이미지가 되고 배포 끝 청소(OPS-43)에 지워진다. 그 뒤 롤백은 재빌드뿐이다 |
+| 3 | **지금 떠서 health가 ok인** 운영 컨테이너의 이미지를 `repman:rollback`으로 태그 — `deploy.sh prod`가 빌드 직전에 한다. 멈췄거나 아프면 옮기지 않는다(OPS-17a) | 빌드가 `repman:latest`를 덮으면 옛 이미지는 태그 없는(dangling) 이미지가 되고 배포 끝 청소(OPS-43)에 지워진다. 그 뒤 롤백은 재빌드뿐이다 |
 | 4 | `git pull` → 스키마가 바뀌었으면 `prisma db push` (**chown 없이**) | 아래 「chown 하지 않는다」. 빠뜨리면 6단계의 새 앱이 뜨지 않고 없는 표·열을 로그 첫 FATAL 줄에 적는다(OPS-48) — push한 뒤 `deploy.sh prod --no-build` |
 | 5 | 권한 확인: `stat` → `10001:mhchoi drwxrws---` · DB `-rw-rw----` | 틀어졌으면 백업이 조용히 멈춘다 |
 | 6 | `bash scripts/deploy.sh prod` — 빌드 → 기동 → health `ok:true` → 우리 빌드 찌꺼기 청소 | OPS-43 |
@@ -474,7 +474,7 @@ sudo sh -c 'du -sh /var/lib/containerd/*/ | sort -rh'
 | OPS-43d | 표식이 생기기 전 이미지(레거시)는 **repman 최종 이미지의 지문이 그대로일 때만** `docker rmi`(`-f` 없이)로 지운다 — 태그 없음 · `WorkingDir=/app` · `User=app` · `Entrypoint=["/usr/bin/tini","--"]` · `Cmd=["./scripts/entrypoint.sh"]` |
 | OPS-43e | **남의 것과 태그 붙은 것은 건드리지 않는다.** `repman:latest`·`repman:rollback`·`repman:test`도 지우지 않는다. 필터 없는 `image prune`, `-a`, `system`·`builder`·`container`·`volume` prune, `rmi -f`를 스크립트에 쓰지 않는다 — 테스트가 스크립트를 읽어 막는다 |
 | OPS-43f | 빌드 전 루트 여유가 **5 GiB 미만**이면 우리 찌꺼기를 먼저 치우고 다시 잰다. 그래도 모자라면 **빌드하지 않고** 할 일을 출력한다 (OPS-19) |
-| OPS-43g | 운영은 `main`에서만 돈다 — 다른 브랜치를 구우면 `repman:latest`가 그 이미지가 되어 다음 재기동이 조용히 그것으로 뜬다. `--no-build`도 같다: 그 체크아웃의 `docker-compose.yml`(환경변수·볼륨)로 운영 컨테이너를 다시 만들고, 프로젝트 이름(`repman`)을 박았으므로 다른 worktree에서 돌려도 운영을 가리킨다. 브랜치를 읽지 못하면(흔히 `sudo bash …` — root에게 git이 답하지 않는다) 막는다. 금지 시간대(OPS-16)면 멈춘다 — `--no-build` 재기동도(재기동이 곧 중단이다). 빌드 직전 `repman:latest` → `repman:rollback`(OPS-15 3단계). `--no-build`는 지금 이미지로 다시 띄우기만 한다(`--force-recreate`) — 롤백 태그를 옮기지 않는다 |
+| OPS-43g | 운영은 `main`에서만 돈다 — 다른 브랜치를 구우면 `repman:latest`가 그 이미지가 되어 다음 재기동이 조용히 그것으로 뜬다. `--no-build`도 같다: 그 체크아웃의 `docker-compose.yml`(환경변수·볼륨)로 운영 컨테이너를 다시 만들고, 프로젝트 이름(`repman`)을 박았으므로 다른 worktree에서 돌려도 운영을 가리킨다. 브랜치를 읽지 못하면(흔히 `sudo bash …` — root에게 git이 답하지 않는다) 막는다. 금지 시간대(OPS-16)면 멈춘다 — `--no-build` 재기동도(재기동이 곧 중단이다). 빌드 직전 **지금 떠서 건강한 운영 컨테이너의 이미지** → `repman:rollback`(OPS-15 3단계 · OPS-17a — 2026-10-10 개정, 예전에는 `repman:latest`). `--no-build`는 지금 이미지로 다시 띄우기만 한다(`--force-recreate`) — 롤백 태그를 옮기지 않는다 |
 | OPS-43h | 테스트 서버는 `TINCASE_TEST_MODE`가 있으면 그대로 넘긴다(`sudo` **뒤에** 붙여서 — RU-45의 함정을 스크립트가 대신 피한다). 시연 모드로 떠 있는데 변수 없이 다시 올리려 하면 멈춘다 — 되돌리려면 `TINCASE_TEST_MODE=test`를 적는다. `docs/DEMO.md`의 `sudo TINCASE_TEST_MODE=… docker compose … up -d`는 `feat/org-rollup` 머지(2026-10-08) 때 `TINCASE_TEST_MODE=… bash scripts/deploy.sh test --no-build`로 바꿨다(되돌리기는 `TINCASE_TEST_MODE=test`) — `docker-compose.test.yml` 머리 주석도 같다 |
 | OPS-43i | 시작·끝에 `df -h /`, 끝에 health 결과를 출력한다. health가 `ok:true`가 아니면 0이 아닌 값으로 끝나고 롤백 명령을 보여 준다 |
 
@@ -575,6 +575,13 @@ sudo docker tag repman:rollback repman:latest
 bash scripts/deploy.sh prod --no-build    # 지금 태그로 다시 띄우고(--force-recreate) health까지 본다 — 롤백 태그는 옮기지 않는다
 #   금지 시간대(OPS-16) 안이면 --ignore-window — 롤백은 대개 급하다
 ```
+
+**OPS-17a — 롤백 태그는 지금 떠서 건강한 이미지에만 (2026-10-10).** 예전 `deploy.sh`는 빌드 직전에 늘 `repman:latest`를 `repman:rollback`으로 옮겼다.
+그런데 `latest`는 「돌고 있는 것」이 아니다 — 빌드만 하고 띄우지 않았거나, 배포를 빌드째 거듭 돌리면(첫 번째가 빌드 뒤 health에서 멈춤) 둘째의 태그가
+방금 구운 새 판을 가리켜 옛 이미지가 태그를 잃고 그 실행의 청소에 지워졌다. 이제 「되돌아갈 곳」의 두 조건을 직접 본다: 운영 컨테이너가 **떠 있고**
+그 **이미지**(`docker inspect repman --format '{{.Image}}'`)이며, 지금 health가 **ok**다. 아니면 태그를 옮기지 않고 그대로 둔 것을 알린다.
+배포가 실패하면 되돌리는 명령을 적는데, 사람이 붙인 **고정 태그**(v2 전환의 `repman:v1.39.0` — `deploy.sh`가 옮기지도 지우지도 않는다)가 있으면 그쪽을 먼저 적는다.
+시험 `[OPS-T40]`(떠서 건강할 때만 · 그 컨테이너의 이미지에 · 아프거나 멈췄으면 그대로 · 빌드째 두 번) · `[OPS-T41]`(실패 안내는 고정 태그 먼저) — `tests/deploy-script.test.ts`.
 
 **DB는 보통 되돌리지 않는다.** 스키마 변경이 「추가만」(OPS-15)이면 옛 앱은 새 열을 모르고 지나간다. DB 스냅샷(OPS-15 2단계)으로
 되돌리는 것은 데이터가 망가졌을 때만이다 — 배포 뒤에 들어온 제출·수정도 함께 사라진다. 절차는 DEPLOY.md §2b-롤백.
