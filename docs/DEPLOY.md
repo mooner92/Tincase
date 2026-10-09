@@ -265,6 +265,7 @@ bash scripts/deploy.sh prod --no-build     # 지금 태그로 다시 띄우고 h
 스냅샷으로 되돌린다 — 배포 뒤에 들어온 제출·수정도 함께 사라진다:
 
 ```bash
+sudo docker exec repman sqlite3 /data/db/worklog.db ".backup '/data/db/worklog.db.before-restore-$TS'"   # 덮기 전에 지금 DB를 남긴다 — 원인을 보고, 배포 뒤 들어온 것을 되살릴 길
 sudo docker compose stop app
 rm -f /data/worklog/db/worklog.db-wal /data/worklog/db/worklog.db-shm /data/worklog/db/worklog.db-journal   # 덮기 전에 — 남은 로그가 스냅샷에 적용되지 않게
 cp /data/worklog/db/worklog.db.predeploy-$TS /data/worklog/db/worklog.db   # 있는 파일에 덮는다 — 주인·권한이 그대로 남는다 (닫힌 스냅샷 · 멈춘 앱)

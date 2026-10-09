@@ -412,6 +412,25 @@ q "SELECT d.nameKo AS 총괄부서, COUNT(*) AS 총괄, SUM(u.employeeNo IS NOT 
   (마감 전 알림은 명단 안 미제출자에게 — NOTIFICATIONS-v2 §3.1). 인원 드로어에서 그 줄을 집계 제외(사유 「부서장」). 이행 리허설 보고 6.
 - 총괄이 없을 때만: `q "UPDATE User SET isCoordinator = 1 WHERE email = '<총괄-이메일>' AND isActive = 1; SELECT changes();" | tee -a ~/deploy-$TS/sql.txt` → 1.
 
+**9-4b 읽기만 — 9-5(알림 켜기) 전에 셋** (2026-10-10 알림 점검). 이름이 나오는 것은 **화면에만** 띄운다 — `tee`로 파일에 남기지 않는다.
+
+```bash
+# ① 명단 안의 부서장·「…장」 — 0줄이어야 한다. 나오면 그 사람은 매주 「미제출」로 잡혀 마감 독촉 세 통(+ 부서장이면 검토 요청)을 받는다 —
+#    마감 전 알림은 역할을 보지 않고 명단(onRoster)만 본다(NOTIFICATIONS-v2 §3.1). 인원 드로어에서 집계 제외(사유 「부서장」)
+q "SELECT u.name AS 이름, u.jobTitle AS 직책, u.divisionRole AS 역할 FROM User u JOIN Division d ON d.id = u.divisionId
+   WHERE d.nameKo IN ('기획조정실', 'AI홍보전략실') AND u.isActive = 1 AND u.onRoster = 1
+     AND (u.divisionRole = 'head' OR u.jobTitle LIKE '%장');"
+# ② 총괄이 있는 부서 — 기획조정실 한 줄이어야 한다. 「병합 점검」은 총괄이 있는 부서의 담당에게 가고 그 부서가 켜졌는지는 보지 않는다(TACP-30) —
+#    다른 부서가 나오면 그 부서 담당도 받는다
+q "SELECT d.nameKo AS 총괄부서, d.isActive AS 켜짐, COUNT(*) AS 총괄 FROM User u JOIN Division d ON d.id = u.divisionId
+   WHERE u.isCoordinator = 1 AND u.isActive = 1 GROUP BY d.id;"
+# ③ 같은 사번 둘 — 0줄이어야 한다. 메신저는 사번으로 사람을 찾으므로 한 사람에게 두 사람 몫의 쪽지(이름까지)가 간다
+q "SELECT employeeNo AS 사번, COUNT(*) AS 수 FROM User WHERE isActive = 1 AND employeeNo IS NOT NULL GROUP BY 1 HAVING COUNT(*) > 1;"
+```
+
+- ①이 0줄이 아니면 9-5 전에 고친다(위 「부서장명단」과 같은 까닭 — 이쪽은 직책 「…장」까지 본다). ②가 기획조정실이 아니면 누가 총괄인지부터 본다.
+  ③이 0줄이 아니면 인원 드로어에서 틀린 사번을 고친다 — 고치기 전에는 그 둘 중 한 사람의 알림을 끈다.
+
 **9-5 부서 알림 스위치 — 두 부서만** — `/ops` 부서 표의 「알림」 칸(인원 드로어의 「알림」은 사람마다의 칸이다)
 
 1. 기획조정실 · AI홍보전략실 줄 [편집] → 「알림」이 [끔 · 켜기]면 눌러 「켬 · 끄기」로 → [완료]. 이미 「켬」이면 그대로 둔다.
@@ -492,7 +511,8 @@ q "SELECT SUM(isActive) AS 켜짐, SUM(notifyEnabled) AS 알림,
 2. **안내문** — [ANNOUNCE-v2.md](ANNOUNCE-v2.md)를 **두 부서에만**(메신저 단체 쪽지). 취합게시판에는 올리지 않는다 — 다른 부서는 꺼져 있어 들어오면 「준비 중」이다. 작업 끝 공지를 겸한다.
 3. **설정 링크** — 두 부서 각각 `/ops` 부서 줄 [열기] → 인원 드로어 → 「미발급 n명에게 링크 보내기」(한 번에 60명까지 · 운영자당 1분에 10번 — 「요청이 너무 잦습니다」면 몇 초 뒤 다시).
    AI홍보전략실은 파일럿 때 발급해 대개 몇 명 안 된다 · 기획조정실은 거의 전원이다.
-   **3일 만료** — 화요일에 보내면 금요일 아침까지다(목 14:00 마감을 덮는다). 링크는 본인 알림 설정과 상관없이 간다(NT-20).
+   **3일 만료** — 화 오전에 보내면 금 오전까지다(목 14:00 마감을 덮는다 — 쪽지에 그 날짜·시각이 적힌다, 2026-10-10). 링크는 본인 알림 설정과 상관없이 간다(NT-20).
+   사람마다 링크는 하나만 산다 — 누가 같은 사람에게 다시 보내거나 본인이 「비밀번호를 잊으셨나요?」로 받으면 앞의 링크는 「새 링크가 다시 발급된 링크입니다」가 된다(AU-30a). 가장 최근 쪽지를 쓰면 된다.
    사번이 없는 사람은 이 목록에서 빠진다 — 인원 드로어에 사번을 넣거나, 그 사람만 줄 끝 [직접](임시 비밀번호 표시 — 개인별로 전달, 단체 쪽지 금지).
    결과에 「수신 허용 목록 밖」이 있으면 env가 `*`가 아니다 — ⑦ 기동 로그의 `(수신 허용: …)`를 다시 본다.
 
@@ -512,7 +532,7 @@ q "SELECT chapter AS 장, outcome AS 고른것, COUNT(*) AS 사람 FROM GuideTou
 | 시각 | 무엇 | 운영자가 볼 것 |
 |---|---|---|
 | 월 10/12 | v1 그대로(운영자 없음) — 파일럿 부서원은 hwp로도 낼 수 있다 | 아무것도 하지 않는다. 화요일 ①이 그 수를 센다 |
-| 화 10/13 07:00~09:00 | 전환 ①~⑪ — 안내문 · 설정 링크(3일 → 금 아침까지) | §4 Go/No-go |
+| 화 10/13 07:00~09:00 | 전환 ①~⑪ — 안내문 · 설정 링크(3일 → 금 오전까지) | §4 Go/No-go |
 | 화 09:00~ | 첫 로그인 · 첫 작성 · 월요일에 낸 사람은 [열기]로 고쳐 다시 낼 수 있다 | ⑫ — `/ops` 「미발급」 수 · 둘러보기 쿼리 · 「설정 링크 발송」 |
 | 수 10/14 ~11:29 | 화요일에 못 끝낸 전환의 마지막 창 · `--ignore-window` 없는 롤백의 끝 | |
 | 수 11:30 | 금지 시간대 시작 | 배포·재기동하지 않는다(롤백은 `--ignore-window` — §3.1) |
@@ -567,6 +587,9 @@ sudo docker inspect repman --format '{{.Image}}' | diff - ~/deploy-$TS/image-v1.
 
 ```bash
 cd ~/repman
+sudo docker exec repman sqlite3 /data/db/worklog.db ".backup '/data/db/worklog.db.v2-$TS'" \
+  && ls -l /data/worklog/db/worklog.db.v2-$TS    # 덮기 **전에** 지금(v2) DB를 남긴다 — 무엇이 망가졌는지 나중에 보고, ④ 뒤에 들어온 제출·설정을 되살릴 유일한 길
+#   .backup이 실패하면(DB가 깨졌다) 아래 stop 뒤에 파일째 남긴다: cp /data/worklog/db/worklog.db* ~/deploy-$TS/ (멈춘 앱의 닫힌 파일이라 된다 — OPS-07)
 sudo docker tag repman:v1.39.0 repman:latest                                  # §3.1과 같다 — 고정 태그
 sudo docker compose -f docker-compose.yml -p repman stop app
 rm -f /data/worklog/db/worklog.db-wal /data/worklog/db/worklog.db-shm /data/worklog/db/worklog.db-journal   # 덮기 **전에** — v2 DB의 남은 로그가 v1 스냅샷에 적용되지 않게
@@ -579,6 +602,7 @@ q "PRAGMA integrity_check; SELECT COUNT(*) AS 제출 FROM Submission;"          
 - 스냅샷은 ⑤ 전이라 스키마도 v1으로 돌아간다 — 옛 이미지와 맞는다. (이 DB로 v2 이미지를 띄우면 OPS-48이 막는다.)
 - 이미 보낸 설정 링크는 무효가 된다(토큰이 DB에 없다) — 다시 보낸다. 그 사이 **링크로 비밀번호를 정한 사람도 다시 정해야 한다**(비밀번호가 ④ 시점으로 돌아간다). ⑨는 다시 한다.
 - 새 앱이 만든 파일(`divisions/*/reports/` · `org/`)은 남는다 — 행 없는 파일이라 해가 없다.
+- `worklog.db.v2-$TS`(덮기 전의 v2 DB)는 원인을 보고 되살릴 것을 옮긴 뒤 지운다 — 그때까지는 v2에서 들어온 제출·설정의 유일한 사본이다.
 
 ### 3.3 쪽지만 멈추기
 
@@ -604,6 +628,7 @@ q "PRAGMA integrity_check; SELECT COUNT(*) AS 제출 FROM Submission;"          
 - [ ] 기존 로그인 유지
 - [ ] 9-7 범위 점검 — 켜짐 2 · 알림 2 · 범위밖 0 · 삼단계 0 (기획조정실을 껐으면 1 · 1 · 0 · 0)
 - [ ] 9-4 `divisions-after.txt` — 두 부서 모두 담당 ≥ 1 · 목 14:00 · **부서장명단 0** · 사번없음 0(아니면 누구인지 안다) · 기획조정실 부서장은 담당의 답대로 · 실장 집계 제외
+- [ ] 9-4b — ① 명단 안의 부서장·「…장」 0줄 · ② 총괄이 있는 부서 = 기획조정실 한 줄 · ③ 같은 사번 0줄
 - [ ] 9-3b 파일 점검 — 두 부서 양식 실패 0 (기획조정실이 실패면 껐다). 제출·병합본 실패는 수를 적고 Go
 - [ ] 총괄 ≥ 1 · 운영자 알림받음 1
 - [ ] ⑩ 스모크 통과 — ①의 「W42제출」이 있으면 그 하나가 열렸다(월요일에 v1으로 낸 것 — 안 열리면 No-go는 아니다: 그 사람에게 [작성하기]로 다시 내 달라고 하고 수를 적는다)
