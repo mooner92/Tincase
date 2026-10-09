@@ -416,6 +416,20 @@ Cloudflare 경유(HTTPS)일 때만 `secure`를 켠다 — 요청의 프로토콜
 `X-Frame-Options: DENY`(같은 사이트 iframe으로 버튼을 누르게 하는 클릭재킹) · `X-Content-Type-Options: nosniff` ·
 `Referrer-Policy: same-origin`. 앱은 다른 페이지를 iframe에 넣지 않고 넣어지지도 않는다(2026-10-08 확인).
 
+### AU-34 — 로그인 뒤 가려던 화면으로 (2026-10-10)
+
+메신저 쪽지의 링크(부서장 검토 요청 → `/{부서}/manage` 등)를 로그인하지 않은 브라우저(Edge)로 열면 가드가 `/login`으로 보냈고, 로그인하면 홈(`/`)에 떨어졌다 —
+쪽지가 가리킨 화면을 다시 찾아가야 했다(2026-10-10 알림 점검). 이제:
+
+- **가드가 지금 주소를 싣는다** — `redirect('/login?next={지금 주소}')`. 서버 컴포넌트는 자기 주소를 모르므로(부서 레이아웃은 슬러그만 받는다) `src/proxy.ts`가
+  화면 요청마다 머리 `x-tincase-path`(경로 + 쿼리, `_rsc` 뺌)를 붙이고, 가드는 `loginPath()`(page-scope) 하나로 만든다. 요청이 보낸 같은 이름의 머리는 덮어쓴다.
+  홈(`/`)은 싣지 않는다
+- **같은 사이트 안의 경로만** — `safeNextPath`(`src/lib/next-path.ts`): `/`로 시작하되 `//`·`/\`로 시작하지 않고, 제어 문자(탭·줄바꿈 — 브라우저가 지워
+  `//`가 된다)와 역슬래시가 없고, `/login`·`/api/`가 아니고, 512자 이하. 아니면 없는 것(홈)이다 — 열린 리다이렉트를 만들지 않는다
+- 로그인 화면이 거른 값을 폼에 넘기고 폼도 한 번 더 거른다. 이미 로그인 상태로 `/login?next=`를 열면 그 화면으로 바로 간다.
+  첫 비밀번호 변경(AU-22)이 남았으면 그쪽이 먼저다(`/password?first=1`)
+- 시험 AU-T95
+
 ### AU-09 — 감사 로그
 
 `upload`, `download`, ~~`download_zip`~~(2026-10-08 폐지 — 옛 기록만), `merge` 는 `AuditLog`에 남긴다.
@@ -571,6 +585,7 @@ curl -m 5 http://<서버-내부-IP>:11111/          # 실패해야 정상
 | AU-T91 | 감사 로그 화면은 운영자만 (AU-09a · TACP v1.14) — 총괄·담당·부서원 404, 운영자 200 · 「전사」의 감사 로그 링크는 운영자에게만 (`tests/audit-access.test.ts`) |
 | AU-T92 | 비밀번호 찾기 — 꺼진 부서 사람은 같은 응답 · 쪽지 0 · 토큰 0 · `setup_link` 0, 꺼진 부서의 운영자에게는 간다 (AU-32a, `tests/setup-link.test.ts`) |
 | AU-T93 | 비밀번호 찾기 한도 — `x-forwarded-for`를 매번 바꿔도 전체 한도에서 429 · 한 사람에게 하루 3통 뒤에는 같은 응답에 쪽지 없음 (AU-32b, `tests/setup-link.test.ts`) |
+| AU-T95 | 로그인 뒤 가려던 화면 (AU-34) — 가드가 `/login?next={지금 주소}`(proxy 머리) · `//`·`/\`·제어 문자·다른 호스트·`/login`·`/api/`는 없는 것 · 로그인 상태면 그 화면으로 바로 · 머리를 위조해도 같은 사이트 경로만 (`tests/login-next.test.ts`) |
 | AU-T94 | 밀린 링크 — 새 링크를 보내면 옛 링크는 `superseded` · 화면 「새 링크가 다시 발급된 링크입니다」 · 설정 API 410 `token_superseded` · 쓴 링크만 `used` · 만료 화면은 「비밀번호를 잊으셨나요?」를 말한다 (AU-30a, `tests/setup-link.test.ts`) |
 
 > AU-T09·T10(위조 방어)과 AU-T12~T17(격리)이 이 스펙의 핵심 회귀 테스트다.

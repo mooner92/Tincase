@@ -1,6 +1,6 @@
 // 부서 스코프 레이아웃 — slug/별칭 해석(PG-01), AppHeader, 격리(404)
 import { notFound, redirect } from 'next/navigation';
-import { getPageScope, getDivisionView } from '@/server/page-scope';
+import { getPageScope, getDivisionView, loginPath } from '@/server/page-scope';
 import { HttpError, rollupNav } from '@/server/authz';
 import { noticeFor } from '@/components/Notice';
 import { AppHeader } from '@/components/AppHeader';
@@ -18,7 +18,7 @@ export default async function DivisionLayout({
 }) {
   const ps = await getPageScope();
   if (!ps.ok) {
-    if (ps.code === 'unauthenticated') redirect('/login');
+    if (ps.code === 'unauthenticated') redirect(await loginPath());
     return noticeFor(ps.code, ps.message);
   }
   if (ps.scope.user.mustChangePassword) redirect('/password?first=1'); // AU-22

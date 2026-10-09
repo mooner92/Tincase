@@ -10,7 +10,7 @@
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { prisma } from '@/server/db';
-import { getPageScope } from '@/server/page-scope';
+import { getPageScope, loginPath } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { canOperate, canReadAuditLog, rollupNav } from '@/server/authz';
 import { AppHeader } from '@/components/AppHeader';
@@ -76,7 +76,7 @@ export default async function AuditPage({
 }) {
   const ps = await getPageScope();
   if (!ps.ok) {
-    if (ps.code === 'unauthenticated') redirect('/login');
+    if (ps.code === 'unauthenticated') redirect(await loginPath());
     return noticeFor(ps.code, ps.message);
   }
   const scope = ps.scope;

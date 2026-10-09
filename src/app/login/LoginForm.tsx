@@ -1,8 +1,10 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { safeNextPath } from '@/lib/next-path';
 
-export function LoginForm() {
+/** `next` — AU-34 로그인 뒤 돌아갈 화면(서버가 이미 거른 값). 화면에서도 한 번 더 거른다 — 이 컴포넌트를 다른 곳에서 써도 열린 리다이렉트가 되지 않게 */
+export function LoginForm({ next = null }: { next?: string | null }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -21,8 +23,8 @@ export function LoginForm() {
       .then(async (r) => {
         const b = await r.json();
         if (r.ok) {
-          // 초기 발급 비밀번호면 변경 화면으로 (AU-22)
-          router.replace(b.mustChangePassword ? '/password?first=1' : '/');
+          // 초기 발급 비밀번호면 변경 화면으로 (AU-22). 아니면 가려던 화면(AU-34) — 없으면 홈
+          router.replace(b.mustChangePassword ? '/password?first=1' : (safeNextPath(next) ?? '/'));
           router.refresh();
         } else {
           setError(b.message ?? '로그인에 실패했습니다.');

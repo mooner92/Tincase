@@ -5,6 +5,7 @@ import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { requireScope, resolveTargetDivision, HttpError, type Scope } from './authz';
 import { AuthError } from './auth';
+import { loginHref, PATH_HEADER } from '@/lib/next-path';
 import type { Division } from '@prisma/client';
 
 export type PageScope =
@@ -27,9 +28,17 @@ export const getPageScope = cache(async (): Promise<PageScope> => {
 });
 
 /**
+ * AU-34 — 로그인 화면 주소. 지금 보던 주소(`src/proxy.ts`가 붙인 머리)를 `?next=`로 싣는다 — 로그인 뒤 그 화면으로 돌아간다.
+ * 메신저 쪽지의 링크를 로그인 없이 열면 예전에는 로그인 뒤 홈에 떨어졌다. 같은 사이트 안의 경로만 싣는다(`safeNextPath`)
+ */
+export async function loginPath(): Promise<string> {
+  return loginHref((await headers()).get(PATH_HEADER));
+}
+
+/**
  * AU-22 — **보호 페이지의 표준 진입점.** 여기서 실제로 내보낸다.
  *
- *   미인증            → `/login`
+ *   미인증            → `/login?next={지금 주소}` (AU-34)
  *   초기 비밀번호 미변경 → `/password?first=1`
  *   그 외(미등록·미온보딩) → PageScope를 그대로 돌려준다 (페이지가 안내 화면을 고른다)
  *
@@ -45,7 +54,7 @@ export const getPageScope = cache(async (): Promise<PageScope> => {
 export async function requirePageScope(): Promise<PageScope> {
   const ps = await getPageScope();
   if (!ps.ok) {
-    if (ps.code === 'unauthenticated') redirect('/login');
+    if (ps.code === 'unauthenticated') redirect(await loginPath());
     return ps; // 미등록·미온보딩은 안내 화면이 낫다 — 리다이렉트하면 이유를 못 읽는다
   }
   if (ps.scope.user.mustChangePassword) redirect('/password?first=1');

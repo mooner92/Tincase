@@ -1,6 +1,6 @@
 // `/ops` — 운영 (operator 전용, PG §6). 비운영자는 404 (존재 은닉).
 import { notFound, redirect } from 'next/navigation';
-import { getPageScope } from '@/server/page-scope';
+import { getPageScope, loginPath } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { OpsClient } from './OpsClient';
 import { AppHeader } from '@/components/AppHeader';
@@ -16,7 +16,7 @@ export const dynamic = 'force-dynamic';
 export default async function OpsPage() {
   const ps = await getPageScope();
   if (!ps.ok) {
-    if (ps.code === 'unauthenticated') redirect('/login');
+    if (ps.code === 'unauthenticated') redirect(await loginPath());
     return noticeFor(ps.code, ps.message);
   }
   if (ps.scope.user.mustChangePassword) redirect('/password?first=1'); // AU-22

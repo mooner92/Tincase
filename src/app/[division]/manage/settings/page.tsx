@@ -5,7 +5,7 @@
 // 타 부서를 읽는 사람에게는 같은 두 카드를 읽기로만 그린다 — 설정을 한 덩어리로 쏟던 읽기 전용 덤프는 지웠다.
 import { notFound, redirect } from 'next/navigation';
 import { prisma } from '@/server/db';
-import { getPageScope, getDivisionView } from '@/server/page-scope';
+import { getPageScope, getDivisionView, loginPath } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { TemplateManager } from '@/components/TemplateManager';
 import { RuleEditor } from '@/components/RuleEditor';
@@ -18,7 +18,7 @@ export const dynamic = 'force-dynamic';
 export default async function SettingsPage({ params }: { params: Promise<{ division: string }> }) {
   const ps = await getPageScope();
   if (!ps.ok) {
-    if (ps.code === 'unauthenticated') redirect('/login');
+    if (ps.code === 'unauthenticated') redirect(await loginPath());
     return noticeFor(ps.code, ps.message);
   }
   if (ps.scope.user.mustChangePassword) redirect('/password?first=1'); // AU-22

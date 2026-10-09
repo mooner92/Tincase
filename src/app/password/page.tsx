@@ -1,6 +1,6 @@
 // `/password` — 비밀번호 변경. 초기 발급 계정은 여기로 강제된다 (AU-22).
 import { redirect } from 'next/navigation';
-import { getPageScope } from '@/server/page-scope';
+import { getPageScope, loginPath } from '@/server/page-scope';
 import { PasswordForm } from './PasswordForm';
 
 export const dynamic = 'force-dynamic';
@@ -11,7 +11,7 @@ export default async function PasswordPage({
   searchParams: Promise<{ first?: string }>;
 }) {
   const ps = await getPageScope();
-  if (!ps.ok) redirect('/login');
+  if (!ps.ok) redirect(await loginPath());
   const { first } = await searchParams;
   const isFirst = first === '1' || ps.scope.user.mustChangePassword;
 
