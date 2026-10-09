@@ -1450,9 +1450,10 @@ d('WS-19 주차 마감 예외 — 총괄이 정한다', () => {
     const [coord, op, lead] = [await as(ID.coord), await as(ID.op), await as(ID.aLead)];
     await prisma.orgRollupSetting.deleteMany({}); // 기본 = 꺼짐
     await prisma.orgSection.deleteMany({});
-    expect(await orgPageView(coord)).toEqual({ open: true, progress: true, desk: false, schedule: true, operate: false });
-    expect(await orgPageView(op)).toEqual({ open: true, progress: true, desk: true, schedule: true, operate: true });
-    expect(await orgPageView(lead)).toEqual({ open: false, progress: false, desk: false, schedule: false, operate: false });
+    // audit — 감사 로그 링크는 운영자에게만 (TACP §3.1 · v1.14 · AU-T91). 예전에는 progress(readAll)에 묶여 총괄에게도 그렸다
+    expect(await orgPageView(coord)).toEqual({ open: true, progress: true, desk: false, schedule: true, operate: false, audit: false });
+    expect(await orgPageView(op)).toEqual({ open: true, progress: true, desk: true, schedule: true, operate: true, audit: true });
+    expect(await orgPageView(lead)).toEqual({ open: false, progress: false, desk: false, schedule: false, operate: false, audit: false });
 
     // 페이지가 실제로 그리는 것 — 같은 판정에서 나온다 (TACP-9: 못 하는 일의 열·버튼·링크를 그리지 않는다)
     await prisma.user.updateMany({ where: { email: { in: [ID.coord, ID.op, ID.aLead] } }, data: { mustChangePassword: false } });
@@ -1468,7 +1469,9 @@ d('WS-19 주차 마감 예외 — 총괄이 정한다', () => {
       expect((c.props('WeekSchedule')?.weeks as unknown[]).length).toBeGreaterThan(0);
       // RU-60 — 최종본 열이 없으면 [올리기]도 없다
       expect(c.props('OrgBoard')?.canUpload).toBe(false);
-      expect(c.hrefs).toContain('/ops/audit');
+      // 감사 로그는 운영자만(AU-T91) — 총괄에게는 링크도 없다. 감사 문서·CSV(readAll)는 그대로
+      expect(c.hrefs).not.toContain('/ops/audit');
+      expect(c.hrefs.some((h) => h.startsWith('/api/ops/report?'))).toBe(true);
       expect(c.hrefs).not.toContain('/ops');
       expect(c.hrefs.some((h) => h.includes('edit=sections'))).toBe(false);
       // 편집 주소를 직접 쳐도 편집기는 오지 않는다 — 값이 없다

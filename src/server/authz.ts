@@ -179,6 +179,17 @@ export function canOperate(user: Pick<User, 'isOperator'>): boolean {
   return user.isOperator;
 }
 
+/**
+ * TACP §3.1 「감사 로그」 · v1.14 · AU-09a — 감사 로그를 읽는가. **운영자만.**
+ *
+ * readAll(총괄)이 아니다. 감사 로그는 부서 문서가 아니라 **사람들의 행동 기록**(로그인·비밀번호 초기화·내려받기)이고,
+ * TACP-8의 「전 부서 읽기」는 부서 문서에 대한 것이다. 2026-10-10까지 페이지가 `readAll`로 문을 열어 총괄이 전부를 읽었다(§9).
+ * 페이지의 문과 그리로 가는 링크(`/ops` · 「전사」 `orgPageView().audit`)가 이 하나를 본다 — 둘이 따로 적히면 갈라진다(TACP-9·12).
+ */
+export function canReadAuditLog(user: Pick<User, 'isOperator'>): boolean {
+  return canOperate(user);
+}
+
 /** HM-54 · TACP-30 — 「병합 점검」 요약을 받는 사람 한 명 */
 export interface MergeBatchRecipient {
   id: string;
@@ -533,10 +544,11 @@ export async function requireOrgRollup(headers: Headers): Promise<Scope> {
 /**
  * PG-49f · PG-51e — 「전사」 화면(`/org`)에서 **이 사람에게 그릴 것**. 화면은 이 값만 보고 그린다 (TACP-9·12).
  *
- *   progress  섹션별 제출 막대·미제출 이름·감사 링크 — 전 부서를 늘어놓으므로 readAll (TACP §3.2)
+ *   progress  섹션별 제출 막대·미제출 이름·감사 문서·CSV — 전 부서를 늘어놓으므로 readAll (TACP §3.2)
  *   desk      최종본 열·파일 올리기·만들기·섹션 구성 편집·본부 취합 길·3단계 스위치 — `canOpenOrgDesk`(RU-52 스위치 포함)
  *   schedule  마감 바꾸기 (TACP-20)
  *   operate   「← 운영」 (`/ops`의 문)
+ *   audit     「감사 로그」 링크 — `canReadAuditLog`(운영자만, TACP §3.1 · v1.14). progress에 묶여 있어 총괄에게 404로 가는 링크였다
  *
  * 문(`open`)은 둘 중 하나라도 있으면 열린다. 예전에는 [현황]·[취합] 두 탭이 각자 문을 가졌다(PG-49e) —
  * 한 화면이 되면서 「무엇을 그리나」로 바뀌었다. 판정을 페이지에 풀어 적지 않는다 (TACP-12).
@@ -547,6 +559,7 @@ export async function orgPageView(scope: Scope): Promise<{
   desk: boolean;
   schedule: boolean;
   operate: boolean;
+  audit: boolean;
 }> {
   const progress = canReadAllDivisions(scope.user);
   const desk = await canOpenOrgDesk(scope);
@@ -556,6 +569,7 @@ export async function orgPageView(scope: Scope): Promise<{
     desk,
     schedule: canScheduleDeadlines(scope.user),
     operate: canOperate(scope.user),
+    audit: canReadAuditLog(scope.user),
   };
 }
 

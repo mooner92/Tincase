@@ -8,8 +8,9 @@
 // 2026-10-08(ADR-0015) — 전사본은 섹션 출처가 바뀌면 저절로 다시 만들어진다(RU-83). 이 화면은 그리기 전에 맞추고(읽기 수리) 보여 줄 뿐이다.
 // 옛 `/ops/monitor`는 보내지 않는다 — 2026-10-08 지웠다(R17, 상단 메뉴 「전사」가 같은 길이다).
 //
-// 무엇을 그릴지는 `orgPageView` 하나가 정한다(TACP-9·12): 제출 열·감사 링크는 전 부서를 읽는 사람(readAll),
+// 무엇을 그릴지는 `orgPageView` 하나가 정한다(TACP-9·12): 제출 열·감사 문서·CSV는 전 부서를 읽는 사람(readAll),
 // 최종본 열·파일 올리기·전사본(실패 때 [다시 시도])·섹션 구성 편집은 전사 취합의 문(canOpenOrgDesk — 3단계가 꺼져 있으면 총괄에게도 없다, RU-52).
+// 감사 로그 링크는 운영자에게만(`audit` — TACP §3.1 · v1.14): readAll에 묶여 총괄에게 그려졌고, 그 문도 총괄에게 열려 있었다.
 import { notFound } from 'next/navigation';
 import Link from 'next/link';
 import { requirePageScope } from '@/server/page-scope';
@@ -97,11 +98,13 @@ export default async function OrgPage({ searchParams }: { searchParams: Promise<
           </div>
           {/* PG-49c · PG-51f — 곁가지는 구석에 작게. 누르면 404인 링크는 그리지 않는다 (TACP-9) */}
           <nav aria-label="전사 곁가지" className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+            {can.audit && (
+              <Link href="/ops/audit" className={side}>
+                감사 로그
+              </Link>
+            )}
             {can.progress && (
               <>
-                <Link href="/ops/audit" className={side}>
-                  감사 로그
-                </Link>
                 <a href={`/api/ops/report?isoKey=${slot.isoKey}`} className={side}>
                   감사 문서
                 </a>

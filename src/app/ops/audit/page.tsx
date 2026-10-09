@@ -1,16 +1,18 @@
-// `/ops/audit` — 감사 로그 열람 (운영자·총괄).
+// `/ops/audit` — 감사 로그 열람 (운영자만 — TACP §3.1 · AU-09a).
 //
 // TACP-10이 "경계를 넘는 접근은 반드시 기록된다"고 못박았는데 **볼 화면이 없었다.**
 // 아무도 안 보는 로그는 있으나 마나다. 기록의 목적은 보관이 아니라 확인이다.
 //
-// 총괄에게도 여는 이유: 자기가 남의 부서를 얼마나 열어봤는지는 본인이 먼저 알아야 한다.
-// 감시가 아니라 자기 확인이다.
+// 2026-10-10 (TACP v1.14) — 예전에는 총괄에게도 열었다(「자기가 남의 부서를 얼마나 열어봤는지는 본인이 먼저 알아야 한다」).
+// 그런데 이 화면은 actor를 거르지 않아 총괄이 **남의** 로그인·비밀번호 초기화·내려받기 기록까지 전부 읽었다. 감사 로그는
+// 부서 문서가 아니라 사람들의 행동 기록이라 readAll의 「전 부서 읽기」(TACP-8)에 들지 않고, §3.1의 칸도 처음부터 운영자만이었다.
+// 문은 authz.ts의 `canReadAuditLog` 하나다 — 그리로 가는 링크(「전사」·`/ops`)도 같은 판정으로만 그린다(TACP-9·12).
 import { redirect, notFound } from 'next/navigation';
 import Link from 'next/link';
 import { prisma } from '@/server/db';
 import { getPageScope } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
-import { canOperate, rollupNav } from '@/server/authz';
+import { canOperate, canReadAuditLog, rollupNav } from '@/server/authz';
 import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
 import { getTour } from '@/server/tour';
@@ -79,7 +81,7 @@ export default async function AuditPage({
   }
   const scope = ps.scope;
   if (scope.user.mustChangePassword) redirect('/password?first=1');
-  if (!scope.readAll) notFound(); // TACP-5 존재 은닉
+  if (!canReadAuditLog(scope.user)) notFound(); // TACP §3.1 운영자만 · TACP-5 존재 은닉
 
   const sp = await searchParams;
   const days = Math.min(Math.max(Number(sp.days ?? 30) || 30, 1), 365);
