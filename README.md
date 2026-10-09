@@ -138,6 +138,7 @@ tincase/
 ## 지금 필요한 것
 
 - 🟡 **3단계 취합 시연** — 11/2(월) 운영회의 목표. 개발은 테스트 서버(11112), 강당 화면도 같은 11112를 가짜 인원만 있는 **시연 모드**로 바꿔 띄운다(별도 포트 없음) — [DEMO](docs/DEMO.md) · [S-12 §9a](docs/spec/12-org-rollup.md)
-- 🟡 **다음 배포 전 운영 작업** — 백업 크론·fstab 줄 반영([DEPLOY](docs/DEPLOY.md) §7), 빌드 전 디스크 정리(§2b)
+- ✅ **배포 전 운영 작업** — 백업 크론(files 매일 — 2026-10-09)·fstab 줄(2026-10-10) 반영([DEPLOY](docs/DEPLOY.md) §7). 빌드 찌꺼기 청소는 `deploy.sh`가 한다(OPS-43)
+- 🟡 **v2 운영 전환 — 2026-10-13(화) 아침**(월요일에서 옮김) — 두 부서(기획조정실 · AI홍보전략실) · 3단계 끔. 순서 [LAUNCH-v2](docs/LAUNCH-v2.md)
 
 미결 목록: [OPEN-QUESTIONS.md](OPEN-QUESTIONS.md) *(2026-08 이후 갱신 안 됨)*

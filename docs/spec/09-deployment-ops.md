@@ -238,7 +238,8 @@ DB 백업에는 그 행(`OrgSectionUpload`·`RollupRun`)이 들어가므로 파�
 **NFS가 마운트돼 있지 않으면 멈춘다.** `/mnt/backup`이 마운트 지점이 아니면 `backup.sh`는 아무것도 쓰지 않고
 `[backup] FATAL …`을 찍고 1로 끝난다. 재부팅 뒤 마운트가 빠지면 `/mnt/backup`은 **루트 디스크의 빈 디렉터리**가 되고,
 거기에 쓰면 「서버 디스크 장애에도 살아남을」 백업이 이미 찬 루트 디스크에 쌓이기 때문이다.
-지금 마운트는 손으로 한 것이라(fstab에 없음) 재부팅하면 빠진다 — **운영자가 fstab에 넣는다** (sudo, 1회):
+**2026-10-10 운영자가 fstab에 넣었다** — `defaults,_netdev,nofail,hard,timeo=600` · 원본 `/etc/fstab.bak-20261010` · `findmnt --verify` 오류 0 ·
+`daemon-reload` 뒤 `mnt-backup.mount`가 생겨 붙어 있다. 그 전에는 손으로 붙인 마운트라 재부팅하면 빠졌다. 새 서버라면 아래를 한 번 (sudo):
 
 ```bash
 findmnt -no SOURCE /mnt/backup            # 지금 붙어 있는 NFS 주소:경로 — 아래 줄에 그대로 쓴다
@@ -368,6 +369,9 @@ v2 전환의 `Division`이 그렇다. 행·열·외래 키는 그대로다(2026-
 않으면 읽을 곳이 없으므로 알리고 지나간다 — 이미 멈춘 서비스를 올리는 일은 금지 시간대가 막으려는 사고를 키우지 않는다.
 
 권장: **목 16:30 이후 ~ 다음 주 화요일** (마감이 당겨진 주는 그만큼 앞당겨 끝낸다).
+
+v2 전환(2026-10-13 화 — [LAUNCH-v2](../LAUNCH-v2.md))은 이 권장 안이다: 화 07:00~ 열림 · 수 11:29까지 열림 · 수 11:30부터 목 16:30까지 막힘
+(W42 · 목 14:00). 그 사이의 롤백은 `--ignore-window`다(LAUNCH-v2 §3.1 명령에 이미 붙어 있다). 시험 `[OPS-T19d]`가 이 경계를 고정한다.
 
 ### OPS-16a — 자동 병합을 잠시 멈춰야 할 때
 
@@ -529,7 +533,7 @@ sudo systemctl daemon-reload && sudo systemctl start docker-image-prune.service 
 
 시험 `[OPS-T30]`~`[OPS-T33]`(`tests/rehearsal.test.ts` — 각본·기대 알림·판정·가짜 모델) · `[OPS-T34]`(`tests/deploy-script.test.ts` — 스케줄러 판정·덧붙이는 compose).
 
-### OPS-50 — 브라우저 e2e 스모크 (2026-10-09 · v2 운영 전환 10/12)
+### OPS-50 — 브라우저 e2e 스모크 (2026-10-09 · v2 운영 전환 10/13)
 
 리허설(OPS-47)은 **알림과 스케줄러**를 보고, 사람의 일은 HTTP로 흉내 낸다. 화면 시험(vitest)은 함수와 그리기를 따로 본다. 둘 다 「운영 빌드에서
 실제 단추를 누르면 그 화면이 되나」는 보지 않는다 — 그래서 `scripts/e2e-v2.cjs`가 **운영과 같은 빌드**를 띄우고 역할마다 실제 화면을 누르고 쳐서
@@ -553,7 +557,7 @@ sudo systemctl daemon-reload && sudo systemctl start docker-image-prune.service 
 ### OPS-51 — 분류 순서 초안은 부서를 골라 넣는다 (`--only`, 2026-10-09)
 
 `scripts/apply-merge-rule-drafts.ts`(HM-27 · HM-51)는 분류가 비어 있는 초안 부서를 **한꺼번에** 쓴다. 부서는 하나씩 켜는데(LAUNCH-v2 §6)
-초안은 두 부서 것이다 — 10/12에 켜는 기획조정실 것을 넣으면 아직 꺼져 있고 담당 확인 전인 인사관리실 것까지 들어간다(9-6).
+초안은 두 부서 것이다 — 10/13에 켜는 기획조정실 것을 넣으면 아직 꺼져 있고 담당 확인 전인 인사관리실 것까지 들어간다(9-6).
 
 | ID | 요구사항 |
 |---|---|

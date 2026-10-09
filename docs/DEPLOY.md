@@ -210,7 +210,7 @@ cd ~/repman && bash scripts/deploy.sh prod
 | (health에 닿지 못함) 로그 `[boot] FATAL: DB 스키마가 이 판보다 오래됐습니다` | 2b-3의 `db push`를 빠뜨렸다(OPS-48). 로그에 없는 표·열이 적혀 있다. 롤백하지 않는다 — 스냅샷(2b-2)이 있는지 보고 `db push` → `bash scripts/deploy.sh prod --no-build` |
 | `다른 deploy.sh가 돌고 있다` | 겹치면 이쪽 청소가 저쪽 빌드의 스테이지 이미지를 지울 수 있다. 끝난 뒤 다시 |
 
-### 2b-5. v2 전환 — 한 번 (2026-10-12, `main` v1.39.0 → v2)
+### 2b-5. v2 전환 — 한 번 (2026-10-13 화 — 10/10에 월요일에서 옮김, `main` v1.39.0 → v2)
 
 > 그날 아침의 시각별 순서 · 합칠 브랜치와 태그 · 배포 뒤 설정(부서 켜기·알림 스위치·섹션·3단계) · 롤백 판단 · Go/No-go는 [LAUNCH-v2.md](LAUNCH-v2.md),
 > 운영에서 나갈 쪽지 문구 전부는 [NOTIFICATIONS-v2.md](NOTIFICATIONS-v2.md), 부서 안내문은 [ANNOUNCE-v2.md](ANNOUNCE-v2.md). 이 절은 스키마와 기동 확인만 다룬다.
@@ -249,7 +249,7 @@ sudo docker exec repman sqlite3 /data/db/worklog.db ".tables" | tr -s ' ' '\n' |
 
 ### 2b-롤백 — 재빌드하지 않는다 (OPS-17)
 
-> v2 전환(2026-10-12)에서 v1으로 되돌릴 때는 [LAUNCH-v2.md](LAUNCH-v2.md) §3.1 — `repman:rollback`이 아니라 그날 ①에서 붙인 고정 태그 `repman:v1.39.0`으로 한다
+> v2 전환(2026-10-13)에서 v1으로 되돌릴 때는 [LAUNCH-v2.md](LAUNCH-v2.md) §3.1 — `repman:rollback`이 아니라 그날 ①에서 붙인 고정 태그 `repman:v1.39.0`으로 한다
 > (⑥을 빌드째 두 번 돌렸으면 `repman:rollback`은 v2다).
 
 ```bash
@@ -369,8 +369,12 @@ crontab -e
 ```
 
 **NFS가 fstab에 있어야 한다.** `backup.sh`는 `/mnt/backup`이 마운트 지점이 아니면 `[backup] FATAL`을 찍고 멈춘다 —
-재부팅 뒤 마운트가 빠지면 루트 디스크에 쓰게 되기 때문이다. 지금 마운트는 손으로 한 것이라 운영자가 한 번 넣는다
-(sudo, 정확한 줄은 [spec 09 OPS-08](spec/09-deployment-ops.md)):
+재부팅 뒤 마운트가 빠지면 루트 디스크에 쓰게 되기 때문이다.
+
+- [x] **2026-10-10 넣었다**(운영자 · sudo) — 옵션 `defaults,_netdev,nofail,hard,timeo=600` · 원본 `/etc/fstab.bak-20261010` ·
+      `findmnt --verify` 오류 0 · `systemctl daemon-reload` 뒤 `mnt-backup.mount`가 생겨 붙어 있다. 그 전에는 손으로 붙인 마운트라 재부팅하면 빠졌다.
+
+새 서버라면 한 번 (sudo, 정확한 줄은 [spec 09 OPS-08](spec/09-deployment-ops.md)):
 
 ```bash
 findmnt -no SOURCE /mnt/backup        # 이 값을 아래 <NFS-내부-IP>:<경로> 자리에
@@ -380,7 +384,7 @@ sudo systemctl daemon-reload && sudo mount -a && findmnt /mnt/backup
 
 ## 8. 월요일 아침 안내문 (붙여넣기용 초안)
 
-> 아래는 v1 개통(2026-08-17) 때 것이다 — hwp 업로드 시절 문구라 지금은 쓰지 않는다. v2 전환(2026-10-12) 안내문은 [ANNOUNCE-v2.md](ANNOUNCE-v2.md).
+> 아래는 v1 개통(2026-08-17) 때 것이다 — hwp 업로드 시절 문구라 지금은 쓰지 않는다. v2 전환(2026-10-13) 안내문은 [ANNOUNCE-v2.md](ANNOUNCE-v2.md).
 
 > [주간업무 제출 안내]
 > 이번 주부터 주간 업무일지를 웹으로 제출합니다. **사내망에서만 접속됩니다.**
@@ -396,7 +400,7 @@ sudo systemctl daemon-reload && sudo mount -a && findmnt /mnt/backup
 ## 장애 시 (OPS-18)
 
 시스템이 죽고 마감이 임박하면 **그 주는 이메일로 되돌린다**: 부서마다 `/data/worklog/divisions/<부서-slug>/template/active.hwp`를 메일로 배포
-(파일럿 때 예: `AI_and_Public_Relations_Division`). v2(2026-10-12 — 켠 부서 2곳에서 시작해 부서마다 늘어난다 · 3단계를 켜면 본부·전사 취합도)에서도 손으로 돌아간다 —
+(파일럿 때 예: `AI_and_Public_Relations_Division`). v2(2026-10-13 — 켠 부서 2곳에서 시작해 부서마다 늘어난다 · 3단계를 켜면 본부·전사 취합도)에서도 손으로 돌아간다 —
 누가 알리고 양식 사본을 어디 두는지는 [LAUNCH-v2.md](LAUNCH-v2.md) §5 질문 10.
 
 ## 배포 금지 시간대 (OPS-16)

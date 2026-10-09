@@ -340,6 +340,17 @@ describe('OPS-16 · OPS-43g 배포 금지 시간대 — bash 계산이 src/lib/w
     expect(verdict(at(2026, 10, 11, 11, 0), rows)).toBe(0);
   });
 
+  it('[OPS-T19d] v2 전환을 화요일(10/13)로 — 화 아침·점심은 열려 있고, 마지막 창은 수 11:29, 금지는 수 11:30 ~ 목 16:30 (W42 · 목 14:00 — LAUNCH-v2 ①)', () => {
+    const rows = 'div|4|14:00|';
+    expect(verdict(at(2026, 10, 13, 7, 0), rows)).toBe(0); // ① 준비
+    expect(verdict(at(2026, 10, 13, 7, 30), rows)).toBe(0); // ⑥ deploy.sh prod
+    expect(verdict(at(2026, 10, 13, 12, 30), rows)).toBe(0); // 아침을 넘기면 점심으로
+    expect(verdict(at(2026, 10, 14, 11, 29), rows)).toBe(0); // 화요일에 못 하면 수요일 아침이 마지막
+    expect(verdict(at(2026, 10, 14, 11, 30), rows)).toBe(1); // 첫 쪽지(수 11:45) 15분 전부터 금지
+    expect(verdict(at(2026, 10, 15, 16, 29), rows)).toBe(1); // 롤백도 이 사이면 --ignore-window
+    expect(verdict(at(2026, 10, 15, 16, 30), rows)).toBe(0);
+  });
+
   it('[OPS-T19c] 값이 이상하면 판정하지 못한다 — 막는 쪽(2)이다', () => {
     expect(verdict(at(2026, 10, 9, 10, 0), 'div|9|14:00|')).toBe(2);
     expect(verdict(at(2026, 10, 9, 10, 0), 'div|4|25:00|')).toBe(2);
