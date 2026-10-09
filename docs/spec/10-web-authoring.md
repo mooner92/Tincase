@@ -233,6 +233,7 @@ WA-07이 말한 「지난주 계획 불러오기」를 실제로 붙이면서 �
 | WA-39 | 부서원이 hwp **파일을 올려** 제출하는 길이 없다. `POST /api/submissions`(멀티파트) 라우트 파일이 없고(→ 404), `src/app/api/submissions/` 아래 어느 라우트도 `formData()`를 읽지 않는다. 제출물을 만드는 HTTP 문은 웹 작성 `POST /api/submissions/compose`(WA-04) 하나다 — 화면·라우트 중 저장 함수 `uploadSubmission()`을 부르는 곳은 그 라우트뿐 |
 | WA-39a | 화면에도 없다: 제출 탭·드롭존(`SubmitChoice`·`UploadDropzone`)·홈의 「양식 받기」·[내 파일 받기]·지난번 패널 [hwp로 받기]·안내(`/guide`)의 「아직 올리는 길도 열려 있다」 한 줄 (PG-66 · R19) |
 | WA-39b | **그대로인 것**: 이미 올린 제출물 열기·받기·병합(제출은 사실의 기록 — ADR-0007) · 웹 작성 · 담당자 첨삭(WA-20, 업로드로 들어온 판에도) · 부서 양식 등록과 담당자의 「현재 양식 받기」(웹 작성이 이 양식으로 hwp를 만든다) · 저장 함수 `uploadSubmission()`과 그 검증(ST-04~07) — 웹 작성·스크립트(`scripts/seed-fake-submissions.ts` 등)가 쓴다 · 제출물 드로어의 [원본 다운로드] |
+| WA-39d | **전환 주의 월요일(10/12)에 v1으로 올린 제출물** (2026-10-10 — 전환이 화요일로 밀려 월요일에는 v1이 돈다. 이미 켜진 파일럿 부서는 그날 hwp를 올릴 수 있다): 이번 주 제출로 그대로 센다 — 홈 「제출 완료」(낸 시각 · 판), [열기]는 **그 hwp의 표로 작성 화면을 채운다**(WA-35 — 한글에서 만든 파일도 같은 `readWorklog`), 고쳐 내면 v2(`web`)이고 v1(`upload`)은 남는다(ADR-0007). 새 길이 아니다 — WA-39b의 「이미 올린 제출물 열기」가 **이번 주**에도 그대로라는 것을 박아 둔다 |
 | WA-39c | 스위치 `SUBMIT_HWP_UPLOAD`·`src/server/submit-mode.ts`는 **제출과 상관없다.** 남은 독자는 「전사」 게시판 hwp [올리기](RU-60a — `org/page.tsx`·`api/rollup/org/sections/upload`) 하나이고, 그 두 파일은 3단계 흐름을 다시 쓰는 다른 작업의 영역이라 이번에 두었다. [올리기]가 걷히면 부르는 곳이 0이 되고, 그때 파일과 환경변수를 함께 지운다(WA-T33이 부르는 곳을 센다) |
 
 **왜 410이 아니라 404인가.** 스위치 시절에는 길이 「닫혀」 있었다 — 되살릴 수 있어서 410 Gone으로 「지금은 없다」를 말했다.
@@ -329,6 +330,7 @@ model Draft {
 | WA-T53 | ★ 업로드 라우트 파일이 없다 · `src/app/api/submissions/` 아래 라우트는 `formData()`를 읽지 않는다 · 화면·라우트 중 `uploadSubmission`을 부르는 곳은 `compose` 하나 (WA-39, `tests/web-only-submit.test.ts`) |
 | WA-T53b | 부서원 화면·안내에 업로드 길이 없다 — `SubmitChoice`·`UploadDropzone` 파일 없음 · 홈과 `/guide`가 `submit-mode`를 읽지 않는다 · 안내 단계에 업로드 낱말 없음 (WA-39a) |
 | WA-T53c | ★ 웹 작성 문에 hwp 파일을 멀티파트로 보내면 422 · 파일·DB 행·감사 기록이 남지 않는다 (WA-39) |
+| WA-T54 | ★ 월요일에 v1으로 올린 hwp(한글에서 만든 실제 제출물 꼴 — `fixtures/sample-filled-w2.hwp`) — 홈 「제출 완료」 · 주 버튼 [열기] · [열기]가 부르는 열람 응답의 표 = 파일의 표 · `composerStart`가 그것으로 채움(빈 표 아님) · 고쳐 내면 v2 `web`, v1 `upload` 남음 · 현황 「제출」 (WA-39d, `tests/monday-upload.test.ts`) |
 | WA-T48 | 시작점 고르기 — 내용 있는 임시본 > 지금 낸 판 > 빈 표 · 빈 임시본·깨진 임시본은 없는 것 · 낸 판에는 이어 적을 빈 줄과 「공유」가 붙는다 (WA-35, `src/lib/composer.test.ts`) · 화면이 낸 판의 줄과 「공유」를 채워 연다 — 시작점 줄은 없다(2026-10-08, `tests/web-composer.test.ts`) |
 | WA-T49 | 일자 예시 — 이번 주 화요일 `M/D`, 계획은 다음 주. 달·해가 바뀌는 주와 실행 TZ에 흔들리지 않는다 (WA-36a) |
 | WA-T50 | 표 머리글에 「공유」가 있다 · 표 아래 범례 줄은 없다 (WA-36 개정 2026-10-08, `tests/web-composer.test.ts` — 화면 첫 그림) |
