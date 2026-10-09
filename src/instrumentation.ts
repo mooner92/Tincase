@@ -84,17 +84,17 @@ export async function register() {
    *
    * 「다른 부서는 꺼져 있겠지」를 믿고 넘어가면, 실수로 켠 날에도 아무도 모른다.
    * 알림은 잘못 나가면 되돌릴 수 없으므로, 지금 무엇이 켜져 있는지는 **매번 보여야 한다**.
+   * 「발송 부서」는 켜짐 그리고 부서 알림인 곳만 센다(NT-30) — 글은 notifyBootLine 하나가 만든다
    */
   try {
     const { prisma } = await import('./server/db');
     const { messengerStatus } = await import('./server/messenger');
-    const on = await prisma.division.findMany({ where: { notifyEnabled: true }, select: { nameKo: true } });
-    const total = await prisma.division.count();
-    const st = messengerStatus();
-    console.log(
-      `[알림] ${st.enabled ? `켜짐 (수신 허용: ${st.allow})` : `꺼짐 — ${st.reason}`} · ` +
-        `발송 부서 ${on.length}/${total}개: ${on.map((d) => d.nameKo).join(', ') || '없음'}`,
-    );
+    const { notifyBootLine } = await import('./lib/notify-boot');
+    const divisions = await prisma.division.findMany({
+      select: { nameKo: true, isActive: true, notifyEnabled: true },
+      orderBy: { createdAt: 'asc' },
+    });
+    console.log(notifyBootLine(divisions, messengerStatus()));
   } catch (e) {
     console.error('[알림] 설정 확인 실패', e);
   }

@@ -6,7 +6,7 @@
 // 메신저는 흉내 낸다(적기만 하고 아무에게도 보내지 않는다). 사람·부서 이름은 지어낸 것이다.
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { execSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -222,3 +222,39 @@ describe('[NT-T91] 꺼진 부서는 알림 스위치가 켜져 있어도 받지 
     expect(await prisma.mergeReview.count({ where: { divisionId: div.off.id } })).toBe(1);
   });
 });
+
+describe('[NT-T92] 기동 로그 「발송 부서」는 켜짐 그리고 부서 알림인 곳만 센다 (NT-32 · NT-30)', () => {
+  const st = { enabled: true, allow: '전원', reason: '' };
+
+  it('꺼진 부서에 켜 둔 스위치는 발송 부서가 아니다 — 지우지 않고 따로 적는다(켜는 순간 쪽지가 가기 시작한다)', async () => {
+    const { notifyBootLine } = await import('@/lib/notify-boot');
+    const line = notifyBootLine(
+      [
+        { nameKo: '켠실', isActive: true, notifyEnabled: true },
+        { nameKo: '알림 끈 실', isActive: true, notifyEnabled: false },
+        { nameKo: '꺼진실', isActive: false, notifyEnabled: true },
+        { nameKo: '다 꺼진 실', isActive: false, notifyEnabled: false },
+      ],
+      st,
+    );
+    expect(line).toBe('[알림] 켜짐 (수신 허용: 전원) · 발송 부서 1/4개: 켠실 · 알림만 켠 꺼진 부서 1개: 꺼진실');
+    // 미리 켜 둔 곳이 없으면 꼬리가 없다 — 예전 줄과 같은 꼴(LAUNCH-v2 ⑦이 이 줄을 grep한다)
+    expect(notifyBootLine([{ nameKo: '켠실', isActive: true, notifyEnabled: true }], st)).toBe('[알림] 켜짐 (수신 허용: 전원) · 발송 부서 1/1개: 켠실');
+    expect(notifyBootLine([], { enabled: false, allow: '', reason: 'MESSENGER_URL 미설정' })).toBe('[알림] 꺼짐 — MESSENGER_URL 미설정 · 발송 부서 0/0개: 없음');
+  });
+
+  it('이 시험의 DB로 — 본실(켬·알림 끔) · 켠실 · 꺼진실(알림만 켬)이면 발송 부서는 켠실 하나', async () => {
+    const { notifyBootLine } = await import('@/lib/notify-boot');
+    const prisma = await db();
+    await prisma.division.update({ where: { id: div.off.id }, data: { notifyEnabled: true } });
+    const rows = await prisma.division.findMany({ select: { nameKo: true, isActive: true, notifyEnabled: true }, orderBy: { createdAt: 'asc' } });
+    expect(notifyBootLine(rows, st)).toBe('[알림] 켜짐 (수신 허용: 전원) · 발송 부서 1/3개: 켠실 · 알림만 켠 꺼진 부서 1개: 꺼진실');
+  });
+
+  it('기동은 이 함수로 찍는다 — 알림 스위치만 세던 질의가 되살아나지 않게', () => {
+    const src = readFileSync(path.resolve(__dirname, '../src/instrumentation.ts'), 'utf8');
+    expect(src).toContain('notifyBootLine(');
+    expect(src).not.toMatch(/where:\s*\{\s*notifyEnabled:\s*true\s*\}/);
+  });
+});
+
