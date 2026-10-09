@@ -10,8 +10,10 @@
 set -euo pipefail
 
 CONTAINER="repman"
-HOST_TMP="/data/worklog/tmp"
-MOUNT="/mnt/backup"
+# 시험(tests/backup-script.test.ts)만 이 둘을 바꾼다 — 크론은 아무것도 넘기지 않으므로 운영 경로 그대로다
+DATA_ROOT="${BACKUP_DATA_ROOT:-/data/worklog}"
+MOUNT="${BACKUP_MOUNT:-/mnt/backup}"
+HOST_TMP="$DATA_ROOT/tmp"
 DEST="$MOUNT/worklog"
 KEEP_DB_DAYS=30
 KEEP_FILE_WEEKS=12
@@ -37,12 +39,15 @@ case "${1:-}" in
     echo "[backup] db ok: $OUT ($(date -Is))"
     ;;
   files)
-    # 이름은 예전 그대로 divisions-날짜 — 보존 정리(find)와 로그를 바꾸지 않는다. 안에는 org/도 들어간다
+    # 이름은 예전 그대로 divisions-날짜 — 보존 정리(find)와 로그를 바꾸지 않는다. 안에는 org/·templates/도 들어간다
     OUT="$DEST/files/divisions-$(date +%F).tar.gz"
     # 3단계 취합(총괄 섹션 원본·전사본)은 org/ 아래에 있다. 없는 서버에서 tar가 실패하지 않도록 있을 때만 넣는다
     DIRS=(divisions)
-    [ -d /data/worklog/org ] && DIRS+=(org)
-    tar czf "$OUT" -C /data/worklog "${DIRS[@]}"
+    [ -d "$DATA_ROOT/org" ] && DIRS+=(org)
+    # OPS-08a (2026-10-10) — 전사 표준 양식(ST-20 — 운영자가 올린 원본과 이력 standard-v{n}.hwp)은 templates/ 아래에 있다.
+    # DB 백업에는 그 행(StandardTemplate)이 들어가므로 빠지면 복원 뒤 「행은 있는데 파일이 없다」 — 각 부서가 양식을 만드는 원본이 사라진다
+    [ -d "$DATA_ROOT/templates" ] && DIRS+=(templates)
+    tar czf "$OUT" -C "$DATA_ROOT" "${DIRS[@]}"
     find "$DEST/files" -name 'divisions-*.tar.gz' -mtime +$((KEEP_FILE_WEEKS * 7)) -delete
     echo "[backup] files ok: $OUT [${DIRS[*]}] ($(date -Is))"
     ;;

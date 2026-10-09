@@ -282,7 +282,7 @@ sudo docker compose stop app
 D=2026-10-08                                                  # 되돌릴 날짜
 gunzip -c /mnt/backup/worklog/db/worklog-$D.db.gz > /data/worklog/db/worklog.db
 tar xzf /mnt/backup/worklog/files/divisions-$D.tar.gz -C /data/worklog
-# └ 이름은 divisions-지만 안에 divisions/와 (있으면) org/가 같이 들어 있다 — tar tzf로 확인할 수 있다
+# └ 이름은 divisions-지만 안에 divisions/와 (있으면) org/ · templates/가 같이 들어 있다 — tar tzf로 확인할 수 있다 (templates/는 2026-10-10 묶음부터)
 sudo chown -R 10001:mhchoi /data/worklog && sudo chmod -R g+rwX,o-rwx /data/worklog \
   && sudo find /data/worklog -type d -exec chmod g+s {} +     # §1의 세 줄
 sudo docker compose up -d && sleep 15 && curl -fsS http://127.0.0.1:11111/api/health | python3 -m json.tool
@@ -370,6 +370,9 @@ crontab -e
 # 수동 1회 실행으로 확인 (db는 그날 야간본을 같은 이름으로 덮는다 — 첫 설치 때만):
 ~/repman/scripts/backup.sh db && ~/repman/scripts/backup.sh verify
 ```
+
+files 묶음(`divisions-날짜.tar.gz`)에는 `divisions/` · `org/`(있을 때) · **`templates/`**(전사 표준 양식, 있을 때 — 2026-10-10부터, OPS-08a)가 들어간다.
+로그 끝 `[divisions org templates]`로 무엇을 묶었는지 보인다.
 
 **NFS가 fstab에 있어야 한다.** `backup.sh`는 `/mnt/backup`이 마운트 지점이 아니면 `[backup] FATAL`을 찍고 멈춘다 —
 재부팅 뒤 마운트가 빠지면 루트 디스크에 쓰게 되기 때문이다.

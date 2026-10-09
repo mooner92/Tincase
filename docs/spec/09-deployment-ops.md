@@ -231,7 +231,7 @@ sqlite3 /data/worklog/db/worklog.db ".backup '/mnt/backup/worklog/db-$(date +%F)
 | 대상 | 주기 | 보존 | 목적지 |
 |---|---|---|---|
 | DB | 매일 03:00 | 30일 | `/mnt/backup/worklog/db/` (NFS, 실측 227T 여유) |
-| `divisions/**` + `org/**`(있을 때) | **매일 03:30** | 12주 | `/mnt/backup/worklog/files/divisions-날짜.tar.gz` |
+| `divisions/**` + `org/**` + `templates/**`(있을 때) | **매일 03:30** | 12주 | `/mnt/backup/worklog/files/divisions-날짜.tar.gz` |
 
 목적지는 **다른 노드의 NFS**(<NFS-내부-IP>) — 이 서버 디스크 장애에도 생존.
 NFS에는 백업 파일만 둔다. 라이브 SQLite 상주 금지 (ADR-0003). 스크립트는 `scripts/backup.sh {db|files|verify}`.
@@ -242,6 +242,11 @@ NFS에는 백업 파일만 둔다. 라이브 SQLite 상주 금지 (ADR-0003). �
 **`org/`도 묶는다.** 3단계 취합(총괄이 올린 섹션 원본·전사 취합본)은 `STORAGE_ROOT/org/` 아래에 저장된다.
 DB 백업에는 그 행(`OrgSectionUpload`·`RollupRun`)이 들어가므로 파일이 빠지면 복원 뒤 「행은 있는데 파일이 없다」가 된다.
 `org/`가 아직 없는 서버에서는 빼고 묶는다 — 없는 디렉터리 때문에 `tar`가 실패하지 않게.
+
+**OPS-08a — `templates/`도 묶는다 (2026-10-10).** 전사 표준 양식(ST-20 — 운영자가 올린 `templates/standard.hwp`와 이력 `standard-v{n}.hwp`)이
+files 묶음에 없었다. DB 백업에는 그 행(`StandardTemplate`)이 들어가므로 복원하면 「행은 있는데 파일이 없다」 — 각 부서가 양식을 만드는 원본이 사라진다.
+`org/`와 같이 있을 때만 넣는다. 묶음 이름은 그대로(`divisions-날짜`) — 보존 정리와 로그를 바꾸지 않는다.
+시험 `[OPS-T42]`(`tests/backup-script.test.ts` — 임시 디렉터리로 실제로 돌려 묶음 목록을 본다 · 없는 디렉터리는 빼고 · NFS가 없으면 멈춤).
 
 **NFS가 마운트돼 있지 않으면 멈춘다.** `/mnt/backup`이 마운트 지점이 아니면 `backup.sh`는 아무것도 쓰지 않고
 `[backup] FATAL …`을 찍고 1로 끝난다. 재부팅 뒤 마운트가 빠지면 `/mnt/backup`은 **루트 디스크의 빈 디렉터리**가 되고,
