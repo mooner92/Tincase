@@ -315,9 +315,20 @@ lead에게는 이 엔드포인트가 존재하지 않는다(404).
 
 ## 4. 운영자 (operator 전용)
 
-### `GET·POST /api/ops/divisions` · `PUT /api/ops/divisions/:id`
+### `GET /api/ops/divisions` · `PUT /api/ops/divisions`
 
-테넌트 목록·생성·활성화·마감정책·별칭(shortSlug) 변경.
+테넌트 목록·활성화·부서 알림·마감정책·별칭(shortSlug)·게시판 이력 변경. 부서를 만드는 경로(`POST`)는 없다 — 부서는 시드·인원 최신화가 만든다. `id`는 본문에 싣는다.
+
+```jsonc
+// PUT — 바꿀 칸만. 운영자가 아니면 404 · 없는 id 404 · 바꿀 칸이 없으면 422
+{ "id": "c…", "isActive": true, "notifyEnabled": true, "deadlineDow": 4, "deadlineTime": "14:00", "shortSlug": "aiprd", "boardStatus": "confirmed" }
+// 200
+{ "ok": true, "division": { "id": "c…", "isActive": true, "notifyEnabled": true } }
+```
+
+| ID | 요구사항 |
+|---|---|
+| API-66 | **`notifyEnabled`** (2026-10-09 — NT-61): 불리언만 받는다 — 그 밖의 값(`null`·`"true"`·`1` …)은 422 `invalid_request`. 켜짐(`isActive`)과 따로 저장한다 — 꺼진 부서에도 켤 수 있고 켜기 전까지는 효과가 없다(NT-30). 감사 `rule_update`의 `detail`에 `changed`(`notifyEnabled` 포함)와 바뀐 값 `notifyEnabled`. GET의 부서마다 `notifyEnabled`. 문은 그대로 `requireOperator` |
 
 ### `GET·POST·PUT /api/ops/users` · `PUT /api/ops/roster`
 
@@ -417,6 +428,7 @@ v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노�
 | API-T14 | 병합 재실행 — 고친 병합본이면 409 `edited` + `detail.edits`, `overwriteEdits: true`면 실행 (API-55, HM-T136) |
 | API-T18 | 병합 실행 중이면 409 `merging` 「이미 병합 중입니다」(기록 없음) · 10분 넘은 running은 막지 않음 · 같은 순간 두 요청은 하나만 실행 (API-31, HM-T157). 2026-10-08 2단계부터 409는 **다른 프로세스**의 running일 때만 — 같은 프로세스의 겹침은 줄에 합류한다(API-T25) |
 | API-T25 | [지금 병합] → 202 `{ jobId, position, joined }` · `GET ?jobId=`로 끝까지 · 같은 순간 두 요청은 작업 하나(둘째 `joined`) · 남의 부서 작업 id · member → 404 (API-31a · API-65, HM-T165 · HM-T171) |
+| API-T26 | `PUT /api/ops/divisions`의 `notifyEnabled` — 운영자 200 · DB에 저장 · 감사 `changed`에 `notifyEnabled`와 바뀐 값 · 꺼진 부서에도 켜짐(`isActive`는 그대로) · 불리언이 아니면 422(바뀐 것 없음) · 담당·부서장·부서원·총괄 404 · 없는 id 404 · GET에 `notifyEnabled` (API-66, `tests/ops-notify.test.ts`) |
 | API-T15 | 제출물 열람 — 빈 번호 줄은 `rows`에 없고 머리행은 남는다 · `rowsByTable`은 그대로 (API-57) |
 | API-T16 | 병합본 보기 — member는 `review`가 `null`(승인자 이름이 응답에 없다)·`canApprove` 거짓, lead는 `review`를 받는다 · 「위로」 상태의 `sent.by`는 member에게 `null`, lead에게는 이름 (API-58) |
 | API-T17 | 규칙 PUT — `categories`만 저장 · 옛 키(`ruleText`·`guideText`·`emptyWords`·`sort` …)는 열을 바꾸지 않는다 · `categories`가 없거나 500B 초과면 422 · member 404 · 쓰기는 신원의 부서 (API-59, `tests/sprint2.test.ts`) |

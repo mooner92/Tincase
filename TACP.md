@@ -4,7 +4,7 @@
 > 코드·스펙·UI가 이 문서와 어긋나면 **문서가 아니라 코드가 틀린 것**이다.
 > 규칙을 바꾸려면 §10 절차를 따른다. 코드를 먼저 고치는 것은 위반이다.
 
-버전 1.12 · 2026-10-08 · 대상 코드 v1.41.0 (feat/org-rollup) — v1.9 위에 세 갈래를 이력 순서대로 합쳤다: v1.10(병합 줄 · 「병합 점검」 TACP-30 — feat/merge-queue) · v1.11(가짜 알림 수신함 TACP-26) · v1.12 노트(화면 둘러보기 — 새 권한 없음, feat/guide-v2)
+버전 1.13 · 2026-10-09 · 대상 코드 v1.41.0 (feat/org-rollup) — v1.9 위에 세 갈래를 이력 순서대로 합쳤다: v1.10(병합 줄 · 「병합 점검」 TACP-30 — feat/merge-queue) · v1.11(가짜 알림 수신함 TACP-26) · v1.12 노트(화면 둘러보기 — 새 권한 없음, feat/guide-v2) · v1.13 노트(부서 알림 스위치를 운영자 화면으로 — 새 권한 없음)
 관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md) · [ADR-0008](docs/adr/0008-head-principal.md) · [ADR-0012](docs/adr/0012-upward-submission.md) · [ADR-0015](docs/adr/0015-approval-is-handoff.md) · [ADR-0016](docs/adr/0016-division-status-visibility.md) · [ADR-0017](docs/adr/0017-foreign-read-chip.md) · [ADR-0018](docs/adr/0018-manage-settings-trim.md) · [ADR-0019](docs/adr/0019-merge-queue.md)
 
 변경 이력:
@@ -79,6 +79,10 @@
   ③ **새 기록은 자기 것만** — 쓰는 사람 = 세션의 Principal(TACP-1), 본문이 사람을 고르지 못한다, 남의 기록을 읽는 길이 없다(GET 없음). 부서 문서·권한·경계와
   무관해 TACP-6·8·10의 대상이 아니다 ④ **실제 동작을 일으키지 않는다** — 덮개 밖은 `inert`, 구멍은 누를 수 없다, 둘러보기가 보내는 요청은 기록 하나.
   새 Resource의 격리 시험은 PG-T151(내 줄만 — 남의 `userId`를 실어도 내 줄)
+- v1.13 — **노트 (규칙 변경 없음 — 새 권한 없음, 2026-10-09)**: 부서 알림 스위치(`Division.notifyEnabled`, NT-61)를 `/ops` 부서 표에서 바꾼다(PG-91 · API-66).
+  §3.1 「명단 · 역할 · 부서 활성화」 칸에 「부서 알림」을 적는다 — operator만 `manage`, 나머지 `—`(404). 같은 문(`requireOperator` — TACP-12) · 같은 API(`PUT /api/ops/divisions`) ·
+  같은 감사(`rule_update`). 그동안은 화면이 없어 운영 DB에 SQL로 바꿨다 — 서버에 닿는 사람은 operator뿐이므로(§8) 바뀌는 사람은 없고, 감사 기록이 없던 길이 기록이 남는 길로 바뀐 것이다.
+  §10 절차의 1·4·5만 해당한다(불변식·게이트가 바뀌지 않는다 — 단추는 운영자 문 안의 표에만 있다). 시험 API-T26(담당·부서장·부서원·총괄 404)
 
 ---
 
@@ -211,7 +215,7 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
 | 병합 규칙 (분류 순서) — v1.6.4. 예전 「작성 안내 · 병합 규칙」, member read는 작성 안내였다 | **—** | write | write | write | write |
 | 병합 실행 | — | write | write | write | write |
 | **마감 잠시 열기·닫기** | — | write | write | — | write |
-| 명단 · 역할 · 부서 활성화 | — | — | — | — | manage |
+| 명단 · 역할 · 부서 활성화 · 부서 알림 (v1.13) | — | — | — | — | manage |
 | 감사 로그 | — | — | — | — | read |
 
 ### 3.2 병합본 (Resource: `MergeRun` · 결과 파일)
