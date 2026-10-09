@@ -11,6 +11,8 @@
  *   --model-delay-ms=2500  가짜 병합 모델의 응답 지연 — 줄에 선 모습(「줄 n번째」)이 화면에 보일 만큼
  *   --keep              끝나도 작업 디렉터리를 남긴다(실패하면 늘 남긴다)
  *   --headed            브라우저 창을 띄운다
+ *   --scope=launch      출시 범위(OPS-50h — 2026-10-13 운영 전환 그대로): 켠 부서 둘(기획조정실 · AI홍보전략실) · 3단계 끔 · 부서 알림은 그 둘만.
+ *                       기본 `full`은 리허설 저장소 그대로(13개 단위 · 3단계 켬). 범위의 모양은 scripts/e2e-plan.ts
  *   PLAYWRIGHT=<.../node_modules/playwright>  (기본: 이 체크아웃 → /home/mhchoi/kei-dev-0703/web/node_modules/playwright)
  *
  * 흐름 (각 단계는 화면이 보이는 것을 확인한다 — 실패하면 그 화면을 찍어 둔다):
@@ -24,6 +26,10 @@
  *   운영자   로그인 화면 · /ops 병합 줄 · 알림 수신함의 종류 · 감사 로그의 행동
  *   안내     /guide/present PageDown ×5 · B 검은 화면 · 발표자 창 동기화 · 체험하기 주소(#lead-3)
  *   400px    부서원 홈 · 작성 화면 · 수합 관리 — 가로로 넘치지 않는다
+ *
+ * 출시 범위(--scope=launch)는 본부장·안내 흐름을 빼고 이것을 본다: 승인이 위로 가지 않는다(「위로」 카드 · 「올라갔어요」가 어디에도 없다) ·
+ * 담당은 [받기]·[제목 복사]로 취합게시판에 올린다 · 부서장 없는 기획조정실 · 총괄은 현황판만(최종본 열 없음 · /hq 404) ·
+ * 운영자 「알림」(범위 밖 켬 한 줄을 화면에서 끈다) · 「병합 점검」은 운영자와 기획조정실 담당 · **꺼진 부서 사람에게 간 쪽지 0**(수신함 파일을 읽는다).
  *
  * 안전: 서버는 이 스크립트가 만든 임시 저장소(@example.invalid 사람만 — rehearsal.ts prepare)에만 붙는다. 알림은 같은 서버의 가짜 수신함으로만
  * 간다(TINCASE_ENV=demo · MESSENGER_SINK=on — 다른 주소면 서버가 뜨지 않는다, OPS-46). 셸의 환경변수는 넘기지 않는다(.env*도 복사하지 않는다).
@@ -65,6 +71,9 @@ const PORT = num('port', 3460);
 const DEADLINE_IN = num('deadline-in', 9);
 const MODEL_DELAY = num('model-delay-ms', 2500);
 const KEEP = arg('keep') !== undefined;
+/** OPS-50h — 범위. scripts/e2e-plan.ts의 E2E_SCOPES와 같은 목록이다(이 파일은 TS를 불러오지 못한다 — 시드도 같은 값을 다시 본다) */
+const SCOPES = ['full', 'launch'];
+const SCOPE = arg('scope') ?? 'full';
 
 function die(why, code = 2) {
   console.error(`e2e: 멈춤 — ${why}`);
@@ -83,6 +92,8 @@ function mondayOf(ms) {
 /** 운영 · 테스트 · 시연 서버의 포트 — 이 스크립트는 그 서버를 겨누지 않는다(자기가 띄운 서버만 본다) */
 const FORBIDDEN_PORTS = [11111, 11112, 11113];
 if (require.main === module && FORBIDDEN_PORTS.includes(PORT)) die(`포트 ${PORT}는 운영·테스트·시연 서버의 것입니다 — 다른 포트를 주세요`);
+// 빌드(1~2분) 전에 — 모르는 범위로 반쯤 돌고 나서야 알면 그만큼 버린다
+if (require.main === module && !SCOPES.includes(SCOPE)) die(`--scope는 ${SCOPES.join(' | ')} 중 하나입니다 (받은 값: ${SCOPE || '없음'})`);
 
 function loadPlaywright() {
   for (const id of [process.env.PLAYWRIGHT, 'playwright', '/home/mhchoi/kei-dev-0703/web/node_modules/playwright'].filter(Boolean)) {
@@ -293,7 +304,7 @@ async function main() {
     const tsx = require.resolve('tsx/cli', { paths: [app] });
     const tool = (args, what) => run(process.execPath, [tsx, ...args], { cwd: app, env: cleanEnv({}) }, what);
     log(tool(['scripts/rehearsal.ts', 'prepare', `--root=${store}`], 'rehearsal prepare').split('\n').find((l) => l.startsWith('rehearsal prepare')) ?? '');
-    log(tool(['scripts/e2e-seed.ts', `--root=${store}`], 'e2e-seed').trim().split('\n').pop());
+    log(tool(['scripts/e2e-seed.ts', `--root=${store}`, `--scope=${SCOPE}`], 'e2e-seed').trim().split('\n').pop());
     const seed = JSON.parse(fs.readFileSync(path.join(store, 'e2e', 'seed.json'), 'utf8'));
 
     // ── 3. 가짜 병합 모델 · 서버 ──
@@ -346,7 +357,7 @@ async function main() {
     });
     const mj = await moved.json().catch(() => ({}));
     if (moved.status !== 200 || new Date(mj.plan?.department).getTime() !== deadline) die(`마감을 옮기지 못했습니다: HTTP ${moved.status} ${JSON.stringify(mj).slice(0, 200)}`);
-    log(`부서 마감 ${hms(deadline)} (지금 + ${((deadline - Date.now()) / MIN).toFixed(1)}분) · ${mj.plan.weekLabel}`);
+    log(`부서 마감 ${hms(deadline)} (지금 + ${((deadline - Date.now()) / MIN).toFixed(1)}분) · ${mj.plan.weekLabel} · 범위 ${SCOPE}`);
     setupOk = true;
 
     // ── 5. 브라우저 ──
@@ -355,23 +366,8 @@ async function main() {
     const ctx = await makeContexts(browser, base, local, seed);
     const env = { base, local, seed, deadline, store, work, ctx };
 
-    await memberBeforeDeadline(env);
-    await leadBeforeDeadline(env); // 부서원이 취소한 사이 — 미제출이 둘이라 「, 」로 잇는 것까지 본다
-    await memberResubmit(env);
-    await narrowBeforeDeadline(env);
-    await guide(env);
-    await operatorLogin(env);
-    await waitForDeadline(env);
-    await leadAfterDeadline(env);
-    await headApprove(env);
-    await leadReedit(env);
-    await headReapprove(env);
-    await hqApprove(env);
-    await coordinator(env);
-    await memberAfterDeadline(env);
-    await narrowAfterDeadline(env);
-    await operator(env);
-    await serverLog(env);
+    if (SCOPE === 'launch') await launchFlows(env);
+    else await fullFlows(env);
     for (const c of Object.values(ctx.all)) await c.close().catch(() => {});
   } catch (e) {
     if (!setupOk) {
@@ -426,6 +422,8 @@ async function makeContexts(browser, base, local, seed) {
     coord: await make('총괄', t.coordinator),
     ops: await make('운영자', null),
     guide: await make('안내', t.lead, { viewport: { width: 1600, height: 900 } }),
+    // OPS-50h — 출시 범위에서만: 부서장 없는 기획조정실의 담당
+    ...(t.pcLead ? { pcLead: await make('기획조정실담당', t.pcLead) } : {}),
   };
 }
 
@@ -634,6 +632,8 @@ async function memberResubmit({ base, ctx }) {
     const past = p.locator('section[data-guide="past-weeks"]');
     const btn = past.getByRole('button', { name: /병합본 열기/ }).filter({ visible: true }).first();
     const which = await btn.getAttribute('aria-label');
+    // WS-14 — 그 주가 월간이면 줄에 「월간」 칩, 병합본 제목은 「n월 연구운영회의 월간업무」(주차 번호 없음). 둘이 같은 말을 하는지 본다
+    const monthly = (await btn.locator('xpath=ancestor::li[1]').locator('span.chip').filter({ hasText: /^월간$/ }).count()) > 0;
     await btn.click();
     const d = p.getByRole('dialog', { name: '병합본 보기' });
     await d.waitFor({ state: 'visible', timeout: UI });
@@ -641,9 +641,10 @@ async function memberResubmit({ base, ctx }) {
     const title = (await d.locator('h2').innerText()).trim();
     const rows = await d.locator('table tbody tr').count();
     need(!(await d.locator('textarea').count()), '부서원 병합본이 고칠 수 있게 열렸다(CP-114 view)');
+    need(monthly === /^\d+월 연구운영회의 월간업무\(/.test(title), `줄의 월간 칩(${monthly ? '있음' : '없음'})과 병합본 제목이 다르다: ${title}`);
     await d.getByRole('button', { name: '닫기' }).click();
     await d.waitFor({ state: 'detached', timeout: UI });
-    return `${which?.replace(' 열기', '')} → 「${title}」 ${rows}행 · 읽기 전용`;
+    return `${which?.replace(' 열기', '')}${monthly ? '(월간)' : ''} → 「${title}」 ${rows}행 · 읽기 전용`;
   });
   await p.close();
 }
@@ -1149,10 +1150,12 @@ async function narrowAfterDeadline({ base, ctx }) {
     await navLink(p, '수합 관리').click();
     await p.waitForURL(/\/manage$/, { timeout: UI });
     await p.locator('section[data-guide="merge-card"]').waitFor({ timeout: UI });
-    await p.locator('section[data-guide="report-unit"]').waitFor({ timeout: UI });
+    // 「위로」 카드는 3단계가 켜졌을 때만 있다 — 출시 범위(3단계 끔)에는 없어야 한다(OPS-50h)
+    if (SCOPE === 'launch') need(!(await p.locator('section[data-guide="report-unit"]').count()), '3단계가 꺼졌는데 「위로」 카드가 있다');
+    else await p.locator('section[data-guide="report-unit"]').waitFor({ timeout: UI });
     const o = await overflowOf(p);
     need(o.doc <= 0, `가로로 ${o.doc}px 넘침 ${o.wide.join(' ')}`);
-    return `제출 현황 · 병합본 · 위로 · 부서원 목록 — 넘침 없음`;
+    return `제출 현황 · 병합본 · ${SCOPE === 'launch' ? '(위로 없음)' : '위로'} · 부서원 목록 — 넘침 없음`;
   });
   await p.close();
 }
@@ -1228,14 +1231,459 @@ async function operator({ ctx }) {
   await p.close();
 }
 
+// ── 흐름 묶음 ────────────────────────────────────────────────────────────────
+/** 리허설 저장소 그대로(13개 단위 · 3단계 켬) — 화면 흐름을 넓게 본다 */
+async function fullFlows(env) {
+  await memberBeforeDeadline(env);
+  await leadBeforeDeadline(env); // 부서원이 취소한 사이 — 미제출이 둘이라 「, 」로 잇는 것까지 본다
+  await memberResubmit(env);
+  await narrowBeforeDeadline(env);
+  await guide(env);
+  await operatorLogin(env);
+  await waitForDeadline(env);
+  await leadAfterDeadline(env);
+  await headApprove(env);
+  await leadReedit(env);
+  await headReapprove(env);
+  await hqApprove(env);
+  await coordinator(env);
+  await memberAfterDeadline(env);
+  await narrowAfterDeadline(env);
+  await operator(env);
+  await serverLog(env);
+}
+
+/**
+ * OPS-50h — 출시 범위(2026-10-13 운영 전환 그대로 — LAUNCH-v2 「범위」). 부서원·담당의 흐름은 `full`과 같은 함수다(3단계에 기대지 않는다).
+ * 다른 것은 「위로」가 없는 화면 · 부서장 없는 부서 · 총괄의 현황판 · 운영자 「알림」 · 수신함 판정이다.
+ */
+async function launchFlows(env) {
+  await memberBeforeDeadline(env);
+  await leadBeforeDeadline(env);
+  await memberResubmit(env);
+  await narrowBeforeDeadline(env);
+  await operatorLogin(env);
+  await launchOperatorBefore(env);
+  await waitForDeadline(env);
+  await leadAfterDeadline(env);
+  await launchLeadBoard(env);
+  await launchHeadApprove(env);
+  await launchLeadReedit(env);
+  await launchHeadReapprove(env);
+  await launchPcLead(env);
+  await launchCoordinator(env);
+  await memberAfterDeadline(env);
+  await narrowAfterDeadline(env);
+  await launchOperatorAfter(env);
+  await launchSink(env);
+  await serverLog(env);
+}
+
+// ── 출시 범위 (--scope=launch · OPS-50h) ─────────────────────────────────────
+const sameSet = (a, b) => [...new Set(a)].sort().join('|') === [...new Set(b)].sort().join('|');
+const MERGED = '담당/마감 뒤 스케줄러 병합 (줄 → 준비됨)';
+const L_APPROVE = '실장/고쳐 저장 = 승인 → 담당에게 알림 (위로 없음)';
+const L_REEDIT = '담당/승인 뒤 고쳐 저장 → 「승인 뒤 바뀜」 (다시 승인하라는 말 없음)';
+const L_REAPPROVE = '실장/[고칠 것 없음 · 승인] → 담당에게 알림';
+const noHandoff = async (p, where) => need(!(await p.locator('section[data-guide="report-unit"]').count()), `3단계가 꺼졌는데 ${where}에 「위로」 카드가 있다`);
+
+/** `/ops` 부서 표 — 분류 둘을 돌며 이름 → { 분류 · 상태 · 알림 } (줄은 불러온 뒤에 생긴다 — PG-64) */
+async function opsDivisionTable(p) {
+  const sec = p.locator('section[aria-labelledby="divisions"]');
+  const out = {};
+  for (const tab of ['제출 확인', '이력 없음']) {
+    await sec.getByRole('tab', { name: new RegExp(`^${tab}`) }).click();
+    await p.waitForFunction(() => {
+      const t = document.querySelector('section[aria-labelledby="divisions"] tbody');
+      return !!t && !t.textContent.includes('불러오는 중');
+    }, null, { timeout: UI });
+    const rows = sec.locator('tbody tr');
+    const n = await rows.count();
+    for (let i = 0; i < n; i++) {
+      const tds = rows.nth(i).locator('td');
+      if ((await tds.count()) < 8) continue; // 「이 분류에 해당하는 부서가 없습니다」
+      const name = (await tds.nth(0).locator('span').first().innerText()).trim();
+      out[name] = { tab, active: (await tds.nth(5).innerText()).trim(), notify: (await tds.nth(6).innerText()).trim() };
+    }
+  }
+  return out;
+}
+const divisionRow = (p, name) => p.locator('section[aria-labelledby="divisions"] tbody tr').filter({ has: p.getByText(name, { exact: true }) });
+
+/** 운영자 (마감 전) — 범위 확인(LAUNCH-v2 9-7)과 「알림」 스위치(9-5의 2 — 범위 밖 켬 한 줄을 화면에서 끈다) */
+async function launchOperatorBefore({ base, seed, ctx }) {
+  const F = '운영자';
+  const L = seed.launch;
+  const p = await ctx.ops.newPage();
+  const act = (t) => Object.keys(t).filter((k) => t[k].active === '활성');
+  const on = (t) => Object.keys(t).filter((k) => t[k].notify === '켬');
+  await step(F, '/ops 「알림」 — 범위 밖 켬 한 줄 끄기 → 두 부서만', p, async () => {
+    await p.goto(`${base}/ops`, { waitUntil: 'domcontentloaded' });
+    const before = await opsDivisionTable(p);
+    need(Object.keys(before).length >= 10, `부서 표가 ${Object.keys(before).length}줄`);
+    need(sameSet(act(before), L.active), `활성: ${act(before).join(', ')}`);
+    need(sameSet(on(before), [...L.active, L.leftover]), `알림 켬(처음): ${on(before).join(', ')}`);
+    await p.locator('section[aria-labelledby="divisions"]').getByRole('tab', { name: new RegExp(`^${before[L.leftover].tab}`) }).click();
+    const row = divisionRow(p, L.leftover);
+    await row.getByRole('button', { name: '편집' }).click();
+    const [res] = await Promise.all([
+      p.waitForResponse((r) => r.url().endsWith('/api/ops/divisions') && r.request().method() === 'PUT', { timeout: UI }),
+      p.getByRole('button', { name: `${L.leftover} 알림 켬 · 끄기` }).click(),
+    ]);
+    need(res.ok(), `알림 저장 HTTP ${res.status()}`);
+    await p.getByRole('button', { name: `${L.leftover} 알림 끔 · 켜기` }).waitFor({ timeout: UI });
+    await row.getByRole('button', { name: '완료' }).click();
+    await row.locator('span.chip').filter({ hasText: /^끔$/ }).waitFor({ timeout: UI });
+    // 다시 열어도 그대로 — 화면만 바뀐 것이 아니다
+    await p.reload({ waitUntil: 'domcontentloaded' });
+    const after = await opsDivisionTable(p);
+    need(sameSet(on(after), L.active), `알림 켬(끈 뒤): ${on(after).join(', ')}`);
+    need(sameSet(act(after), L.active), `활성(끈 뒤): ${act(after).join(', ')}`);
+    return `활성 ${act(after).join('·')} · 알림 켬 ${on(before).length}줄 → ${on(after).join('·')} (${L.leftover} 끔 · 다시 열어도)`;
+  }, ['운영자/로그인 화면']);
+  await step(F, '/ops 병합 줄 — 마감 전에는 비어 있다', p, async () => {
+    const q = p.locator('section[aria-labelledby="merge-queue"]');
+    await q.waitFor({ timeout: UI });
+    await q.getByText('이번 주 병합 없음').waitFor({ timeout: UI });
+    return '「이번 주 병합 없음」';
+  }, ['운영자/로그인 화면']);
+  await p.close();
+}
+
+/** 담당 (마감 뒤) — 3단계가 꺼졌으니 지금처럼 받아서 취합게시판에 올린다: [받기]의 파일 이름 · [제목 복사]의 글 */
+async function launchLeadBoard({ base, local, ctx }) {
+  const F = '담당';
+  const p = await ctx.lead.newPage();
+  await step(F, '[받기] hwp · [제목 복사] — 취합게시판에 올릴 것', p, async () => {
+    await openManage(p, base);
+    await noHandoff(p, '수합 관리');
+    const card = p.locator('section[data-guide="merge-card"]');
+    const [dl] = await Promise.all([p.waitForEvent('download', { timeout: UI }), card.getByRole('link', { name: '받기' }).click()]);
+    const name = dl.suggestedFilename();
+    const m = name.match(/^\d{4}_\d+월_\d+주차_AI홍보전략실_(주간|월간)업무\.hwp$/);
+    need(m, `파일 이름: ${name}`);
+    const buf = fs.readFileSync(await dl.path());
+    need(buf.subarray(0, 8).toString('hex') === 'd0cf11e0a1b11ae1' && buf.includes(Buffer.from('HWP Document File')), '받은 파일이 hwp가 아니다');
+    await card.getByRole('button', { name: '제목 복사' }).click();
+    await card.getByRole('button', { name: '복사됨 ✓' }).waitFor({ timeout: UI });
+    const q = await ctx.lead.newPage();
+    await q.goto(`${local}/api/health`);
+    const clip = await q.evaluate(() => navigator.clipboard.readText());
+    await q.close();
+    // 게시판 답변 제목 규격(docname.ts boardTitle) — 주간은 「10월1주차」, 월간은 「10월」. 파일 이름과 같은 종류여야 한다
+    need(new RegExp(`^\\d+월(\\d+주차)? 연구운영회의 ${m[1]}업무\\(AI홍보전략실\\)$`).test(clip), `클립보드 「${clip}」`);
+    return `${name} ${Math.round(buf.length / 1024)}KB · 제목 「${clip}」`;
+  }, [MERGED]);
+  await p.close();
+}
+
+/** 실장 (AI홍보전략실) — 고쳐 저장이 곧 승인. 3단계가 꺼졌으니 위로 가지 않고 담당에게 알린다(NT-46 — 끝 줄 「취합게시판에 올려」) */
+async function launchHeadApprove({ base, ctx }) {
+  const F = '실장';
+  const p = await ctx.head.newPage();
+  await step(F, L_APPROVE.split('/')[1], p, async () => {
+    await p.goto(`${base}/`, { waitUntil: 'domcontentloaded' });
+    await dismissTour(p);
+    await navLink(p, '수합 관리').click();
+    await p.waitForURL(/\/manage$/, { timeout: UI });
+    const card = p.locator('section[data-guide="merge-card"]');
+    await card.getByText('부서장 승인 전').waitFor({ timeout: UI });
+    await noHandoff(p, '실장의 수합 관리');
+    await card.getByRole('button', { name: '내용 보기' }).click();
+    const d = p.getByRole('dialog', { name: '병합본 보기' });
+    const band = d.getByText(/^승인 전 · 고쳐 저장하면 승인/);
+    await band.waitFor({ timeout: UI });
+    const bandText = (await band.innerText()).trim();
+    need(bandText === '승인 전 · 고쳐 저장하면 승인', `승인 줄이 위로 가는 것을 말한다: ${bandText}`);
+    const cell = await pickCell(d);
+    await cell.fill(`${await cell.inputValue()} · E2E실장`);
+    await d.getByRole('button', { name: '수정 저장' }).click();
+    const note = d.locator('[data-guide="merged-head"] .text-success').filter({ hasText: /^저장 · 승인/ });
+    await note.waitFor({ timeout: UI });
+    const said = (await note.innerText()).trim();
+    need(said === '저장 · 승인 완료 — 담당자에게 알렸습니다', `저장 뒤 한 마디: ${said}`);
+    await d.locator('span.chip').filter({ hasText: /^승인 완료$/ }).waitFor({ timeout: UI });
+    await d.getByRole('button', { name: '닫기' }).click();
+    await d.waitFor({ state: 'detached', timeout: UI });
+    await card.locator('span.chip').filter({ hasText: /^승인 완료$/ }).waitFor({ timeout: UI });
+    await noHandoff(p, '승인 뒤 수합 관리');
+    return `「${bandText}」 → 「${said}」 · 위로 카드 없음`;
+  }, [MERGED]);
+  await p.close();
+}
+
+async function launchLeadReedit({ base, ctx }) {
+  const F = '담당';
+  const p = await ctx.lead.newPage();
+  await step(F, L_REEDIT.split('/')[1], p, async () => {
+    await openManage(p, base);
+    const card = p.locator('section[data-guide="merge-card"]');
+    await card.locator('span.chip').filter({ hasText: /^승인 완료$/ }).waitFor({ timeout: UI });
+    await card.getByRole('button', { name: '내용 보기' }).click();
+    const d = p.getByRole('dialog', { name: '병합본 보기' });
+    await d.locator('textarea').first().waitFor({ timeout: UI });
+    // 3단계가 꺼졌으면 담당의 저장이 위에 무엇을 남기지 않는다 — 「다시 승인해야 올라갑니다」는 3단계의 말이다(RU-80)
+    need(!(await d.getByText(/다시 승인해야/).count()), '3단계가 꺼졌는데 「다시 승인해야 … 올라갑니다」가 있다');
+    const cell = await pickCell(d);
+    await cell.fill(`${await cell.inputValue()} · E2E담당2`);
+    await d.getByRole('button', { name: '수정 저장' }).click();
+    await d.locator('[data-guide="merged-head"] .text-success').filter({ hasText: /^저장$/ }).waitFor({ timeout: UI });
+    await d.getByRole('button', { name: '닫기' }).click();
+    await d.waitFor({ state: 'detached', timeout: UI });
+    await card.locator('span.chip').filter({ hasText: '승인 뒤 바뀜' }).waitFor({ timeout: UI });
+    await noHandoff(p, '수합 관리');
+    return '「저장」 · 병합 카드 「승인 뒤 바뀜」';
+  }, [L_APPROVE]);
+  await p.close();
+}
+
+async function launchHeadReapprove({ base, ctx }) {
+  const F = '실장';
+  const p = await ctx.head.newPage();
+  await step(F, L_REAPPROVE.split('/')[1], p, async () => {
+    await openManage(p, base);
+    const card = p.locator('section[data-guide="merge-card"]');
+    await card.getByText('승인 뒤 바뀜').first().waitFor({ timeout: UI });
+    await card.getByRole('button', { name: '고칠 것 없음 · 승인' }).click();
+    const note = card.locator('p.text-success').filter({ hasText: /승인/ });
+    await note.waitFor({ timeout: UI });
+    const said = (await note.innerText()).trim();
+    need(said === '승인 완료 — 담당자에게 알렸습니다', `승인 뒤 한 마디: ${said}`);
+    await card.locator('span.chip').filter({ hasText: /^승인 완료$/ }).waitFor({ timeout: UI });
+    await noHandoff(p, '수합 관리');
+    return `「${said}」`;
+  }, [L_REEDIT]);
+  await p.close();
+}
+
+/** 기획조정실 담당 — 부서장을 두지 않은 부서(LAUNCH-v2 9-4 「아니오」). 담당이 확인한 병합본이 최종이다: 승인 줄도 위로 카드도 없다 */
+async function launchPcLead({ base, ctx }) {
+  const F = '담당(기획조정실)';
+  const p = await ctx.pcLead.newPage();
+  await step(F, '부서장 없는 부서 — 병합본 준비됨 · 승인 줄 없음 · [제목 복사]', p, async () => {
+    await p.goto(`${base}/`, { waitUntil: 'domcontentloaded' });
+    await dismissTour(p);
+    await navLink(p, '수합 관리').click();
+    await p.waitForURL(/\/manage$/, { timeout: UI });
+    const card = p.locator('section[data-guide="merge-card"]');
+    await card.waitFor({ timeout: UI });
+    // 기획조정실은 줄의 앞(제출이 적은 부서부터 — HM-59c)이라 AI홍보전략실이 끝났으면 이미 끝났다. 혹시 몰라 잠깐 새로 고친다
+    const until = Date.now() + 2 * MIN;
+    while (!/준비됨/.test((await mergeChip(p).innerText()).trim())) {
+      need(Date.now() < until, `병합본이 준비되지 않았다: ${(await mergeChip(p).innerText()).trim()}`);
+      await p.waitForTimeout(1500);
+      await p.reload({ waitUntil: 'domcontentloaded' });
+      await card.waitFor({ timeout: UI });
+    }
+    need(!(await card.getByText(/부서장 승인 전|승인 완료|승인 뒤 바뀜/).count()), '부서장이 없는데 승인 줄이 있다');
+    await noHandoff(p, '기획조정실 수합 관리');
+    await card.getByRole('button', { name: '제목 복사' }).waitFor({ timeout: UI });
+    return '준비됨 · 승인 줄 없음 · 위로 카드 없음 · [받기]·[제목 복사]';
+  }, [MERGED]);
+  await p.close();
+}
+
+/** 총괄 — readAll이라 「전사」 현황판은 보지만, 3단계가 꺼졌으니 취합 쪽(최종본 열 · 전사본 · 본부 취합)은 없다(RU-52 · PG-51e) */
+async function launchCoordinator({ base, seed, ctx }) {
+  const F = '총괄';
+  const p = await ctx.coord.newPage();
+  await step(F, '/org — 제출 현황판만 (최종본 열 없음)', p, async () => {
+    await p.goto(`${base}/`, { waitUntil: 'domcontentloaded' });
+    await dismissTour(p);
+    need(!(await navLink(p, '본부 취합').count()), '3단계가 꺼졌는데 「본부 취합」 메뉴가 있다');
+    await navLink(p, '전사').click();
+    await p.waitForURL(/\/org/, { timeout: UI });
+    const board = p.locator('section[data-guide="org-board"]');
+    await board.waitFor({ timeout: UI });
+    const text = await board.innerText();
+    need(/제출/.test(text) && !/최종본/.test(text), '현황판 머리에 최종본 열이 있다');
+    need(!(await p.locator('section[data-guide="org-run"]').count()), '전사본 카드가 있다');
+    need(!(await p.getByRole('link', { name: '섹션 구성 편집' }).count()), '「섹션 구성 편집」이 있다');
+    const bars = await board.getByRole('button', { name: /제출 \d+\/\d+ —/ }).evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label') ?? ''));
+    need(bars.length === seed.launch.active.length && seed.launch.active.every((d) => bars.some((b) => b.includes(d))), `제출 막대: ${bars.join(' · ')}`);
+    return `제출 막대 ${bars.length}줄(${bars.map((b) => b.split(' 제출 ')[0]).join(' · ')}) · 최종본 열·전사본 카드 없음`;
+  });
+  await step(F, '/hq → 404 (3단계 꺼짐)', p, async () => {
+    const hq = await p.goto(`${base}/hq`, { waitUntil: 'domcontentloaded' });
+    need(hq && hq.status() === 404, `/hq HTTP ${hq && hq.status()}`);
+    const node = await p.goto(`${base}/hq?node=${encodeURIComponent(seed.launch.slugs['기획경영본부'])}`, { waitUntil: 'domcontentloaded' });
+    need(node && node.status() === 404, `/hq?node= HTTP ${node && node.status()}`);
+    return '/hq 404 · /hq?node=기획경영본부 404';
+  });
+  await step(F, '타 부서 수합 관리(읽기) — 위로 카드 없음', p, async () => {
+    await p.goto(`${base}/${seed.aiSlug}/manage`, { waitUntil: 'domcontentloaded' });
+    await p.locator('section[data-guide="merge-card"]').waitFor({ timeout: UI });
+    await noHandoff(p, '총괄이 연 AI홍보전략실 수합 관리');
+    return `/${seed.aiSlug}/manage — 병합 카드 · 위로 카드 없음`;
+  });
+  await p.close();
+}
+
+/** 운영자 (마감 뒤) — 병합 줄은 켠 두 부서만 · 수신함 화면의 종류와 받는 사람 · 감사 로그에 「위로 제출」이 없다 */
+async function launchOperatorAfter({ base, seed, ctx }) {
+  const F = '운영자';
+  const L = seed.launch;
+  const p = await ctx.ops.newPage();
+  await step(F, '/ops 병합 줄 — 켠 두 부서만 · n/n 끝', p, async () => {
+    await p.goto(`${base}/ops`, { waitUntil: 'domcontentloaded' });
+    const q = p.locator('section[aria-labelledby="merge-queue"]');
+    await q.waitFor({ timeout: UI });
+    const head = (await q.locator('h2 + span').innerText()).trim();
+    const m = head.match(/(\d+)\/(\d+) 끝/);
+    need(m && m[1] === m[2] && Number(m[2]) === L.active.length, `줄 요약: ${head}`);
+    const names = (await q.locator('tbody tr td:nth-child(2) span.font-medium').allInnerTexts()).map((s) => s.trim());
+    need(sameSet(names, L.active), `줄에 선 부서: ${names.join(', ')}`);
+    const ai = (await q.locator('tbody tr').filter({ hasText: 'AI홍보전략실' }).innerText()).replace(/\s+/g, ' ');
+    need(/수동/.test(ai) && /끝/.test(ai), `AI홍보전략실 줄: ${ai}`);
+    return `「${head}」 · ${names.join('·')}`;
+  }, ['운영자/로그인 화면']);
+
+  await step(F, '알림 수신함 — 승인 완료 → 담당 · 병합 점검 → 운영자·기획조정실 담당', p, async () => {
+    await p.getByRole('link', { name: '알림 수신함' }).click();
+    await p.waitForURL(/\/ops\/notify-sink$/, { timeout: UI });
+    const tabs = p.getByRole('navigation', { name: '종류별' }).getByRole('link');
+    await tabs.first().waitFor({ timeout: UI });
+    const got = (await tabs.allInnerTexts()).map((s) => s.replace(/\s+/g, ' ').trim());
+    const labels = got.map((s) => s.replace(/\s*\d+$/, ''));
+    const want = ['병합 점검', '승인 완료', ...(DEADLINE_IN >= 8 && DEADLINE_IN <= 10 ? ['10분 전'] : [])];
+    const lack = want.filter((w) => !labels.includes(w));
+    need(!lack.length, `없는 종류: ${lack.join(', ')} (있는 것: ${got.join(' · ')})`);
+    // 「다시 승인」은 3단계의 쪽지다(NT-52) — 담당이 승인 뒤 고쳤어도 꺼져 있으면 가지 않는다
+    need(!labels.includes('다시 승인'), `3단계가 꺼졌는데 「다시 승인」이 있다 (${got.join(' · ')})`);
+    for (const [kind, who] of [['승인 완료', [L.aiLead]], ['병합 점검', L.batch]]) {
+      const tab = tabs.filter({ hasText: new RegExp(`^${kind}\\s*\\d+$`) });
+      const href = await tab.getAttribute('href');
+      await tab.click();
+      await p.waitForURL((u) => `${u.pathname}${u.search}` === href, { timeout: UI });
+      await p.locator('table tbody tr td:nth-child(3) .chip').first().filter({ hasText: kind }).waitFor({ timeout: UI });
+      const to = (await p.locator('table tbody tr td:nth-child(2)').allInnerTexts()).join(' ');
+      const emails = [...new Set(to.match(/[\w.+-]+@example\.invalid/g) ?? [])];
+      need(sameSet(emails, who), `「${kind}」 받는 사람 ${emails.join(', ')} ≠ ${who.join(', ')}`);
+    }
+    return `${got.join(' · ')} · 승인 완료 → ${L.aiLead} · 병합 점검 → ${L.batch.join(', ')}`;
+  }, ['운영자/로그인 화면']);
+
+  await step(F, '감사 로그 — 행동 · 「위로 제출」·「본부본·전사본」 없음', p, async () => {
+    await p.goto(`${base}/ops`, { waitUntil: 'domcontentloaded' });
+    await p.getByRole('link', { name: '감사 로그' }).first().click();
+    await p.waitForURL(/\/ops\/audit/, { timeout: UI });
+    const tabs = p.getByRole('navigation', { name: '행동별 필터' }).getByRole('link');
+    await tabs.first().waitFor({ timeout: UI });
+    const got = (await tabs.allInnerTexts()).map((s) => s.replace(/\s+/g, ' ').trim());
+    const labels = got.map((s) => s.replace(/\s*\d+$/, ''));
+    const want = ['제출', '제출물 삭제', '제출물 고침', '병합 실행', '설정 변경', '마감 변경'];
+    const lack = want.filter((w) => !labels.includes(w));
+    need(!lack.length, `없는 행동: ${lack.join(', ')} (있는 것: ${got.join(' · ')})`);
+    const up = ['위로 제출', '본부본·전사본'].filter((w) => labels.includes(w));
+    need(!up.length, `3단계가 꺼졌는데 ${up.join(' · ')} 기록이 있다`);
+    // 「설정 변경」에 운영자의 「알림」(마감 전 흐름) — 화면으로 바꾸면 감사가 남는다(NT-61)
+    const tab = tabs.filter({ hasText: /^설정 변경\s*\d+$/ });
+    const href = await tab.getAttribute('href');
+    await tab.click();
+    await p.waitForURL((u) => `${u.pathname}${u.search}` === href, { timeout: UI });
+    await p.locator('table tbody tr td:nth-child(3) .chip').first().filter({ hasText: '설정 변경' }).waitFor({ timeout: UI });
+    const actors = (await p.locator('table tbody tr td:nth-child(2)').allInnerTexts()).join(' ');
+    need(actors.includes(seed.ops.email), `「설정 변경」에 운영자가 없다: ${actors.replace(/\s+/g, ' ').slice(0, 120)}`);
+    return `${want.length}가지 · 위로 제출·본부본 없음 · 설정 변경에 운영자`;
+  }, ['운영자/로그인 화면']);
+  await p.close();
+}
+
+/**
+ * OPS-50h — 수신함 기록(가짜 알림 수신함 NT-56b의 `dev/messenger-sink.jsonl`)을 출시 범위의 사실(seed.json)로 판정한다. 순수 함수 — 시험이 부른다.
+ * 앱 코드를 불러 쓰지 않는다(리허설 OPS-47b와 같은 까닭). 사람 → 부서 → 켜짐은 시드가 DB에서 적어 둔 사실이다.
+ */
+function judgeLaunchSink(entries, L) {
+  const counts = {};
+  const leaks = [];
+  const unknown = [];
+  const unlabeled = [];
+  const stage3 = [];
+  for (const e of entries) {
+    const base = String(e.kind ?? '').split(':')[0];
+    counts[base || '(종류 없음)'] = (counts[base || '(종류 없음)'] ?? 0) + 1;
+    if (!base) unlabeled.push(e.subject ?? '');
+    // 3단계 쪽지(RU-53~57b의 ru_* · NT-52 merge_reapprove)는 스위치가 꺼지면 하나도 없다
+    if (/^ru_/.test(base) || base === 'merge_reapprove') stage3.push(base);
+    for (const r of e.recipients ?? []) {
+      const who = L.people[r.email];
+      if (!who) unknown.push(`${base} → ${r.employeeNo || '?'}`);
+      else if (!who.active) leaks.push(`${base} → ${r.email} (${who.div})`);
+    }
+  }
+  const to = (prefix) => entries.filter((e) => String(e.kind ?? '').startsWith(prefix)).flatMap((e) => (e.recipients ?? []).map((r) => r.email));
+  return {
+    counts,
+    leaks,
+    unknown,
+    unlabeled,
+    stage3,
+    batchTo: [...new Set(to('merge_batch:'))].sort(),
+    approved: entries.filter((e) => String(e.kind ?? '').startsWith('merge_approved:')),
+  };
+}
+
+async function launchSink({ store, seed }) {
+  const L = seed.launch;
+  const read = () => {
+    const file = path.join(store, 'dev', 'messenger-sink.jsonl');
+    const lines = fs.existsSync(file) ? fs.readFileSync(file, 'utf8').split('\n').filter(Boolean) : [];
+    return lines.map((l) => {
+      try {
+        return JSON.parse(l);
+      } catch {
+        return null;
+      }
+    }).filter(Boolean);
+  };
+  await step('수신함', '꺼진 부서 사람에게 0통 · 3단계 쪽지 0 · 종류 없는 쪽지 0', null, async () => {
+    const entries = read();
+    need(entries.length > 0, '수신함이 비어 있다 — 알림이 하나도 안 나갔다');
+    const j = judgeLaunchSink(entries, L);
+    need(!j.leaks.length, `꺼진 부서로 간 쪽지 ${j.leaks.length}건: ${j.leaks.slice(0, 3).join(' · ')}`);
+    need(!j.unknown.length, `모르는 사번으로 간 쪽지: ${j.unknown.slice(0, 3).join(' · ')}`);
+    need(!j.stage3.length, `3단계 쪽지: ${[...new Set(j.stage3)].join(', ')}`);
+    need(!j.unlabeled.length, `종류 없는 쪽지 ${j.unlabeled.length}통(NT-56c)`);
+    return `${entries.length}통 — ${Object.entries(j.counts).map(([k, n]) => `${k} ${n}`).join(' · ')}`;
+  });
+  await step('수신함', '병합 점검 → 운영자·기획조정실 담당(총괄 아님) · 승인 완료 → 담당 두 통', null, async () => {
+    const j = judgeLaunchSink(read(), L);
+    need(sameSet(j.batchTo, L.batch), `「병합 점검」 받은 사람 ${j.batchTo.join(', ') || '없음'} ≠ ${L.batch.join(', ')}`);
+    need(!j.batchTo.includes(L.coordinator), `총괄(${L.coordinator})이 총괄이라서 「병합 점검」을 받았다(TACP-30)`);
+    need(j.approved.length === 2, `「승인 완료」 ${j.approved.length}통 (고쳐 저장 · 고칠 것 없음 — 두 통이어야 한다)`);
+    for (const e of j.approved) {
+      need(e.recipients.length === 1 && e.recipients[0].email === L.aiLead, `「승인 완료」 받는 사람: ${e.recipients.map((r) => r.email).join(', ')}`);
+      // 3단계가 꺼졌으면 끝 줄이 v1.39 그대로다(NOTIFICATIONS-v2 §3.3) — 담당이 받아서 올린다
+      need(e.contents.includes('취합게시판에 올려주세요') && !/자동으로 올라갔어요/.test(e.contents), `「승인 완료」 끝 줄: ${e.contents.split('\n').pop()}`);
+    }
+    return `병합 점검 → ${j.batchTo.join(', ')} · 승인 완료 2통 → ${L.aiLead} (끝 줄 「취합게시판에 올려주세요」)`;
+  }, [MERGED, L_APPROVE, L_REAPPROVE]);
+}
+
 // ── 서버 로그 ────────────────────────────────────────────────────────────────
-async function serverLog({ work }) {
+async function serverLog({ work, seed }) {
+  const lines = () => fs.readFileSync(path.join(work, 'server.log'), 'utf8').split('\n');
   await step('서버', '로그에 오류 없음', null, async () => {
-    const lines = fs.readFileSync(path.join(work, 'server.log'), 'utf8').split('\n');
-    const bad = lines.filter((l) => /오류|Error|FATAL|Unhandled|⨯/.test(l) && !/"level":(30|40)/.test(l));
+    const all = lines();
+    const bad = all.filter((l) => /오류|Error|FATAL|Unhandled|⨯/.test(l) && !/"level":(30|40)/.test(l));
     need(!bad.length, `${bad.length}줄 — ${bad.slice(0, 2).join(' / ').slice(0, 300)}`);
-    const merges = lines.filter((l) => l.includes('[merge] 자동 병합')).length;
+    const merges = all.filter((l) => l.includes('[merge] 자동 병합')).length;
     return `오류 0 · 자동 병합 줄 넣음 ${merges}번`;
+  });
+  if (SCOPE !== 'launch') return;
+  // NT-32 — 기동 로그의 「발송 부서」는 켜짐 그리고 알림만 센다. 기동 때는 범위 밖 한 줄(꺼진 부서)이 아직 알림 켬이다 — 운영자가 끄기 전이다.
+  // 예전 줄은 그 부서까지 「발송」으로 셌다(「발송 부서 3/14개」) — 운영자가 LAUNCH-v2 ⑦에서 보는 수가 실제와 달랐다
+  await step('서버', '기동 로그 「발송 부서」 — 켠 두 부서만 · 알림만 켠 꺼진 부서는 따로 (NT-32)', null, async () => {
+    const L = seed.launch;
+    const line = lines().find((l) => l.startsWith('[알림] 켜짐'));
+    need(line, '기동 로그에 「[알림] 켜짐」 줄이 없다');
+    const m = line.match(/발송 부서 (\d+)\/(\d+)개: (.*?)(?: · 알림만 켠 꺼진 부서 (\d+)개: (.*))?$/);
+    need(m, `기동 로그: ${line}`);
+    const sending = m[3].split(', ');
+    const parked = m[5] ? m[5].split(', ') : [];
+    need(Number(m[1]) === L.active.length && sameSet(sending, L.active), `발송 부서: ${m[1]}개 ${m[3]}`);
+    need(sameSet(parked, [L.leftover]), `알림만 켠 꺼진 부서: ${m[5] ?? '없음'}`);
+    return line.replace(/^\[알림\] /, '');
   });
 }
 
@@ -1246,4 +1694,4 @@ if (require.main === module) {
     process.exit(2);
   });
 }
-module.exports = { cleanEnv, FORBIDDEN_PORTS, mondayOf, kstIso };
+module.exports = { cleanEnv, FORBIDDEN_PORTS, SCOPES, mondayOf, kstIso, judgeLaunchSink };
