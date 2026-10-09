@@ -136,8 +136,8 @@ services:
 | `MAX_UPLOAD_BYTES` | `20971520` | | 기본 20MB |
 | `SUBMIT_HWP_UPLOAD` | `off` | | 기본 `on`. `off`면 「전사」 게시판 hwp [올리기]를 닫는다(RU-60a) — 테스트 서버만 `off`. 부서원 제출과는 상관없다: hwp 업로드 제출은 2026-10-08에 코드째 없어졌다(WA-39 · [ADR-0014](../adr/0014-web-only-submission.md)). [올리기]가 걷히면 이 변수도 지운다 |
 | `DEV_IDENTITY` | `me@kei.re.kr` | | **개발 전용** (AU-03) |
-| `TINCASE_ENV` | `test` · `demo` | | 시험(11112 평소)·시연(11112 시연 모드) 서버 표식 — 띠(RU-43·47)·기동 검사(RU-45 · OPS-46)·가짜 알림 수신함(NT-56)이 같은 값을 본다. **운영에는 없다** |
-| `MESSENGER_SINK` | `on` | | 기본 `off`. 가짜 알림 수신함(`/api/dev/messenger-sink` · `/ops/notify-sink`)의 명시 스위치 — `TINCASE_ENV`가 test·demo일 때만 뜻이 있다(NT-56) |
+| `TINCASE_ENV` | `test` · `demo` | | 시험(11112 평소)·시연(11112 시연 모드) 서버 표식 — 띠(RU-43·47)·기동 검사(RU-45 · OPS-46)·가짜 알림 수신함(NT-56)이 같은 값을 본다. **운영에는 없다** — 운영 compose가 빈 값으로 못 박는다(OPS-46a) |
+| `MESSENGER_SINK` | `on` | | 기본 `off`. 가짜 알림 수신함(`/api/dev/messenger-sink` · `/ops/notify-sink`)의 명시 스위치 — `TINCASE_ENV`가 test·demo일 때만 뜻이 있다(NT-56). 운영 compose는 `off`로 못 박는다(OPS-46a) |
 
 ### OPS-06 — 기동 시 환경변수 검증
 
@@ -159,6 +159,14 @@ production에서 `DEV_IDENTITY`가 설정돼 있으면 **거부**한다.
 
 비어 있는 `MESSENGER_URL`은 어디서나 괜찮다(알림 끔). 수신함 주소는 **경로**(`/api/dev/messenger-sink`)로 알아본다 — 호스트·포트는 컨테이너 안팎에서 다르다.
 시험 `[NT-T76]`(`tests/messenger-sink.test.ts`).
+
+**OPS-46a — 운영은 시험 서버 설정을 물려받지 않는다 (2026-10-10).** 두 구멍을 막는다.
+① **표기.** 같은 경로의 다른 표기(겹 빗금 `//api//dev/…` · 대소문자 · 퍼센트 부호 · 물음표 뒤)는 예전 판정에서 「수신함 아님」이라 운영이 수신함으로
+보내는 설정이 그대로 떴다. 이제 `isSinkUrl`은 경로를 풀어(퍼센트) 소문자로 · 겹 빗금을 하나로 · 끝 빗금을 떼고 견준다. `entrypoint.sh`도 물음표·# 뒤를 떼고
+소문자 · 겹 빗금 하나로 같은 판정을 한다(퍼센트 부호는 앱이 멈춘다 — 이유가 로그 첫 줄이 아닐 뿐).
+② **env 파일.** 운영 compose의 `environment`에 `TINCASE_ENV: ""` · `MESSENGER_SINK: "off"`를 못 박는다 — `environment`는 `env_file`(`.env.production`)보다 이겨서,
+시험 서버 설정을 옮겨 붙이는 실수가 운영에 수신함을 열거나(TACP-26) 띠를 띄우지 못한다. 옛 앱(v1.39.0)은 두 값을 읽지 않는다 — 롤백에도 그대로다.
+시험 `[NT-T85]`(compose · 표기 · 입구 — `tests/messenger-sink.test.ts`).
 
 ### OPS-48 — DB 스키마가 이 판보다 오래됐으면 뜨지 않는다 (2026-10-09)
 

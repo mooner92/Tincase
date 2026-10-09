@@ -241,7 +241,7 @@ sudo docker exec repman sqlite3 /data/db/worklog.db ".tables" | tr -s ' ' '\n' |
 
 기동한 뒤(2b-4):
 
-- [ ] 로그에 `[merge] 자동 병합 스케줄러 등록 (1분 주기)` — 기동 env 검사(OPS-46)가 통과했다는 뜻이기도 하다. 운영 compose에 `TINCASE_ENV`·`MESSENGER_SINK`가 없다
+- [ ] 로그에 `[merge] 자동 병합 스케줄러 등록 (1분 주기)` — 기동 env 검사(OPS-46)가 통과했다는 뜻이기도 하다. 운영 compose는 `TINCASE_ENV`를 빈 값 · `MESSENGER_SINK`를 `off`로 못 박는다(OPS-46a — `.env.production`에 적혀 있어도 이긴다)
 - [ ] `/ops` — 「병합 줄」 카드(이번 주 병합 없음), 머리에 [알림 수신함]이 **없다**(운영은 수신함이 닫혀 있다 — `/ops/notify-sink` 404)
 - [ ] 본부 부서(문서가 없는 본부)의 **알림 스위치가 꺼져 있다** — 켜 두면 본부 담당자에게 마감 독촉·「병합본이 아직 없어요」가 간다(CHANGELOG 「주말 시험」 ⚑)
 - [ ] 첫 마감 뒤: `[merge] 자동 병합 n건 줄에 넣음` → `[merge] 줄 k/n — …` · 마감 +15분 안에 「병합 점검」이 운영자와 기획조정실 담당에게 한 통(NT-60)

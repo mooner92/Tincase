@@ -43,8 +43,8 @@ v1.11(가짜 알림 수신함 TACP-26) → **v1.12**(화면 둘러보기 노트 
   - 새 열: `Division.rollupOrder`·`rollupNote`·`rollupPageBreak`·`rollupSelf` · `MergeReview.filePath` · **`MergeRun.outputSha`**(HM-56e — 옛 실행은 null) ·
     **`SetupToken.supersededAt`**(2026-10-10 출시 전 점검 — 밀린 설정 링크, AU-30a)
   - 관계 필드만(열 없음): `Division.reportSubmissions`·`rollupRuns` · `WeekSlot.reportSubmissions`·`rollupRuns` · `User.guideTours`
-  - 가짜 알림 수신함은 **스키마가 없다** — 기록은 저장소 파일(`$STORAGE_ROOT/dev/messenger-sink.jsonl`)이고 시험·시연 서버에만 생긴다. 운영 compose에는
-    `TINCASE_ENV`·`MESSENGER_SINK`를 넣지 않는다 — 운영의 `MESSENGER_URL`이 수신함 주소면 기동이 거부한다(OPS-46)
+  - 가짜 알림 수신함은 **스키마가 없다** — 기록은 저장소 파일(`$STORAGE_ROOT/dev/messenger-sink.jsonl`)이고 시험·시연 서버에만 생긴다. 운영 compose는
+    `TINCASE_ENV`를 빈 값 · `MESSENGER_SINK`를 `off`로 못 박는다(2026-10-10 OPS-46a — 예전에는 「넣지 않는다」였다) — 운영의 `MESSENGER_URL`이 수신함 주소면 기동이 거부한다(OPS-46)
   - 기동 로그: `[merge] 자동 병합 스케줄러 등록` → 마감 뒤 `[merge] 자동 병합 n건 줄에 넣음` · `[merge] 줄 k/n — …` · 「병합 점검」은 운영자와 기획조정실 담당에게
   - 본부 부서(문서가 없는 본부)의 **알림 스위치는 꺼 둔다** — 아래 「주말 시험」 절의 ⚑
   - `Division`은 열 넷이 기본값 있는 NOT NULL이라 Prisma가 **표를 새로 만들어 옮긴다**(행·외래 키 그대로 — main 스키마 DB 사본에서 원래 열 값 같음 ·

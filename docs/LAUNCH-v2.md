@@ -281,7 +281,8 @@ curl -sS http://127.0.0.1:11111/api/health | python3 -m json.tool
 #   ok:true · checks.db / storage / template = ok · rootDisk ok(또는 warn) · warnings 비어 있음
 echo "FATAL 줄: $(sudo docker logs --since 20m repman 2>&1 | grep -c FATAL)개"     # 0
 sudo docker logs --since 20m repman 2>&1 | grep -E '^\[boot\]|\[merge\]|\[알림\]'
-sudo docker exec repman printenv | grep -E '^(TINCASE_ENV|MESSENGER_SINK|MERGE_SCHEDULER|SESSION_COOKIE_NAME|SUBMIT_HWP_UPLOAD)=' || echo "테스트 값 없음"
+sudo docker exec repman printenv | grep -E '^(TINCASE_ENV=.|MESSENGER_SINK=on|MERGE_SCHEDULER=|SESSION_COOKIE_NAME=|SUBMIT_HWP_UPLOAD=)' || echo "테스트 값 없음"
+#   운영 compose는 TINCASE_ENV를 빈 값 · MESSENGER_SINK를 off로 못 박는다(OPS-46a) — 그 두 줄(`TINCASE_ENV=` · `MESSENGER_SINK=off`)은 정상이라 위 거르기에 걸리지 않는다
 ```
 
 기동 로그에 있어야 하는 줄:
@@ -550,7 +551,7 @@ sudo docker inspect repman --format '{{.Image}}' | diff - ~/deploy-$TS/image-v1.
 ```
 
 - `repman:v1.39.0` = ① 시점에 돌던 이미지(v1). `repman:rollback`도 보통 같은 이미지다(⑥이 한 번만 빌드했으면). 자세한 것은 [DEPLOY.md](DEPLOY.md) §2b-롤백.
-- `--no-build`는 지금 체크아웃(v2)의 `docker-compose.yml`로 컨테이너를 만든다 — v1.39.0과 다른 것은 `MERGE_MODEL_KEEP_ALIVE` 한 줄이고 옛 앱은 읽지 않는다(2026-10-09 diff).
+- `--no-build`는 지금 체크아웃(v2)의 `docker-compose.yml`로 컨테이너를 만든다 — v1.39.0과 다른 것은 `MERGE_MODEL_KEEP_ALIVE` 한 줄(2026-10-09 diff)과 `TINCASE_ENV: ""` · `MESSENGER_SINK: "off"`(OPS-46a, 2026-10-10)이고 옛 앱은 셋 다 읽지 않는다.
 - 며칠 v1으로 갈 거면 `main`도 되돌린다(위 표 첫 줄) — 그대로 두면 다음 빌드가 v2를 굽는다.
 - DB는 그대로다 — ⑨에서 한 설정(기획조정실 켜기 · 사람 · 알림 스위치)이 남고 옛 앱도 그것을 따른다. 기획조정실에도 **v1 쪽지**가 간다
   (당일 09:00 알림 포함, 끝 줄 「취합게시판에 올리고」).

@@ -8,9 +8,9 @@
 //
 // DB: prisma/test-sink.db — 이 파일 전용.
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import { createServer, type IncomingHttpHeaders, type Server } from 'node:http';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { isSinkUrl, sinkBootProblem, sinkOpen, SINK_PATH } from '@/lib/messenger-sink';
@@ -268,10 +268,67 @@ describe('[NT-T79] 시험 서버 compose — 알림은 같은 컨테이너의 �
     expect(c).toMatch(/MESSENGER_ALLOWLIST: "\*"/);
     // 스케줄러는 그대로 꺼져 있다 — 리허설만 덧붙이는 compose로 켠다(OPS-47)
     expect(c).toMatch(/MERGE_SCHEDULER: "off"/);
-    // 운영 compose에는 수신함이 없다
+    // 운영 compose에는 수신함 주소가 없고, 두 스위치는 「운영」으로 못 박혀 있다(OPS-46a — NT-T85)
     const prod = readFileSync(path.join(root, 'docker-compose.yml'), 'utf8');
     expect(prod).not.toContain('messenger-sink');
-    expect(prod).not.toContain('MESSENGER_SINK');
+    expect(prod).toMatch(/^ {6}MESSENGER_SINK: "off"$/m);
+  });
+});
+
+describe('[NT-T85] ★ 운영이 시험 서버 설정을 물려받지 않는다 (OPS-46a · 2026-10-10)', () => {
+  const SINK = (p: string) => `http://127.0.0.1:3000${p}`;
+
+  it('운영 compose — environment가 TINCASE_ENV를 빈 값 · MESSENGER_SINK를 off로 못 박는다(env_file보다 이긴다)', () => {
+    const prod = readFileSync(path.join(root, 'docker-compose.yml'), 'utf8');
+    const env = prod.slice(prod.indexOf('\n    environment:\n'), prod.indexOf('\n    extra_hosts:'));
+    expect(env).toMatch(/^ {6}TINCASE_ENV: ""$/m);
+    expect(env).toMatch(/^ {6}MESSENGER_SINK: "off"$/m);
+    expect(prod.indexOf('env_file:')).toBeGreaterThan(prod.indexOf('    environment:')); // env_file도 그대로 있다 — 이기는 쪽이 environment
+  });
+
+  it('수신함 주소는 다른 표기도 수신함이다 — 겹 빗금 · 대소문자 · 퍼센트 부호 · 끝 빗금 · 물음표', () => {
+    for (const u of [
+      SINK('//api//dev/messenger-sink'),
+      SINK('/API/Dev/Messenger-Sink'),
+      SINK('/api/dev/messenger%2Dsink'),
+      SINK('/api/dev/messenger-sink//'),
+      SINK('/api/dev/messenger-sink?x=1'),
+      'http://127.0.0.1:3000/api/./dev/messenger-sink',
+    ]) {
+      expect(isSinkUrl(u), u).toBe(true);
+      // 운영(시험·시연 아님)에서 이 주소면 뜨지 않는다 — 표기 하나로 기동 검사를 지나가던 길
+      expect(sinkBootProblem({ TINCASE_ENV: '', MESSENGER_URL: u, MESSENGER_SINK: 'on' }), u).toMatch(/운영 알림이 아무에게도/);
+    }
+    expect(isSinkUrl(SINK('/api/dev/messenger-sinks'))).toBe(false);
+    expect(isSinkUrl('http://messenger.example.com:12555/')).toBe(false);
+    expect(isSinkUrl(SINK('/api/dev/messenger%E0%A4%A'))).toBe(false); // 깨진 퍼센트 — 던지지 않는다
+  });
+
+  it('컨테이너 입구(entrypoint.sh)도 같은 표기를 수신함으로 보고 운영이면 node 전에 멈춘다', () => {
+    const bin = mkdtempSync(path.join(tmpdir(), 'tincase-entry-'));
+    // sqlite3(부서 수 1)와 node(시작했다고 말하고 끝)를 바꿔 끼운다 — 진짜 서버를 띄우지 않는다
+    writeFileSync(path.join(bin, 'sqlite3'), '#!/bin/sh\necho 1\n');
+    writeFileSync(path.join(bin, 'node'), '#!/bin/sh\necho NODE-STARTED\n');
+    chmodSync(path.join(bin, 'sqlite3'), 0o755);
+    chmodSync(path.join(bin, 'node'), 0o755);
+    const run = (extra: Record<string, string>) =>
+      spawnSync('sh', [path.join(root, 'scripts/entrypoint.sh')], {
+        encoding: 'utf8',
+        env: { PATH: `${bin}:${process.env.PATH}`, STORAGE_ROOT: bin, DATABASE_URL: `file:${path.join(bin, 'x.db')}`, ...extra },
+      });
+    try {
+      const prod = run({ MESSENGER_URL: SINK('//API/dev/Messenger-Sink?probe=1') });
+      expect(prod.status).toBe(1);
+      expect(prod.stdout).toContain('[boot] FATAL: MESSENGER_URL이 가짜 알림 수신함인데 시험·시연 서버가 아닙니다');
+      expect(prod.stdout).not.toContain('NODE-STARTED');
+      const trial = run({ MESSENGER_URL: SINK('//API/dev/Messenger-Sink'), TINCASE_ENV: 'test', MESSENGER_SINK: 'on' });
+      expect(trial.status).toBe(0);
+      expect(trial.stdout).toContain('NODE-STARTED');
+      const real = run({ MESSENGER_URL: 'http://messenger.example.com:12555/' }); // 운영 + 진짜 메신저 — 그대로 뜬다
+      expect(real.stdout).toContain('NODE-STARTED');
+    } finally {
+      rmSync(bin, { recursive: true, force: true });
+    }
   });
 });
 

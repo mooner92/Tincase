@@ -37,6 +37,11 @@ services:
       # HM-53 — 모델을 내리지 않는다(-1 = 상주, 2026-10-08 「독점하듯이 사용해도 돼」). 숫자는 초로 보낸다(gate.ts).
       # 스케줄러가 켜져 있으니 기동하자마자 한 번 올린다. 모델 서버를 다른 일과 나누게 되면 "30m" 같은 기간으로 바꾼다
       MERGE_MODEL_KEEP_ALIVE: "-1"
+      # OPS-46a (2026-10-10) — 운영은 시험·시연 서버가 **아니다**. 이 둘을 여기 못 박는다: `environment`는 env_file(.env.production)보다 이긴다 —
+      # 누가 그 파일에 `TINCASE_ENV=test`·`MESSENGER_SINK=on`을 적어도(시험 서버 설정을 옮겨 붙이는 실수) 운영에서 가짜 알림 수신함이 열리거나(TACP-26)
+      # 「시험 서버」 띠가 뜨지 않는다. 빈 값은 「운영」이다(env.ts 기본값과 같다)
+      TINCASE_ENV: ""
+      MESSENGER_SINK: "off"
       # CF_ACCESS_AUD는 .env.production(env_file)에서. 누락 시 앱 env 가드가 기동 거부 (OPS-06)
       # NT-01 — 메신저 주소·허용 사번도 .env.production에서 받는다.
       # 사내 IP를 여기 적지 않는 이유: 이 파일은 커밋된다 (공개 저장소).

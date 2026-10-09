@@ -32,11 +32,22 @@ export function sinkOpen(e: SinkEnv): boolean {
   return isTrialEnv(e.TINCASE_ENV) && e.MESSENGER_SINK === 'on';
 }
 
-/** 이 메신저 주소가 수신함인가 */
+/**
+ * 이 메신저 주소가 수신함인가. **경로만 보고, 같은 곳을 가리키는 다른 표기도 수신함으로 친다**(OPS-46a, 2026-10-10) —
+ * 겹 빗금(`//api//dev/…`) · 대소문자(`/API/Dev/…`) · 퍼센트 부호(`messenger%2Dsink`) · 끝 빗금. 이 판정은 「운영이 수신함으로 보내는가」를 막는
+ * 기동 검사(sinkBootProblem)의 눈이라, 표기 하나 다르다고 「수신함 아님」으로 보면 운영 알림이 조용히 사라지는 설정이 그대로 뜬다.
+ * 넓게 잡아 잃는 것은 없다 — 진짜 메신저 주소가 이 경로일 일은 없다.
+ */
 export function isSinkUrl(url: string | undefined): boolean {
   if (!url) return false;
   try {
-    return new URL(url).pathname.replace(/\/+$/, '') === SINK_PATH;
+    let p = new URL(url).pathname; // 백슬래시·점 구간은 URL이 이미 고친다
+    try {
+      p = decodeURIComponent(p);
+    } catch {
+      /* 깨진 퍼센트 부호 — 고친 만큼만 본다 */
+    }
+    return p.toLowerCase().replace(/\/{2,}/g, '/').replace(/\/+$/, '') === SINK_PATH;
   } catch {
     return false;
   }
