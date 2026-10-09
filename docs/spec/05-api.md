@@ -148,6 +148,7 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 | API-48 | `GET` — 저장된 병합본 hwp를 파싱해 표 3개 반환. 권한은 `requireMergedAccess` (담당자부터) |
 | API-49 | 응답에 **게시판 답변 제목**을 함께 준다 — 주간 `8월3주차 연구운영회의 주간업무(부서)` · 월간 `8월 연구운영회의 월간업무(부서)` |
 | API-50 | `PUT` — 고친 표로 병합본을 **다시 쓴다**. `requireLead` + 신원의 부서만 (TACP-6). 본문에 `GET`이 준 판(`runId`·`sha256`)을 싣는다 — 그 사이 바뀌었으면 409 (HM-47). 칸의 **줄바꿈은 남기고**, 500자를 넘는 칸은 자르지 않고 422 |
+| API-50a | (2026-10-10) **인증·역할(`requireOwnManager`)이 본문 검사보다 먼저** — TACP §5 판정 순서. 예전에는 422(「표 내용이 없습니다」)가 앞이라 로그인 없는 요청·부서원·총괄이 본문 모양에 따라 401·404 대신 422를 받았다 |
 | API-51 | 구분 채번은 저장할 때 시스템이 다시 만든다 (ABS-5). 사람이 고친 번호는 버린다 |
 | API-52 | **제출자가 올린 원본은 건드리지 않는다.** 다시 병합하면 수정 내용은 사라진다 — 그래서 저장마다 바뀐 곳을 남기고(`reviewJson.edits`), 다시 병합은 확인을 받는다 (HM-49 · API-55) |
 
@@ -429,6 +430,7 @@ v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노�
 | API-T18 | 병합 실행 중이면 409 `merging` 「이미 병합 중입니다」(기록 없음) · 10분 넘은 running은 막지 않음 · 같은 순간 두 요청은 하나만 실행 (API-31, HM-T157). 2026-10-08 2단계부터 409는 **다른 프로세스**의 running일 때만 — 같은 프로세스의 겹침은 줄에 합류한다(API-T25) |
 | API-T25 | [지금 병합] → 202 `{ jobId, position, joined }` · `GET ?jobId=`로 끝까지 · 같은 순간 두 요청은 작업 하나(둘째 `joined`) · 남의 부서 작업 id · member → 404 (API-31a · API-65, HM-T165 · HM-T171) |
 | API-T26 | `PUT /api/ops/divisions`의 `notifyEnabled` — 운영자 200 · DB에 저장 · 감사 `changed`에 `notifyEnabled`와 바뀐 값 · 꺼진 부서에도 켜짐(`isActive`는 그대로) · 불리언이 아니면 422(바뀐 것 없음) · 담당·부서장·부서원·총괄 404 · 없는 id 404 · GET에 `notifyEnabled` (API-66, `tests/ops-notify.test.ts`) |
+| API-T30 | `PUT /api/division/merged/content` — 본문이 틀려도(`{}` · JSON 아님 · `tables: null`) 로그인 없음 401 · 부서원 404 · 총괄 404, 담당에게만 422 (API-50a, `tests/merged-content-auth.test.ts`) |
 | API-T15 | 제출물 열람 — 빈 번호 줄은 `rows`에 없고 머리행은 남는다 · `rowsByTable`은 그대로 (API-57) |
 | API-T16 | 병합본 보기 — member는 `review`가 `null`(승인자 이름이 응답에 없다)·`canApprove` 거짓, lead는 `review`를 받는다 · 「위로」 상태의 `sent.by`는 member에게 `null`, lead에게는 이름 (API-58) |
 | API-T17 | 규칙 PUT — `categories`만 저장 · 옛 키(`ruleText`·`guideText`·`emptyWords`·`sort` …)는 열을 바꾸지 않는다 · `categories`가 없거나 500B 초과면 422 · member 404 · 쓰기는 신원의 부서 (API-59, `tests/sprint2.test.ts`) |

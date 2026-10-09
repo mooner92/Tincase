@@ -156,6 +156,14 @@ export const GET = handler(async (req: NextRequest) => {
 
 /** API-50 — 담당자가 고친 내용으로 병합본을 **다시 쓴다**. 원본 제출물은 건드리지 않는다 */
 export const PUT = handler(async (req: NextRequest) => {
+  /*
+   * TACP §5 판정 순서 — **인증·역할이 본문보다 먼저**(API-50a, 2026-10-10). 예전에는 본문 검사(422)가 앞이라, 로그인하지 않은 요청과
+   * 권한 없는 사람(부서원·총괄)도 본문 모양에 따라 401·404 대신 422를 받았다 — 이 경로가 있고 무엇을 받는지를 알려 주는 셈이다.
+   * TACP-6 — 쓰기는 신원의 부서에만. 슬러그로 남의 부서 병합본을 고칠 수 없다
+   */
+  const scope = await requireOwnManager(req.headers);
+  rateLimit(`merged-edit:${scope.user.email}`, 20, 60_000);
+
   const body = (await req.json().catch(() => null)) as
     | {
         isoKey?: string;
@@ -166,10 +174,6 @@ export const PUT = handler(async (req: NextRequest) => {
       }
     | null;
   if (!body?.tables) throw new HttpError(422, 'invalid_request', '표 내용이 없습니다.');
-
-  // TACP-6 — 쓰기는 신원의 부서에만. 슬러그로 남의 부서 병합본을 고칠 수 없다
-  const scope = await requireOwnManager(req.headers);
-  rateLimit(`merged-edit:${scope.user.email}`, 20, 60_000);
   const located = await locate(req, null, body.isoKey ?? null);
   const { division, slot } = located;
   const reviewer = isReviewer(scope);
