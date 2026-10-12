@@ -1,11 +1,11 @@
 // HM-19 — 병합 절차. 이 파일이 "목요일 14:10에 다 되어 있다"를 만든다.
 //
-// 순서: 제출물 수집 → 규칙 적용 → (모델) 중복 묶기 → 조립 → 자체 점검 → 저장
+// 순서: 제출물 수집 → 규칙 적용 → (모델) 중복 묶기 → 조립 → 자체 점검 → (저장은 부르는 쪽 — run.ts, 잠금 안에서 기록과 함께)
 // 어느 단계가 실패해도 **병합본은 나온다** (HM-21 부분 실패 허용, HM-24 폴백).
 
 import path from 'node:path';
 import { prisma } from '../db';
-import { readStoredFile, writeFileAtomic, sanitizeSegment } from '../storage';
+import { readStoredFile, sanitizeSegment } from '../storage';
 import { readWorklog } from '@/lib/hwp/reader';
 import { openHwp } from '@/lib/hwp/ole';
 import { parseRecords, serializeRecords } from '@/lib/hwp/record';
@@ -15,12 +15,9 @@ import { toPlan, orderPeople } from './rules';
 import { groupDuplicates, MergeRow, GroupingResult } from './model';
 import { startMergeBudget, type MergeBudget } from './budget';
 import type { FallbackKind } from './gate';
-import type { RowGroup } from './dedupe';
 import { classifyRows, sortByCategory, OTHER } from './classify';
-import { sortByDate } from './order';
-import { dateKey } from '@/lib/date-key';
 import { findFlaggedRows, parseFlagWords, type FlaggedRow } from '@/lib/empty-content';
-import { parseEmphasisWords, stripEmphasisMarker } from '@/lib/emphasis-marker';
+import { DEFAULT_EMPHASIS_WORDS, stripEmphasisMarker } from '@/lib/emphasis-marker';
 import { mergeRowCells, pickRepresentative } from '@/lib/merge-rows';
 export { mergedName as mergedFileName } from '@/lib/docname';
 import type { WorklogRow } from '@/lib/hwp/reader';
@@ -44,7 +41,13 @@ export interface MergedGroup {
 }
 
 export interface MergeOutcome {
+  /** 병합본을 쓸 자리 — 주차마다 하나(다시 병합하면 덮인다, HM-49) */
   outputRelPath: string;
+  /**
+   * 병합본 바이트. **엔진은 쓰지 않는다** (2026-10-08 결정 c) — 쓰기와 `MergeRun` 성공 기록을 승인·수정 저장과 같은 잠금 안에서
+   * 한 덩어리로 하려고 `runMergeRecorded`가 쓴다. 엔진이 쓰면 그 순간부터 기록 전까지 다른 저장이 끼어 새 실행이 엉뚱한 바이트를 가리킬 수 있다
+   */
+  output: Buffer;
   bytes: number;
   rowCounts: { achievements: number; plans: number; notes: number };
   /** HM-26 — 검토 화면이 "볼 곳"으로 쓰는 정보 */
@@ -246,8 +249,11 @@ export async function runMerge(
   // 제출자 순서 — 명단은 운영자 소관이므로 sortOrder를 그대로 따른다 (TACP-3)
   const ordered = orderPeople(submissions.map((s) => ({ ...s, name: s.user.name, sortOrder: s.user.sortOrder })));
 
-  // HM-38 — 부서가 정한 강조 표시 낱말. 비우면 아무것도 떼지 않는다
-  const emphasisWords = parseEmphasisWords(division.emphasisWords);
+  /*
+   * HM-38b · HM-51 — 강조 표시 낱말은 「하이라이트」 고정이다. 부서 칸(`emphasisWords`)은 바꾼 곳이 없었고(2026-10-08 실측),
+   * 이건 한글로 적어 올리던 사람이 괄호로 쓰던 습관을 받는 자리다 — 웹 작성에는 [공유]가 있다
+   */
+  const emphasisWords: readonly string[] = DEFAULT_EMPHASIS_WORDS;
 
   // ── 1. 수집 — 한 명이 깨져도 나머지로 계속한다 (HM-21) ──
   const rows: Tagged[] = [];
@@ -294,26 +300,21 @@ export async function runMerge(
 
   // ── 2. 판단 — 표별로 따로 묶는다 (실적과 계획을 섞지 않는다) ──
   const grouped: Record<Bucket, MergedGroup[]> = { achievements: [], plans: [], notes: [] };
-  let model: GroupingResult = { groups: [], usedModel: false, fallbackReason: '중복묶기 꺼짐', elapsedMs: 0, rejected: [] };
+  // 첫 표(행이 하나라도 있는 표)의 결과가 곧 이 자리를 채운다 — 행이 0이면 위에서 이미 멈췄다
+  let model: GroupingResult = { groups: [], usedModel: false, fallbackReason: null, elapsedMs: 0, rejected: [] };
   const modelTables: ModelTableUse[] = [];
 
   for (const bucket of BUCKETS) {
     const mine = rows.filter((r) => r.bucket === bucket);
     if (mine.length === 0) continue;
 
-    const result: GroupingResult = plan.dedupe
-      ? await groupDuplicates(mine, division.mergeRuleText, {
-          budget,
-          label: `${division.nameKo} · ${BUCKET_NAME[bucket]} 중복 묶기`,
-        })
-      : {
-          groups: mine.map((r) => ({ ids: [r.id], reason: '' }) as RowGroup),
-          usedModel: false,
-          fallbackReason: '중복묶기 꺼짐',
-          elapsedMs: 0,
-          rejected: [],
-          fallbackKind: 'skipped',
-        };
+    // HM-51 — 중복 묶기는 늘 켠다. 부서 지침(`mergeRuleText`)은 모델에 보내지 않는다 — 쓰는 부서가 없었고,
+    // 지침이 있으면 같은 제출이 부서마다 다르게 묶인다
+    // HM-52 · HM-57 — 모델 문을 지나서, 실행 예산 안에서 부른다
+    const result = await groupDuplicates(mine, '', {
+      budget,
+      label: `${division.nameKo} · ${BUCKET_NAME[bucket]} 중복 묶기`,
+    });
     modelTables.push(tableUse(bucket, result));
 
     // 가장 정보가 많은 실행 결과를 대표로 남긴다 (실적 표가 보통 제일 크다)
@@ -365,7 +366,7 @@ export async function runMerge(
         probes.push({ id: i * 10 + BUCKETS.indexOf(bucket), who: g.authors[0] ?? '', content: g.row.content, date: '', place: '', attendee: '' });
       });
     }
-    const cls = await classifyRows(probes, plan.categories, plan.guidance, { budget, label: `${division.nameKo} · 분류` });
+    const cls = await classifyRows(probes, plan.categories, '', { budget, label: `${division.nameKo} · 분류` });
     modelTables.push(tableUse('categories', cls));
     categoryInfo = { used: cls.usedModel, reason: cls.fallbackReason, order: [...plan.categories] };
     if (cls.usedModel) {
@@ -377,32 +378,11 @@ export async function runMerge(
         grouped[bucket] = sortByCategory(grouped[bucket], (g) => g.category, plan.categories);
       }
     } else {
-      // HM-48 — 일자 순을 골랐으면 아래 2c가 표 전체를 일자로 놓는다. 「제출자 순서」라고 하면 문서와 다르다
-      const fallback = plan.sort === 'date' ? '표 전체를 일자 순으로' : '제출자 순서로';
-      warnings.push(`분류 정렬을 건너뛰었습니다 — ${cls.fallbackReason}. ${fallback} 넣었습니다.`);
+      warnings.push(`분류 정렬을 건너뛰었습니다 — ${cls.fallbackReason}. 제출자 순서로 넣었습니다.`);
     }
   }
 
-  /*
-   * ── 2c. 일자 정렬 (HM-48) — 부서가 「일자 순」을 골랐을 때만 ──
-   *
-   * `input`이면 이 블록에 **들어오지 않는다.** 정렬을 돌려 놓고 「키가 같으니 그대로겠지」에 기대면,
-   * 언젠가 키 계산이 바뀔 때 일자 순을 고르지 않은 부서의 문서까지 움직인다.
-   * 고르지 않은 부서는 지금까지와 바이트까지 같아야 한다 (HM-T125).
-   *
-   * 분류 정렬 **뒤에** 두는 이유: 일자는 분류 안에서 정렬된다. 분류가 실패했으면(모델 없음)
-   * 분류 축 없이 표 전체를 일자로 놓는다 — 분류를 못 했다고 일자까지 포기할 이유는 없다.
-   * 일자는 묶음의 것(HM-40 — 대표가 안 적었어도 다른 사람이 적은 날짜)으로 본다.
-   */
-  if (plan.sort === 'date') {
-    const week = { year: slot.year, month: slot.month };
-    const category = categoryInfo?.used ? { of: (g: MergedGroup) => g.category, order: plan.categories } : undefined;
-    for (const bucket of BUCKETS) {
-      grouped[bucket] = sortByDate(grouped[bucket], (g) => dateKey(g.row.date, week), plan.undated, category);
-    }
-  }
-
-  if (model.fallbackReason && plan.dedupe) {
+  if (model.fallbackReason) {
     warnings.push(`중복 묶기를 건너뛰었습니다 — ${model.fallbackReason}. 모든 행이 그대로 들어갔습니다.`);
   }
 
@@ -424,11 +404,8 @@ export async function runMerge(
     rowEmphasis[bucket] = grouped[bucket].map((g) => g.emphasis);
   });
 
-  // 특이사항이 비면 3번 표를 지운다 — 실제 제출물의 관례 (sample-filled-w1에 3번 표가 없다)
-  if (plan.dropEmptyNotes && grouped.notes.length === 0) {
-    tableRows.notes = [];
-    rowEmphasis.notes = [];
-  }
+  // 특이사항이 비면 3번 표는 머리행만 남는다 — `tableRows.notes`가 이미 비어 있고 fillTable이 늘 비운다(HM-32).
+  // 이걸 끄던 설정(`mergeDropNotes`)은 HM-51로 고정했다 — 꺼도 문서는 같았다
 
   const composed = composeMergedHwp(src, tableRows, rowEmphasis, division.nameKo);
   warnings.push(...composed.warnings);
@@ -439,8 +416,8 @@ export async function runMerge(
   const check = verifyMerged(out, grouped, tableCount);
   if (check) throw new MergeFailed(`결과 검증 실패 — ${check}`);
 
+  // 쓰지 않는다 — 부르는 쪽(runMergeRecorded)이 잠금 안에서 쓰고 기록한다 (결정 c)
   const rel = mergedRelPath(division.slug, slot.year, slot.label);
-  await writeFileAtomic(rel, out);
 
   const roster = await prisma.user.findMany({
     where: { divisionId, isActive: true, onRoster: true },
@@ -450,6 +427,7 @@ export async function runMerge(
 
   return {
     outputRelPath: rel,
+    output: out,
     bytes: out.length,
     rowCounts: {
       achievements: grouped.achievements.length,
@@ -526,8 +504,9 @@ function describeMismatch(g: MergedGroup, got: string | undefined): string {
 /**
  * HM-22 — 저장 전 자체 점검. **4번(내용 무손실)이 핵심이다.**
  * 실패하면 저장하지 않는다. 잘못된 병합본이 나가는 것보다 안 나가는 편이 낫다.
+ * ST-19b (2026-10-10) — 부서 양식을 받기 전의 시험 병합(`template-check.ts`)도 이 판정을 그대로 쓴다 — 받을 때와 병합할 때 같은 눈으로 본다.
  */
-function verifyMerged(out: Buffer, grouped: Record<Bucket, MergedGroup[]>, tableCount: number): string | null {
+export function verifyMerged(out: Buffer, grouped: Record<Bucket, MergedGroup[]>, tableCount: number): string | null {
   let back;
   try {
     back = readWorklog(out);

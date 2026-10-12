@@ -1,6 +1,6 @@
 // WA-35 · WA-36a — 웹 작성의 시작점과 일자 예시.
 import { describe, expect, it } from 'vitest';
-import { composerStart, dateHint } from './composer';
+import { clearComposerDrafts, composerDraftKey, composerStart, dateHint, DRAFT_PREFIX, sameRows, submitBlocked } from './composer';
 
 type Row = { content: string; date: string; place: string; attendee: string; emphasis?: boolean };
 const blank = (): Row => ({ content: '', date: '', place: '', attendee: '', emphasis: false });
@@ -64,5 +64,84 @@ describe('WA-36a — 일자 칸 예시는 이번 주 날짜', () => {
     const sep = Date.UTC(2026, 8, 27, 15); // 2026-09-28(월)
     expect(dateHint(sep)).toBe('9/29');
     expect(dateHint(sep, 1)).toBe('10/6');
+  });
+});
+
+describe('WA-37 — 「바뀌었나」는 내용으로', () => {
+  const start = composerStart<Row>(null, submitted, blank).data;
+  const clone = () => JSON.parse(JSON.stringify(start)) as typeof start;
+
+  it('[WA-T51] 한 글자 쳤다 지우면 같다 · 끝의 빈 줄과 앞뒤 공백은 보지 않는다', () => {
+    const typed = clone();
+    typed.achievements[0].content = '실적 하나x';
+    expect(sameRows(start, typed)).toBe(false);
+    typed.achievements[0].content = '실적 하나';
+    expect(sameRows(start, typed)).toBe(true);
+
+    const padded = clone();
+    padded.plans.push(blank(), blank());
+    padded.achievements[1].content = '  실적 둘 ';
+    expect(sameRows(start, padded)).toBe(true);
+  });
+
+  it('[WA-T51] 「공유」를 켜거나 일자·장소를 바꾸면 다르다 — 문서가 달라진다', () => {
+    const shared = clone();
+    shared.plans[0].emphasis = true;
+    expect(sameRows(start, shared)).toBe(false);
+    const dated = clone();
+    dated.achievements[1].date = '10/7';
+    expect(sameRows(start, dated)).toBe(false);
+    const moved = clone();
+    moved.achievements.reverse();
+    expect(sameRows(start, moved)).toBe(false); // 순서도 문서다
+  });
+
+  it('[WA-T51] [제출] 꺼짐 — 보내는 중 · 낸 뒤 닫히기까지 · 내용 없음 · 낸 판 그대로 (submitBlocked)', () => {
+    const ok = { busy: false, done: false, filled: 2, from: 'blank' as const, unchanged: false };
+    expect(submitBlocked(ok)).toBe(false);
+    expect(submitBlocked({ ...ok, busy: true })).toBe(true);
+    // 응답이 와서 busy가 풀려도 닫히기 전에는 다시 못 낸다 — 같은 내용의 판이 하나 더 생기지 않게
+    expect(submitBlocked({ ...ok, done: true })).toBe(true);
+    expect(submitBlocked({ ...ok, filled: 0 })).toBe(true);
+    expect(submitBlocked({ ...ok, from: 'submission', unchanged: true })).toBe(true);
+    expect(submitBlocked({ ...ok, from: 'submission', unchanged: false })).toBe(false);
+    // 임시본·빈 표에서 시작했으면 「그대로」여도 낼 수 있다(아직 안 낸 내용이다)
+    expect(submitBlocked({ ...ok, from: 'draft', unchanged: true })).toBe(false);
+  });
+});
+
+describe('WA-35d — 임시본 열쇠는 사람 + 주차 (2026-10-10)', () => {
+  /** localStorage 흉내 — 넣은 순서대로 key(i) */
+  const fakeStorage = (init: Record<string, string>) => {
+    const m = new Map(Object.entries(init));
+    return {
+      get length() {
+        return m.size;
+      },
+      key: (i: number) => [...m.keys()][i] ?? null,
+      removeItem: (k: string) => void m.delete(k),
+      keys: () => [...m.keys()],
+    };
+  };
+
+  it('[WA-T60] 같은 주라도 사람이 다르면 열쇠가 다르다 — 옛 열쇠(주차만)와도 다르다', () => {
+    const a = composerDraftKey('user-a', '2026-W42');
+    const b = composerDraftKey('user-b', '2026-W42');
+    expect(a).not.toBe(b);
+    expect(a).not.toBe(`${DRAFT_PREFIX}2026-W42`); // 옛 열쇠는 읽지 않는다 — 누구 것인지 모른다
+    expect(a.startsWith(DRAFT_PREFIX)).toBe(true); // 로그아웃이 지우는 범위 안
+    expect(composerDraftKey('user-a', '2026-W43')).not.toBe(a);
+  });
+
+  it('[WA-T60] 로그아웃 — 이 앱의 임시본(옛 열쇠 포함)만 지운다, 다른 저장소는 그대로', () => {
+    const st = fakeStorage({
+      [`${DRAFT_PREFIX}2026-W41`]: '{}', // 옛 열쇠
+      [composerDraftKey('user-a', '2026-W42')]: '{}',
+      [composerDraftKey('user-b', '2026-W42')]: '{}',
+      'other.app.key': 'keep',
+      'tincase.tour.seen': 'keep', // 같은 앱의 다른 것도 임시본이 아니면 둔다
+    });
+    expect(clearComposerDrafts(st)).toBe(3);
+    expect(st.keys()).toEqual(['other.app.key', 'tincase.tour.seen']);
   });
 });

@@ -1,306 +1,41 @@
-// `/{slug}` — member 메인 (S-06 §2). 제출이 주인공: 히어로(주차·마감) + 7/5 그리드.
-import { prisma } from '@/server/db';
-import { redirect } from 'next/navigation';
-import { getPageScope, getDivisionView } from '@/server/page-scope';
+// `/{slug}` — 부서원 홈 (PG-66). 이번 주 카드 + 지난 주차, 두 덩어리뿐이다.
+//
+// 2026-10-08 (사용자) — 부서원 메뉴 「제출 · 보관함 · 내 이력」 셋을 홈 하나로 합쳤다. 내가 낸 것과 부서 병합본은
+// 같은 질문(그 주에 무엇이 나갔나)의 두 답이라 한 줄에 둔다. 부서 제출 명단은 홈에서 뺐다 — 누가 냈는지는
+// 담당자가 수합 관리에서 본다(TACP-11 v1.8 · ADR-0016). 카운트다운·설명 상자·hwp 업로드 길도 없다.
+//
+// 남의 부서를 읽는 사람(총괄·운영자)은 여기서 할 일이 없다 — 그 부서의 수합 관리로 보낸다(PG-70).
+import { notFound, redirect } from 'next/navigation';
+import { requirePageScope, getDivisionView, type DivisionView } from '@/server/page-scope';
+import { HttpError } from '@/server/authz';
 import { noticeFor } from '@/components/Notice';
-import { ensureCurrentSlot, effectiveDeadline, divisionStatus } from '@/server/worklog';
-import { formatDeadlineKo, formatSubmittedKo, isLocked, slotKind, toKstIso } from '@/lib/week';
-import { isOpenNow } from '@/lib/deadline';
-import { openingOf } from '@/server/deadline';
-import { DeadlineCountdown } from '@/components/DeadlineCountdown';
-import { SubmitChoice } from '@/components/SubmitChoice';
-import { MySubmissionCard } from '@/components/MySubmissionCard';
-import { BellIcon } from '@/components/BellIcon';
+import { loadMemberHome } from '@/server/my-weeks';
+import { ThisWeekCard } from '@/components/ThisWeekCard';
+import { PastWeeks } from '@/components/PastWeeks';
 
 export const dynamic = 'force-dynamic';
 
-export default async function MemberPage({ params }: { params: Promise<{ division: string }> }) {
-  const ps = await getPageScope();
-  if (!ps.ok) {
-    if (ps.code === 'unauthenticated') redirect('/login');
-    return noticeFor(ps.code, ps.message);
+export default async function MemberHome({ params }: { params: Promise<{ division: string }> }) {
+  const ps = await requirePageScope(); // AU-22 · AU-T39
+  if (!ps.ok) return noticeFor(ps.code, ps.message);
+  let view: DivisionView;
+  try {
+    // ★ 해석된 부서를 쓴다 — scope.division을 쓰면 헤더와 본문이 어긋난다 (TACP-7)
+    view = await getDivisionView((await params).division);
+  } catch (e) {
+    // 레이아웃과 병렬로 그려지므로 페이지도 스스로 막는다 — 남의 부서·없는 부서는 같은 404 (AU-T17 · TACP-5)
+    if (e instanceof HttpError && e.status === 404) notFound();
+    throw e;
   }
-  if (ps.scope.user.mustChangePassword) redirect('/password?first=1'); // AU-22
-  const { division: slugParam } = await params;
-  // ★ 반드시 해석된 부서를 쓴다 — scope.division을 쓰면 헤더와 본문이 어긋난다 (v1.3.1 수정)
-  const view = await getDivisionView(slugParam);
-  const { scope, division, isOwn, canSubmit } = view;
-  const now = new Date();
+  if (!view.isOwn) redirect(`/${view.division.slug}/manage`); // PG-70 — 「개요」는 없어졌다
 
-  const slot = await ensureCurrentSlot(now);
-  const deadline = effectiveDeadline(slot, division);
-  /*
-   * DM-20 — 담당자가 마감을 잠시 열어 두었으면 낼 수 있다.
-   * **부서원 화면에도 보여야 한다** — 열어 놓고 알리지 않으면 아무도 안 낸다.
-   */
-  const opening = await openingOf(division.id, slot.id);
-  const opened = isOpenNow(opening, now);
-  const locked = isLocked(slot, division, now) && !opened;
-  const nextOpens = new Date(slot.opensAt.getTime() + 7 * 86400_000);
-
-  const [mySubmission, template, { members, extras }] = await Promise.all([
-    isOwn
-      ? prisma.submission.findFirst({ where: { userId: scope.user.id, weekSlotId: slot.id, isLatest: true } })
-      : null,
-    prisma.template.findFirst({ where: { divisionId: division.id, isActive: true } }),
-    divisionStatus(division.id, slot.id),
-  ]);
-
-  const guideLines = division.guideText.split('\n').filter(Boolean);
-
-  /*
-   * WA-10 — **지난번에 낸 것**. 「지난주」가 아니다 — 휴가로 한 주 걸렀으면
-   * 그 전 것을 보여줘야 한다. 이번 주 실적은 대개 지난번 계획에 적은 그 일이다.
-   */
-  const previousSubmission = canSubmit
-    ? await prisma.submission.findFirst({
-        where: {
-          userId: scope.user.id,
-          isLatest: true,
-          weekSlot: { opensAt: { lt: slot.opensAt } },
-        },
-        include: { weekSlot: true },
-        orderBy: { weekSlot: { opensAt: 'desc' } },
-      })
-    : null;
-  // WS-14 — 그 달 마지막 주에는 월간 업무일지를 낸다. 주차는 그대로이고 '무엇을 내는가'가 바뀐다
-  const monthly = slotKind(slot) === 'monthly';
-  const submitted = members.filter((m) => m.status === 'submitted').length;
-
+  const { card, groups, showMissing } = await loadMemberHome(view, new Date());
+  // PG-66d — 지난 주차가 하나도 없으면(첫 주) 카드만 7칸. 「아직 없습니다」 같은 문장·빈 카드는 두지 않는다
+  const paired = groups.recent.length + groups.older.length > 0;
   return (
-    <main className="pt-10">
-      {/* 히어로 — 주차가 이 페이지의 제목이다 (hero-band) */}
-      <section className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">
-            {slot.year}년 · {monthly ? `${slot.month}월 마지막 주` : '이번 주차'}
-          </p>
-          <h1 className="display mt-1 flex flex-wrap items-center gap-2.5 text-[40px] leading-[1.1]">
-            {slot.label}
-            {monthly && (
-              <span className="rounded-full bg-brand px-3 py-1 text-[15px] font-semibold text-white">
-                월간
-              </span>
-            )}
-          </h1>
-        </div>
-        {/*
-          * WS-18 — **이번 주만 마감이 다를 때.** 사람들은 「목요일 14시」를 몸으로 기억하고
-          * 있어서 요일이 바뀐 것을 안 읽는다. 그렇다고 큰 안내 상자를 얹으면 제목 옆이
-          * 시끄러워지고, 매주 보는 화면에서 시끄러운 것은 곧 무시된다.
-          *
-          * 그래서 **새 요소를 더하지 않고 이미 보는 것의 색을 바꾼다** — 마감 배지가
-          * 빨간 볼드가 되고, 그 밑에 이유가 한 줄 붙는다. 시선이 어차피 가는 자리다.
-          */}
-        <div className="flex flex-col items-start gap-1.5 pb-1.5 sm:items-end">
-          <div className="flex items-center gap-2">
-            {locked ? (
-              <span className="badge-pill bg-surface-strong">마감됨 · {formatDeadlineKo(deadline)}</span>
-            ) : opened ? (
-              /* 마감은 지났지만 담당자가 열어 두었다 — 언제까지인지가 제일 중요하다 */
-              <span className="badge-pill border-warning/50 bg-warning-soft text-ink">
-                마감 후 열림 · {opening ? toKstIso(opening.openUntil).slice(11, 16) : ''}까지
-              </span>
-            ) : (
-              <>
-                <span
-                  className={
-                    slot.deadlineNote
-                      ? 'badge-pill border-error/60 bg-error-soft font-semibold text-error'
-                      : 'badge-pill'
-                  }
-                >
-                  마감 {formatDeadlineKo(deadline)}
-                </span>
-                <DeadlineCountdown deadlineAtMs={deadline.getTime()} serverNowMs={now.getTime()} />
-              </>
-            )}
-          </div>
-          {slot.deadlineNote && (
-            <p className="text-[13px] leading-5 text-muted sm:text-right">
-              <strong className="font-semibold text-error">이번 주만 변경</strong> · {slot.deadlineNote}
-            </p>
-          )}
-        </div>
-      </section>
-
-      {monthly && (
-        <section className="mt-6 flex gap-3 rounded-[14px] border border-brand-tint bg-brand-soft px-5 py-4">
-          <span aria-hidden className="mt-0.5 text-brand">◆</span>
-          <div>
-            <p className="font-semibold text-ink">이번 주는 {slot.month}월 월간 업무일지입니다</p>
-            <p className="mt-1 text-[15px] text-body">
-              그 달의 마지막 날이 이번 주에 있어 이번이 {slot.month}월의 마지막 주입니다.
-              한 주가 아니라 <strong className="font-semibold text-ink">한 달치</strong>를 정리해 주세요 —
-              주간보다 자세하고 분량도 많습니다. 마감·제출 방법은 평소와 같습니다.
-            </p>
-          </div>
-        </section>
-      )}
-
-      <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-12">
-        {/* 좌측 7 — 제출 (주인공) */}
-        <div className="space-y-6 lg:col-span-7">
-          {mySubmission && (
-            <MySubmissionCard
-              submissionId={mySubmission.id}
-              userId={scope.user.id}
-              userName={scope.user.name}
-              version={mySubmission.version}
-              uploadedAtKst={toKstIso(mySubmission.uploadedAt).slice(5, 16).replace('T', ' ')}
-              sizeKb={(mySubmission.byteSize / 1024).toFixed(1)}
-              originalName={mySubmission.originalName}
-              canCancel={!locked} /* TACP-14 — 마감 후에는 렌더하지 않는다 */
-            />
-          )}
-
-          {/* PG-08 — 잠김이면 업로드 영역을 DOM에서 제거 */}
-          {locked ? (
-            !mySubmission && (
-              <section className="card-feature bg-surface-strong px-7 py-10 text-center">
-                <p className="display text-lg">이번 주차는 마감되었습니다</p>
-                <p className="mt-2 text-sm text-muted">
-                  다음 주차는 {formatDeadlineKo(nextOpens).replace(/ \d{2}:\d{2}$/, '')} 00:00에 열립니다.
-                </p>
-              </section>
-            )
-          ) : template && canSubmit ? (
-            <section>
-              <h2 className="label">{mySubmission ? '다시 제출 — 새 버전으로 저장됩니다' : '제출'}</h2>
-              {/*
-                DM-16 — 집계 제외자(부서장·휴직 등)도 낼 수 있다. 다만 오른쪽 현황의
-                분모에 없어서 "내 이름이 왜 없지?"가 되므로, 그 이유를 여기서 먼저 밝힌다.
-              */}
-              {!scope.user.onRoster && (
-                <p className="mb-3 rounded-lg bg-surface-soft px-4 py-2.5 text-sm text-body">
-                  집계 대상에서 빠져 있어 오른쪽 현황에는 이름이 표시되지 않습니다
-                  {scope.user.rosterNote ? ` (사유: ${scope.user.rosterNote})` : ''}.{' '}
-                  <strong className="font-semibold text-ink">제출은 지금 하실 수 있고</strong>, 내시면
-                  담당자 화면에 «추가 제출»로 표시되며 병합에도 들어갑니다.
-                </p>
-              )}
-              <SubmitChoice
-                hasPrevious={!!mySubmission}
-                current={mySubmission && { id: mySubmission.id, version: mySubmission.version }}
-                isoKey={slot.isoKey}
-                weekStartMs={slot.opensAt.getTime()}
-                guideLines={guideLines}
-                emptyWordsRaw={view.division.emptyWords}
-              />
-            </section>
-          ) : !isOwn ? (
-            <section className="card px-6 py-5 text-sm text-muted">
-              내 부서가 아니므로 제출할 수 없습니다. 제출은 소속 부서 페이지에서만 가능합니다.
-            </section>
-          ) : (
-            <section className="card border-warning/40 bg-warning/5 px-6 py-5 text-sm text-body">
-              등록된 부서 양식이 없습니다. 담당자에게 양식 등록을 요청하세요.
-            </section>
-          )}
-
-          {/* 작성 안내 (CP-21/22) */}
-          {guideLines.length > 0 && (
-            <section className="card-cream px-7 py-6">
-              <h2 className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">작성 안내</h2>
-              <ul className="mt-3 space-y-1.5 text-sm leading-6 text-body">
-                {guideLines.map((l) => (
-                  <li key={l} className="flex gap-2">
-                    <span aria-hidden className="text-brand">
-                      ●
-                    </span>
-                    {l}
-                  </li>
-                ))}
-              </ul>
-            </section>
-          )}
-        </div>
-
-        {/* 우측 5 — 양식·부서 현황 */}
-        <div className="space-y-6 lg:col-span-5">
-          <section className="card px-7 py-6">
-            {/* WA-10 — 「빈 양식」이었으나 지난번 낸 것도 여기서 받는다. 제목이 내용을 덮어야 한다 */}
-            <h2 className="display text-lg">양식 받기</h2>
-            <p className="mt-1 text-sm text-muted">파일명에 이번 주차가 자동으로 들어갑니다.</p>
-            {!template ? (
-              <p className="mt-4 text-sm font-medium text-body-strong">아직 등록된 양식이 없습니다.</p>
-            ) : isOwn ? (
-              <div className="mt-4 flex flex-wrap items-center gap-2.5">
-                {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- 파일 다운로드, 클라이언트 내비게이션 아님 */}
-                <a href="/api/template" className="btn-primary">
-                  양식 다운로드
-                </a>
-                {/* WA-10 — 지난번 낸 것. 없으면 아예 렌더하지 않는다 (빈 안내는 자리만 먹는다) */}
-                {previousSubmission && (
-                  <a
-                    href={`/api/submissions/${previousSubmission.id}/download`}
-                    className="btn-secondary btn-sm"
-                  >
-                    지난 {previousSubmission.weekSlot.label} 받기
-                  </a>
-                )}
-              </div>
-            ) : (
-              <p className="mt-4 text-sm font-medium text-body-strong">
-                등록됨 — 양식 내려받기는 소속 부서원만 가능합니다.
-              </p>
-            )}
-          </section>
-
-          {/* 부서 현황 — member에게도 공개 (AU-06 v2.1). 파일 링크 없음 (CP-87~89) */}
-          <section className="card px-6 py-5">
-            <div className="flex items-baseline justify-between">
-              <h2 className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">부서 제출 현황</h2>
-              <span className="text-sm font-semibold text-ink">
-                {submitted}
-                <span className="font-normal text-muted"> / {members.length}</span>
-                {extras.length > 0 && <span className="font-normal text-muted"> +{extras.length}</span>}
-              </span>
-            </div>
-            <ul className="mt-3 grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
-              {members.map((m) => {
-                const mine = m.user.id === scope.user.id;
-                return (
-                  <li key={m.user.id} className={`flex items-center gap-2 ${mine ? 'font-semibold' : ''}`}>
-                    {m.status === 'submitted' ? (
-                      <span className="text-success" aria-hidden>
-                        ●
-                      </span>
-                    ) : (
-                      <span className="text-border-strong" aria-hidden>
-                        ○
-                      </span>
-                    )}
-                    <span className={m.status === 'submitted' ? 'text-ink' : 'text-muted-soft'}>
-                      {m.user.name}
-                      {mine && ' (나)'}
-                    </span>
-                    {m.latest ? (
-                      <span className="text-xs whitespace-nowrap text-muted-soft">
-                        {formatSubmittedKo(m.latest.uploadedAt, now)}
-                      </span>
-                    ) : (
-                      /*
-                        NT-31 — 안 낸 사람에게 «알림은 갔는지»를 보여준다.
-                        **시각은 빼고 표식만** 남긴다: 알림은 부서 전원에게 같은 시각(마감 1시간 전)에
-                        한 번 나가므로 사람마다 다르지 않다 — 시각을 적으면 제출 시각과 같은 회색·같은
-                        자리에 놓여 눈이 헷갈린다. 알아야 할 것은 «갔다/안 갔다»뿐이다.
-                        그래서 시각(제출)과 라벨(알림)로 **모양 자체를 다르게** 한다.
-                      */
-                      m.notifiedAtKst && (
-                        <span title={`마감 알림을 보냈습니다 (${m.notifiedAtKst})`} className="text-muted-soft">
-                          <BellIcon />
-                          <span className="sr-only">알림 보냄 {m.notifiedAtKst}</span>
-                        </span>
-                      )
-                    )}
-                  </li>
-                );
-              })}
-            </ul>
-          </section>
-        </div>
-      </div>
+    <main className="grid grid-cols-1 items-start gap-4 pt-8 lg:grid-cols-12 lg:gap-6">
+      <ThisWeekCard {...card} layout={paired ? 'paired' : 'alone'} />
+      {paired && <PastWeeks groups={groups} showMissing={showMissing} divisionSlug={view.division.slug} me={card.me} />}
     </main>
   );
 }

@@ -26,8 +26,9 @@
 // **도는 중(매분)에는 예산 + 여유(기본 10분)보다 오래 running이면 멈춘 것이다.** 예산(HM-57)이 모델 호출과 문 앞 대기를
 // 끊으므로 살아 있는 실행은 그보다 오래 갈 수 없다 — 매분 치워도 살아 있는 실행을 죽이지 않는다.
 // 개발용 scripts/run-merge.ts를 서버와 같은 DB에 돌리는 중에 서버가 재시작하면 그 실행은 잠깐 「중단됨」으로 보이지만,
-// 끝나면 제 결과로 다시 쓴다(recordMerge가 id로 갱신한다). 운영 DB에는 그 스크립트를 돌리지 않는다.
-// 2단계에서 병합 줄(작업 표)이 생기면 그 lease가 이 일을 맡는다.
+// 끝나면 제 결과로 다시 쓴다(runMergeRecorded가 id로 갱신한다). 운영 DB에는 그 스크립트를 돌리지 않는다.
+// 2단계(HM-59e, 2026-10-08)의 병합 줄은 작업 표의 lease로 **작업**을 회수한다. 실행 기록의 회수(이 파일)는 그대로 둔다 — 병합 안내(HM-50)와
+// 재시도 셈(HM-43)이 실행 기록을 본다. 같은 프로세스의 겹침은 이제 줄이 막고, 이 파일의 막이는 다른 프로세스(개발 스크립트)를 위해 남는다.
 
 import { prisma } from '../db';
 import { mergeStaleAfterMs, mergeStaleBefore } from './budget';
@@ -40,7 +41,13 @@ export const MERGING_TEXT = '이미 병합 중입니다';
 interface Claim {
   since: number;
 }
-const claims = new Map<string, Claim>();
+/*
+ * 잡은 표는 `globalThis`에 둔다 — rollup/lock.ts · gate.ts와 같은 이유. Next는 같은 파일을 번들 층마다 따로 싣는다:
+ * 스케줄러(instrumentation)와 [지금 병합](라우트 처리기)이 이 모듈의 다른 사본을 가지면 모듈 변수로 둔 표는 서로를 못 본다 —
+ * 그러면 「1) 프로세스 안」 막이가 없는 것과 같고, 둘 다 DB에 running 행을 만들기 전의 틈으로 함께 들어간다.
+ */
+const shared = globalThis as unknown as { __tincaseMergeClaims?: Map<string, Claim> };
+const claims = (shared.__tincaseMergeClaims ??= new Map<string, Claim>());
 const unitKey = (divisionId: string, weekSlotId: string) => `${divisionId}:${weekSlotId}`;
 
 function liveClaim(divisionId: string, weekSlotId: string, now: number): Claim | null {

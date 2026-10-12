@@ -128,17 +128,21 @@ export function PreviousWeekPanel({
 
       본문 맨 위면 둘 다 풀린다: 열자마자 제일 먼저 보이고, 쓰기 시작하면 스크롤로 비켜난다.
     */
-    <div className="mb-5">
-      <div className="card overflow-hidden">
+    <div data-guide="previous-panel" className="mb-6">
+      <div className="overflow-hidden rounded-lg border border-hairline">
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-3.5 py-2.5">
           <button
             onClick={() => setOpen((v) => !v)}
             aria-expanded={open}
             className="flex items-center gap-1.5 text-sm font-semibold text-ink hover:underline"
           >
-            <span aria-hidden className="text-[10px] text-muted">
-              {open ? '▾' : '▸'}
-            </span>
+            {/* 화살표는 선으로 그린다 — ▸▾는 페이퍼로지에 없어 다른 글꼴로 샌다 */}
+            <span
+              aria-hidden
+              className={`inline-block h-1.5 w-1.5 border-r-[1.5px] border-b-[1.5px] border-current text-muted transition-transform ${
+                open ? 'rotate-45' : '-rotate-45'
+              }`}
+            />
             지난번에 낸 것
             <span className="font-normal text-muted">· {data.slot.label}</span>
           </button>
@@ -150,85 +154,78 @@ export function PreviousWeekPanel({
           )}
 
           {/*
-            주된 동선 — 지난주 계획이 이번 주 실적이 된다.
-            **채운 버튼**이라야 눈이 여기에 멈춘다. 테두리만 있는 버튼은 옆의 글자와 섞였다.
-            접혀 있어도 누를 수 있게 머리줄에 둔다.
+            주된 동선 — 지난주 계획이 이번 주 실적이 된다. 접혀 있어도 누를 수 있게 머리줄에 둔다.
+            검정으로 채웠더니 드로어의 주 버튼인 [제출]과 무게를 다퉜다(2026-10-07) — 보조 버튼으로 둔다.
+            옆 글자와 섞이지 않는 것은 테두리(border-strong)로 충분하다.
           */}
           {rows && rows.plans.length > 0 && (
             <button
+              data-guide="previous-to-achievements"
               onClick={() => {
                 onCopyPlansToAchievements(rows.plans);
                 say(`계획 ${rows.plans.length}줄을 실적에 넣었습니다`);
               }}
-              className="ml-auto rounded-lg bg-ink px-3 py-1.5 text-xs font-semibold text-canvas transition-colors hover:bg-ink-active"
+              className="btn-secondary btn-sm ml-auto"
             >
               계획 {rows.plans.length}줄을 이번 주 실적으로
             </button>
           )}
-          {flash && <span className="text-xs font-semibold text-success">{flash}</span>}
+          {flash && <span className="text-sm font-medium text-success">{flash}</span>}
         </div>
 
         {open && (
-          <div className="border-t border-hairline-soft bg-surface-soft/60 px-3.5 py-2.5">
+          <div className="border-t border-hairline-soft bg-surface-soft px-3.5 py-3">
             {/*
               WA-12 — 주차 고르기. 낸 주차만 나온다 — 안 낸 주를 흐리게 늘어놓으면
               «내가 그때 안 냈구나»를 매번 확인시킬 뿐이고, 여기서 할 수 있는 일도 없다.
             */}
-            <div className="mb-2 flex flex-wrap items-center gap-1.5">
-              {data.items.length > 1 &&
-                data.items.map((it) => {
-                  const on = it.submissionId === data.submissionId;
-                  return (
-                    <button
-                      key={it.submissionId}
-                      onClick={() => !on && load(it.submissionId)}
-                      aria-pressed={on}
-                      className={
-                        'rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ' +
-                        (on
-                          ? 'bg-ink text-canvas'
-                          : 'border border-hairline bg-canvas text-muted hover:border-ink hover:text-ink')
-                      }
-                    >
-                      {it.label}
-                    </button>
-                  );
-                })}
-              {loading && <span className="text-[11px] text-muted-soft">불러오는 중…</span>}
-              {data.submissionId && (
-                <a
-                  href={`/api/submissions/${data.submissionId}/download`}
-                  className="ml-auto text-[11px] text-muted underline underline-offset-2 hover:text-ink"
-                >
-                  hwp로 받기
-                </a>
-              )}
-            </div>
+            {(data.items.length > 1 || loading) && (
+              <div className="mb-2 flex flex-wrap items-center gap-1.5">
+                {data.items.length > 1 &&
+                  data.items.map((it) => {
+                    const on = it.submissionId === data.submissionId;
+                    return (
+                      <button
+                        key={it.submissionId}
+                        onClick={() => !on && load(it.submissionId)}
+                        aria-pressed={on}
+                        className={
+                          'rounded-full px-2.5 py-1 text-xs font-medium transition-colors ' +
+                          (on
+                            ? 'bg-ink text-canvas'
+                            : 'border border-hairline bg-canvas text-muted hover:border-ink hover:text-ink')
+                        }
+                      >
+                        {it.label}
+                      </button>
+                    );
+                  })}
+                {loading && <span className="text-xs text-muted">불러오는 중…</span>}
+              </div>
+            )}
 
-            <p className="mb-1.5 text-[11px] text-muted">
-              줄 오른쪽에서 <strong className="font-medium text-body">넣을 곳</strong>을 고르세요 — 같은 일이라도
-              이번 주에는 실적일 수도, 계획일 수도 있습니다.
-            </p>
+            {/*
+              2026-10-08 — [hwp로 받기]를 걷었다. 지난 hwp를 받는 것은 「한글에서 고쳐 다시 올리기」 동선이었고,
+              hwp 업로드가 없어지면서 그 길도 없다(R19). 옮기는 버튼이 그 일을 한다
+            */}
 
             {/* 지난주가 길어도 표를 덮지 않게 묶는다 */}
-            <div className="max-h-56 overflow-y-auto">
+            <div className="max-h-44 overflow-y-auto">
               {!rows ? (
-                <p className="text-xs text-muted">
-                  파일을 읽지 못했습니다. [hwp로 받기]로 내려받아 확인해 주세요.
-                </p>
+                <p className="text-xs text-muted">파일을 읽지 못했습니다.</p>
               ) : SECTIONS.every((s) => rows[s.key].length === 0) ? (
                 <p className="text-xs text-muted">이 주차에는 적은 내용이 없습니다.</p>
               ) : (
                 SECTIONS.filter((s) => rows[s.key].length > 0).map((s) => (
                   <section key={s.key} className="mb-2.5 last:mb-0">
-                    <h4 className="mb-1 text-[11px] font-semibold text-muted">
+                    <h4 className="mb-1 text-xs font-semibold text-muted">
                       {s.no}. {s.title}
                     </h4>
                     <ul className="space-y-0.5">
                       {rows[s.key].map((r, i) => (
                         <li
                           key={i}
-                          className="group flex items-start gap-2 rounded px-1.5 py-1 text-xs hover:bg-canvas"
+                          className="group flex items-start gap-2 rounded px-1.5 py-1 text-[13px] hover:bg-canvas"
                         >
                           <span className="min-w-0 flex-1 text-body">
                             {r.content}
@@ -271,7 +268,7 @@ export function PreviousWeekPanel({
                                 }}
                                 aria-label={`「${r.content}」을 이번 주 ${label}에 넣기`}
                                 title={`이번 주 ${label}에 넣기`}
-                                className="rounded border border-hairline bg-canvas px-1.5 py-0.5 text-[11px] font-medium text-muted hover:border-ink hover:text-ink"
+                                className="rounded border border-hairline bg-canvas px-1.5 py-0.5 text-xs font-medium text-muted hover:border-ink hover:text-ink"
                               >
                                 +{label}
                               </button>

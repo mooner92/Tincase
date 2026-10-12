@@ -15,6 +15,7 @@
 // 「HTML이라 본문으로 판정할 수 없다」고 적혀 있었는데 사실이 아니었다.
 import { env } from './env';
 import { logger } from './logger';
+import { isSinkUrl, SINK_KIND_HEADER } from '@/lib/messenger-sink';
 
 export interface AlertInput {
   /** 수신자 사번. 메신저는 이메일이 아니라 사번으로만 사람을 찾는다 */
@@ -23,6 +24,11 @@ export interface AlertInput {
   contents: string;
   /** 누르면 열릴 주소. 없으면 메신저 보관함이 열린다 */
   url?: string;
+  /**
+   * NT-56 — 알림 종류(`NotifyLog.kind`와 같은 값). **가짜 알림 수신함으로 갈 때만** 머리(`x-tincase-kind`)로 실린다 —
+   * 진짜 메신저가 받는 요청은 그대로다(폼 16개 필드, messenger.md §6). 수신함 화면·리허설이 「무슨 알림이 누구에게」를 이것으로 가른다
+   */
+  kind?: string;
 }
 
 export interface SendResult {
@@ -61,6 +67,16 @@ export function messengerStatus(): { enabled: boolean; reason: string; allow: st
     return { enabled: false, reason: 'MESSENGER_ALLOWLIST 비어 있음 (아무에게도 안 감)', allow: '' };
   }
   return { enabled: true, reason: '', allow: all ? '전원' : [...ids].join(',') };
+}
+
+/**
+ * AU-32a — 이 사번에게 **지금 쪽지가 갈 수 있나**(주소 있음 · 허용 목록 안). 보내기 전에 무언가를 바꾸는 길이 묻는다 —
+ * 비밀번호 찾기는 새 링크를 만들면 그 사람의 옛 링크(운영자가 보낸 것)를 죽인다. 쪽지가 못 가는데 만들면 이미 간 링크만 쪽지 없이 죽는다.
+ */
+export function canReach(employeeNo: string): boolean {
+  if (!env.MESSENGER_URL) return false;
+  const { all, ids } = allowlist();
+  return all || ids.has(employeeNo.trim());
 }
 
 /** 문서 3장 — 텍스트 필드는 값과 인코딩을 **쌍으로** 보낸다. 빠지면 한글이 깨진다 */
@@ -118,9 +134,11 @@ export async function sendAlert(input: AlertInput): Promise<SendResult> {
   for (let i = 0; i < targets.length; i += CHUNK) {
     const chunk = targets.slice(i, i + CHUNK);
     try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' };
+      if (input.kind && isSinkUrl(env.MESSENGER_URL)) headers[SINK_KIND_HEADER] = input.kind;
       const res = await fetch(env.MESSENGER_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8' },
+        headers,
         body: buildForm(chunk, input).toString(),
         signal: AbortSignal.timeout(10_000),
       });

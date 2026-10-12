@@ -33,6 +33,21 @@ vi.mock('@/server/merge/index', async (importOriginal) => ({
   runMerge: runMergeMock,
 }));
 
+/**
+ * 병합 뒤 맞추기(RU-72 `afterMerged`)에 끼어들 자리. 원래 동작은 그대로 부른다 — 이 파일은 3단계를 켜지 않으므로 아무것도 하지 않는다
+ */
+const afterHook = vi.hoisted(() => ({ fn: null as null | (() => Promise<void>) }));
+vi.mock('@/server/rollup/auto', async (importOriginal) => {
+  const orig = await importOriginal<typeof import('@/server/rollup/auto')>();
+  return {
+    ...orig,
+    onUnitVersionChanged: async (...args: Parameters<typeof orig.onUnitVersionChanged>) => {
+      await afterHook.fn?.();
+      return orig.onUnitVersionChanged(...args);
+    },
+  };
+});
+
 const MIN = 60_000;
 /** 목 2026-10-15 14:00 KST — 기본 마감(목 14:00)인 주 */
 const D = new Date('2026-10-15T14:00:00+09:00');
@@ -40,6 +55,8 @@ const at = (minutes: number) => new Date(D.getTime() + minutes * MIN);
 
 const OUTCOME = {
   outputRelPath: 'm.hwp',
+  // 엔진은 쓰지 않는다 — runMergeRecorded가 잠금 안에서 이 바이트를 쓰고 기록한다 (RU-75 결정 c)
+  output: Buffer.from('m'),
   bytes: 1,
   rowCounts: { achievements: 1, plans: 1, notes: 0 },
   mergedGroups: [],
@@ -135,16 +152,23 @@ beforeEach(async () => {
   stubModel();
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
-  // 각 테스트는 자기 부서만 본다 — 앞 테스트의 부서는 끈다
+  // 각 테스트는 자기 부서만 본다 — 앞 테스트의 부서는 끈다. 줄(HM-59)도 비운다
   const { prisma } = await import('@/server/db');
   await prisma.division.updateMany({ data: { isActive: false } });
+  await prisma.mergeJob.deleteMany({});
+  const { resetMergeQueueForTest } = await import('@/server/merge/queue');
+  resetMergeQueueForTest();
 });
-afterEach(() => {
+afterEach(async () => {
+  // 줄의 일꾼이 다음 시험으로 넘어가지 않게 — 남은 병합을 끝낸다
+  const { settleMergeQueue } = await import('@/server/merge/queue');
+  await settleMergeQueue();
   vi.useRealTimers();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   delete process.env.MERGE_JOB_BUDGET_MS;
   delete process.env.MERGE_PAUSE_UNTIL;
+  delete process.env.MERGE_MODEL_KEEP_ALIVE;
   process.env.MERGE_SCHEDULER = 'off'; // vitest.config 기본값으로 되돌린다
 });
 afterAll(() => {
@@ -168,37 +192,38 @@ describe('HM-58 · API-31 같은 부서·주차 병합은 하나만 — [지금 
   });
 
   it('[HM-T157] 멈춘 실행(10분 넘은 running)은 막지 않는다 — 죽은 기록이 [지금 병합]을 영영 막으면 안 된다', async () => {
+    const { settleMergeQueue } = await import('@/server/merge/queue');
     const { div, lead } = await mkDivision('끊김실');
     await runningRun(div.id, at(1));
     vi.setSystemTime(at(11.5)); // 10분 30초 지남
     const res = await mergeNow(lead.email);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(202); // 2단계(HM-60b) — 줄에 넣고 바로 돌아온다
+    await settleMergeQueue();
     expect(runMergeMock).toHaveBeenCalledTimes(1);
   });
 
-  it('[HM-T157] ★ 같은 순간 두 번 누르면 하나만 돈다 (다른 탭 · Cloudflare 524 뒤 다시 누름)', async () => {
+  it('[HM-T157] ★ 같은 순간 두 번 누르면 하나만 돈다 (다른 탭 · Cloudflare 524 뒤 다시 누름) — 2단계부터 둘째는 409가 아니라 같은 작업에 합류(202)', async () => {
     const { prisma } = await import('@/server/db');
+    const { settleMergeQueue } = await import('@/server/merge/queue');
     const { div, lead } = await mkDivision('동시실');
     let finish!: () => void;
     runMergeMock.mockImplementationOnce(() => new Promise((r) => (finish = () => r(OUTCOME))));
 
-    const [first, second] = [mergeNow(lead.email), mergeNow(lead.email)];
-    // 둘 중 하나는 곧바로 409로 끝난다 — 다른 하나는 병합 중
-    const quick = await Promise.race([first, second]);
-    expect(quick.status).toBe(409);
-    // 확인 단계에서 걸렸든 잡는 순간에 걸렸든 응답 모양은 같다 (API-31 `detail: { runId, startedAt }`)
-    const qb = (await quick.json()) as { error: string; detail: { startedAt: string | null } };
-    expect(qb.error).toBe('merging');
-    expect(qb.detail.startedAt).toMatch(/\+09:00$/);
+    const [first, second] = await Promise.all([mergeNow(lead.email), mergeNow(lead.email)]);
+    expect([first.status, second.status]).toEqual([202, 202]);
+    const [a, b] = [await first.json(), await second.json()];
+    expect(a.jobId).toBe(b.jobId);
+    expect([a.joined, b.joined].sort()).toEqual([false, true]);
     await vi.waitFor(() => expect(runMergeMock).toHaveBeenCalledTimes(1));
     finish();
-    const statuses = (await Promise.all([first, second])).map((r) => r.status).sort();
-    expect(statuses).toEqual([200, 409]);
+    await settleMergeQueue();
     expect(runMergeMock).toHaveBeenCalledTimes(1);
     expect(await prisma.mergeRun.count({ where: { divisionId: div.id } })).toBe(1);
 
-    // 끝나면 다시 누를 수 있다
-    expect((await mergeNow(lead.email)).status).toBe(200);
+    // 끝나면 다시 누를 수 있다 — 새 작업
+    const again = await mergeNow(lead.email);
+    expect(again.status).toBe(202);
+    expect((await again.json()).jobId).not.toBe(a.jobId);
   });
 
   it('[HM-T158] ★ 스케줄러는 [지금 병합]이 돌고 있는 부서를 건너뛴다 · 멈춘 실행은 회수하고 다시 돈다', async () => {
@@ -208,12 +233,14 @@ describe('HM-58 · API-31 같은 부서·주차 병합은 하나만 — [지금 
     const manual = await runningRun(div.id, at(1.5)); // 14:01:30 담당자가 [지금 병합]
 
     vi.setSystemTime(at(2));
-    expect(await runDueMerges(at(2))).toEqual({ ran: 0, skipped: 1 });
+    expect(await runDueMerges(at(2))).toEqual({ queued: 0, skipped: 1 });
     expect(runMergeMock).not.toHaveBeenCalled();
 
-    // 그 실행이 재시작에 끊겼다 — 10분이 지나면 실패로 회수되고, 재시도 간격(HM-43, 1분)은 이미 지났으니 바로 돈다
+    // 그 실행이 재시작에 끊겼다 — 10분이 지나면 실패로 회수되고, 재시도 간격(HM-43, 1분)은 이미 지났으니 바로 줄에 선다
     vi.setSystemTime(at(12));
-    expect(await runDueMerges(at(12))).toEqual({ ran: 1, skipped: 0 });
+    expect(await runDueMerges(at(12))).toEqual({ queued: 1, skipped: 0 });
+    const { settleMergeQueue } = await import('@/server/merge/queue');
+    await settleMergeQueue();
     expect(runMergeMock).toHaveBeenCalledTimes(1);
     const old = await prisma.mergeRun.findUniqueOrThrow({ where: { id: manual.id } });
     expect(old).toMatchObject({ status: 'failed', errorText: '중단됨(재시작 등)' });
@@ -229,12 +256,54 @@ describe('HM-58 · API-31 같은 부서·주차 병합은 하나만 — [지금 
     const manual = runMergeRecorded(div.id, slotId, 'manual');
     await vi.waitFor(() => expect(runMergeMock).toHaveBeenCalledTimes(1));
 
-    expect(await runDueMerges(at(2))).toEqual({ ran: 0, skipped: 1 });
+    expect(await runDueMerges(at(2))).toEqual({ queued: 0, skipped: 1 });
     // 직접 불러도 시작하지 않는다 — 프로세스 안에서 먼저 잡은 쪽이 있다 (DB를 보기 전에 걸린다)
     expect(await runMergeRecorded(div.id, slotId, 'auto')).toEqual({ runId: '', status: 'busy', errorText: '이미 병합 중입니다', outcome: null });
     finish();
     expect((await manual).status).toBe('succeeded');
     expect(runMergeMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('[HM-T158] (병합 뒤 맞추기와 함께) 기록이 succeeded가 된 뒤에도 맞추기(afterMerged)가 끝날 때까지는 잡은 채다 — 다음 병합의 맞추기가 앞지르지 않는다', async () => {
+    const { prisma } = await import('@/server/db');
+    const { runMergeRecorded } = await import('@/server/merge/run');
+    const { mergeInFlight } = await import('@/server/merge/inflight');
+    const { div } = await mkDivision('맞춤실');
+    vi.setSystemTime(at(2));
+    const seen: { status?: string; second?: string; inFlight?: boolean } = {};
+    afterHook.fn = async () => {
+      afterHook.fn = null;
+      // 쓰기·기록은 이미 끝났다(잠금 안의 두 걸음) — 맞추기는 그 뒤
+      const run = await prisma.mergeRun.findFirstOrThrow({ where: { divisionId: div.id }, orderBy: { startedAt: 'desc' } });
+      seen.status = run.status;
+      seen.inFlight = !!(await mergeInFlight(div.id, slotId));
+      seen.second = (await runMergeRecorded(div.id, slotId, 'auto')).status;
+    };
+    try {
+      expect((await runMergeRecorded(div.id, slotId, 'manual')).status).toBe('succeeded');
+    } finally {
+      afterHook.fn = null;
+    }
+    expect(seen).toEqual({ status: 'succeeded', inFlight: true, second: 'busy' });
+    expect(runMergeMock).toHaveBeenCalledTimes(1);
+    // 끝나면 놓았다 — 다음 병합은 바로 돈다
+    expect(await mergeInFlight(div.id, slotId)).toBeNull();
+    expect((await runMergeRecorded(div.id, slotId, 'manual')).status).toBe('succeeded');
+  });
+
+  it('[HM-T158] 쓰기가 실패해도(디스크 등) 잡은 것을 놓는다 — 실행은 failed로 남고 다음 병합은 막히지 않는다', async () => {
+    const { prisma } = await import('@/server/db');
+    const { runMergeRecorded } = await import('@/server/merge/run');
+    const { mergeInFlight } = await import('@/server/merge/inflight');
+    const { div } = await mkDivision('쓰기실패실');
+    vi.setSystemTime(at(2));
+    // 저장소 밖으로 나가는 경로 — writeFileAtomic이 거절한다
+    runMergeMock.mockImplementationOnce(async () => ({ ...OUTCOME, outputRelPath: '../escape.hwp' }));
+    const r = await runMergeRecorded(div.id, slotId, 'manual');
+    expect(r.status).toBe('failed');
+    expect(await prisma.mergeRun.findUniqueOrThrow({ where: { id: r.runId } })).toMatchObject({ status: 'failed' });
+    expect(await mergeInFlight(div.id, slotId)).toBeNull();
+    expect((await runMergeRecorded(div.id, slotId, 'manual')).status).toBe('succeeded');
   });
 });
 
@@ -299,15 +368,15 @@ describe('HM-55 멈춘 실행 회수', () => {
     expect(interval).not.toHaveBeenCalled(); // 1분 주기(데우기 포함)를 걸지 않았다
     expect(modelCalls).toHaveLength(0);
     // 끊긴 부서는 곧바로 다시 누를 수 있다 — 아무것도 돌지 않는데 「이미 병합 중」으로 막지 않는다
-    expect((await mergeNow(lead.email)).status).toBe(200);
+    expect((await mergeNow(lead.email)).status).toBe(202);
   });
 });
 
 describe('HM-53 마감 전 데우기', () => {
-  it('[HM-T156] ★ 가장 이른 병합 기준 시각 10분 전에 한 번 — 빈 프롬프트 · keep_alive 30m · 같은 기준 시각에는 다시 안 보낸다', async () => {
+  it('[HM-T156] ★ 가장 이른 병합 기준 시각 10분 전에 한 번 — 빈 프롬프트 · keep_alive -1(상주) · 같은 기준 시각에는 다시 안 보낸다', async () => {
     process.env.MERGE_SCHEDULER = 'on';
     const { warmModelIfDue, resetWarmupForTest } = await import('@/server/merge/warmup');
-    const { keepAliveFor, modelGateState } = await import('@/server/merge/gate');
+    const { modelGateState } = await import('@/server/merge/gate');
     resetWarmupForTest();
     await mkDivision('데움실');
 
@@ -316,14 +385,11 @@ describe('HM-53 마감 전 데우기', () => {
 
     const w = await warmModelIfDue(at(-10));
     expect(w).toMatchObject({ ok: true, gate: D });
-    expect(modelCalls).toEqual([{ model: 'test-model', stream: false, prompt: '', keep_alive: '30m' }]);
+    expect(modelCalls).toEqual([{ model: 'test-model', stream: false, prompt: '', keep_alive: -1 }]);
     expect(modelGateState().lastWarmup).toMatchObject({ ok: true });
 
     for (const m of [-9, -1, 0, 0.5]) expect(await warmModelIfDue(at(m))).toBeNull();
     expect(modelCalls).toHaveLength(1);
-    // 마감 시간대 — 병합 호출도 모델을 붙잡는다
-    expect(keepAliveFor(at(5).getTime())).toBe('30m');
-    expect(keepAliveFor(at(-20).getTime())).toBeNull();
   });
 
   it('[HM-T156] 마감 열기가 닫히는 시각도 기준 시각이다 (DM-20) — 그 시각마다 한 번', async () => {
@@ -359,5 +425,57 @@ describe('HM-53 마감 전 데우기', () => {
     vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('fetch failed'))));
     const r = await warmModelIfDue(at(-10));
     expect(r).toMatchObject({ ok: false, reason: '모델 호출 연결 실패' }); // 데우기는 다시 부르지 않는다
+  });
+
+  it('[HM-T161] ★ (2026-10-08 상주) 기동할 때 한 번 데운다 — 마감을 기다리지 않는다 · 스케줄러가 꺼진 서버 · 일시정지면 안 데운다', async () => {
+    const { warmModelAtBoot } = await import('@/server/merge/warmup');
+    const { modelGateState } = await import('@/server/merge/gate');
+    vi.setSystemTime(at(-3 * 24 * 60)); // 월요일 — 어느 기준 시각에서도 먼 때
+
+    process.env.MERGE_SCHEDULER = 'off';
+    expect(await warmModelAtBoot()).toBeNull();
+    process.env.MERGE_SCHEDULER = 'on';
+    process.env.MERGE_PAUSE_UNTIL = at(60).toISOString(); // HM-44
+    expect(await warmModelAtBoot()).toBeNull();
+    expect(modelCalls).toHaveLength(0);
+
+    delete process.env.MERGE_PAUSE_UNTIL;
+    expect(await warmModelAtBoot()).toMatchObject({ ok: true, gate: null });
+    expect(modelCalls).toEqual([{ model: 'test-model', stream: false, prompt: '', keep_alive: -1 }]);
+    expect(modelGateState().lastWarmup).toMatchObject({ ok: true });
+    expect(modelGateState().lastCall).toMatchObject({ label: '데우기(기동)' });
+
+    // 설정한 값을 그대로 붙인다 — 데우기도 병합 호출과 같은 `MERGE_MODEL_KEEP_ALIVE`다 (HM-53b)
+    process.env.MERGE_MODEL_KEEP_ALIVE = '45m';
+    expect(await warmModelAtBoot()).toMatchObject({ ok: true });
+    expect(modelCalls[1]).toEqual({ model: 'test-model', stream: false, prompt: '', keep_alive: '45m' });
+    delete process.env.MERGE_MODEL_KEEP_ALIVE;
+
+    vi.stubGlobal('fetch', vi.fn(async () => Promise.reject(new TypeError('fetch failed'))));
+    expect(await warmModelAtBoot()).toMatchObject({ ok: false, reason: '모델 호출 연결 실패' }); // 던지지 않는다 · 다시 부르지 않는다
+  });
+
+  it('[HM-T161] 스케줄러가 켜진 서버는 register()가 기동하자마자 데운다 — 첫 주기(20초 뒤)를 기다리지 않는다', async () => {
+    await mkDivision('기동데움실');
+    vi.setSystemTime(at(-3 * 24 * 60));
+    process.env.MERGE_SCHEDULER = 'on';
+    const env = process.env as Record<string, string | undefined>;
+    const before = env.NEXT_RUNTIME;
+    env.NEXT_RUNTIME = 'nodejs';
+    // 주기는 걸지 않는다 — 이 시험이 보는 것은 기동 때의 데우기 하나다
+    const realSetTimeout = globalThis.setTimeout;
+    const firstTick = vi.fn();
+    vi.spyOn(globalThis, 'setInterval').mockImplementation((() => ({ unref() {} })) as never);
+    vi.spyOn(globalThis, 'setTimeout').mockImplementation(((fn: () => void, ms?: number, ...rest: unknown[]) =>
+      ms === 20_000 ? (firstTick(), { unref() {} }) : realSetTimeout(fn, ms, ...rest)) as never);
+    try {
+      const { register } = await import('@/instrumentation');
+      await register();
+    } finally {
+      env.NEXT_RUNTIME = before;
+    }
+    expect(firstTick).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() => expect(modelCalls).toHaveLength(1));
+    expect(modelCalls[0]).toEqual({ model: 'test-model', stream: false, prompt: '', keep_alive: -1 });
   });
 });

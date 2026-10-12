@@ -3,6 +3,7 @@
 #
 #   bash scripts/deploy.sh prod  [--no-build] [--ignore-window]   운영   (docker-compose.yml · 11111)
 #   bash scripts/deploy.sh test  [--no-build]                     테스트 (docker-compose.test.yml -p repman-test · 11112)
+#     (TINCASE_TEST_MODE=demo — sudo 뒤로 넘긴다, OPS-43h · 리허설이면 TINCASE_REHEARSAL=on — 덧붙이는 compose, OPS-47)
 #   bash scripts/deploy.sh prune                                  빌드 없이 청소만 (손으로 빌드한 뒤 · 디스크 경보 때)
 #
 # 왜 스크립트인가: 2026-10-08, 이틀 사이 빌드를 거듭하자 태그 없는 이미지가 약 45개(약 35G) 쌓여 루트 디스크가
@@ -32,6 +33,9 @@ LOCK_FILE='/tmp/repman-deploy.lock'
 
 PROD_IMAGE='repman:latest'
 ROLLBACK_IMAGE='repman:rollback'
+# OPS-17a — 사람이 붙여 두는 **고정 태그**. deploy.sh는 옮기지도 지우지도 않는다(청소는 태그 없는 것만 — OPS-43).
+# v2 전환(LAUNCH-v2 ①)에서 그 아침에 돌던 v1을 이 이름으로 붙잡는다. 다음 고정 태그를 붙이면 여기를 바꾼다
+PINNED_ROLLBACK_IMAGE='repman:v1.39.0'
 PROD_CONTAINER='repman'
 TEST_CONTAINER='repman-test'
 
@@ -358,6 +362,32 @@ check_test_mode() {
 }
 
 # ---------------------------------------------------------------------------------------------------------------
+# OPS-47 — 리허설(scripts/rehearsal.ts · docs/REHEARSAL.md)은 테스트 서버의 자동 병합 스케줄러를 켠다 — 덧붙이는 compose
+# (docker-compose.rehearsal.yml)로. **시연 모드(가짜 사람)에서만** — 평소 모드는 운영 사본(실명)이라, 켜면 그 주차가 저절로 병합·넘김되고
+# 알림 수신함에 실명 알림이 쌓인다.
+#   rehearsal_verdict <TINCASE_TEST_MODE> <TINCASE_REHEARSAL> → 0 가도 됨 · 1 멈춤(실명 데이터에서 켬) · 2 값이 이상함
+# 변수 없이 다시 올리면 꺼진다(덧붙이는 파일 없이 만든다) — 리허설이 끝나면 `TINCASE_TEST_MODE=demo bash scripts/deploy.sh test --no-build`
+# ---------------------------------------------------------------------------------------------------------------
+rehearsal_verdict() {
+  local mode=${1:-} on=${2:-}
+  case $on in
+    '' | off) return 0 ;;
+    on) [[ $mode == demo ]] && return 0 || return 1 ;;
+    *) return 2 ;;
+  esac
+}
+
+check_rehearsal() {
+  local rc=0
+  rehearsal_verdict "${TINCASE_TEST_MODE:-}" "${TINCASE_REHEARSAL:-}" || rc=$?
+  case $rc in
+    0) [[ ${TINCASE_REHEARSAL:-} != on ]] || log "리허설: 자동 병합 스케줄러 켜짐 (docker-compose.rehearsal.yml — 끝나면 변수 없이 다시 올린다)" ;;
+    1) die "TINCASE_REHEARSAL=on은 시연 모드(TINCASE_TEST_MODE=demo)에서만 — 평소 모드는 운영 사본(실명)이다 (OPS-47)" ;;
+    *) die "TINCASE_REHEARSAL 값이 이상하다: '${TINCASE_REHEARSAL:-}' (on 또는 off)" ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------------------------------------------
 # 운영 전용 — 브랜치 · 롤백 태그
 # ---------------------------------------------------------------------------------------------------------------
 # 빌드만이 아니라 --no-build 재기동도 본다 — 그 체크아웃의 docker-compose.yml(환경변수·볼륨)로 운영 컨테이너를
@@ -374,28 +404,54 @@ require_main_branch() {
   [[ -z $dirty ]] || warn "커밋하지 않은 변경이 운영에 들어간다 (빌드면 이미지로, --no-build면 compose 설정으로):"$'\n'"$dirty"
 }
 
-tag_rollback() {
+# 지금 롤백 태그가 가리키는 것 — 옮기지 않을 때 무엇이 남았는지 말하려고
+rollback_now() {
   local id
-  if ! id=$(dk image inspect --format '{{.Id}}' "$PROD_IMAGE" 2>/dev/null); then
-    log "$PROD_IMAGE 이 없다 — 첫 설치로 보고 롤백 태그 없이 간다"
+  id=$(dk image inspect --format '{{.Id}}' "$ROLLBACK_IMAGE" 2>/dev/null || true)
+  if [[ -n $id ]]; then printf ' (그대로: %s)' "${id:7:12}"; else printf ' (지금 없음)'; fi
+}
+
+# OPS-17a (2026-10-10) — 롤백 태그는 **지금 떠서 health가 ok인 운영 컨테이너의 이미지**에 붙인다. 그 밖이면 옮기지 않는다.
+#   예전에는 빌드 직전에 늘 `repman:latest`를 repman:rollback으로 옮겼다. 그런데 latest는 「돌고 있는 것」이 아니다 —
+#   ⑥을 빌드째 두 번 돌리면(첫 번째가 빌드 뒤 health에서 멈춤) 둘째의 태그가 방금 구운 v2를 가리켜 v1 이미지가 태그를 잃고 그 실행의 청소에 지워졌다.
+#   누가 빌드만 하고 띄우지 않은 경우도 같다. 그래서 「되돌아갈 곳」의 조건 둘을 직접 본다: 지금 **도는** 이미지이고, 지금 **건강하다**.
+tag_rollback() { # <health url>
+  local url=$1 id
+  if ! container_running "$PROD_CONTAINER"; then
+    log "운영 컨테이너가 떠 있지 않다 — 되돌아갈 곳을 모르니 롤백 태그($ROLLBACK_IMAGE)를 옮기지 않는다$(rollback_now)"
     return 0
   fi
-  dk tag "$PROD_IMAGE" "$ROLLBACK_IMAGE" || die "$ROLLBACK_IMAGE 태그 실패 — 되돌릴 길 없이 빌드하지 않는다"
-  log "롤백 태그: $ROLLBACK_IMAGE = 지금 $PROD_IMAGE (${id:7:12}) — 그 전 세대는 태그가 떨어져 이번 청소에 지워진다"
+  id=$(dk inspect --format '{{.Image}}' "$PROD_CONTAINER" 2>/dev/null || true)
+  if [[ -z $id ]]; then
+    warn "운영 컨테이너의 이미지를 읽지 못했다 — 롤백 태그($ROLLBACK_IMAGE)를 옮기지 않는다$(rollback_now)"
+    return 0
+  fi
+  if ! probe_health "$url"; then
+    warn "지금 운영 health가 ok:true가 아니다 — 그 이미지는 되돌아갈 곳이 아니다. 롤백 태그($ROLLBACK_IMAGE)를 옮기지 않는다$(rollback_now)"
+    return 0
+  fi
+  dk tag "$id" "$ROLLBACK_IMAGE" || die "$ROLLBACK_IMAGE 태그 실패 — 되돌릴 길 없이 빌드하지 않는다"
+  log "롤백 태그: $ROLLBACK_IMAGE = 지금 떠서 health ok인 운영 컨테이너의 이미지 (${id:7:12}) — 그 전 세대는 태그가 떨어져 이번 청소에 지워진다"
 }
 
 # ---------------------------------------------------------------------------------------------------------------
 # health (OPS-13) — ok:true가 올 때까지. compose healthcheck의 start_period가 20초라 그보다 넉넉히 기다린다
 # ---------------------------------------------------------------------------------------------------------------
 HEALTH_BODY=''
+# 한 번만 묻는다 — 200 그리고 본문에 "ok":true. 본문은 HEALTH_BODY에 남는다
+probe_health() { # <url>
+  local res code
+  res=$(curl -sS --max-time 5 -w $'\n%{http_code}' "$1" 2>&1 || true)
+  code=${res##*$'\n'}
+  HEALTH_BODY=${res%$'\n'*}
+  [[ $code == 200 && $HEALTH_BODY == *'"ok":true'* ]]
+}
+
 wait_for_health() { # <url>
-  local url=$1 give_up_at res code
+  local url=$1 give_up_at
   give_up_at=$(($(date +%s) + HEALTH_TIMEOUT_SEC))
   while :; do
-    res=$(curl -sS --max-time 5 -w $'\n%{http_code}' "$url" 2>&1 || true)
-    code=${res##*$'\n'}
-    HEALTH_BODY=${res%$'\n'*}
-    if [[ $code == 200 && $HEALTH_BODY == *'"ok":true'* ]]; then return 0; fi
+    if probe_health "$url"; then return 0; fi
     (($(date +%s) < give_up_at)) || return 1
     sleep 3
   done
@@ -469,6 +525,7 @@ main() {
     compose_args=(compose -f docker-compose.yml -p repman)
     health_url='http://127.0.0.1:11111/api/health'
     [[ -z ${TINCASE_TEST_MODE:-} ]] || warn "TINCASE_TEST_MODE는 테스트 서버 전용이다 — 운영에서는 쓰지 않는다"
+    [[ -z ${TINCASE_REHEARSAL:-} ]] || warn "TINCASE_REHEARSAL은 테스트 서버 전용이다 — 운영에서는 쓰지 않는다"
     require_main_branch
     if ((ignore_window)); then
       warn "배포 금지 시간대 확인을 건너뛴다 (--ignore-window)"
@@ -480,12 +537,14 @@ main() {
     health_url='http://127.0.0.1:11112/api/health'
     ((ignore_window == 0)) || log "테스트 서버에는 금지 시간대가 없다 — --ignore-window는 무시한다"
     check_test_mode
+    check_rehearsal
     [[ -z ${TINCASE_TEST_MODE:-} ]] || env_args=("TINCASE_TEST_MODE=$TINCASE_TEST_MODE")
+    [[ ${TINCASE_REHEARSAL:-} != on ]] || compose_args=(compose -f docker-compose.test.yml -f docker-compose.rehearsal.yml -p repman-test)
   fi
 
   if ((build)); then
     ensure_disk_for_build "$target"
-    [[ $target != prod ]] || tag_rollback
+    [[ $target != prod ]] || tag_rollback "$health_url"
     log "빌드: docker ${compose_args[*]} build"
     dk ${env_args[@]+"${env_args[@]}"} "${compose_args[@]}" build ||
       die "빌드 실패 — 돌고 있는 컨테이너는 그대로다. 남은 찌꺼기는 bash scripts/deploy.sh prune"
@@ -514,9 +573,22 @@ main() {
   fi
   printf '[deploy] 실패: health가 %s초 안에 ok:true가 아니다. checks를 읽는다 — checks.template만 fail이면 배포 탓이 아니다(OPS-41).\n' \
     "$HEALTH_TIMEOUT_SEC" >&2
+  # 본문이 JSON이 아니면 앱이 기동하다 멈춘 것이다 — 이유는 로그의 FATAL 줄에 있다(스키마 OPS-48 · 메신저 설정 OPS-46 · 빈 DB OPS-05).
+  # 스키마면 되돌리지 않는다 — db push 뒤 --no-build로 다시 띄운다(DEPLOY.md 2b-4 표)
+  if [[ $HEALTH_BODY != *'"ok"'* ]]; then
+    printf '         health에 닿지 못했다 — 앱이 기동하다 멈췄다. 이유: sudo docker %s logs --tail 60 | grep -A8 FATAL  (db push를 빠뜨렸으면 push 뒤 --no-build)\n' \
+      "${compose_args[*]}" >&2
+  fi
   if [[ $target == prod ]]; then
-    printf '         되돌리기(OPS-17): sudo docker tag %s %s && bash scripts/deploy.sh prod --no-build --ignore-window\n' \
-      "$ROLLBACK_IMAGE" "$PROD_IMAGE" >&2
+    # OPS-17a — 고정 태그가 있으면 그쪽을 먼저 권한다. repman:rollback은 「이번 배포 전에 떠서 건강하던 것」이라 대개 맞지만,
+    # 같은 날 배포를 거듭하면 그것도 새 판일 수 있다 — 사람이 붙인 고정 태그(v2 전환의 v1)는 deploy.sh가 옮기지 않는다
+    local back=$ROLLBACK_IMAGE note=''
+    if dk image inspect --format '{{.Id}}' "$PINNED_ROLLBACK_IMAGE" >/dev/null 2>&1; then
+      back=$PINNED_ROLLBACK_IMAGE
+      note="   ← 고정 태그(LAUNCH-v2 §3.1). 직전에 떠서 건강하던 이미지로 가려면 $ROLLBACK_IMAGE"
+    fi
+    printf '         되돌리기(OPS-17): sudo docker tag %s %s && bash scripts/deploy.sh prod --no-build --ignore-window%s\n' \
+      "$back" "$PROD_IMAGE" "$note" >&2
   fi
   exit 1
 }

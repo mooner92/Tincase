@@ -10,6 +10,29 @@ export type ComposerFrom = 'draft' | 'submission' | 'blank';
 const hasContent = <R extends { content: string }>(d: Partial<Buckets<R>> | null | undefined) =>
   !!d && BUCKETS.some((b) => d[b]?.some((r) => typeof r?.content === 'string' && r.content.trim() !== ''));
 
+/** WA-35d — 이 앱의 브라우저 임시본 열쇠는 모두 이것으로 시작한다(옛 열쇠 `tincase.compose.{주차}`도) */
+export const DRAFT_PREFIX = 'tincase.compose.';
+
+/**
+ * WA-35d (2026-10-10) — 임시본 열쇠 = **사람 + 주차**. 예전 열쇠는 주차뿐이라(`tincase.compose.2026-W42`) 한 브라우저를 여럿이 쓰면
+ * 다음 사람이 [작성하기]를 누르는 순간 앞사람의 안 낸 임시본이 「저장하지 않은 임시본에서 이어 씁니다」로 열리고, 그대로 [제출]하면
+ * **남의 글이 내 이름으로** 나갔다. 옛 열쇠는 읽지 않는다(누구 것인지 모른다) — 로그아웃이 지운다(`clearComposerDrafts`).
+ */
+export function composerDraftKey(userId: string, isoKey: string): string {
+  return `${DRAFT_PREFIX}u:${userId}:${isoKey}`;
+}
+
+/** WA-35d — 로그아웃할 때 이 앱의 임시본을 모두 지운다(옛 열쇠 포함). 다른 앱의 저장소는 건드리지 않는다. 지운 수를 돌려준다 */
+export function clearComposerDrafts(storage: Pick<Storage, 'length' | 'key' | 'removeItem'>): number {
+  const doomed: string[] = [];
+  for (let i = 0; i < storage.length; i++) {
+    const k = storage.key(i);
+    if (k?.startsWith(DRAFT_PREFIX)) doomed.push(k);
+  }
+  for (const k of doomed) storage.removeItem(k); // 다 모은 뒤에 지운다 — 돌면서 지우면 번호가 밀려 하나씩 건너뛴다
+  return doomed.length;
+}
+
 /** 브라우저 임시본. 모양이 틀리면(깨졌거나 옛 형식) 없는 것으로 친다 — 조용히 버린다 */
 function parseDraft<R extends { content: string }>(raw: string | null): Buckets<R> | null {
   if (!raw) return null;
@@ -54,4 +77,38 @@ export function composerStart<R extends { content: string }>(
 export function dateHint(weekStartMs: number, weeksAhead = 0): string {
   const d = new Date(weekStartMs + (1 + 7 * weeksAhead) * 86_400_000 + 9 * 3_600_000);
   return `${d.getUTCMonth() + 1}/${d.getUTCDate()}`;
+}
+
+/** WA-37이 비교하는 칸 — 문서로 나가는 것 전부 */
+interface Comparable {
+  content: string;
+  date?: string;
+  place?: string;
+  attendee?: string;
+  emphasis?: boolean;
+}
+
+/**
+ * WA-37 — 두 표가 **내용으로** 같은가. 표마다 내용 있는 줄만, 칸은 앞뒤 공백을 뺀 값으로, 순서대로 견준다.
+ *
+ * 예전 「손대기 전」 판정은 참조 비교(`data === start.data`)였다. 한 글자 쳤다 지우기만 해도 「바뀜」이라
+ * [제출]이 켜지고, 같은 내용의 새 판이 생겼다(2판 이상 0건인 지금도 그 길은 열려 있었다).
+ * 내용 없는 줄은 제출 때 빠지므로(끝의 빈 줄 포함) 보지 않는다. 「공유」를 켜면 문서 색이 바뀌므로 다르다.
+ */
+export function sameRows<R extends Comparable>(a: Buckets<R> | null | undefined, b: Buckets<R> | null | undefined): boolean {
+  const norm = (rows: R[] | undefined) =>
+    (rows ?? [])
+      .filter((r) => typeof r?.content === 'string' && r.content.trim() !== '')
+      .map((r) => [r.content.trim(), (r.date ?? '').trim(), (r.place ?? '').trim(), (r.attendee ?? '').trim(), r.emphasis === true]);
+  return BUCKETS.every((k) => JSON.stringify(norm(a?.[k])) === JSON.stringify(norm(b?.[k])));
+}
+
+/**
+ * WA-37 — [제출]이 꺼져 있는가. 화면은 이 식 하나로 정한다(WA-T51).
+ *
+ * `done`: 낸 뒤 작성 화면이 닫히기까지(0.9초) 다시 누르지 못하게 한다. 예전에는 응답이 오면 `busy`가 풀리면서
+ * [제출]이 다시 켜졌다 — 「제출되었습니다」를 보고 한 번 더 누르면 같은 내용의 판이 하나 더 생겼다(2026-10-08 UX 리뷰).
+ */
+export function submitBlocked(s: { busy: boolean; done: boolean; filled: number; from: ComposerFrom; unchanged: boolean }): boolean {
+  return s.busy || s.done || s.filled === 0 || (s.from === 'submission' && s.unchanged);
 }

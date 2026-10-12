@@ -10,6 +10,7 @@ import { contentDisposition, readStoredFile, sha256, writeFileAtomic } from '@/s
 import { validateHwpUpload, UploadValidationError } from '@/lib/hwp/reader';
 import { env } from '@/server/env';
 import path from 'node:path';
+import { laterSyncCurrentWeek } from '@/server/rollup/auto';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,6 +77,8 @@ export const POST = handler(async (req: NextRequest) => {
   await writeFileAtomic(relPath(version, false), bytes); // 이력
   await writeFileAtomic(relPath(version, true), bytes); // active
   await audit(scope.user.email, 'template_update', null, `standard-template:v${version}`, { bytes: bytes.length });
+  // RU-72 — 표준 양식을 쓰는 본부본·전사본만 다시 만들어진다 (열쇠에 양식이 들어 있다, RU-74)
+  laterSyncCurrentWeek({ cause: 'template', causedBy: scope.user.email });
 
   return json(
     { standard: { version, byteSize: bytes.length }, parsedSummary: parsed.tables.map((t) => ({ rows: t.rows, cols: t.cols })) },

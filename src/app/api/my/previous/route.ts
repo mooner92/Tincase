@@ -32,7 +32,7 @@ export const dynamic = 'force-dynamic';
  * **직전 3주까지만** 본다 (WA-14). 이번이 N주차면 N-1 · N-2 · N-3.
  *
  * 「그 전 건 어차피 안 볼 것 같다」는 판단이고, 맞다 — 참고의 값은 최근일수록 크고
- * 칩이 늘어나면 고르는 일 자체가 일이 된다. 더 뒤는 「내 이력」에서 본다.
+ * 칩이 늘어나면 고르는 일 자체가 일이 된다. 더 뒤는 홈의 지난 주차에서 본다(PG-68).
  *
  * **「최근 제출 3건」이 아니라 「직전 3주」다.** 한 주 걸렀으면 그 주는 그냥 빈다 —
  * 3주 창이면 한 주쯤 건너뛴 경우는 창 안에서 저절로 흡수되고, 그보다 오래된 것은
@@ -96,7 +96,8 @@ export const GET = handler(async (req: NextRequest) => {
   try {
     rows = readWorklog(await readStoredFile(chosen.filePath)).worklog;
   } catch {
-    // 파일을 못 읽어도 «받기»는 되게 한다 — 화면에서 못 보는 것과 아예 없는 것은 다르다
+    // 파일을 못 읽어도 목록과 고른 주차는 돌려준다 — 화면에서 못 보는 것과 아예 없는 것은 다르다.
+    // (2026-10-08 — 예전에는 여기서 [hwp로 받기]로 돌렸다. 업로드 길과 함께 그 버튼도 걷었다, WA-39)
     rows = null;
   }
 
@@ -106,7 +107,7 @@ export const GET = handler(async (req: NextRequest) => {
     submissionId: chosen.id,
     slot: { isoKey: chosen.weekSlot.isoKey, label: chosen.weekSlot.label, year: chosen.weekSlot.year },
     uploadedAtKst: toKstIso(chosen.uploadedAt).slice(5, 16).replace('T', ' '),
-    /** 읽지 못했으면 null — 화면이 「받기만 됩니다」로 안내한다 */
+    /** 읽지 못했으면 null — 화면이 「파일을 읽지 못했습니다」 한 줄을 그린다 */
     rows,
   });
 });

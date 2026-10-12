@@ -76,15 +76,21 @@ async function save(identity: string, ach: string[]) {
   );
 }
 
+/** [지금 병합] — 2026-10-08 2단계(HM-60b)부터 202로 줄에 넣는다. 이 파일은 병합 뒤를 보므로 줄이 빌 때까지 기다린다 */
 async function merge(identity: string, body: Record<string, unknown>) {
   const { POST } = await import('@/app/api/division/merge/route');
-  return POST(
+  const res = (await POST(
     nx('/api/division/merge', identity, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ isoKey, ...body }),
     }),
-  );
+  )) as Response;
+  if (res.status === 202) {
+    const { settleMergeQueue } = await import('@/server/merge/queue');
+    await settleMergeQueue();
+  }
+  return res;
 }
 
 beforeAll(async () => {
@@ -119,11 +125,12 @@ beforeAll(async () => {
   await prisma.user.create({ data: { email: ID.head, name: '머리', divisionId: div.id, divisionRole: 'head', jobTitle: '실장' } });
   await prisma.user.create({ data: { email: ID.lead, name: '담당', divisionId: div.id, divisionRole: 'lead' } });
 
-  // 다시 병합 — 같은 경로에 새로 쓴다 (실제 병합과 같은 모양). 사람이 고친 것은 그래서 사라진다
+  // 다시 병합 — 같은 경로에 새로 쓴다 (실제 병합과 같은 모양). 사람이 고친 것은 그래서 사라진다.
+  // 엔진은 바이트만 돌려주고 쓰기는 runMergeRecorded가 잠금 안에서 한다 (2026-10-08 결정 c)
   runMergeMock.mockImplementation(async () => {
-    await writeFileAtomic(MERGED, bytes);
     return {
       outputRelPath: MERGED,
+      output: bytes,
       bytes: bytes.length,
       rowCounts: { achievements: 2, plans: 1, notes: 0 },
       mergedGroups: [],
@@ -190,7 +197,7 @@ d('HM-49 사람이 고친 병합본은 묻기 전에는 덮지 않는다', () =>
 
     // 확인하면 돈다 — 새 실행, 고친 기록 없음
     const ok = await merge(ID.lead, { overwriteEdits: true });
-    expect(ok.status).toBe(200);
+    expect(ok.status).toBe(202);
     expect(runMergeMock).toHaveBeenCalledTimes(1);
     const { latestEdits } = await import('@/server/merge/edits');
     expect((await latestEdits(divId, slotId))?.edits).toBeNull();
@@ -202,7 +209,7 @@ d('HM-49 사람이 고친 병합본은 묻기 전에는 덮지 않는다', () =>
     expect(JSON.parse(log.detail!).overwroteEdits).toMatchObject({ places: 2, by: ['담당', '머리 실장'] });
 
     // 고친 기록이 없는 병합본은 묻지 않는다 — 지금까지와 같다
-    expect((await merge(ID.lead, {})).status).toBe(200);
+    expect((await merge(ID.lead, {})).status).toBe(202);
     expect(runMergeMock).toHaveBeenCalledTimes(2);
   });
 });

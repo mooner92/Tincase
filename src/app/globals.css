@@ -3,56 +3,73 @@
 /*
  * 디자인 토큰 — Airbnb 구조 언어 + Tincase 그린.
  *
- * 흰 캔버스 · 넉넉한 여백 · 부드러운 모서리 · 절제된 글자 굵기 · **강조색 하나**.
+ * 넉넉한 여백 · 부드러운 모서리 · 절제된 글자 굵기 · **강조색 하나**.
  * Airbnb는 Rausch 핑크 하나로 모든 CTA를 끌고 가는데, 우리 브랜드색은 로고의
  * 딥 그린이므로 그 자리를 그린이 대신한다. 색을 여러 개 쓰면 강조가 강조를 잃는다.
  *
- * 그림자는 **한 단계만** 쓴다 (Airbnb도 그렇다) — 떠오르는 카드와 드롭다운에만.
+ * **바닥은 옅은 회색, 카드는 흰색이다 (CP-97, 2026-10-07).**
+ * 그 전까지는 바닥도 카드도 흰색이라 카드가 1.67:1짜리 가는 선 하나로만 구분됐다.
+ * 「컴포넌트별로 구분이 잘 안 된다」는 피드백이 거기서 나왔다 — 선을 진하게 하면 화면이
+ * 격자가 되므로, 선이 아니라 **면**으로 나눈다: 흰 카드가 회색 바닥 위에 놓인다.
  */
 @theme {
-  /* 표면 — 흰 캔버스 위에 회색 계조 */
-  --color-canvas: #ffffff;
-  --color-surface-soft: #f7f7f7;
-  --color-surface-card: #ffffff;
-  --color-surface-strong: #f2f2f2;
+  /* 바닥과 표면 */
+  --color-ground: #f3f4f3; /* 페이지 바닥. 이 위에 바로 놓는 글자는 muted 이상 (#767676은 4.12:1로 떨어진다) */
+  --color-canvas: #ffffff; /* 카드·입력칸·드로어·메뉴·헤더 */
+  --color-surface-soft: #f7f7f7; /* 카드 안 — 표 머리·hover·callout */
+  --color-surface-strong: #ececec; /* 카드 안 — 진행 막대 바탕·회색 칩 */
 
   /* 글자 */
   --color-ink: #222222;
   --color-ink-active: #000000;
   --color-body: #3f3f3f;
   --color-body-strong: #222222;
-  --color-muted: #6a6a6a; /* 5.4:1 */
+  --color-muted: #6a6a6a; /* 5.4:1 (흰색) · 4.9:1 (바닥) */
   /*
-   * 회색 계조는 **재서 정했다** (v1.28.0). 「테두리가 너무 연해서 직관적이지 않고
-   * ✕ 같은 것도 잘 안 보인다」는 실제 피드백에서 값을 다시 계산했다.
-   *
-   *   muted-soft   #929292 → 3.11:1  작은 글자인데 4.5:1에 못 미쳤다 (✕ 버튼이 이 색이었다)
-   *   hairline     #dddddd → 1.36:1  입력칸 테두리인데 «있는지 없는지» 수준이었다
-   *   hairline-soft #ebebeb → 1.19:1 사실상 안 보인다
-   *
+   * 회색 계조는 **재서 정했다** (v1.28.0, 2026-10-07 다시 잼).
    * 기준: 글자는 4.5:1(WCAG AA), 조작 요소의 경계는 3:1(WCAG 1.4.11).
    * 다만 **장식용 구분선까지 3:1로 올리면 화면이 격자로 뒤덮인다** — 그래서 층을 나눈다:
    *   border-strong  입력칸처럼 «여기를 누르거나 적는다»를 알려야 하는 경계   ≈3:1
-   *   hairline       카드의 바깥 테두리                                      보이되 조용하게
-   *   hairline-soft  카드 안 행 구분선                                        장식
+   *   hairline       카드의 바깥 테두리 — 카드는 이제 면(흰색 대 바닥)으로 구분되므로 한 단계 옅게
+   *   hairline-soft  카드 안 행·구역 구분선                                  장식
    */
-  --color-muted-soft: #767676; /* 4.54:1 — 작은 글자 하한 */
-  --color-hairline: #c8c8c8; /* 1.67:1 — 카드 테두리 */
-  --color-hairline-soft: #dedede; /* 1.35:1 — 행 구분선 */
+  --color-muted-soft: #767676; /* 4.54:1 (흰색) — 흰 카드 안에서만. 바닥 위에서는 muted를 쓴다 */
+  --color-hairline: #d6d6d6; /* 1.32:1 (바닥) — 카드 테두리 */
+  --color-hairline-soft: #e6e6e6; /* 카드 안 구분선 */
   --color-border-strong: #9a9a9a; /* 2.81:1 — 입력칸·조작 경계 */
 
   /* 브랜드 — 로고와 **같은 값**을 유지한다 (public/brand/*.svg) */
-  --color-brand: #0a3711; /* 딥 그린. 기본 CTA·강조 */
+  --color-brand: #0a3711; /* 딥 그린. 기본 CTA·강조 — 큰 면을 칠하지 않는다 (CP-100) */
   --color-brand-active: #06250b;
   --color-brand-tint: #7fb98c; /* 어두운 배경 위에서만 */
   --color-brand-soft: #eef4ef; /* 아주 옅은 배경 */
 
-  /* 상태 */
+  /*
+   * CP-105 개정 · PG-82 (2026-10-08 v2) — 발표 무대는 **흰 바탕**이다. 사용자: 「배경을 검은색 말고 흰색으로 — 프레젠터로
+   * 발표할 거라 흰 배경」. 강당 프로젝터는 바탕에 빛이 더해져 대비가 떨어지므로 무대 글자는 7:1 이상(AAA), 경계는 3:1 이상 —
+   * UI-T94가 이 값들로 계산한다. `brand-tint`는 흰 바탕에서 2.28:1이라 무대에서 쓰지 않는다(강조는 `brand`).
+   */
+  --color-stage: #ffffff;
+  --color-stage-soft: #f3f4f3; /* 무대 안의 면 — 흐름 칸·발표자 창의 칸 (= ground) */
+  --color-stage-line: #d6d6d6; /* 무대 안 구분선 (= hairline, 장식) */
+  --color-stage-muted: #555555; /* 보조 글자 — stage 위 7.46:1 · stage-soft 위 6.76:1 */
+  --color-stage-ink: #111111; /* 무대 글자 — stage 위 18.88:1 */
+  --color-blackout: #000000; /* 검은 화면(B) 전용 — 무대가 희어도 검은 화면은 검다 */
+
+  /* 상태 — 「-soft」 위에 같은 이름의 글자를 얹는다. 비율은 그 조합으로 쟀다 */
   --color-success: #0a7d2c;
-  --color-warning: #b26a00;
+  --color-success-soft: #e7f3ea; /* success 글자 4.62:1 */
+  --color-warning: #945800; /* warning-soft 위 5.22:1 (#b26a00은 3.85:1이라 낮췄다) */
   --color-warning-soft: #fdf3e2;
   --color-error: #c13515;
   --color-error-soft: #fdeceb;
+  --color-info: #2f5bd3; /* info-soft 위 5.26:1 — 「올린 파일」 같은 중립 정보. 여러 파랑(#5b82e0·blue-600…)을 이것 하나로 */
+  --color-info-soft: #edf2fd;
+  /*
+   * HM-37 — 「공유」 표시. 기획조정실 규칙의 **실제 hwp 색**이라 비슷한 파랑으로 바꾸지 않는다.
+   * 화면에서 이 색을 쓰는 곳은 «문서에서 파랗게 나간다»를 보여 주는 자리뿐이다.
+   */
+  --color-emphasis: #0000ff;
 
   /* 페이퍼로지 — layout.tsx의 next/font/local이 --font-paperlogy를 채운다.
      뒤의 목록은 글꼴이 뜨기 전·못 뜰 때만 쓰인다 (한글 있는 것으로만 골랐다) */
@@ -60,75 +77,631 @@
     "Apple SD Gothic Neo", "Noto Sans KR", sans-serif;
 }
 
+/*
+ * PG-80 — 스크롤바가 생기고 없어질 때 폭이 9~17px 흔들리지 않게(Windows 고정 스크롤바). 체험하기의 무대는 폭으로 높이를
+ * 정하므로(16:9) 폭이 흔들리면 그 밑의 도크가 위아래로 움직였다. 발표 화면은 스크롤이 없으므로 빈 띠를 두지 않는다
+ */
+html {
+  scrollbar-gutter: stable;
+}
+html:has([data-present]) {
+  scrollbar-gutter: auto;
+}
+
 body {
-  background: var(--color-canvas);
+  background: var(--color-ground);
   color: var(--color-body);
   font-family: var(--font-sans);
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  /*
+   * 한국어는 낱말 중간에서 줄을 바꾸지 않는다 — 기본값(normal)은 글자마다 끊어 「있습니/다」·「담/당자」가 됐다
+   * (사용 안내의 휴대폰 목록·목차, 강당에 비친 일정 표). 칸보다 긴 낱말(긴 파일 이름 등)만 overflow-wrap이 끊는다.
+   */
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 @layer components {
   /*
-   * 제목 — 굵기로 밀어붙이지 않는다. 22~28px에 600 정도면 충분하고,
-   * 무게는 여백과 대비가 만든다 (Airbnb가 700+ 대신 500~600을 쓰는 이유).
+   * 제목 — 굵기로 밀어붙이지 않는다. 무게는 여백과 대비가 만든다.
+   * 크기는 몇 개만 쓴다 (CP-98): 12 · 14 · 15 · 17 · 26~28px, 통계 숫자만 40px.
    */
-  .display {
-    @apply font-semibold text-ink;
-    letter-spacing: -0.02em;
+  /* 페이지 제목 하나 — 예전에는 화면마다 40·32·24px·xl·lg로 제각각이었다 */
+  .page-title {
+    @apply text-[26px] leading-tight font-semibold tracking-[-0.02em] text-ink sm:text-[28px];
+  }
+  .page-sub {
+    @apply mt-1.5 max-w-[68ch] text-[15px] leading-6 text-muted;
+  }
+  /* 제목 줄 — 왼쪽 제목, 오른쪽 그 화면의 곁가지(주차 고르기 등) */
+  .page-head {
+    @apply flex flex-wrap items-end justify-between gap-x-6 gap-y-3;
   }
 
-  /* 버튼 — 8px 모서리, 48px 높이. 모든 상호작용 요소는 둥글다 */
+  /* 버튼 — 카드마다 주 버튼(primary)은 하나 (CP-99) */
   .btn-primary {
-    @apply inline-flex h-12 items-center justify-center gap-1.5 rounded-lg bg-brand px-6 text-[15px] font-semibold text-white transition-colors hover:bg-brand-active disabled:cursor-not-allowed disabled:bg-hairline disabled:text-muted-soft;
+    @apply inline-flex h-11 items-center justify-center gap-1.5 rounded-lg bg-brand px-5 text-[15px] font-semibold whitespace-nowrap text-white transition-colors hover:bg-brand-active disabled:cursor-not-allowed disabled:bg-hairline disabled:text-muted-soft;
   }
   .btn-secondary {
-    @apply inline-flex h-12 items-center justify-center gap-1.5 rounded-lg border border-ink bg-canvas px-6 text-[15px] font-semibold text-ink transition-colors hover:bg-surface-soft disabled:cursor-not-allowed disabled:border-hairline disabled:text-muted-soft;
+    @apply inline-flex h-11 items-center justify-center gap-1.5 rounded-lg border border-border-strong bg-canvas px-5 text-[15px] font-medium whitespace-nowrap text-ink transition-colors hover:border-ink hover:bg-surface-soft disabled:cursor-not-allowed disabled:border-hairline disabled:text-muted-soft;
   }
-  /* 어두운 배경 위 — 흰 버튼 */
-  .btn-oncolor {
-    @apply inline-flex h-10 items-center justify-center rounded-lg bg-canvas px-4 text-sm font-semibold text-ink transition-colors hover:bg-surface-soft;
+  /* 줄마다 붙는 행동(열기·받기·복사) — 테두리 없이. 여러 줄에 늘어서도 표가 버튼 밭이 되지 않는다 */
+  .btn-ghost {
+    @apply inline-flex h-9 items-center justify-center gap-1 rounded-lg px-3 text-sm font-medium whitespace-nowrap text-body transition-colors hover:bg-surface-soft hover:text-ink disabled:cursor-not-allowed disabled:text-muted-soft disabled:hover:bg-transparent;
+  }
+  /* 제출 취소·삭제 — 되돌릴 수 없는 행동은 다른 버튼과 같은 무게로 두지 않는다 */
+  .btn-link-danger {
+    @apply inline-flex items-center rounded px-1 text-sm whitespace-nowrap text-muted underline-offset-2 transition-colors hover:text-error hover:underline disabled:cursor-not-allowed disabled:text-muted-soft disabled:no-underline;
   }
   .btn-sm {
-    @apply h-9 rounded-lg px-4 text-sm;
+    @apply h-9 rounded-lg px-3.5 text-sm;
   }
 
-  /* 카드 — 14px. 기본은 헤어라인만, 떠오를 때만 그림자 한 단계 */
+  /*
+   * 카드 — **한 단계만** (CP-97). 흰 면 + 옅은 테두리 + 아주 얕은 그림자.
+   * 카드 안에 카드를 넣지 않는다: 안쪽은 선(`card-section`)으로 나누고,
+   * 꼭 상자가 필요하면 테두리 없는 `callout` 하나만 쓴다.
+   */
   .card {
-    @apply rounded-[14px] border border-hairline bg-canvas;
+    @apply rounded-xl border border-hairline bg-canvas p-5 sm:p-6;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
   }
-  .card-cream {
-    @apply rounded-[14px] bg-surface-soft;
+  /* 표를 담는 카드 — 표가 가장자리까지 */
+  .card-flush {
+    @apply overflow-hidden p-0 sm:p-0;
   }
-  .card-feature {
-    @apply rounded-[20px];
+  /* 카드 머리 — 왼쪽 제목, 오른쪽 행동 하나 */
+  .card-head {
+    @apply flex flex-wrap items-start justify-between gap-x-4 gap-y-2;
   }
-  .elevated {
-    box-shadow:
-      rgba(0, 0, 0, 0.02) 0 0 0 1px,
-      rgba(0, 0, 0, 0.04) 0 2px 6px,
-      rgba(0, 0, 0, 0.1) 0 4px 8px;
+  .card-title {
+    @apply text-[17px] leading-6 font-semibold text-ink;
+  }
+  .card-desc {
+    @apply mt-1 text-sm leading-6 text-muted;
+  }
+  .card-section {
+    @apply mt-5 border-t border-hairline-soft pt-5;
+  }
+
+  /* 카드 안의 유일한 상자 — 테두리 없이 색만 */
+  .callout {
+    @apply rounded-lg px-4 py-3 text-sm leading-6 text-body;
+  }
+  .callout-muted {
+    @apply bg-surface-soft;
+  }
+  .callout-warn {
+    @apply bg-warning-soft text-ink;
+  }
+  .callout-error {
+    @apply bg-error-soft text-error;
+  }
+  .callout-info {
+    @apply bg-info-soft text-ink;
+  }
+
+  /*
+   * 상태 (CP-100) — 칩 하나에 낱말 하나. 「●○✓」 글자 대신 `.dot`을 그린다:
+   * 그 기호들은 글꼴마다 크기가 달라 한 줄 안에서 들쭉날쭉했다.
+   */
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[13px] leading-5 font-medium whitespace-nowrap;
+  }
+  .chip-ok {
+    @apply bg-success-soft text-success;
+  }
+  .chip-warn {
+    @apply bg-warning-soft text-warning;
+  }
+  .chip-muted {
+    @apply bg-surface-strong text-muted;
+  }
+  .chip-info {
+    @apply bg-info-soft text-info;
+  }
+  .chip-error {
+    @apply bg-error-soft text-error;
+  }
+  .dot {
+    @apply inline-block h-2 w-2 shrink-0 rounded-full bg-current;
+  }
+  /* 안 낸 사람 — 속이 빈 점 */
+  .dot-hollow {
+    @apply bg-transparent;
+    box-shadow: inset 0 0 0 1.5px currentColor;
   }
 
   /* 필·탭·배지 — 완전한 원형 모서리 */
   .badge-pill {
     @apply inline-flex items-center gap-1 rounded-full border border-hairline bg-canvas px-3 py-1 text-[13px] font-medium text-ink;
   }
+  /* 카드 안의 토글 */
   .tab-pill {
     @apply rounded-full px-4 py-2 text-sm font-medium text-muted transition-colors hover:bg-surface-soft hover:text-ink;
   }
   .tab-pill-active {
     @apply bg-ink text-white hover:bg-ink hover:text-white;
   }
+  /* 페이지 탭 — 밑줄. 색은 잉크 하나 (예전의 blue-600 밑줄은 이 화면에만 있던 색이었다) */
+  .tab-line {
+    @apply -mb-px inline-flex items-center gap-1.5 border-b-2 border-transparent px-1 pt-1 pb-2.5 text-sm font-medium whitespace-nowrap text-muted transition-colors hover:text-ink;
+  }
+  .tab-line-active {
+    @apply border-ink text-ink;
+  }
+
+  /*
+   * 접기 — 매주 바꾸지 않는 것은 「…바꾸기」 뒤에 둔다 (CP-100).
+   * 화살표는 글자가 아니라 선으로 그린다 — ▸▾는 페이퍼로지에 없어 다른 글꼴로 샌다.
+   */
+  details.disclosure > summary {
+    @apply inline-flex cursor-pointer items-center gap-2 rounded text-sm font-medium text-ink select-none hover:underline;
+    list-style: none;
+  }
+  details.disclosure > summary::-webkit-details-marker {
+    display: none;
+  }
+  details.disclosure > summary::before {
+    content: "";
+    @apply inline-block h-1.5 w-1.5 border-r-[1.5px] border-b-[1.5px] border-current transition-transform;
+    transform: rotate(-45deg);
+  }
+  details.disclosure[open] > summary::before {
+    transform: rotate(45deg) translateY(-2px);
+  }
+
+  /*
+   * 접는 줄 (CP-100 · PG-69) — 부서원 홈의 달 줄·해 줄. 화살표는 위 disclosure와 같은 선 화살표이고,
+   * 줄 전체가 누르는 자리다(44px — 터치에서도 그대로). 펼쳐도 접어도 같은 줄이라 눌러도 줄이 움직이지 않는다.
+   */
+  details.fold > summary {
+    @apply flex min-h-11 w-full cursor-pointer items-center gap-3 px-5 select-none hover:bg-surface-soft;
+    list-style: none;
+  }
+  details.fold > summary::-webkit-details-marker {
+    display: none;
+  }
+  details.fold > summary::before {
+    content: "";
+    @apply inline-block h-1.5 w-1.5 shrink-0 border-r-[1.5px] border-b-[1.5px] border-current text-muted transition-transform;
+    transform: rotate(-45deg);
+  }
+  details.fold[open] > summary::before {
+    transform: rotate(45deg) translateY(-2px);
+  }
 
   /* 입력 — 초점은 잉크 테두리로. 브랜드색은 CTA에만 쓴다 */
   .input {
-    @apply h-12 w-full rounded-lg border border-hairline bg-canvas px-4 text-[15px] text-ink transition-colors placeholder:text-muted-soft focus:border-ink focus:outline-none;
+    @apply h-11 w-full rounded-lg border border-border-strong bg-canvas px-3.5 text-[15px] text-ink transition-colors placeholder:text-muted-soft focus:border-ink focus:outline-none;
+  }
+  .select {
+    @apply h-9 rounded-lg border border-border-strong bg-canvas px-3 text-sm text-ink focus:border-ink focus:outline-none;
   }
   .label {
     @apply mb-1.5 block text-[13px] font-medium text-muted;
   }
 
+  /* 표 — 머리는 옅은 회색 띠, 줄은 44px. 숫자는 자리를 맞춘다 */
+  .table {
+    @apply w-full text-sm tabular-nums;
+  }
+  .table thead th {
+    @apply bg-surface-soft px-4 py-2.5 text-left text-xs font-medium whitespace-nowrap text-muted;
+  }
+  .table tbody td {
+    @apply h-11 border-t border-hairline-soft px-4 py-1.5;
+  }
   .table-head {
     @apply text-left text-xs font-medium text-muted;
+  }
+
+  /*
+   * CP-101 — 사용 안내 무대. 카메라는 그림을 얹은 판(.guide-layer)을 옮기고 키운다.
+   * 600ms ease-out — 「어디로 가는지」를 눈이 따라갈 만큼만. 줄이기를 원하는 사람에게는 움직이지 않는다.
+   *
+   * 겹쳐 바뀌는 시간: 같은 화면 320ms(카메라와 함께 흐른다) · 다른 화면 200ms(오래 겹치면 두 화면이 한 장에 보인다) ·
+   * 여러 장을 건너뛸 때(목차·번호 이동)는 겹치지 않고 바로 바꾼다 — 건너뛰는 동안의 화면은 볼 이유가 없다.
+   * 판은 그림 밖을 자르지 않는다 — 어둡게 덮는 그늘(.coach-dim)이 그림 아래 빈 곳까지 무대 전체를 덮어야 한다(무대가 자른다).
+   */
+  .guide-layer {
+    position: absolute;
+    left: 0;
+    top: 0;
+    transform-origin: 0 0;
+    transition:
+      transform 600ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 320ms ease-out;
+  }
+  .guide-layer[data-swap='screen'] {
+    transition:
+      transform 600ms cubic-bezier(0.22, 1, 0.36, 1),
+      opacity 200ms ease-out;
+  }
+  .guide-layer[data-swap='cut'] {
+    transition: none;
+  }
+
+  /*
+   * 2026-10-08 — **게임 튜토리얼식 코치 마크** (사용자: 「누를 버튼만 빼고 검은 필터를 씌우고, 옆에 팝업 말풍선으로」).
+   *   .coach-dim     누를 곳(구멍)만 남기고 무대 전체를 덮는 그늘(--coach-dim 55% — PG-82 「흰,검 비율」).
+   *                  구멍 자체가 그늘을 드리우는 상자다 — 판과 같이 움직이므로 카메라가 옮겨 가는 동안에도 구멍이
+   *                  버튼에서 어긋나지 않는다. 둥글기는 GuideStage가 계획의 구멍에서 계산해 단다(PG-81)
+   *   .coach-ring    구멍 가장자리 위에 걸친 흰 띠 + 2초마다 밖으로 퍼지며 사라지는 흰 고리 — 「여기」를 말한다
+   *   .coach-hand    누르라는 손 — 버튼 모서리를 세 번 두드리고(손끝에 흰 물결) 멈춘다
+   *   .coach-bubble  말풍선 「이름: 한 문장」(+ 체험하기 첫 단계에만 꼬리말). 흰 바탕 · 짙은 글자
+   *   .coach-press   눌린 모양 — 구멍을 누른 자리(키로 넘기면 손끝)에 흰 물결, 구멍이 살짝 들어간다(data-press)
+   * 고리·손·말풍선은 무대 좌표에 놓고 카메라가 도착한 뒤(data-settled) 나타난다 — 움직이는 동안 같이 미끄러지면
+   * 눈이 그것을 쫓느라 화면을 못 본다. 어두운 곳을 누르면(PG-T90) 셋이 처음부터 다시 움직인다.
+   *
+   * 길이 단위는 `--cu` — 무대에서는 없다(= 1cqw, 무대 폭의 1%), 실제 화면 위의 둘러보기(PG-84)는 9px. 같은 말풍선·고리를
+   * 두 곳이 쓴다(CP-120). 글자는 단위 × 말풍선 배율(--k) — 1920px 무대에서 이름 40px · 문장 31px. 숫자는 coach.ts BUBBLE과 같다.
+   */
+  /* 그림 아래 — 카메라가 그림 밑을 비울 때(BOTTOM_SLACK) 그 그림의 바닥색(manifest ground)이 이어진다 */
+  .guide-ground {
+    position: absolute;
+    left: 0;
+    right: 0;
+    pointer-events: none;
+  }
+  .coach-dim {
+    position: absolute;
+    pointer-events: none;
+    box-shadow: 0 0 0 calc(6000px / var(--cam-scale, 1)) rgb(0 0 0 / var(--coach-dim, 0.55));
+    transition: transform 90ms ease-out;
+  }
+  .coach-over {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    animation: coach-in 200ms ease-out both;
+  }
+  .coach-over > * {
+    pointer-events: auto;
+  }
+  .coach-over > .coach-ring,
+  .coach-over > .coach-hand,
+  .coach-over > .coach-tap-ripple {
+    pointer-events: none;
+  }
+  @keyframes coach-in {
+    from {
+      opacity: 0;
+    }
+  }
+  /*
+   * PG-81 — 고리 = **구멍 가장자리 위에 걸친 한 띠.** 예전에는 상자 바깥 그림자(0.17cqw)였는데, 그늘 구멍(판 좌표)과 고리(무대 좌표)가
+   * 같은 선을 따로 안티앨리어싱해 그 사이에 회색 실선(이중 테두리)이 비쳤다 — 그림자는 상자 바깥에만 있어 그 줄을 못 덮는다.
+   * 이제 `outline`이 안쪽 --ring-in부터 바깥 0.17cu까지 덮는다 — 그늘의 반투명 가장자리 픽셀이 불투명한 흰 띠 밑에 숨는다.
+   * 바깥으로 보이는 굵기는 예전과 같다. `outline`은 둥글기를 따른다(Chrome 94+). 둥글기 --hole-r은 버튼과 동심(PG-81)
+   */
+  .coach-ring {
+    --ring-in: max(2px, calc(0.12 * var(--cu, 1cqw)));
+    position: absolute;
+    border-radius: var(--hole-r, calc(0.9 * var(--cu, 1cqw)));
+    outline: calc(0.17 * var(--cu, 1cqw) + var(--ring-in)) solid var(--color-canvas);
+    outline-offset: calc(-1 * var(--ring-in));
+    transition: transform 90ms ease-out;
+  }
+  /*
+   * 퍼지는 고리 — 속이 빈 흰 테가 밖으로 1.1cu 퍼지며 사라진다. 배율(scale)이 아니라 바깥 여백(inset)을 키운다 — 넓은 칸을
+   * 배율로 키우면 가로로만 수십 px 늘어 고리가 납작한 타원처럼 보인다
+   */
+  .coach-ring::after {
+    content: '';
+    position: absolute;
+    inset: calc(-0.3 * var(--cu, 1cqw));
+    border: calc(0.3 * var(--cu, 1cqw)) solid var(--color-canvas);
+    border-radius: calc(var(--hole-r, calc(0.9 * var(--cu, 1cqw))) + 0.3 * var(--cu, 1cqw));
+    opacity: 0;
+    animation: coach-pulse 2s ease-out infinite;
+  }
+  @keyframes coach-pulse {
+    from {
+      inset: calc(-0.3 * var(--cu, 1cqw));
+      opacity: 0.9;
+    }
+    to {
+      inset: calc(-1.4 * var(--cu, 1cqw));
+      opacity: 0;
+    }
+  }
+  /* 구멍 위의 투명한 버튼 — 누르면 다음 (그 버튼을 누른 뒤의 화면이 다음 단계다). 키보드 초점은 짙은 실선으로 */
+  .coach-hit {
+    position: absolute;
+    border-radius: var(--hole-r, calc(0.9 * var(--cu, 1cqw)));
+    cursor: pointer;
+    background: transparent;
+  }
+  .coach-hit:focus-visible {
+    outline: calc(0.25 * var(--cu, 1cqw)) solid var(--color-stage-ink);
+    outline-offset: calc(0.3 * var(--cu, 1cqw));
+  }
+  /* 손 — 손끝(24% 4%)을 축으로 기울이고 뒤집는다(transform은 GuideStage가 단다). 윤곽은 짙은 잉크 — 흰 구멍 위에서도 보인다 */
+  .coach-hand {
+    position: absolute;
+    pointer-events: none;
+    overflow: visible;
+    transform-origin: 24% 4%;
+    filter: drop-shadow(0 0.2cqw 0.35cqw rgb(0 0 0 / 0.35));
+  }
+  /*
+   * 두드리기 — 손끝이 다가가 한 번 누르고(작아짐) 물러난다. **세 번 하고 멈춘다**(약 4초): 발표자가 40초 말하는 동안
+   * 손이 계속 두드리면 청중이 말 대신 손을 본다(2026-10-08 검토). 어두운 곳을 누르면 처음부터 다시 세 번.
+   * 거리는 손 그림의 단위(1 = 0.1cqw)다 — 그림 안의 cqw는 그림 배율만큼 한 번 더 커진다
+   */
+  .coach-hand-tap {
+    transform-origin: 24% 4%;
+    animation: coach-tap 1.3s ease-in-out 3;
+  }
+  .coach-hand path,
+  .coach-hand rect {
+    fill: var(--color-canvas);
+    stroke: var(--color-stage-ink);
+    stroke-width: 1.5;
+    stroke-linejoin: round;
+  }
+  @keyframes coach-tap {
+    0%,
+    100% {
+      transform: translate(5px, 9px);
+    }
+    40% {
+      transform: translate(0, 0);
+    }
+    52% {
+      transform: translate(0, 0) scale(0.9);
+    }
+    64% {
+      transform: translate(0, 0);
+    }
+  }
+  /* 손끝의 물결 — 두드리는 순간(52%)에 흰 동그라미가 퍼지며 사라진다. 손과 같이 세 번 */
+  .coach-tap-ripple,
+  .coach-press {
+    position: absolute;
+    width: calc(1.2 * var(--cu, 1cqw));
+    height: calc(1.2 * var(--cu, 1cqw));
+    margin: calc(-0.6 * var(--cu, 1cqw)) 0 0 calc(-0.6 * var(--cu, 1cqw));
+    border-radius: 999px;
+    background: var(--color-canvas);
+    pointer-events: none;
+    opacity: 0;
+  }
+  .coach-tap-ripple {
+    animation: coach-tap-ripple 1.3s ease-out 3;
+  }
+  @keyframes coach-tap-ripple {
+    0%,
+    50% {
+      transform: scale(0);
+      opacity: 0;
+    }
+    52% {
+      transform: scale(0.2);
+      opacity: 0.8;
+    }
+    84%,
+    100% {
+      transform: scale(1.6);
+      opacity: 0;
+    }
+  }
+  /* 눌린 모양 — 누른 자리에 물결 한 번, 구멍이 살짝 들어가고 손이 누른다 */
+  .coach-press {
+    animation: coach-press-ripple 200ms ease-out both;
+  }
+  @keyframes coach-press-ripple {
+    from {
+      transform: scale(0.2);
+      opacity: 0.85;
+    }
+    to {
+      transform: scale(2.2);
+      opacity: 0;
+    }
+  }
+  [data-press] .coach-dim,
+  [data-press] .coach-ring {
+    transform: scale(0.97);
+  }
+  [data-press] .coach-hand-tap {
+    animation: coach-push 200ms ease-out both;
+  }
+  @keyframes coach-push {
+    from {
+      transform: translate(5px, 9px);
+    }
+    60%,
+    to {
+      transform: translate(0, 0) scale(0.9);
+    }
+  }
+  /* 말풍선 — 흰 면(55% 그늘 위 4.7:1). 그림자는 가볍게: 흰 무대에서 짙은 그림자는 얼룩으로 보였다 */
+  .coach-bubble {
+    position: absolute;
+    border-radius: calc(1 * var(--cu, 1cqw) * var(--k, 1));
+    padding: calc(1.1 * var(--cu, 1cqw) * var(--k, 1)) calc(1.4 * var(--cu, 1cqw) * var(--k, 1));
+    background: var(--color-canvas);
+    color: var(--color-stage-ink);
+    box-shadow: 0 calc(0.4 * var(--cu, 1cqw)) calc(1.6 * var(--cu, 1cqw)) rgb(0 0 0 / 0.28);
+    animation: coach-pop 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+    cursor: default;
+  }
+  @keyframes coach-pop {
+    from {
+      opacity: 0;
+      transform: scale(0.94);
+    }
+  }
+  /* 마지막 줄에 「합쳐져요」 한 낱말만 남지 않게(pretty). balance는 쓰지 않는다 — 이름 뒤에서 줄을 끊어 「검토 요청: 마감」처럼 머리만 남았다 */
+  .coach-text {
+    font-size: calc(1.6 * var(--cu, 1cqw) * var(--k, 1));
+    line-height: 1.3;
+    font-weight: 500;
+    word-break: keep-all;
+    overflow-wrap: anywhere;
+    text-wrap: pretty;
+  }
+  .coach-label {
+    font-size: calc(2.1 * var(--cu, 1cqw) * var(--k, 1));
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  .coach-foot {
+    margin-top: calc(0.7 * var(--cu, 1cqw) * var(--k, 1));
+    /* 혼자 보기 무대(800px 남짓)에서 꼬리말이 12px 밑으로 내려가지 않게 */
+    font-size: max(12px, calc(1.1 * var(--cu, 1cqw) * var(--k, 1)));
+    line-height: 1.3;
+    color: var(--color-stage-muted);
+    white-space: nowrap;
+  }
+  /* 꼬리 — 말풍선과 같은 흰 마름모의 반쪽이 구멍 쪽 변에서 튀어나온다. 2.0cu — 1.4cu는 강당에서 「모서리의 점」으로 보였다 */
+  .coach-arrow {
+    position: absolute;
+    width: calc(2 * var(--cu, 1cqw) * var(--k, 1));
+    height: calc(2 * var(--cu, 1cqw) * var(--k, 1));
+    background: var(--color-canvas);
+    transform: translate(-50%, -50%) rotate(45deg);
+  }
+  .coach-arrow[data-edge='left'] {
+    left: 0;
+  }
+  .coach-arrow[data-edge='right'] {
+    left: 100%;
+  }
+  .coach-arrow[data-edge='top'] {
+    top: 0;
+  }
+  .coach-arrow[data-edge='bottom'] {
+    top: 100%;
+  }
+  /*
+   * 구석 알약 「부서원 3/8」(발표 무대에만) — 흰 면 + 잉크 글자 + 옅은 테(PG-82). 그늘 위에서는 흰 면이 먼저 보이고,
+   * 그늘이 없는 글자 슬라이드 위에서는 테가 경계를 만든다
+   */
+  .coach-pill {
+    position: absolute;
+    left: 2.4cqw;
+    top: 2.2cqw;
+    display: flex;
+    align-items: center;
+    height: calc(2.8cqw * var(--k, 1));
+    padding: 0 calc(1.2cqw * var(--k, 1));
+    border-radius: 999px;
+    background: var(--color-canvas);
+    box-shadow: 0 0 0 0.1cqw rgb(0 0 0 / 0.1);
+    color: var(--color-stage-ink);
+    font-size: max(12px, calc(1.25cqw * var(--k, 1)));
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  /* 휴대폰·인쇄의 잘라 낸 한 장 — 재지 않고 비율로 놓는다. 그늘은 그림 상자가 자른다. 테두리는 가장자리 위에 걸친 한 띠(PG-81) */
+  .coach-static-hole {
+    position: absolute;
+    pointer-events: none;
+    border-radius: 8px;
+    outline: 3px solid var(--color-canvas);
+    outline-offset: -1px;
+    box-shadow: 0 0 0 3000px rgb(0 0 0 / 0.45);
+  }
+  .coach-still .coach-over,
+  .coach-still .coach-bubble,
+  .coach-still .coach-ring::after,
+  .coach-still .coach-hand-tap,
+  .coach-still .coach-tap-ripple {
+    animation: none;
+  }
+
+  /*
+   * PG-80 · CP-121 — 도크. 넘기기 단추는 화면마다 한 곳, **칸 폭·높이 고정**이다 — 글자가 「다음 →」에서 「끝」으로 바뀌어도,
+   * 장 이름이 「부서원」에서 「부서담당자」로 길어져도 칸은 그대로다. 그래서 같은 자리를 계속 눌러도 늘 같은 단추를 누른다.
+   * `contain`으로 안쪽 변화가 바깥 배치로 새지 않게 한다
+   */
+  .coach-dock {
+    display: grid;
+    grid-template-columns: 7rem 9rem 7rem;
+    grid-template-rows: 2.75rem;
+    align-items: stretch;
+    column-gap: 0.5rem;
+    contain: layout paint;
+  }
+  .coach-dock > * {
+    min-width: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .coach-dock-count {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-variant-numeric: tabular-nums;
+    color: var(--color-stage-muted);
+  }
+  /* 덮개(크게 보기·둘러보기) 바닥 가운데에 뜨는 도크 — 폭이 고정이라 translateX(-50%)도 늘 같은 자리다 */
+  .coach-dock-float {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    bottom: max(1rem, calc(env(safe-area-inset-bottom) + 0.75rem));
+    padding: 0.5rem;
+    border-radius: 0.875rem;
+    background: var(--color-canvas);
+    box-shadow:
+      0 0 0 1px rgb(0 0 0 / 0.08),
+      0 8px 24px rgb(0 0 0 / 0.18);
+  }
+  .coach-dock-float.coach-dock-skip {
+    grid-template-columns: 7rem 9rem 7rem 5rem;
+  }
+  @media (max-width: 480px) {
+    /* 휴대폰 — 칸은 좁지만 여전히 고정 폭이다(단계와 상관없다) */
+    .coach-dock {
+      grid-template-columns: 5rem 6.5rem 5rem;
+      column-gap: 0.375rem;
+    }
+    .coach-dock-float.coach-dock-skip {
+      grid-template-columns: 4.5rem 6rem 4.5rem 4.25rem;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .guide-layer {
+      transition: none;
+    }
+    /* 움직이지 않는다 — 고리는 0.3cu 흰 테 한 겹으로 서 있고, 손은 버튼을 짚은 채 멈춰 있다 */
+    .coach-over,
+    .coach-bubble,
+    .coach-hand-tap,
+    .coach-tap-ripple,
+    .coach-press {
+      animation: none;
+    }
+    .coach-hand-tap {
+      transform: none;
+    }
+    .coach-ring::after {
+      animation: none;
+      opacity: 0.9;
+    }
+  }
+}
+
+/*
+ * PG-61 — 사용 안내를 인쇄하면 한 단계가 한 쪽 (배포물 PDF). 화면용 머리·목차·버튼은 빠진다.
+ * 그림은 줄이지 않는다 — 인쇄물에서 버튼 글자가 읽혀야 한다.
+ */
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 12mm;
+  }
+  body {
+    background: var(--color-canvas);
   }
 }

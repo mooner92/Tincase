@@ -1,4 +1,7 @@
-// AU-09 — 감사 로그. actor는 항상 검증된 신원의 이메일.
+// AU-09 — 감사 로그. actor는 검증된 신원의 이메일이다.
+// 예외 하나(TACP-23, 2026-10-08): 사람이 결정하지 않은 자동 진행(본부본·전사본 조립, 부서장 없는 단위의 사본, 켤 때 따라잡기)은
+// actor가 'system'이고 detail에 일으킨 사건(`cause`)과 사람(`causedBy`)을 남긴다. 다른 부서 사람의 이름으로 남기면 그 사람에게
+// 없는 권한으로 한 일처럼 읽히기 때문이다. 'system'에는 `@`가 없어 어떤 로그인 신원과도 섞이지 않는다.
 import { prisma } from './db';
 import { logger } from './logger';
 
@@ -26,6 +29,13 @@ export type AuditAction =
   | 'setup_done'
   /** TACP-20 · WS-19 — 총괄·운영자가 주차 마감 예외를 설정·해제했다. 전·후와 이유가 남는다 */
   | 'deadline_override'
+  /** TACP-21 — 위로 보냈다·취소했다. 어느 판(sha256)을 보냈는지 남는다 */
+  | 'report_submit'
+  | 'report_withdraw'
+  /** TACP-21 — 본부·전사 이어 붙이기. 무엇을 어떤 순서로 읽었는지 남는다 */
+  | 'rollup'
+  /** RU-20 — 이어 붙이는 순서·메모를 바꿨다 */
+  | 'rollup_order'
   /** TACP-22 — 담당자가 부서원 제출물을 새 판으로 고쳤다. 누구의 몇 판을 고쳤는지 남는다 */
   | 'submission_revise';
 

@@ -1,0 +1,118 @@
+// PG-51 — 「전사」 한 화면의 표를 만든다. 섹션 하나 = 한 줄, 최종본 순서대로.
+//
+// 제출 열(사람이 냈나)과 최종본 열(그 섹션이 무엇으로 들어가나)을 **같은 섹션 목록**에서 만든다 —
+// 두 탭이 각자 목록을 읽던 때는 같은 부서가 두 모양으로 나왔다. 열마다 그 열을 보는 사람에게만 값을 채운다(TACP-9):
+// 못 보는 열은 계산도 하지 않고 내려보내지도 않는다.
+import type { WeekSlot } from '@prisma/client';
+import { prisma } from './db';
+import { progressNodes } from './monitor';
+import { resolveSections, sectionList, uncoveredCopies, type SectionItem, type SectionSource } from './rollup/sections';
+import { loadTree, type OrgTree } from './rollup/tree';
+import { orgRunState } from './rollup/orgrun';
+import { fileSha } from './rollup/report';
+import { kst } from './rollup/view';
+import { groupBySection, OUTSIDE } from '@/lib/org-groups';
+import type { OrgBoardRow } from '@/components/OrgBoard';
+
+/** 이 섹션의 부서가 본부 단계가 있는 본부에 속하나 — 그 본부 (본부 자신이거나 산하 실) */
+function hqOf(tree: OrgTree, divisionId: string | null) {
+  if (!divisionId) return null;
+  const n = tree.nodes.find((x) => x.node.id === divisionId || x.contributors.some((c) => c.id === divisionId));
+  return n?.hasHqStep ? n.node : null;
+}
+
+/**
+ * RU-57a · RU-83 — 이 사람이 이 주의 전사본을 받은(`download`) 뒤 전사본이 다시 만들어져 **바이트가 다르면** 그 받은 시각.
+ * 받은 사람에게만 주황 「16:20에 받은 뒤 바뀜」 — NAMS에 이미 올렸을 수 있다.
+ */
+async function changedSinceDownload(slot: WeekSlot, email: string, currentSha: string | null): Promise<string | null> {
+  if (!currentSha) return null;
+  const runs = await prisma.rollupRun.findMany({ where: { level: 'org', weekSlotId: slot.id, status: 'succeeded' }, select: { id: true, outputPath: true } });
+  if (runs.length === 0) return null;
+  const got = await prisma.auditLog.findFirst({
+    where: { actor: email, action: 'download', target: { in: runs.map((r) => `rollup:${r.id}`) } },
+    orderBy: { at: 'desc' },
+  });
+  if (!got?.target) return null;
+  const run = runs.find((r) => `rollup:${r.id}` === got.target);
+  return run && (await fileSha(run.outputPath)) !== currentSha ? kst(got.at) : null;
+}
+
+export async function orgBoard(
+  slot: WeekSlot,
+  can: { progress: boolean; desk: boolean },
+  /** 지난 주차를 볼 때 링크에 붙일 `isoKey=…` (이번 주면 빈 글자) */
+  weekQuery: string,
+  /** RU-57a — 보는 사람 (「받은 뒤 바뀜」은 받은 사람에게만) */
+  viewer?: { email: string },
+) {
+  const divisions = await prisma.division.findMany({ orderBy: { createdAt: 'asc' }, select: { id: true, nameKo: true, isActive: true } });
+  const nameOf = new Map(divisions.map((d) => [d.id, d.nameKo]));
+
+  // 취합을 여는 사람: 섹션마다 무엇이 들어가나(resolveSections — 섹션 목록이 비어 있으면 기본 13개를 만든다, 예전 [취합] 탭과 같다).
+  // 읽기만 하는 사람: 목록을 만들지 않고 읽는다(PG-51d)
+  const tree = can.desk ? await loadTree() : null;
+  const sources: SectionSource[] | null = can.desk ? await resolveSections(slot, tree!) : null;
+  const sections: SectionItem[] = sources
+    ? sources.map(({ section: s }) => ({
+        id: s.id,
+        title: s.title,
+        divisionId: s.divisionId,
+        divisionName: s.divisionId ? (nameOf.get(s.divisionId) ?? null) : null,
+        kind: s.kind,
+      }))
+    : await sectionList(divisions);
+
+  const data = can.progress ? await progressNodes(slot) : null;
+  const grouped = data ? groupBySection(sections, data.nodes) : null;
+  const hqLink = (slug: string) => `/hq?node=${encodeURIComponent(slug)}${weekQuery ? `&${weekQuery}` : ''}`;
+
+  const rows: OrgBoardRow[] = sections.map((s, i) => {
+    const src = sources?.[i];
+    const hq = tree ? hqOf(tree, s.divisionId) : null;
+    return {
+      key: s.id,
+      no: i + 1,
+      title: s.title,
+      offline: !s.divisionName,
+      progress: grouped ? grouped.sections[i] : null,
+      final: src ? { sectionId: s.id, source: src.kind, label: src.label, refId: src.refId ?? null, flag: src.flag ?? null } : null,
+      hq: hq ? { name: hq.nameKo, href: hqLink(hq.slug) } : null,
+    };
+  });
+  // PG-51c — 집계 부서인데 어느 섹션에도 닿지 않는 곳. 숨기면 합계가 감사 문서와 갈라진다 (PG-T73)
+  if (grouped && grouped.outside.teams.length > 0) {
+    rows.push({ key: 'outside', no: null, title: OUTSIDE, offline: false, progress: grouped.outside, final: null, hq: null });
+  }
+
+  const all = grouped ? [...grouped.sections, grouped.outside] : null;
+  // RU-83 — 전사본은 늘 준비돼 있다: 가장 최근 성공한 것(받을 판)과, 그 뒤 시도가 실패했으면 그 실패(그때만 [다시 시도])
+  const state = sources ? await orgRunState(slot, sources) : null;
+  const run = state?.current ?? null;
+  // RU-64 「누락」 — 지금 상태로 본다(만든 뒤에 섹션을 고치면 바로 사라져야 한다). 취합을 여는 사람에게만
+  const coverage = sources ? await uncoveredCopies(slot, sources, tree!) : null;
+  return {
+    rows,
+    /** 제출 합계 — 섹션과 「섹션 밖」을 더한 것 = 감사 문서의 합계 */
+    totals: all && {
+      submitted: all.reduce((n, g) => n + g.submitted, 0),
+      roster: all.reduce((n, g) => n + g.roster, 0),
+      missing: all.flatMap((g) => g.missing),
+    },
+    excludedNote: data?.excludedNote ?? null,
+    capturedAtKst: data?.capturedAtKst ?? null,
+    /** 최종본에 들어올 것이 있는 섹션 수 (취합을 여는 사람에게만) */
+    ready: sources ? sources.filter((x) => x.kind === 'tincase' || x.kind === 'upload').length : null,
+    run: run && { ...run, finishedAtKst: kst(run.finishedAt) },
+    failed: state?.failed ? { errorText: state.failed.errorText, atKst: kst(state.failed.finishedAt) } : null,
+    /** RU-57a — 이 사람이 받은 뒤 바뀌었으면 그 받은 시각 */
+    changedSinceDownload: run && viewer ? await changedSinceDownload(slot, viewer.email, run.sha256) : null,
+    /** 도착했는데 어느 섹션에도 안 들어가는 사본 — 최종본에서 빠진다 (취합을 여는 사람에게만) */
+    coverage,
+    /** 섹션 구성 편집기에 넘길 것 (취합을 여는 사람에게만) */
+    editor: sources && {
+      sections: sections.map((s) => ({ id: s.id, title: s.title, divisionId: s.divisionId })),
+      divisions,
+    },
+  };
+}

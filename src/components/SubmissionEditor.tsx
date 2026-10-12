@@ -2,8 +2,10 @@
 // WA-20 · TACP-22 — 담당자 첨삭. 부서원 제출물을 고쳐 **그 사람의 새 판**으로 저장한다.
 //
 // 표 모양은 웹 작성(WebComposer)과 같다 — 구분은 시스템이 다시 매기므로 번호 표시만 둔다(ABS-5).
-// 원래 판은 그대로 남는다는 것을 저장 버튼 바로 옆에 적는다 — 「내가 남의 글을 지우나」 하는 망설임을 없앤다.
+// 원래 판은 그대로 남는다 — 저장 버튼이 「고쳐서 저장 (vN)」으로 새 판 번호를 말한다.
+// 2026-10-08 (사용자: 주석 걷기) — 위의 설명 callout과 버튼 옆 [다시 병합] 안내를 걷었다. 저장 뒤 한 줄(FileDrawer)이 말한다.
 import { useLayoutEffect, useRef, useState } from 'react';
+import { fitTextarea, fitTextareas } from '@/lib/fit-textarea';
 
 type Bucket = 'achievements' | 'plans' | 'notes';
 export interface EditRow {
@@ -21,21 +23,15 @@ const SECTIONS: { key: Bucket; no: number; title: string }[] = [
 ];
 const blank = (): EditRow => ({ content: '', date: '', place: '', attendee: '', emphasis: false });
 
-/**
- * 칸 높이를 내용에 맞춘다 — MergedDrawer와 같은 방식 (`field-sizing`은 사내 PC 브라우저를 장담할 수 없다).
+/*
+ * 칸 높이를 내용에 맞춘다 — MergedDrawer와 같은 함수(CP-119, `src/lib/fit-textarea.ts`).
  * 한 칸에 두 줄을 적는 것은 정상이다(HM-39). `<input>`은 값의 줄바꿈을 **조용히 지운다** —
  * 그래서 고치지도 않은 칸의 줄바꿈이 저장하는 순간 사라졌다 (2026-10-07 리뷰). 그래서 textarea다.
  */
-const fit = (el: HTMLTextAreaElement | null) => {
-  if (!el) return;
-  el.style.height = 'auto';
-  const border = el.offsetHeight - el.clientHeight;
-  el.style.height = `${el.scrollHeight + border}px`;
-};
+const fit = fitTextarea;
 
 export function SubmissionEditor({
   submissionId,
-  ownerName,
   version,
   initial,
   onSaved,
@@ -43,7 +39,6 @@ export function SubmissionEditor({
   onDirtyChange,
 }: {
   submissionId: string;
-  ownerName: string;
   version: number;
   initial: Record<Bucket, EditRow[]>;
   onSaved: (newId: string, newVersion: number) => void;
@@ -61,11 +56,11 @@ export function SubmissionEditor({
   /*
    * 줄을 지우면 아래 줄의 값이 위 칸(같은 textarea)으로 올라온다 — 칸 높이는 그대로라서
    * 여러 줄 값이 한 줄 높이 칸에 들어가면 `overflow-hidden`에 가려 안 보인다. 값이 바뀔 때마다 다시 맞춘다
-   * (MergedDrawer와 같은 방식)
+   * (MergedDrawer와 같은 방식 — 칸마다 따로 맞추면 칸 수만큼 레이아웃을 다시 계산하므로 한꺼번에, CP-119)
    */
   const rootRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
-    rootRef.current?.querySelectorAll('textarea').forEach((el) => fit(el as HTMLTextAreaElement));
+    if (rootRef.current) fitTextareas(rootRef.current.querySelectorAll('textarea'));
   }, [data]);
 
   const touch = () => onDirtyChange?.(true);
@@ -110,9 +105,10 @@ export function SubmissionEditor({
   const cell =
     'block resize-none overflow-hidden rounded-md border border-border-strong bg-canvas px-2 py-1.5 text-[13px] leading-snug text-ink focus:border-ink focus:ring-1 focus:ring-ink focus:outline-none';
   /** 칸 하나 — 줄바꿈을 지키는 textarea (HM-39) */
-  const field = (b: Bucket, i: number, f: 'content' | 'date' | 'place' | 'attendee', label: string, extra: string) => (
+  const field = (b: Bucket, i: number, f: 'content' | 'date' | 'place' | 'attendee', label: string, extra: string, placeholder?: string) => (
     <textarea
       aria-label={label}
+      placeholder={placeholder}
       rows={1}
       ref={fit}
       value={data[b][i][f]}
@@ -126,17 +122,18 @@ export function SubmissionEditor({
 
   return (
     <div ref={rootRef} className="space-y-5">
-      <p className="rounded-lg bg-brand-soft px-3 py-2 text-xs text-body-strong">
-        <strong>{ownerName}</strong>님의 업무일지를 고칩니다. 저장하면 <strong>새 판(v{version + 1})</strong>이 생기고,
-        지금 판(v{version})은 그대로 남습니다. 판 목록에 「고친 사람」이 함께 표시됩니다.
-      </p>
       {SECTIONS.map((s) => (
         <section key={s.key}>
-          <h3 className="mb-1.5 text-sm font-semibold text-body">
+          <h3 className="mb-1.5 text-[15px] font-semibold text-ink">
             {s.no}. {s.title}
           </h3>
-          <div className="overflow-hidden rounded-xl border border-hairline">
-            <div className="flex gap-1.5 border-b border-hairline bg-surface-card px-2 py-1.5 text-[11px] font-semibold text-muted">
+          <div className="overflow-hidden rounded-lg border border-hairline">
+            {/*
+              WA-20a — 640px 미만은 한 줄을 둘로 나눈다(위: 구분·업무 내용·×, 아래: 일자·장소·참석자·공유).
+              한 줄에 일곱 칸을 두면 400px에서 업무 내용 칸이 한 글자 폭으로 눌려 세로로 흘렀다(2026-10-08 wave3 캡처).
+              나뉜 줄과 맞지 않는 머리 행은 감추고, 아랫줄 칸은 빈칸일 때 이름을 보인다(넓은 화면은 머리 행이 말하므로 감춘다)
+            */}
+            <div className="hidden gap-1.5 border-b border-hairline bg-surface-soft px-2 py-1.5 text-xs font-medium text-muted sm:flex">
               <span className="w-8 shrink-0 text-center">구분</span>
               <span className="flex-1">업무 내용</span>
               <span className="w-16 shrink-0">일자</span>
@@ -146,17 +143,22 @@ export function SubmissionEditor({
               <span className="w-5 shrink-0" />
             </div>
             {data[s.key].map((r, i) => (
-              <div key={i} className="flex items-start gap-1.5 border-b border-hairline-soft px-2 py-1 last:border-0">
+              <div key={i} className="flex flex-wrap items-start gap-1.5 border-b border-hairline-soft px-2 py-1 last:border-0 sm:flex-nowrap">
                 <span className="w-8 shrink-0 pt-1.5 text-center text-xs tabular-nums text-muted">
                   {s.no}-{i + 1}
                 </span>
-                {field(s.key, i, 'content', `${s.title} ${i + 1} 내용`, `min-w-0 flex-1 ${r.emphasis ? 'text-[#1d4ed8]' : ''}`)}
-                {field(s.key, i, 'date', '일자', 'w-16 shrink-0')}
-                {field(s.key, i, 'place', '장소', 'w-20 shrink-0')}
-                {field(s.key, i, 'attendee', '참석자', 'w-20 shrink-0')}
-                <span className="flex w-9 shrink-0 justify-center pt-2">
+                {/* 좁은 화면: 업무 내용이 구분·× 사이를 다 쓰고(4.25rem = 구분 2rem + × 1.25rem + 틈 둘), 나머지는 order-2로 아랫줄에 */}
+                {field(s.key, i, 'content', `${s.title} ${i + 1} 내용`, `min-w-0 flex-1 basis-[calc(100%-4.25rem)] sm:basis-0 ${r.emphasis ? 'text-emphasis' : ''}`)}
+                {field(s.key, i, 'date', '일자', 'order-2 ml-[2.375rem] w-16 shrink-0 sm:order-none sm:ml-0 sm:placeholder:text-transparent', '일자')}
+                {field(s.key, i, 'place', '장소', 'order-2 min-w-0 flex-1 sm:order-none sm:w-20 sm:flex-none sm:shrink-0 sm:placeholder:text-transparent', '장소')}
+                {field(s.key, i, 'attendee', '참석자', 'order-2 min-w-0 flex-1 sm:order-none sm:w-20 sm:flex-none sm:shrink-0 sm:placeholder:text-transparent', '참석자')}
+                {/* 좁은 화면은 머리 행을 감추므로 체크 하나로는 무엇인지 모른다 — 아랫줄 칸 이름처럼 「공유」를 붙인다(WA-20a) */}
+                <label className="order-2 flex shrink-0 items-center justify-center gap-1 pt-2 text-xs text-muted sm:order-none sm:w-9">
                   <input type="checkbox" aria-label="공유(파란색)" checked={!!r.emphasis} onChange={(e) => set(s.key, i, 'emphasis', e.target.checked)} />
-                </span>
+                  <span aria-hidden className="sm:hidden">
+                    공유
+                  </span>
+                </label>
                 <button onClick={() => remove(s.key, i)} aria-label="이 줄 지우기" className="w-5 shrink-0 pt-1.5 text-muted-soft hover:text-error">
                   ×
                 </button>
@@ -168,7 +170,7 @@ export function SubmissionEditor({
           </button>
         </section>
       ))}
-      {err && <p className="rounded-lg bg-error-soft px-3 py-2 text-sm text-error">{err}</p>}
+      {err && <p className="callout callout-error">{err}</p>}
       <div className="sticky bottom-0 flex items-center gap-2 border-t border-hairline bg-canvas py-3">
         <button onClick={save} disabled={busy} className="btn-primary btn-sm">
           {busy ? '저장 중…' : `고쳐서 저장 (v${version + 1})`}
@@ -176,8 +178,6 @@ export function SubmissionEditor({
         <button onClick={onCancel} disabled={busy} className="btn-secondary btn-sm">
           취소
         </button>
-        {/* CP-106a — 다시 병합은 병합본에서 고친 것을 지운다. 누르라고 하면서 그걸 숨기지 않는다 */}
-        <span className="text-xs text-muted">병합본에는 [다시 병합]을 눌러야 들어갑니다 — 병합본에서 고친 내용은 사라집니다</span>
       </div>
     </div>
   );

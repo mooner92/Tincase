@@ -14,6 +14,7 @@ import { handler, json, rateLimit, rejectOversizedBody } from '@/server/http';
 import { audit } from '@/server/audit';
 import { readTable } from '@/lib/xlsx';
 import { planRosterSync, applyRosterSync, toErpPerson, REQUIRED_COLUMNS } from '@/server/roster/sync';
+import { laterSyncCurrentWeek } from '@/server/rollup/auto';
 
 export const dynamic = 'force-dynamic';
 
@@ -66,6 +67,8 @@ export const POST = handler(async (req: NextRequest) => {
     leadWarnings: plan.leadWarnings,
   });
 
+  // RU-72 — 나무(상위부서·켜짐)가 바뀌면 받는 곳·기여 단위가 바뀐다 — 이번 주를 위에서 아래로 맞춘다
+  laterSyncCurrentWeek({ cause: 'tree', causedBy: scope.user.email });
   // 적용 뒤 비밀번호가 없는 사람 = 이번에 새로 생긴 사람 (RS-14).
   // 비밀번호는 여기서 만들지 않는다 — 개인별로 전달해야 하므로 발급은 따로 한다
   const needPassword = await prisma.user.findMany({

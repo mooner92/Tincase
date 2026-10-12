@@ -1,12 +1,13 @@
 'use client';
-// 병합본 보기·고치기·복사 (CP-70~74).
+// 병합본 보기·고치기 (CP-70~74 · CP-116).
 //
 // 담당자의 실제 동선은 이렇다: 병합본 받기 → 한글로 열기 → 표 복사 → 게시판에 붙여넣기.
 // 중간에 이상한 행이 하나 보이면 그것만 고치려고 한글을 연다.
 // **한글을 여는 유일한 이유가 그것**이라면, 여기서 보고 고치면 한글을 열 일이 없다.
 //
-// 붙여넣기는 `text/html`로 쓴다 — 한글도 게시판 편집기도 HTML 표를 받으면
-// 표 그대로 들어간다. text/plain만 쓰면 줄글로 쏟아진다 (붙여넣기 파싱에서 배운 것과 같은 이유).
+// 2026-10-08 (S5 · S9 — CP-116) — 받기·제목 복사는 수합 관리 카드의 [받기]·[제목 복사] 하나씩이다. 이 드로어의
+// [hwp로 받기]·[제목 복사]는 같은 일을 두 곳에서 했다. [작성자 보기] 토글도 지웠다 — 작성자는 서버가 보낸 사람
+// (lead·head·readAll)에게만 오고(TACP-17), 그 사람에게는 열이 늘 있다. 판정은 화면이 아니라 서버가 한다.
 //
 // **행 순서 바꾸기 (CP-90).** 부서장이 검토하면서 «이건 위로 올려야지»를 하는데, 지금은
 // 칸 내용을 서로 오려 붙이는 수밖에 없다 — 다섯 칸짜리 행 하나를 옮기려고 다섯 번 오려 붙인다.
@@ -17,8 +18,9 @@
 // 보기·고치기·지우기는 터치에서 그대로 되고, 순서 바꾸기만 마우스·키보드다.
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { copyText } from '@/lib/clipboard';
 import { moveItem, rowNo } from '@/lib/merge-rows';
+import { drawerControls, type DrawerVariant } from '@/lib/merged-drawer';
+import { fitTextarea, fitTextareas } from '@/lib/fit-textarea';
 
 interface TableView {
   key: string;
@@ -54,6 +56,8 @@ interface Content {
   /** HM-47 — 지금 보는 판. 저장·승인 때 그대로 돌려보낸다 — 그 사이 바뀌었으면 서버가 409 */
   runId?: string;
   sha256?: string;
+  /** RU-80 — 3단계에서 승인이 곧 제출이면 받는 곳(「기획경영본부」·「총괄」), 아니면 null */
+  handoffTo?: string | null;
 }
 
 /** 헤더 행을 뺀 본문만. 서버가 준 격자는 첫 줄이 열 이름이다 */
@@ -78,7 +82,8 @@ export function MergedDrawer({
   onClose,
   isoKey,
   divisionSlug,
-  canEdit,
+  canEdit: canEditProp,
+  variant = 'edit',
 }: {
   open: boolean;
   onClose: () => void;
@@ -86,20 +91,24 @@ export function MergedDrawer({
   divisionSlug: string;
   /** 담당자만 고칠 수 있다 (TACP §3.2 — 병합 실행과 같은 권한) */
   canEdit: boolean;
+  /** CP-114 — `view`는 부서원 홈의 [병합본]. 누구에게나 읽기만(고치기·승인 띠·복사·받기 없음) */
+  variant?: DrawerVariant;
 }) {
   const [data, setData] = useState<Content | null>(null);
+  // CP-114 — 무엇을 그릴지는 순수 함수 하나가 정한다(CP-T100). view면 canEdit을 무시한다
+  const ctl = drawerControls(variant, canEditProp, data);
+  const canEdit = ctl.edit;
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [dirty, setDirty] = useState(false);
-  const [copied, setCopied] = useState<string | null>(null);
+  /** 저장 결과 한 마디 (HM-47 — 승인·알림이 실제로 어떻게 됐는지) */
+  const [notice, setNotice] = useState<string | null>(null);
   /*
-   * TACP-17 — 작성자 열은 **기본으로 접혀 있다.**
-   *
-   * 이 화면의 주된 쓰임은 «슥 보고 제출»이고, 그때 필요한 건 내용이지 사람이 아니다.
-   * 늘 켜 두면 표가 좁아지고 시선이 사람 이름으로 먼저 간다 — 검토가 «누가 뭘 냈나»로
-   * 바뀐다. 잘못된 행을 찾은 **그 순간에만** 펼치면 된다.
+   * TACP-17 · S9 — 작성자 열은 **서버가 작성자를 보냈을 때 늘** 있다. 예전에는 기본으로 접고 눌러 폈는데
+   * (「슥 보고 제출」에는 사람이 필요 없다는 판단), 접어 둔 것을 펴는 사람을 잴 수 없었고 부서장이 물어볼 사람을
+   * 찾는 순간에 토글을 먼저 찾아야 했다. 부서원에게는 서버가 보내지 않으므로 열이 생기지 않는다 (AU-T33)
    */
-  const [showAuthors, setShowAuthors] = useState(false);
+  const showAuthors = data?.canSeeAuthors === true;
   /** CP-90 — 끌고 있는 행. `over`는 지금 가리키는 자리(놓으면 여기로 간다) */
   const [drag, setDrag] = useState<{ ti: number; from: number; over: number } | null>(null);
   /**
@@ -108,29 +117,28 @@ export function MergedDrawer({
    */
   const refocusRef = useRef<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
   const router = useRouter();
 
-  /**
-   * 칸 높이를 **내용에 맞춘다.**
+  /*
+   * 칸 높이를 **내용에 맞춘다** (CP-119 — `fitTextarea`·`fitTextareas`).
    *
    * `rows={1}` 고정이면 «본원 소회의실»처럼 줄바꿈되는 값이 아래로 잘려서,
    * 확인하려면 칸마다 클릭해 스크롤해야 한다. 확인하려고 여는 화면인데 그러면 안 된다.
    * 세로로 길어지더라도 **한눈에 다 보이는 편**이 낫다.
    *
-   * CSS `field-sizing: content`가 같은 일을 하지만 사내 PC 브라우저 버전을 장담할 수 없어
-   * scrollHeight로 직접 맞춘다 — 어디서나 동작한다.
+   * 값이 밖에서 바뀌는 경우(불러오기·저장 후 재조회·줄 지우기·옮기기)는 모든 칸을 다시 맞추되 **한꺼번에** 한다.
+   * 칸마다 따로 맞추면 112칸에 한 글자 1초였다 — 부서장이 고쳐 저장(= 승인)하는 바로 그 화면이다(2026-10-08).
+   * 한 칸에 글자를 친 것이면 그 칸은 onChange가 이미 맞췄고 다른 칸의 내용은 그대로다 — 다시 재지 않는다.
    */
-  const fit = (el: HTMLTextAreaElement | null) => {
-    if (!el) return;
-    el.style.height = 'auto';
-    // border-box이므로 테두리 두께를 더해야 한다 — scrollHeight는 테두리를 뺀 값이다
-    const border = el.offsetHeight - el.clientHeight;
-    el.style.height = `${el.scrollHeight + border}px`;
-  };
-
-  // 값이 밖에서 바뀌는 경우(불러오기·저장 후 재조회)도 다시 맞춘다
+  const typedRef = useRef(false);
   useLayoutEffect(() => {
-    bodyRef.current?.querySelectorAll('textarea').forEach((el) => fit(el as HTMLTextAreaElement));
+    if (typedRef.current) {
+      typedRef.current = false;
+      return;
+    }
+    if (bodyRef.current) fitTextareas(bodyRef.current.querySelectorAll('textarea'));
   }, [data]);
 
   useLayoutEffect(() => {
@@ -165,16 +173,41 @@ export function MergedDrawer({
     };
   }, [open, isoKey, divisionSlug]);
 
+  // CP-114 — 열면 제목에 초점(화면 읽기 프로그램이 무엇이 열렸는지 먼저 읽는다)
+  useEffect(() => {
+    if (open) titleRef.current?.focus();
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
-    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && !dirty && onClose();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        if (!dirty) onClose();
+        return;
+      }
+      // CP-114 — Tab은 드로어 안에서 돈다. 뒤 화면으로 새면 열린 줄 모르고 홈의 버튼을 누른다
+      if (e.key !== 'Tab' || !panelRef.current) return;
+      const focusables = panelRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], select, input, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === titleRef.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [open, onClose, dirty]);
 
   const flash = (what: string) => {
-    setCopied(what);
-    setTimeout(() => setCopied(null), 1600);
+    setNotice(what);
+    setTimeout(() => setNotice(null), 1600);
   };
 
   const edit = (ti: number, ri: number, ci: number, v: string) => {
@@ -266,6 +299,7 @@ export function MergedDrawer({
     }
     const saved = (await res.json().catch(() => ({}))) as {
       approved?: { summary: string; notified: number; unchanged?: boolean } | null;
+      handedOff?: { target: string } | null;
       runId?: string;
       sha256?: string;
     };
@@ -274,14 +308,19 @@ export function MergedDrawer({
     setDirty(false);
     setBusy(false);
     // HM-47 — 부서장의 저장은 곧 승인이다. 무엇이 일어났는지 그 자리에서, **사실대로** 말한다
+    // RU-80 — 3단계면 승인이 곧 제출이다: 어디로 갔는지를 먼저. 담당자의 저장은 위로 가지 않는다 — 그 사실도 말한다
     flash(
       !saved.approved
-        ? '저장'
+        ? data.handoffTo && data.review
+          ? '저장 — 부서장이 다시 승인해야 올라갑니다'
+          : '저장'
         : saved.approved.unchanged
           ? '저장 — 이미 승인한 판입니다'
-          : saved.approved.notified > 0
-            ? '저장 · 승인 완료 — 담당자에게 알렸습니다'
-            : '저장 · 승인 기록됨 — 알림은 보내지 않았어요',
+          : saved.handedOff
+            ? `저장 · 승인했어요 — ${saved.handedOff.target}에 올라갔어요`
+            : saved.approved.notified > 0
+              ? '저장 · 승인 완료 — 담당자에게 알렸습니다'
+              : '저장 · 승인 기록됨 — 알림은 보내지 않았어요',
     );
     router.refresh();
     // 채번이 다시 매겨지므로 서버가 쓴 결과를 다시 읽는다
@@ -304,13 +343,15 @@ export function MergedDrawer({
       setErr((await res.json().catch(() => ({}))).message ?? '승인하지 못했습니다.');
       return;
     }
-    const r = (await res.json().catch(() => ({}))) as { notified?: number; unchanged?: boolean };
+    const r = (await res.json().catch(() => ({}))) as { notified?: number; unchanged?: boolean; handedOff?: { target: string } | null };
     flash(
       r.unchanged
         ? '이미 승인한 판입니다'
-        : (r.notified ?? 0) > 0
-          ? '승인 완료 — 담당자에게 알렸습니다'
-          : '승인 기록됨 — 알림은 보내지 않았어요',
+        : r.handedOff
+          ? `승인했어요 — ${r.handedOff.target}에 올라갔어요`
+          : (r.notified ?? 0) > 0
+            ? '승인 완료 — 담당자에게 알렸습니다'
+            : '승인 기록됨 — 알림은 보내지 않았어요',
     );
     router.refresh();
     const fresh = await fetch(`/api/division/merged/content?division=${divisionSlug}&isoKey=${isoKey}`);
@@ -328,15 +369,19 @@ export function MergedDrawer({
         aria-hidden
       />
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label="병합본 보기"
-        className="absolute inset-y-0 right-0 flex h-full w-full max-w-4xl flex-col border-l border-hairline bg-canvas"
+        data-guide="merged-drawer"
+        className="absolute inset-y-0 right-0 flex h-full w-full max-w-4xl flex-col border-l border-hairline bg-canvas shadow-[0_8px_32px_rgba(0,0,0,0.12)]"
       >
-        <header className="flex items-start justify-between gap-3 border-b border-hairline px-6 py-4">
+        <header className="flex items-start justify-between gap-3 border-b border-hairline px-4 py-4 sm:px-6">
           <div className="min-w-0">
-            <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">병합본</p>
-            <h2 className="display mt-0.5 truncate text-lg">{data?.title ?? '불러오는 중…'}</h2>
+            <p className="text-sm text-muted">병합본</p>
+            <h2 ref={titleRef} tabIndex={-1} className="card-title truncate outline-none">
+              {data?.title ?? '불러오는 중…'}
+            </h2>
           </div>
           <button
             onClick={() => (!dirty || confirm('저장하지 않은 수정이 있습니다. 닫을까요?')) && onClose()}
@@ -347,69 +392,38 @@ export function MergedDrawer({
           </button>
         </header>
 
-        {/* 제출 동선 그대로 — 제목 복사 → 표 복사 → 게시판에 붙여넣기 */}
-        <div className="flex flex-wrap items-center gap-2 border-b border-hairline bg-surface-soft px-6 py-3">
-          <button
-            onClick={async () => {
-              if (!data) return;
-              setErr(null);
-              if (await copyText(data.title)) flash('제목');
-              else setErr('제목을 복사하지 못했습니다.');
-            }}
-            disabled={!data}
-            className="btn-secondary btn-sm"
-          >
-            제목 복사
-          </button>
-          {/*
-            «표 복사»는 뺐다 (v1.16.0). 한컴 웹에디터가 붙여넣은 HTML을 자기 방식으로
-            다시 그려서 양식과 완전히 같게 만들 수 없었다 — 폭·정렬·머리행까지 맞춰도
-            미세하게 어긋났다. 어설프게 비슷한 것보다 **확실한 길 하나**가 낫다.
-            브라우저는 한글 고유 형식을 클립보드에 올릴 수 없으므로(text/plain·html·png만),
-            hwp를 받아 한글에서 복사하는 것이 유일하게 서식이 100% 보존되는 경로다.
-            되살릴 때는 v1.15.1의 표 복사 구현에서 이어가면 된다.
-          */}
-          <a
-            href={`/api/division/merged?division=${divisionSlug}&isoKey=${isoKey}`}
-            className="btn-primary btn-sm"
-          >
-            hwp로 받기
-          </a>
-          <span className="text-sm text-muted">→ 한글에서 열어 표를 복사해 게시판에 붙여넣습니다</span>
-          {/* TACP-17 — 서버가 작성자를 보낸 사람에게만 보이는 토글 */}
-          {data?.canSeeAuthors && (
-            <button
-              onClick={() => setShowAuthors((v) => !v)}
-              aria-pressed={showAuthors}
-              className={`btn-sm rounded-lg border px-2.5 py-1 text-sm ${
-                showAuthors
-                  ? 'border-ink bg-ink text-canvas'
-                  : 'border-hairline bg-canvas text-body hover:border-ink'
-              }`}
-            >
-              작성자 {showAuthors ? '숨기기' : '보기'}
-            </button>
-          )}
-          <span className="ml-auto text-sm">
-            {copied && (
-              <span className="font-medium text-success">{copied === '제목' ? '제목 복사됨' : copied}</span>
-            )}
-            {dirty && !copied && <span className="text-warning">저장하지 않은 수정</span>}
-          </span>
-          {canEdit && (
-            <button onClick={save} disabled={!dirty || busy} className="btn-primary btn-sm">
+        {/*
+          CP-116 · CP-110 — 머리 줄은 고칠 수 있는 사람에게만: 저장 결과 한 마디와 [수정 저장]. [수정 저장]은 처음부터 보이고
+          고치기 전에는 꺼져 있다 — 고치는 순간 줄이 새로 생겨 표가 밀려 내려가지 않게. 받기·제목 복사는 수합 관리 카드에 있다(S5)
+        */}
+        {canEdit && (
+          <div data-guide="merged-head" className="flex flex-wrap items-center gap-2 border-b border-hairline px-4 py-3 sm:px-6">
+            <span className="text-sm">
+              {notice && <span className="font-medium text-success">{notice}</span>}
+              {dirty && !notice && <span className="text-warning">저장하지 않은 수정</span>}
+            </span>
+            <button data-guide="merged-save" onClick={save} disabled={!dirty || busy} className="btn-primary btn-sm ml-auto">
               {busy ? '저장 중…' : '수정 저장'}
             </button>
-          )}
-        </div>
+          </div>
+        )}
 
+        {/*
+          RU-80 — 부서장이 승인한 뒤 담당자가 고치려고 열면 맨 위에 한 줄: 담당자의 저장은 승인이 아니라 위로 가지 않는다.
+          고친 판은 부서장이 다시 승인해야 올라간다 — 모르고 고치면 「고쳤는데 위에는 옛 판」이 조용히 생긴다
+        */}
+        {data?.handoffTo && data.review && !data.canApprove && canEdit && (
+          <p className="callout callout-info mx-4 mt-3 text-sm sm:mx-6">
+            고쳐 저장하면 부서장이 다시 승인해야 {data.handoffTo}에 올라갑니다
+          </p>
+        )}
         {/* HM-47 — 승인 상태. 부서장에게는 [고칠 것 없음 · 승인] — 고쳐 저장하면 그 저장이 승인이다 */}
-        {data && (data.review || data.canApprove) && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline-soft bg-surface-soft px-6 py-2.5 text-sm">
+        {data && ctl.reviewBand && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline-soft bg-surface-soft px-4 py-2.5 text-sm sm:px-6">
             {data.review ? (
               <>
-                <span className={data.review.changedAfter ? 'font-semibold text-warning' : 'font-semibold text-success'}>
-                  {data.review.changedAfter ? '승인 뒤 바뀜' : '✓ 승인 완료'}
+                <span className={`chip ${data.review.changedAfter ? 'chip-warn' : 'chip-ok'}`}>
+                  {data.review.changedAfter ? '승인 뒤 바뀜' : '승인 완료'}
                 </span>
                 <span className="text-ink">{data.review.by}</span>
                 <span className="text-muted">
@@ -419,12 +433,13 @@ export function MergedDrawer({
             ) : (
               <span className="text-muted">
                 {/* CP-110 — 「고쳐서」만으로는 어디를 어떻게 고치는지 모른다. 이 화면에서 바로 된다는 것을 먼저 말한다 */}
-                {canEdit
-                  ? '아직 승인 전 — 칸을 눌러 바로 고치고 [수정 저장]하면 그 저장이 곧 승인이고, 담당자에게 알림이 갑니다'
-                  : '아직 승인 전'}
+                {/* RU-80 — 부서장의 저장만 승인이다(담당자의 저장은 아니다). 3단계면 그 승인이 곧 위로 가는 제출이다 */}
+                {canEdit && data.canApprove
+                  ? `승인 전 · 고쳐 저장하면 승인${data.handoffTo ? ` — 바로 ${data.handoffTo}에 올라감` : ''}`
+                  : '승인 전'}
               </span>
             )}
-            {data.canApprove && (!data.review || data.review.changedAfter) && (
+            {ctl.approve && (
               <button onClick={approve} disabled={busy || dirty} className="btn-secondary btn-sm ml-auto">
                 고칠 것 없음 · 승인
               </button>
@@ -432,24 +447,25 @@ export function MergedDrawer({
           </div>
         )}
 
-        <div ref={bodyRef} className="flex-1 overflow-y-auto px-6 py-5">
-          {err && <p className="card border-error/40 bg-error-soft px-4 py-3 text-sm text-error">{err}</p>}
+        <div ref={bodyRef} data-guide="merged-body" className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
+          {err && <p className="callout callout-error mb-4">{err}</p>}
           {!data && !err && <p className="text-sm text-muted">불러오는 중…</p>}
 
           {data?.tables.map((t, ti) => {
             const rows = bodyRows(t);
             return (
               <section key={t.key} className="mb-7">
-                <h3 className="label">
-                  {t.title} <span className="font-normal text-muted-soft">{rows.length}행</span>
+                <h3 className="mb-2 text-[15px] font-semibold text-ink">
+                  {t.title} <span className="text-sm font-normal text-muted">{rows.length}행</span>
                 </h3>
                 {rows.length === 0 ? (
-                  <p className="card px-4 py-3 text-sm text-muted-soft">내용 없음</p>
+                  <p className="callout callout-muted text-muted">내용 없음</p>
                 ) : (
-                  <div className="card overflow-x-auto">
-                    <table className="w-full text-sm">
+                  /* 좁은 화면에서 칸을 짜부라뜨리지 않는다 — 한 글자씩 세로로 쪼개지던 것을 가로 스크롤로 */
+                  <div className="overflow-x-auto rounded-lg border border-hairline">
+                    <table className="w-full min-w-[640px] text-sm">
                       <thead>
-                        <tr className="table-head border-b border-hairline">
+                        <tr className="table-head border-b border-hairline bg-surface-soft">
                           {/* CP-90 — 손잡이 자리. 노션처럼 표 왼쪽 여백에 둔다 */}
                           {canEdit && <th className="w-7" />}
                           {t.columns.map((c, i) => (
@@ -489,7 +505,7 @@ export function MergedDrawer({
                               moveRow(ti, drag.from, ri);
                               setDrag(null);
                             }}
-                            className={`border-b border-hairline-soft last:border-0 ${edge} ${
+                            className={`group border-b border-hairline-soft last:border-0 ${edge} ${
                               dragging ? 'opacity-40' : ''
                             }`}
                           >
@@ -514,8 +530,9 @@ export function MergedDrawer({
                                     refocusRef.current = `${ti}-${to}`;
                                   }}
                                   aria-label={`${rowNo(t.key, ri)}행 옮기기 — 끌거나 위·아래 화살표`}
-                                  title="끌어서 옮기기 · ↑↓ 키로도 됩니다"
-                                  className="cursor-grab rounded px-1 py-1.5 text-muted-soft hover:bg-surface-soft hover:text-body focus:text-body focus:outline-none focus-visible:ring-2 focus-visible:ring-ink active:cursor-grabbing"
+                                  title="끌어서 옮기기"
+                                  // 줄마다 늘 보이면 스물네 줄에 손잡이·공유·✕가 일흔두 개다 — 그 줄에 손이 갔을 때만 (넓은 화면)
+                                  className="cursor-grab rounded px-1 py-1.5 text-muted-soft hover:bg-surface-soft hover:text-body focus:text-body focus:opacity-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-ink active:cursor-grabbing sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
                                 >
                                   <GripIcon />
                                 </button>
@@ -525,18 +542,21 @@ export function MergedDrawer({
                               <td key={ci} className="px-1 py-0.5 align-top">
                                 {canEdit && ci > 0 ? (
                                   <textarea
+                                    // CP-104 — 사용 안내의 「업무실적 내용」 단계는 첫 표 첫 줄의 내용 칸을 가리킨다(「칸을 눌러 고친다」)
+                                    data-guide={ti === 0 && ri === 0 && ci === 1 ? 'merged-cell' : undefined}
                                     value={cell}
                                     rows={1}
-                                    ref={fit}
+                                    ref={fitTextarea}
                                     onChange={(e) => {
-                                      fit(e.target);
+                                      fitTextarea(e.target);
+                                      typedRef.current = true; // CP-119 — 이 칸만 바뀌었다
                                       edit(ti, ri, ci, e.target.value);
                                     }}
                                     /*
                                       HM-37 — 강조 줄의 내용 칸은 **화면에서도 파랗게** 보인다.
                                       문서에서 파란색인 것을 화면에서는 회색 배지로만 알리면,
                                       담당자가 «제출본이 어떻게 보이는지»를 확인할 길이 없다.
-                                      실제 색(#0000ff)을 그대로 쓴다 — 비슷한 파랑이 아니라.
+                                      실제 색(emphasis 토큰 = hwp의 그 파랑)을 그대로 쓴다 — 비슷한 파랑이 아니라.
                                     */
                                     /*
                                       CP-110 — 테두리를 **늘** 그린다. 예전엔 마우스를 올려야 보여서, 처음 여는 실장에게는
@@ -544,13 +564,13 @@ export function MergedDrawer({
                                       옅은 선이면 표로 읽히면서도 「여기를 누르면 적힌다」가 보인다
                                     */
                                     className={`block w-full resize-none overflow-hidden rounded border border-hairline bg-canvas px-2 py-1.5 text-sm leading-snug hover:border-border-strong focus:border-ink focus:outline-none ${
-                                      ci === 1 && t.emphasis?.[ri] ? 'font-medium text-[#0000ff]' : 'text-ink'
+                                      ci === 1 && t.emphasis?.[ri] ? 'font-medium text-emphasis' : 'text-ink'
                                     }`}
                                   />
                                 ) : (
                                   <span
                                     className={`block px-2 py-1.5 whitespace-nowrap tabular-nums ${
-                                      ci === 1 && t.emphasis?.[ri] ? 'font-medium text-[#0000ff]' : 'text-body'
+                                      ci === 1 && t.emphasis?.[ri] ? 'font-medium text-emphasis' : 'text-body'
                                     }`}
                                   >
                                     {/*
@@ -565,7 +585,12 @@ export function MergedDrawer({
                               </td>
                             ))}
                             {showAuthors && (
-                              <td className="px-3 py-1.5 align-top text-xs whitespace-nowrap">
+                              /*
+                                작성자 칸은 **줄을 바꾼다** (2026-10-09 v2 전환 점검). 예전엔 whitespace-nowrap이라 여러 사람이 낸 줄을 묶은 행
+                                (「가 + 나 + … 열 명」)이 한 줄로 늘어나 1440px 화면에서 내용 칸을 60px 남짓으로 짜부라뜨렸다. 이름 사이 공백에서만
+                                바꾸고(break-keep) 이름 안에서는 끊지 않는다 — 머리의 15% 폭을 따른다
+                              */
+                              <td className="px-3 py-1.5 align-top text-xs break-keep">
                                 {(t.authors?.[ri] ?? []).length === 0 ? (
                                   // 담당자가 새로 써 넣었거나 대조하지 못한 행 — 모르는 걸 아는 척하지 않는다
                                   <span className="text-muted-soft">—</span>
@@ -582,17 +607,17 @@ export function MergedDrawer({
                                   onClick={() => toggleEmphasis(ti, ri)}
                                   aria-pressed={t.emphasis?.[ri] === true}
                                   aria-label={`${rowNo(t.key, ri)}행 공유 표시`}
-                                  title="전체 공유·전달이 필요한 주요 사항 — 문서에 파란색으로 나갑니다"
-                                  className={`rounded border px-1.5 py-0.5 text-[11px] font-semibold whitespace-nowrap transition-colors ${
+                                  title="파란색으로 나감"
+                                  className={`rounded border px-1.5 py-0.5 text-xs font-semibold whitespace-nowrap transition-colors ${
                                     t.emphasis?.[ri]
-                                      ? 'border-[#0000ff] bg-[#0000ff] text-white'
-                                      : 'border-hairline bg-canvas text-muted-soft hover:border-ink hover:text-ink'
+                                      ? 'border-emphasis bg-emphasis text-white'
+                                      : 'border-hairline bg-canvas text-muted-soft hover:border-ink hover:text-ink focus:opacity-100 sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100'
                                   }`}
                                 >
                                   공유
                                 </button>
                               ) : t.emphasis?.[ri] ? (
-                                <span className="text-[11px] font-semibold text-[#0000ff]">공유</span>
+                                <span className="text-xs font-semibold text-emphasis">공유</span>
                               ) : null}
                             </td>
                             {canEdit && (
@@ -600,7 +625,7 @@ export function MergedDrawer({
                                 <button
                                   onClick={() => removeRow(ti, ri)}
                                   aria-label={`${ri + 1}행 삭제`}
-                                  className="rounded px-1.5 py-1 text-muted-soft hover:bg-error-soft hover:text-error"
+                                  className="rounded px-1.5 py-1 text-muted-soft hover:bg-error-soft hover:text-error focus:opacity-100 sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
                                 >
                                   ✕
                                 </button>
@@ -616,13 +641,6 @@ export function MergedDrawer({
               </section>
             );
           })}
-
-          {data && canEdit && (
-            <p className="text-xs text-muted-soft">
-              고친 내용은 [수정 저장]을 눌러야 병합본에 반영됩니다. 구분 번호(1-1, 1-2…)는 저장할 때
-              시스템이 다시 매깁니다. <strong className="font-medium">제출자가 올린 원본 파일은 바뀌지 않습니다.</strong>
-            </p>
-          )}
         </div>
       </div>
     </div>

@@ -14,6 +14,10 @@
 // 그 한 시간이 검토에 쓸 수 있는 전부다:
 //   14:10 부서장이 본다 → 20분 검토 → 14:30 담당자가 반영해 제출 → 15:00까지 30분 여유.
 // 병합 자체가 모델 호출까지 수십 초~수 분 걸리므로 10분보다 이르면 «아직 병합 중»에 걸린다.
+//
+// **3단계에서는(RU-52 켜짐) +30분 안내가 바뀐다 (NT-47′ · 2026-10-08 · ADR-0015).** 부서장의 승인이 곧 위로 가는 제출이라
+// 담당자가 누를 [제출]이 없다. 승인돼 올라갔으면 보내지 않고(승인 순간 NT-46′이 이미 말했다), 승인 전·승인 뒤 바뀜이면
+// 「승인되면 저절로 ○○에 올라갑니다(기한)」, 부서장이 없는 부서면 「올라갔어요 — 고치면 다시 올라갑니다」 (submitLines).
 import { prisma } from '../db';
 import { logger } from '../logger';
 import { env } from '../env';
@@ -21,7 +25,9 @@ import { sendAlert, messengerStatus } from '../messenger';
 import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
 import { slotKind } from '@/lib/week';
 import { describeFlagged, type FlaggedRow } from '@/lib/empty-content';
-import { approvalOf } from '../merge/review';
+import { approvalOf, reapproveKind } from '../merge/review';
+import { NEWEST_FIRST, UNIT_REVIEW } from '../merge/review-scope';
+import { loadOrgSetting, loadTree, submitTarget } from '../rollup/tree';
 import { mergeStaleBefore } from '../merge/budget';
 import type { MergeEdits } from '../merge/edits';
 import { toKstIso } from '@/lib/week';
@@ -76,15 +82,46 @@ export interface MergeFacts {
    */
   approval: { by: string; at: Date; summary: string; changedAfter: boolean } | null;
   hasHead: boolean;
+  /** RU-53 — 3단계를 쓰면 올라가는 곳(「기획경영본부」·「총괄」). 안 쓰면 null — 게시판 문구 그대로 */
+  submitTo?: string | null;
+  /** RU-53 · RU-80 — 그 단위의 기한 (「15:00」 — 수합 관리 「위로」 카드와 같은 값). 3단계를 안 쓰면 null */
+  submitDue?: string | null;
   /** HM-49 — 자동 재병합을 멈추게 한 사람 수정 (NT-51 `merge_held`에서만) */
   edits?: MergeEdits | null;
+  /**
+   * NT-44a (2026-10-10) — 이 주에 낸 사람 수(각자 최신 판). 병합본이 없을 때 **왜 없는지** 가른다: 0이면 만들 것이 없었던 것이라
+   * [지금 병합]을 누를 일이 없다 — 예전 쪽지는 그래도 「[지금 병합]을 눌러주세요」라고 했다. 모르면(옛 호출) 두 경우를 함께 말한다
+   */
+  submitted?: number;
+}
+
+/**
+ * RU-53 · NT-47′ (2026-10-08 개정) — 담당자 마지막 알림의 끝 줄. 3단계를 쓰면 **누를 버튼이 없다** — 부서장의 승인이 곧 제출이다(ADR-0015).
+ * 그래서 「무엇을 기다리나」를 기한과 함께 말한다. 안 쓰면 「수합 관리에서 [받기]로 받아 취합게시판에 올려주세요」 한 줄 —
+ * 웹디스크 올리기는 절차에서 빠졌다(운영자 결정 2026-10-12 · NT-T86).
+ *   승인 전           「아직 부서장 승인 전이에요 — 승인되면 저절로 ○○에 올라갑니다(기한 15:00).」
+ *   승인 뒤 바뀜      「부서장이 승인한 뒤 병합본이 바뀌었어요 — 다시 승인되면 저절로 ○○에 올라갑니다(기한 15:00).」
+ *   부서장 없는 부서  「병합본이 ○○에 올라갔어요 — 고칠 곳은 고쳐 저장하면 다시 올라갑니다.」
+ * (승인돼 올라갔으면 이 알림 자체를 보내지 않는다 — pickJobs)
+ */
+export function submitLines(f: Pick<MergeFacts, 'submitTo' | 'submitDue'> & Partial<Pick<MergeFacts, 'hasHead' | 'approval'>>): string[] {
+  if (!f.submitTo) return ['Tincase 수합 관리에서 [받기]로 받아 취합게시판에 올려주세요.'];
+  const due = f.submitDue ? `(기한 ${f.submitDue})` : '';
+  if (f.hasHead === false) return [`병합본이 ${f.submitTo}에 올라갔어요 — 고칠 곳은 고쳐 저장하면 다시 올라갑니다.`];
+  if (f.approval && !f.approval.changedAfter) return [`부서장이 승인해 ${f.submitTo}에 올라갔어요.`];
+  if (f.approval?.changedAfter) return [`부서장이 승인한 뒤 병합본이 바뀌었어요 — 다시 승인되면 저절로 ${f.submitTo}에 올라갑니다${due}.`];
+  return [`아직 부서장 승인 전이에요 — 승인되면 저절로 ${f.submitTo}에 올라갑니다${due}.`];
 }
 
 /** NT-47 — 승인 한 줄 */
 function approvalBlock(f: MergeFacts): string[] {
   // 승인한 뒤 병합본이 바뀌었으면 「승인 완료」라고 말하지 않는다 — 화면의 「승인 뒤 바뀜」과 같은 말을 한다
   if (f.approval?.changedAfter) {
-    return ['', `${f.approval.by}님이 승인한 뒤 병합본이 바뀌었어요 — 다시 확인을 받아주세요.`];
+    /*
+     * NT-47a (2026-10-10) — 이 줄은 3단계가 꺼졌을 때만 나간다(compose: `staged`면 submitLines가 대신 말한다). 꺼져 있으면 부서장에게
+     * 「다시 승인해 주세요」(NT-52)가 가지 않는다 — 담당자가 기다리면 아무도 부서장에게 말하지 않는다. 그래서 할 일을 적는다
+     */
+    return ['', `${f.approval.by}님이 승인한 뒤 병합본이 바뀌었어요 — 다시 확인을 받아주세요.`, '부서장에게는 쪽지가 가지 않으니 직접 부탁해 주세요.'];
   }
   if (f.approval) return ['', `${f.approval.by}님 승인 완료 (${toKstIso(f.approval.at).slice(11, 16)} · ${f.approval.summary})`];
   if (f.hasHead) return ['', '아직 부서장 승인 전이에요 — 확인한 뒤 제출해주세요.'];
@@ -129,7 +166,7 @@ function staleBlock(stale: number, action: string): string[] {
 export function pickJobs(
   atReview: boolean,
   atSubmit: boolean,
-  facts: Pick<MergeFacts, 'ok' | 'approval'>,
+  facts: Pick<MergeFacts, 'ok' | 'approval'> & Partial<Pick<MergeFacts, 'submitTo' | 'hasHead'>>,
 ): { kind: NoticeKind; role: 'lead' | 'head' }[] {
   const jobs: { kind: NoticeKind; role: 'lead' | 'head' }[] = [];
   if (atReview) {
@@ -137,7 +174,9 @@ export function pickJobs(
       if (!facts.approval || facts.approval.changedAfter) jobs.push({ kind: 'merge_review', role: 'head' });
     } else jobs.push({ kind: 'merge_missing', role: 'lead' });
   }
-  if (atSubmit) jobs.push({ kind: 'merge_done', role: 'lead' });
+  // NT-47′ · RU-53 — 3단계에서 부서장이 승인해 이미 올라갔으면 담당자에게 할 일이 없다 — NT-46′이 그 순간 이미 말했다
+  const handedOff = !!facts.submitTo && facts.hasHead === true && facts.ok && !!facts.approval && !facts.approval.changedAfter;
+  if (atSubmit && !handedOff) jobs.push({ kind: 'merge_done', role: 'lead' });
   return jobs;
 }
 
@@ -165,8 +204,9 @@ function rowsLine(f: MergeFacts): string {
  *
  * 토스 말투를 따른다: 사실 한 줄 → 빈 줄 → 다음에 할 일 한 줄.
  * 「~해야 합니다」가 아니라 「~해주세요」다. 매주 오는 알림이라 명령조는 금방 피로해진다.
+ * 순수 함수다 — 문구를 시험이 직접 본다(NT-T86).
  */
-function compose(kind: NoticeKind, who: Person, slotLabel: string, monthly: boolean, f: MergeFacts) {
+export function composeNotice(kind: NoticeKind, who: Person, slotLabel: string, monthly: boolean, f: MergeFacts) {
   const label = `${slotLabel} ${monthly ? '월간' : '주간'}`;
   const head = `[${who.employeeNo}]${who.name}님`;
 
@@ -181,7 +221,12 @@ function compose(kind: NoticeKind, who: Person, slotLabel: string, monthly: bool
         '',
         ...flagBlock(f.flagged),
         '',
-        'Tincase에서 내용을 확인하고 고칠 부분을 알려주세요.',
+        /*
+         * NT-44b (2026-10-10) — 할 일을 단추 이름으로. 예전 「Tincase에서 내용을 확인하고 고칠 부분을 알려주세요」는 담당자에게 말하라는 뜻으로 읽혔다 —
+         * 부서장은 직접 고쳐 저장하거나(그것이 승인 — HM-47) [고칠 것 없음 · 승인]을 누른다. 단추 이름은 화면(MergePanel·MergedDrawer)과 글자까지 같다
+         */
+        'Tincase 수합 관리에서 확인하고, 고칠 것이 없으면 [고칠 것 없음 · 승인]을 눌러 주세요.',
+        '고칠 곳은 직접 고쳐 저장하면 그것이 승인입니다 — 담당자에게 바로 알려집니다.',
         '각 항목을 누가 냈는지도 함께 보입니다.',
       ]
         .filter((l, i, a) => !(l === '' && a[i - 1] === ''))
@@ -204,14 +249,23 @@ function compose(kind: NoticeKind, who: Person, slotLabel: string, monthly: bool
     };
   }
 
+  /*
+   * NT-44a (2026-10-10) — 병합본이 없는 **이유**에 따라 할 일이 다르다. 낸 사람이 없으면 만들 것이 없었던 것이라 [지금 병합]을 누를 일이 없다 —
+   * 예전 쪽지는 그때도 「[지금 병합]을 눌러주세요」였다. 「제출된 파일」은 v1 낱말이다(이제 파일을 올리지 않는다 — 웹 작성, WA-39)
+   */
+  const noneSubmitted = f.submitted === 0;
+  const why = noneSubmitted
+    ? ['이번 주 제출이 한 건도 없어 병합본을 만들지 않았어요.']
+    : [f.submitted === undefined ? '제출이 없거나 병합에 실패했을 수 있어요.' : '병합에 실패했어요.'];
+
   if (kind === 'merge_missing') {
     return {
       subject: `[Tincase] ${slotLabel} 병합본이 아직 없어요`,
       contents: [
         `${head} ${slotLabel} 병합본이 만들어지지 않았어요.`,
         '',
-        '제출된 파일이 없거나 병합에 실패했을 수 있어요.',
-        'Tincase 수합 관리에서 확인하고 [지금 병합]을 눌러주세요.',
+        ...why,
+        ...(noneSubmitted ? [] : ['Tincase 수합 관리에서 확인하고 [지금 병합]을 눌러주세요.']),
       ].join('\n'),
     };
   }
@@ -223,23 +277,27 @@ function compose(kind: NoticeKind, who: Person, slotLabel: string, monthly: bool
       contents: [
         `${head} ${slotLabel} 병합본이 아직 없어요.`,
         '',
-        '대외업무 마감이 얼마 남지 않았어요.',
-        'Tincase 수합 관리에서 [지금 병합]을 눌러주세요.',
+        ...(noneSubmitted ? why : ['대외업무 마감이 얼마 남지 않았어요.', 'Tincase 수합 관리에서 [지금 병합]을 눌러주세요.']),
       ].join('\n'),
     };
   }
+  // NT-47′ — 3단계에서는 누를 버튼이 없다. 승인 줄(approvalBlock)은 끝 줄(submitLines)이 대신 말한다 — 두 줄이 서로 다른 말을 하지 않게
+  const staged = !!f.submitTo;
   return {
-    subject: `[Tincase] ${label} 병합본 제출해주세요`,
+    subject: staged
+      ? f.hasHead
+        ? `[Tincase] ${label} 병합본 — 부서장 승인을 기다려요`
+        : `[Tincase] ${label} 병합본이 ${f.submitTo}에 올라갔어요`
+      : `[Tincase] ${label} 병합본 제출해주세요`,
     contents: [
       `${head} ${label} 병합본이 준비됐어요.`,
       '',
       rowsLine(f),
-      ...approvalBlock(f),
+      ...(staged ? [] : approvalBlock(f)),
       ...staleBlock(f.stale, 'Tincase 수합 관리에서 [다시 병합]을 눌러주세요.'),
       ...flagBlock(f.flagged),
       '',
-      'Tincase에서 hwp로 받아 취합게시판에 올리고',
-      '웹디스크에 업로드해주세요.',
+      ...submitLines(f),
     ]
       .filter((l, i, a) => !(l === '' && a[i - 1] === ''))
       .join('\n'),
@@ -282,7 +340,7 @@ async function deliver(
   const sent: string[] = [];
   const blocked: string[] = [];
   for (const p of people) {
-    const r = await sendAlert({ recvIds: [p.employeeNo], ...compose(kind, p, slotLabel, monthly, facts), url });
+    const r = await sendAlert({ recvIds: [p.employeeNo], ...composeNotice(kind, p, slotLabel, monthly, facts), url, kind });
     sent.push(...r.sent);
     blocked.push(...r.blocked);
   }
@@ -321,6 +379,16 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
   const monthly = slotKind(slot) === 'monthly';
   const out: NoticeOutcome[] = [];
   const divisions = await prisma.division.findMany({ where: { isActive: true, notifyEnabled: true } });
+  // RU-53 — 3단계를 쓰면 마지막 알림의 할 일이 「게시판」이 아니라 「Tincase에서 제출」이다 — 그 단위의 기한과 함께.
+  // 단계 시각은 동적으로 읽는다: schedule → slot-deadline이 이 파일의 상수를 읽어 정적으로 이으면 고리가 된다
+  const tree = (await loadOrgSetting()).enabled ? await loadTree() : null;
+  const stages = tree
+    ? await (async () => {
+        const { stageTimes, stageCells } = await import('../rollup/schedule');
+        const t = await stageTimes(slot);
+        return stageCells(t.anchor, t);
+      })()
+    : null;
 
   for (const division of divisions) {
     try {
@@ -393,6 +461,15 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
         });
         if (inFlight) continue;
         /*
+         * HM-59 · HM-60 (2026-10-08 2단계) — **줄에 선 부서**도 기다린다. 줄에 넣었지만 차례가 오지 않은 부서, 실패 뒤 다시 줄에 선 부서는
+         * 「병합본이 아직 없어요 — [지금 병합]」이 아니다 — 누를 것이 없다. 끝나면 창이 그 시각부터 열린다(HM-50).
+         * queue.ts를 잇지 않고 표를 직접 본다 — queue → run → 이 파일 고리가 된다
+         */
+        const queued = await prisma.mergeJob.count({
+          where: { divisionId: division.id, weekSlotId: slot.id, status: { in: ['queued', 'running'] } },
+        });
+        if (queued > 0) continue;
+        /*
          * HM-50 — 아직 **차례가 오지 않은** 부서도 기다린다. 스케줄러는 부서를 차례로 병합하고 하나 끝날 때마다
          * 여기를 부른다 — 뒤 부서는 아직 시도조차 안 됐다. 그것을 「병합본이 아직 없어요 — [지금 병합]」으로 보내면
          * 줄 서 있는 것을 실패라고 부르는 셈이다(13개 부서를 흉내 낸 시험에서 일곱 통이 그렇게 나갔다).
@@ -431,20 +508,43 @@ export async function runDueMergeNotices(now = new Date()): Promise<NoticeOutcom
         flagged,
         stale,
         approval: run ? await approvalOf(run) : null,
+        ...(() => {
+          const t = tree ? submitTarget(tree, division.id) : null;
+          if (!t || !stages) return { submitTo: null, submitDue: null };
+          // 본부로 가면 실·팀 → 본부 기한, 본부 단계 없이 총괄로 가면 본부 → 총괄 기한 (「위로」 카드와 같은 규칙 — RU-80)
+          return t.kind === 'hq' ? { submitTo: t.node.node.nameKo, submitDue: stages.unitDueKo } : { submitTo: '총괄', submitDue: stages.hqDueKo };
+        })(),
         hasHead: (await prisma.user.count({ where: { divisionId: division.id, isActive: true, divisionRole: 'head' } })) > 0,
         ok: !!run,
         sources: used.size,
+        // NT-44a — 병합본이 없을 때 「낸 사람이 없어서」인지 가른다
+        submitted: await prisma.submission.count({ where: { divisionId: division.id, weekSlotId: slot.id, isLatest: true } }),
         counts: run?.rowCounts ? JSON.parse(run.rowCounts) : null,
       };
       const base = env.MESSENGER_LINK_BASE ? `${env.MESSENGER_LINK_BASE}/${division.slug}` : undefined;
 
       const jobs = pickJobs(atReview, atSubmit, facts).map((j) => ({
         ...j,
-        url: base ? `${base}/${j.kind === 'merge_review' ? 'archive' : 'manage'}` : undefined,
+        // NT-53 — 알림 종류와 상관없이 수합 관리로. 부서장의 검토·승인도 수합 관리에서 한다(이미 나간 옛 보관함 주소는 PG-70이 받는다)
+        url: base ? `${base}/manage` : undefined,
       }));
 
       for (const j of jobs) {
         if (await alreadySent(division.id, slot.id, j.kind)) continue;
+        /*
+         * NT-52 ↔ NT-40 — 부서장의 **가장 최근 승인**에 대해 이미 「다시 승인해 주세요」(NT-52, 바뀐 순간)를 보냈으면 +10분 검토 요청을
+         * 또 보내지 않는다 — 실장이 14:03에 승인하고 담당자가 14:06에 고치면 같은 할 일이 4분 사이에 두 번 가던 틈 (2026-10-08 검증).
+         * NT-52가 승인마다 한 번이 되면서(결정 e) 판(sha)이 아니라 그 승인으로 본다 — 그 뒤 또 바뀌어도 할 일은 같다(다시 승인).
+         * 기록을 남기지 않고 건너뛴다.
+         */
+        if (j.kind === 'merge_review') {
+          const last = await prisma.mergeReview.findFirst({
+            where: { divisionId: division.id, weekSlotId: slot.id, ...UNIT_REVIEW },
+            orderBy: NEWEST_FIRST,
+            select: { id: true },
+          });
+          if (last && (await prisma.notifyLog.findFirst({ where: { divisionId: division.id, weekSlotId: slot.id, kind: reapproveKind(last.id) } }))) continue;
+        }
         const r = await deliver(
           division.id,
           slot.id,
@@ -501,7 +601,7 @@ export async function noticeMergeHeld(opts: {
   const sent: string[] = [];
   const blocked: string[] = [];
   for (const p of people) {
-    const r = await sendAlert({ recvIds: [p.employeeNo], ...compose('merge_held', p, slot.label, monthly, facts), url });
+    const r = await sendAlert({ recvIds: [p.employeeNo], ...composeNotice('merge_held', p, slot.label, monthly, facts), url, kind: logKind });
     sent.push(...r.sent);
     blocked.push(...r.blocked);
   }

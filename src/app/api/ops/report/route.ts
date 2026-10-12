@@ -9,7 +9,7 @@ import { contentDisposition } from '@/server/storage';
 import { layoutOrg, type DivisionNode } from '@/lib/orgtree';
 import { reportCsv, reportHtml } from '@/server/report';
 import { effectiveDeadline } from '@/server/worklog';
-import { formatDeadlineKo, toKstIso } from '@/lib/week';
+import { formatDeadlineKo, slotKind, toKstIso } from '@/lib/week';
 
 export const dynamic = 'force-dynamic';
 
@@ -68,6 +68,8 @@ export const GET = handler(async (req: NextRequest) => {
   const now = new Date();
   const meta = {
     weekLabel: slot.label,
+    // WS-15 — 월간 주의 감사 문서는 「월간 업무일지 제출 현황」. 「주간」을 박아 두면 한 달에 한 주씩 틀린 이름이 남는다
+    kind: slotKind(slot),
     isoKey: slot.isoKey,
     // 부서마다 마감이 다를 수 있으나(DM-10) 현재 전부 동일하므로 대표값을 쓴다
     deadlineKst: formatDeadlineKo(effectiveDeadline(slot, divisions[0])),

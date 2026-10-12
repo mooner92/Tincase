@@ -12,8 +12,10 @@ import { MERGE_DELAY_MINUTES } from './merge/run';
 import { REVIEW_MINUTES, SUBMIT_MINUTES } from './notify/merge-notices';
 import { deadlineFor, formatDeadlineKo, KST, toKstIso, type DeadlinePolicy } from '@/lib/week';
 import { DEPARTMENT_LEAD_MINUTES, parseDeadlineNotice } from '@/lib/deadline-notice';
+import { STAGE_HQ, STAGE_UNIT } from '@/lib/rollup-stages';
 import { TZDate } from '@date-fns/tz';
 import type { WeekSlot } from '@prisma/client';
+import type { StageCells } from './rollup/schedule';
 
 /** 켜진 부서가 없을 때 쓰는 평소 마감 — 전 부서 양식의 기본값과 같다 (DM-10) */
 const FALLBACK: DeadlinePolicy = { deadlineDow: 4, deadlineTime: '14:00' };
@@ -40,6 +42,8 @@ export interface DeadlinePlan {
   assumedPm: boolean;
   note: string;
   schedule: ScheduleRow[];
+  /** RU-58 — 새 부서 마감에서 센 단계 기한. 3단계를 안 쓰면 null. 미리보기 한 줄이 주차 줄과 같은 꼴이 되게 */
+  stages: StageCells | null;
   /** 적용할 수 없는 이유. 있으면 화면은 [적용]을 그리지 않는다 */
   blocked: string | null;
   warnings: string[];
@@ -69,8 +73,35 @@ export function earliestDeadline(
 }
 const earliest = earliestDeadline;
 
+/**
+ * RU-50 — 그 주의 **기준 시각**: 켜진 부서들의 부서 마감 중 가장 이른 것(WS-18 예외 반영).
+ * 3단계 기한·알림이 전부 여기서 계산되므로, 총괄이 마감을 옮기면 한꺼번에 따라 움직인다.
+ */
+export async function weekAnchor(slot: Pick<WeekSlot, 'opensAt' | 'deadlineDowOverride' | 'deadlineTimeOverride'>): Promise<Date> {
+  return earliest(slot, await policies());
+}
+
 const hhmm = (d: Date) => toKstIso(d).slice(11, 16);
 const ko = (d: Date) => formatDeadlineKo(d);
+
+/** RU-58 — 미리보기에 넣을 3단계 기한·알림과 한 줄용 단계 기한. 3단계를 안 쓰면 빈 목록·null */
+async function rollupPlan(department: Date): Promise<{ rows: { label: string; at: Date }[]; stages: StageCells | null }> {
+  const { loadOrgSetting } = await import('./rollup/tree');
+  const { stagesFrom, stageCells } = await import('./rollup/schedule');
+  const { HQ_DUE_SOON_MINUTES } = await import('./rollup/notices');
+  const s = await loadOrgSetting();
+  if (!s.enabled) return { rows: [], stages: null };
+  const t = stagesFrom(department, s);
+  return {
+    rows: [
+      // RU-59 — 화면·알림과 같은 이름 한 쌍
+      { label: `${STAGE_UNIT} 기한 · 본부 담당자 알림`, at: t.unitDue },
+      { label: `${STAGE_HQ} 기한 ${HQ_DUE_SOON_MINUTES}분 전 알림`, at: new Date(t.hqDue.getTime() - HQ_DUE_SOON_MINUTES * 60_000) },
+      { label: `${STAGE_HQ} 기한 · 총괄 도착 알림`, at: t.hqDue },
+    ],
+    stages: stageCells(department, s),
+  };
+}
 
 /** 대외 마감(직접 입력) `YYYY-MM-DDTHH:mm` (KST) → Date */
 export function parseExternalInput(v: string): Date | null {
@@ -115,6 +146,7 @@ export async function planDeadline(
   const dowKo = '일월화수목금토'[k.getDay()];
   const note = `${reason} 이번 주만 ${dowKo}요일 ${hhmm(department)} 마감입니다 (대외 마감 ${hhmm(external)}). 다음 주부터는 평소대로입니다.`;
 
+  const rollup = await rollupPlan(department);
   const schedule: ScheduleRow[] = [
     ...reminderTimes(department).map((r) => ({ label: REMINDER_LABEL[r.kind], at: r.at })),
     { label: '부서 마감', at: department },
@@ -123,6 +155,8 @@ export async function planDeadline(
     { label: '부서장 검토 요청 (승인 전일 때만)', at: new Date(department.getTime() + REVIEW_MINUTES * 60_000) },
     { label: '담당자 제출 요청 (승인 상태 포함)', at: new Date(department.getTime() + SUBMIT_MINUTES * 60_000) },
     { label: '대외 마감', at: external },
+    // RU-58 — 3단계를 쓰면 본부·총괄 기한도 같은 기준에서 따라 움직인다
+    ...rollup.rows,
   ]
     .sort((a, b) => a.at.getTime() - b.at.getTime())
     .map((r) => ({ label: r.label, at: toKstIso(r.at), atKo: ko(r.at), passed: r.at.getTime() <= now.getTime() }));
@@ -156,6 +190,7 @@ export async function planDeadline(
     assumedPm,
     note,
     schedule,
+    stages: rollup.stages,
     blocked,
     warnings,
   };
@@ -215,12 +250,22 @@ export async function clearDeadline(scope: Scope, isoKey: string, now: Date = ne
   return { isoKey, label: slot.label, normal: toKstIso(normal), normalKo: ko(normal) };
 }
 
-/** 화면 첫 상태 — 이번 주와 다음 주 */
+/**
+ * 「전사」 머리글의 주차 줄 — 이번 주와 다음 주 (WS-19l). 화면은 이 중 마지막 기한이 아직 안 지난 것만 그린다(`upcomingWeeks`).
+ *
+ * 3단계를 쓰면(RU-52) 줄마다 **실·팀·본부 제출 기한**을 같이 싣는다(RU-58). 부서 마감과 단계 기한이 따로 다른
+ * 카드에 있으면 총괄이 마감을 옮긴 뒤 「본부 기한도 따라왔나」를 다른 화면에 가서 확인해야 했다 — 같은 줄에 두면
+ * 옮기는 순간 같이 바뀌는 것이 보인다. 꺼져 있으면 `stages`는 null — 아무도 쓰지 않는 기한을 그리지 않는다.
+ */
 export async function deadlineStatus(now: Date = new Date()) {
-  const ps = await policies();
+  // 순환 import를 피한다 — rollup/schedule이 이 파일의 weekAnchor를 쓴다 (rollupPlan과 같은 이유)
+  const { loadOrgSetting } = await import('./rollup/tree');
+  const { stageCells } = await import('./rollup/schedule');
+  const [ps, setting] = await Promise.all([policies(), loadOrgSetting()]);
   const thisWeek = await ensureCurrentSlot(now);
   const next = await ensureCurrentSlot(new Date(now.getTime() + 7 * 86400_000));
   const row = (s: WeekSlot) => {
+    // RU-50 — 기준 시각 = 가장 이른 부서 마감(weekAnchor와 같은 식). 단계 기한은 여기서 센다
     const d = earliest(s, ps);
     return {
       isoKey: s.isoKey,
@@ -230,7 +275,24 @@ export async function deadlineStatus(now: Date = new Date()) {
       overridden: s.deadlineDowOverride !== null,
       note: s.deadlineNote,
       passed: d.getTime() <= now.getTime(),
+      stages: setting.enabled ? stageCells(d, setting) : null,
     };
   };
   return { weeks: [row(thisWeek), row(next)] };
+}
+
+export type DeadlineWeekRow = Awaited<ReturnType<typeof deadlineStatus>>['weeks'][number];
+
+/**
+ * WS-19l — 머리글에 그릴 「다가올 주차」. 그 주의 **마지막 기한**(3단계를 쓰면 본부 → 총괄, 아니면 부서 마감)이
+ * 지난 주차만 뺀다. 부서 마감(`passed`)으로 거르면 목요일 14:00에 이번 주 줄이 사라져, 총괄이 실제로 일하는
+ * 14~16시에 그날의 실·팀 → 본부 · 본부 → 총괄 기한이 화면에서 없어진다 (2026-10-08 검증에서 발견).
+ */
+export function upcomingWeeks<W extends { deadline: string; stages: { unitDue: string; hqDue: string } | null }>(
+  weeks: W[],
+  now: Date = new Date(),
+): W[] {
+  const last = (w: W) =>
+    Math.max(new Date(w.deadline).getTime(), ...(w.stages ? [new Date(w.stages.unitDue).getTime(), new Date(w.stages.hqDue).getTime()] : []));
+  return weeks.filter((w) => last(w) > now.getTime());
 }

@@ -1,8 +1,15 @@
-// 수합 관리 화면 (서버 컴포넌트) — 현재/과거 주차 공용 (PG §4)
-// 요약은 teal 피처 카드(featured tier 패턴), 표는 캔버스 카드.
+// 수합 관리 화면 (서버 컴포넌트) — 현재/과거 주차 공용 (PG §4 · PG-52)
+//
+// 위에서 아래로 담당자가 한 주에 하는 순서 그대로: 제출 현황 → 병합본(검토·승인) → 위로(상태 — 승인이 곧 제출) → 부서원 표.
+// 2026-10-07 — 요약을 짙은 초록 띠로 칠하던 것을 흰 카드로 바꿨다(CP-100: 큰 초록 면 금지).
+// 긴 표가 맨 위에 있으면 병합본·제출 카드가 스크롤 아래로 밀려 「할 일」이 안 보였다.
+//
+// 2026-10-08 (PG-72·73 — 기능 정리) — 머리는 주차 고르기(달마다 묶음 + ‹ ›)와 오른쪽 구석의 작은 `부서 설정` 링크.
+// 받기는 하나씩(전체 zip·줄 [받기] 없음), 진단 줄(「규칙 바뀜」·「빠진 사람」·집계 제외 각주)은 걷었다.
+import Link from 'next/link';
 import { prisma } from '@/server/db';
 import type { Division } from '@prisma/client';
-import { divisionStatus, divisionSlots, effectiveDeadline, ensureCurrentSlot } from '@/server/worklog';
+import { divisionStatus, divisionWeeks, effectiveDeadline, ensureCurrentSlot } from '@/server/worklog';
 import { formatDeadlineKo, isLocked, toKstIso, currentWeek, slotKind } from '@/lib/week';
 import { isOpenNow, OPEN_MINUTES } from '@/lib/deadline';
 import { openingOf } from '@/server/deadline';
@@ -10,18 +17,22 @@ import { DeadlineOpener } from '@/components/DeadlineOpener';
 import { CopyMissingButton } from '@/components/CopyMissingButton';
 import { SlotSelector } from '@/components/SlotSelector';
 import { SubmissionTableClient, type MemberRow } from '@/components/SubmissionTableClient';
-import { MergePanel, type MergeStateView } from '@/components/MergePanel';
+import { MergePanel, type MergeGroupView, type MergeStateView } from '@/components/MergePanel';
+import { HandoffCard } from '@/components/HandoffCard';
+import { handoffHint, unitHandoffView } from '@/server/rollup/state';
+import { rollupEnabled } from '@/server/rollup/schedule';
 import { latestReview } from '@/server/merge/review';
-import { latestEdits } from '@/server/merge/edits';
-import { rulesChangedSince } from '@/server/merge/rule-snapshot';
+import { HELD_TEXT, latestEdits } from '@/server/merge/edits';
+import { activeMergeJob, jobView } from '@/server/merge/queue';
 import { readStoredFile, sha256 } from '@/server/storage';
+import { boardTitle } from '@/lib/docname';
+import { differingGroups } from '@/lib/merge-rows';
 import { notFound } from 'next/navigation';
 
+/** 실행 기록(`MergeRun.reviewJson`)에서 이 화면이 읽는 것만 (HM-26). `missing`·`categories`도 기록에는 남는다 */
 interface ReviewPayload {
-  groups: MergeStateView['groups'];
+  groups: MergeGroupView[];
   model: { used: boolean; reason: string | null };
-  categories: { order: string[] } | null;
-  missing: string[];
   /** HM-33 — 확인이 필요한 행. 옛 실행에는 없다 */
   flagged?: MergeStateView['flagged'];
 }
@@ -34,6 +45,7 @@ export async function ManageView({
   canDeleteAny,
   canEditMerged,
   canApprove = false,
+  handoff = null,
 }: {
   division: Division; // ★ 해석된 부서. scope.division을 쓰면 타 부서 열람 시 어긋난다
   isoKey?: string;
@@ -47,6 +59,11 @@ export async function ManageView({
   canEditMerged: boolean;
   /** HM-47 — 승인 버튼. 내 부서의 head에게만 (TACP-16) */
   canApprove?: boolean;
+  /**
+   * RU-80 — 「위로」 상태 카드. 내 부서의 lead·head에게만(TACP-21 v1.7 `canSeeHandoff`) — 카드에 행방이 있다.
+   * `escape` — 비상구 링크를 그릴 사람인가(`canUseHandoffEscape` — lead). 없으면 카드가 없다
+   */
+  handoff?: { escape: boolean } | null;
 }) {
   const now = new Date();
   await ensureCurrentSlot(now);
@@ -57,16 +74,38 @@ export async function ManageView({
     : await prisma.weekSlot.findUnique({ where: { isoKey: currentKey } });
   if (!slot) notFound(); // 없는 isoKey
 
-  const [{ members, extras, offRoster, summary }, slotList] = await Promise.all([
+  const [{ members, extras, summary }, slotList] = await Promise.all([
     divisionStatus(division.id, slot.id),
-    divisionSlots(division.id),
+    divisionWeeks(division.id, slot.id), // PG-72 — 근거 있는 주 + 이번 주 + 보는 주
   ]);
 
+  // RU-80 — 「위로」 상태. 내 부서 lead·head에게만 그린다 (TACP-21 v1.7 · TACP-9). 3단계가 꺼져 있거나 기여 단위가 아니면 null
+  const rollupOn = await rollupEnabled();
+  const handoffView = handoff && rollupOn ? await unitHandoffView(division, slot, { trail: true, canEscape: handoff.escape, now }) : null;
+  // RU-80 — 부서장의 [승인] 옆 「승인하면 바로 ○○에 올라갑니다」 — 승인이 곧 제출일 때만
+  const handoffTo = rollupOn ? await handoffHint(division.id) : null;
+
   // HM-26 — 최신 실행 하나만 본다. 재실행하면 새 기록이 쌓이고 최신이 유효하다
-  const lastRun = await prisma.mergeRun.findFirst({
+  let lastRun = await prisma.mergeRun.findFirst({
     where: { divisionId: division.id, weekSlotId: slot.id },
     orderBy: { startedAt: 'desc' },
   });
+  /*
+   * HM-61d · CP-130 — 가장 최근 실행이 「병합하는 동안 고친 판이 있어 덮지 않았어요」면 그 병합은 **일부러 쓰지 않은 것**이다 — 파일은 사람이
+   * 고친 그대로이고 가장 최근 성공 실행이 그 판을 가리킨다. 그 판을 그대로 그리고(승인 · 내용 보기가 그대로 된다) 문구만 한 줄 덧붙인다.
+   * 다른 실패는 예전처럼 실패로 그린다.
+   */
+  const held = lastRun?.status === 'failed' && lastRun.errorText === HELD_TEXT;
+  if (held) {
+    lastRun =
+      (await prisma.mergeRun.findFirst({
+        where: { divisionId: division.id, weekSlotId: slot.id, status: 'succeeded', outputPath: { not: null } },
+        orderBy: { startedAt: 'desc' },
+      })) ?? lastRun;
+  }
+  // CP-130 — 줄의 작업(대기 · 병합 중). 화면이 서버에서 받은 자리로 버튼을 막는다 — 탭의 `busy`는 그 탭에만 있었다
+  const activeJob = await activeMergeJob(division.id, slot.id);
+  const jobState = activeJob ? await jobView(activeJob, now) : null;
   const review = lastRun?.reviewJson ? (JSON.parse(lastRun.reviewJson) as ReviewPayload) : null;
   // HM-47 — 이 화면이 보여 주는 **판**. [승인]이 이 판에만 붙도록 그대로 돌려보낸다
   let mergedSha: string | null = null;
@@ -82,23 +121,24 @@ export async function ManageView({
     sha256: mergedSha,
     status: (lastRun?.status as MergeStateView['status']) ?? 'none',
     finishedAtKst: lastRun?.finishedAt ? toKstIso(lastRun.finishedAt).slice(5, 16).replace('T', ' ') : null,
-    trigger: lastRun ? ((JSON.parse(lastRun.ruleSnapshot) as { trigger?: 'auto' | 'manual' }).trigger ?? null) : null,
     rowCounts: lastRun?.rowCounts ? JSON.parse(lastRun.rowCounts) : null,
     warnings: lastRun?.warnings ? JSON.parse(lastRun.warnings) : [],
     errorText: lastRun?.errorText ?? null,
-    groups: review?.groups ?? [],
+    // S8 — 묶음 원문은 실행 기록에 남기고 화면에는 수만 보낸다. 클라이언트로 원문을 다 실어 보낼 이유가 없다
+    differing: differingGroups(review?.groups ?? []),
     modelUsed: review?.model?.used ?? false,
     modelReason: review?.model?.reason ?? null,
-    categoryOrder: review?.categories?.order ?? [],
     sourceCount: lastRun?.sourceIds ? (JSON.parse(lastRun.sourceIds) as string[]).length : 0,
-    missing: review?.missing ?? [],
     flagged: review?.flagged ?? [],
     review: lastRun?.status === 'succeeded' ? await latestReview(division.id, slot.id) : null,
     hasHead: (await prisma.user.count({ where: { divisionId: division.id, isActive: true, divisionRole: 'head' } })) > 0,
     // HM-49 — 마지막 실행이 실패했어도 덮이는 것은 최신 **성공** 실행의 파일이다. 그래서 따로 찾는다
     edits: (await latestEdits(division.id, slot.id))?.edits ?? null,
-    // CP-107 — 이 병합본을 만든 뒤 바뀐 설정. 규칙 저장은 병합을 다시 돌리지 않으므로 화면이 말해야 한다
-    rulesChanged: lastRun?.status === 'succeeded' ? rulesChangedSince(lastRun.ruleSnapshot, division) : [],
+    job:
+      activeJob && jobState && (jobState.status === 'queued' || jobState.status === 'running')
+        ? { id: activeJob.id, status: jobState.status, position: jobState.position ?? 1, etaMinutes: jobState.etaMinutes }
+        : null,
+    held: held && lastRun?.status === 'succeeded',
   };
 
   const deadline = effectiveDeadline(slot, division);
@@ -110,39 +150,32 @@ export async function ManageView({
   const openUntilKo = opening ? toKstIso(opening.openUntil).slice(11, 16) : null;
   const missing = members.filter((m) => m.status === 'missing').map((m) => m.user.name);
   const pct = summary.roster > 0 ? Math.round((summary.submitted / summary.roster) * 100) : 0;
-  // DM-17 — 병합·zip은 **모인 파일 전부**를 다룬다 (명단 밖 제출 포함).
+  // DM-17 — 병합은 **모인 파일 전부**를 다룬다 (명단 밖 제출 포함).
   // 진척률(submitted/roster)과 다른 수다. 이걸 같은 수로 쓰면 추가 제출만 있을 때
   // "제출된 파일이 없습니다"라고 하면서 병합은 되는 모순이 생긴다
   const collected = summary.submitted + summary.extras;
 
-  const tableRows: MemberRow[] = members.map((m) => ({
+  const toRow = (m: (typeof members)[number]): MemberRow => ({
     user: { id: m.user.id, name: m.user.name },
     status: m.status,
     latest: m.latest && {
       id: m.latest.id,
       version: m.latest.version,
-      byteSize: m.latest.byteSize,
       uploadedAtKst: toKstIso(m.latest.uploadedAt).slice(5, 16).replace('T', ' '),
     },
     versionCount: m.versionCount,
-  }));
+    notifiedAtKst: m.notifiedAtKst,
+  });
 
   return (
-    <main className="pt-10">
-      <div className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <p className="text-xs font-semibold tracking-[0.12em] text-muted uppercase">수합 관리</p>
-          <h1 className="display mt-1 flex flex-wrap items-center gap-2.5 text-[32px] leading-[1.15]">
-            {slot.year}년 {slot.label}
-            {/* WS-14 — 이 주에 모으는 것이 월간이면 담당자가 먼저 알아야 한다 */}
-            {slotKind(slot) === 'monthly' && (
-              <span className="rounded-full bg-brand px-2.5 py-1 text-[13px] font-semibold text-white">
-                {slot.month}월 월간
-              </span>
-            )}
-          </h1>
-        </div>
-        <div className="pb-1">
+    <main className="pt-8">
+      <div className="page-head">
+        <h1 className="page-title flex flex-wrap items-center gap-2.5">
+          {slot.year}년 {slot.label}
+          {/* WS-14 — 이 주에 모으는 것이 월간이면 담당자가 먼저 알아야 한다 */}
+          {slotKind(slot) === 'monthly' && <span className="chip chip-ok">{slot.month}월 월간</span>}
+        </h1>
+        <div className="flex w-full flex-wrap items-center justify-end gap-x-4 gap-y-2 sm:w-auto">
           <SlotSelector
             baseHref={`/${division.slug}/manage`}
             selected={slot.isoKey}
@@ -151,156 +184,130 @@ export async function ManageView({
               isoKey: s.isoKey,
               label: s.label,
               year: s.year,
+              month: s.month,
               submitted: slotList.submittedOf(s.id),
               isCurrent: s.isoKey === currentKey,
               monthly: slotKind(s) === 'monthly',
             }))}
           />
+          {/*
+            PG-72 · S6 — 부서 설정은 메뉴가 아니라 여기서 들어간다. 매주 하는 일이 아니라(양식은 온보딩 때 한 번, 분류 순서는
+            한 곳이 쓴다) 상단 메뉴 한 칸을 차지할 일이 아니다. 이 화면을 보는 사람(canManage)이 예전에 그 메뉴를 보던 사람이다
+          */}
+          <Link href={`/${division.slug}/manage/settings`} className="text-sm text-muted underline underline-offset-2 hover:text-ink">
+            부서 설정
+          </Link>
         </div>
       </div>
 
-      {/* StatusSummary — teal 피처 카드 (CP-44~47) */}
-      <section className="card-feature mt-6 bg-brand px-8 py-7 text-white">
-        <div className="flex flex-wrap items-end justify-between gap-5">
-          <div>
-            <p className="text-xs font-semibold tracking-[0.12em] text-brand-tint uppercase">제출 현황</p>
-            <p className="mt-1 text-[44px] leading-none font-semibold tracking-tight">
-              {summary.submitted}
-              <span className="text-xl font-normal text-white/60"> / {summary.roster}</span>
-              {summary.missing === 0 && summary.roster > 0 && (
-                <span className="ml-3 align-middle text-base font-medium text-brand-tint">✓ 전원 제출</span>
+      <div className="mt-6 space-y-4 lg:space-y-6">
+        {/* StatusSummary (CP-44~47) — 흰 카드 하나: 숫자 · 막대 · 마감 칩 · 미제출 복사 */}
+        <section data-guide="status-card" className="card" aria-labelledby="status-summary">
+          <div className="card-head">
+            <div>
+              <h2 id="status-summary" className="card-title">
+                제출 현황
+              </h2>
+              <p className="mt-2 flex items-baseline gap-2 tabular-nums">
+                <span className="text-[40px] leading-none font-semibold tracking-tight text-ink">{summary.submitted}</span>
+                <span className="text-[17px] text-muted">/ {summary.roster}</span>
+                {summary.missing === 0 && summary.roster > 0 && (
+                  <span className="chip chip-ok ml-1 self-center">
+                    <span aria-hidden className="dot" />
+                    전원 제출
+                  </span>
+                )}
+              </p>
+            </div>
+            <div className="flex flex-col items-start gap-1.5 sm:items-end">
+              {/*
+                WS-18 — 예외 주차면 이 칩이 붉어진다. 부서원 화면과 같은 규칙이다 —
+                새 요소를 더하지 않고 **이미 보는 것의 색을 바꾼다.**
+              */}
+              <span
+                className={`chip ${
+                  opened ? 'chip-warn' : slot.deadlineNote && !locked ? 'chip-error font-semibold' : 'chip-muted'
+                }`}
+              >
+                {/* 열려 있을 땐 원래 마감 날짜가 아니라 **언제까지인지**가 알아야 할 것이다 */}
+                {opened
+                  ? `열어 둠 · ${openUntilKo}까지`
+                  : `${locked ? '마감됨' : '진행 중'} · ${formatDeadlineKo(deadline)}`}
+              </span>
+              {slot.deadlineNote && <p className="text-xs text-muted sm:text-right">{slot.deadlineNote}</p>}
+            </div>
+          </div>
+
+          <div
+            className="mt-4 h-1.5 w-full overflow-hidden rounded-full bg-surface-strong"
+            role="progressbar"
+            aria-label="제출 진행"
+            aria-valuenow={summary.submitted}
+            aria-valuemin={0}
+            aria-valuemax={summary.roster}
+          >
+            <div className="h-full rounded-full bg-brand transition-all" style={{ width: `${pct}%` }} />
+          </div>
+
+          {(missing.length > 0 || (canMerge && closed)) && (
+            <div className="mt-4 flex flex-wrap items-center gap-2">
+              <CopyMissingButton names={missing} />
+              {/*
+                DM-20 — 마감이 지난 뒤에만 보인다. 마감 전에는 누구나 낼 수 있으므로
+                열 것이 없고, 그때 버튼이 있으면 «지금도 잠겨 있나?»로 읽힌다 (TACP-9).
+              */}
+              {canMerge && closed && (
+                <DeadlineOpener
+                  open={opened}
+                  openUntilKo={openUntilKo}
+                  openedBy={opening?.openedBy ?? null}
+                  minutes={OPEN_MINUTES}
+                />
               )}
-            </p>
-          </div>
-          <div className="flex flex-col items-end gap-2.5">
-            {/*
-              WS-18 — 예외 주차면 이 배지가 붉어진다. 부서원 화면과 같은 규칙이다 —
-              새 요소를 더하지 않고 **이미 보는 것의 색을 바꾼다.**
-              다만 여기는 짙은 초록 띠 위다. 반투명 빨강을 깔면 초록과 섞여 **탁한 갈색**이
-              되어 경고로 안 읽힌다. 불투명 빨강에 흰 글자라야 색이 색으로 남는다.
-            */}
-            <span
-              className={`inline-flex items-center rounded-full px-3 py-1 text-[13px] font-medium ${
-                slot.deadlineNote && !locked && !opened
-                  ? 'bg-error font-semibold text-white'
-                  : locked
-                    ? 'bg-white/10 text-white/70'
-                    : 'bg-white/15 text-brand-tint'
-              }`}
-            >
-              {/* 열려 있을 땐 원래 마감 날짜가 아니라 **언제까지인지**가 알아야 할 것이다 */}
-              {opened
-                ? `열어 둠 · ${openUntilKo}까지`
-                : `${locked ? '마감됨' : '진행 중'} · ${formatDeadlineKo(deadline)}`}
-            </span>
-            {slot.deadlineNote && (
-              <p className="text-right text-[12px] leading-4 text-white/60">{slot.deadlineNote}</p>
-            )}
-            <CopyMissingButton names={missing} />
-            {/*
-              DM-20 — 마감이 지난 뒤에만 보인다. 마감 전에는 누구나 낼 수 있으므로
-              열 것이 없고, 그때 버튼이 있으면 «지금도 잠겨 있나?»로 읽힌다 (TACP-9).
-            */}
-            {canMerge && closed && (
-              <DeadlineOpener
-                open={opened}
-                openUntilKo={openUntilKo}
-                openedBy={opening?.openedBy ?? null}
-                minutes={OPEN_MINUTES}
-              />
-            )}
-          </div>
-        </div>
-        {opened && (
-          <p className="mt-4 rounded-xl bg-white/15 px-4 py-2.5 text-sm text-white">
-            <strong className="font-semibold">마감을 열어 두었습니다</strong> — {openUntilKo}까지 부서원 누구나
-            제출할 수 있습니다. 시각이 지나면 저절로 닫히고,{' '}
-            {/* CP-106a · HM-49 — 고친 병합본은 닫힌 뒤에도 다시 만들지 않는다. 「한 번 더 돈다」만 말하면 늦게 낸 사람이 들어갔다고 믿는다 */}
-            {mergeState.edits
-              ? `병합본을 고친 곳이 있어 닫힌 뒤에도 다시 병합하지 않습니다.${
-                  canMerge ? ' 늦게 낸 것을 넣으려면 [다시 병합] — 고친 내용은 사라집니다.' : ''
-                }`
-              : '닫힌 뒤 병합이 한 번 더 돕니다.'}
-          </p>
-        )}
-        <div
-          className="mt-5 h-2 w-full overflow-hidden rounded-full bg-white/15"
-          role="progressbar"
-          aria-valuenow={summary.submitted}
-          aria-valuemin={0}
-          aria-valuemax={summary.roster}
-        >
-          <div className="h-full rounded-full bg-brand-soft transition-all" style={{ width: `${pct}%` }} />
-        </div>
-      </section>
-
-      {/* SubmissionTable + 드로어 (CP-48~53, PG-19/20) */}
-      <div className="mt-6">
-        <SubmissionTableClient
-          caption={`${division.nameKo} ${slot.label} 제출 현황`}
-          members={tableRows}
-          canDelete={canDeleteAny}
-        />
-      </div>
-      {/* DM-17 — 명단 밖인데 낸 사람. 분모에는 없지만 병합에는 들어간다 */}
-      {extras.length > 0 && (
-        <section className="mt-6">
-          <h2 className="label">추가 제출 — 집계 대상은 아니지만 병합에 포함됩니다</h2>
-          <SubmissionTableClient
-            caption={`${division.nameKo} ${slot.label} 추가 제출`}
-            members={extras.map((m) => ({
-              user: { id: m.user.id, name: m.user.name },
-              status: m.status,
-              latest: m.latest && {
-                id: m.latest.id,
-                version: m.latest.version,
-                byteSize: m.latest.byteSize,
-                uploadedAtKst: toKstIso(m.latest.uploadedAt).slice(5, 16).replace('T', ' '),
-              },
-              versionCount: m.versionCount,
-              notifiedAtKst: m.notifiedAtKst,
-            }))}
-            canDelete={canDeleteAny}
-          />
+            </div>
+          )}
+          {/*
+            CP-106a · HM-49 — 고친 병합본은 닫힌 뒤에도 다시 만들지 않는다. 그때만 한 줄 — 늦게 낸 사람이 들어갔다고 믿지 않게.
+            열어 둔 것 자체는 칩(「열어 둠 · …까지」)과 [지금 닫기]가 말한다 (2026-10-08 사용자: 주석 걷기)
+          */}
+          {opened && mergeState.edits && <p className="callout callout-warn mt-4">고친 병합본은 자동 재병합 안 함</p>}
         </section>
-      )}
 
-      {offRoster.length > 0 && (
-        <p className="mt-2 px-1 text-xs text-muted-soft">
-          집계 제외: {offRoster.map((u) => (u.note ? `${u.name}(${u.note})` : u.name)).join(', ')} —
-          내실 수는 있고, 내시면 위에 «추가 제출»로 표시됩니다. 명단 변경은 운영자에게
-        </p>
-      )}
-
-      {/* HM-26 — 병합 결과. 목요일 14:10에 이게 이미 준비돼 있는 게 목표다 */}
-      <div className="mt-8">
+        {/* HM-26 — 병합 결과. 목요일 14:10에 이게 이미 준비돼 있는 게 목표다 */}
         <MergePanel
           state={mergeState}
           isoKey={slot.isoKey}
           divisionSlug={division.slug}
+          title={boardTitle(slot.month, slot.label, division.nameKo, slotKind(slot))}
           canRun={canMerge}
           canEditMerged={canEditMerged}
           canApprove={canApprove}
+          handoffTo={handoffTo}
           canDownload={canDownloadMerged}
           submitted={collected}
         />
-      </div>
 
-      {/* BulkActions (CP-58~61) */}
-      <section className="mt-6 flex flex-wrap items-center gap-3">
-        {collected > 0 ? (
-          <a
-            href={`/api/division/download-zip?slot=${slot.isoKey}&division=${encodeURIComponent(division.slug)}`}
-            className="btn-primary"
-          >
-            전체 zip 받기 ({collected}개)
-          </a>
-        ) : (
-          <button disabled title="제출된 파일이 없습니다" className="btn-primary">
-            전체 zip 받기 (0개)
-          </button>
+        {/* RU-80 — 버튼이 아니라 상태. 부서장의 승인이 곧 위로 가는 제출이다 (ADR-0015) */}
+        {handoffView && <HandoffCard view={handoffView} isoKey={slot.isoKey} />}
+
+        {/* SubmissionTable + 드로어 (CP-48~53, PG-19/20). 전체 zip·줄 [받기]·집계 제외 각주는 걷었다 (PG-73) */}
+        <SubmissionTableClient
+          caption={`${division.nameKo} ${slot.label} 제출 현황`}
+          title={`부서원 ${members.length}명`}
+          members={members.map(toRow)}
+          canDelete={canDeleteAny}
+        />
+
+        {/* DM-17 — 명단 밖인데 낸 사람. 분모에는 없지만 병합에는 들어간다 */}
+        {extras.length > 0 && (
+          <SubmissionTableClient
+            caption={`${division.nameKo} ${slot.label} 추가 제출`}
+            title="추가 제출"
+            members={extras.map(toRow)}
+            canDelete={canDeleteAny}
+          />
         )}
-      </section>
+      </div>
     </main>
   );
 }

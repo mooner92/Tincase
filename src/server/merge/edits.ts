@@ -9,11 +9,22 @@
 import type { MergeRun } from '@prisma/client';
 import { prisma } from '../db';
 import { toKstIso } from '@/lib/week';
+import { NEWEST_FIRST, UNIT_REVIEW } from './review-scope';
 
-/** 저장 한 번. `places`는 그 저장에서 바뀐 곳 수 (HM-47과 같은 비교) */
+/**
+ * 저장한 사람의 역할 (authz `unitEditorRole`). `operator` — 그 부서의 lead·head가 아닌 운영자(§3.2 「수정 — write(자기 부서)」).
+ * 2026-10-08 전의 기록에는 `head`·`lead`뿐이다(그때는 운영자도 `lead`로 적혔다 — 가려낼 수 없으니 그대로 lead로 읽는다).
+ */
+export type EditorRole = 'head' | 'lead' | 'operator';
+
+/**
+ * 저장 한 번. `places`는 그 저장에서 바뀐 곳 수 (HM-47과 같은 비교).
+ * `places: 0`인 줄도 있다(2026-10-08 결정 b) — 바뀐 곳은 없지만 바이트가 바뀐 저장, 또는 lead가 운영자의 판을 그대로 받아들인 저장.
+ * 「누가 마지막으로 이 파일을 썼나」를 남기려는 것이라 HM-49의 「고친 곳」 셈(`editEntries`)에는 들지 않는다.
+ */
 export interface EditEntry {
   by: string;
-  role: 'head' | 'lead';
+  role: EditorRole;
   at: string;
   places: number;
 }
@@ -45,6 +56,29 @@ export function editEntries(reviewJson: string | null): EditEntry[] {
   return list.filter(
     (e): e is EditEntry => !!e && typeof e === 'object' && typeof (e as EditEntry).places === 'number' && (e as EditEntry).places > 0,
   );
+}
+
+/**
+ * RU-71 (2026-10-08 결정 b) — 이 실행의 파일을 **마지막으로 쓴 사람**. 병합 뒤 아무도 저장하지 않았으면 null(파일 = 병합 결과).
+ * `places: 0`인 줄까지 본다 — HM-49와 달리 「얼마나 고쳤나」가 아니라 「누구의 판인가」를 묻는다.
+ */
+export function lastEditor(reviewJson: string | null): EditEntry | null {
+  const list = parse(reviewJson).edits;
+  if (!Array.isArray(list)) return null;
+  for (let i = list.length - 1; i >= 0; i--) {
+    const e = list[i] as Partial<EditEntry> | null;
+    if (e && typeof e === 'object' && typeof e.role === 'string') return e as EditEntry;
+  }
+  return null;
+}
+
+/**
+ * RU-71 · TACP-23 v1.7.2 — 부서장 없는 단위에서 이 판이 **그 단위의 결론**인가. 병합 결과(마지막 저장 없음)이거나 그 단위의
+ * lead(·head)가 마지막으로 저장했으면 참. 운영자가 마지막으로 고친 판은 그 단위의 결정이 아니다(TACP-3 「문서는 부서가」) —
+ * 다음 병합이나 lead의 저장이 그때의 판을 올린다.
+ */
+export function decidesForUnit(last: Pick<EditEntry, 'role'> | null): boolean {
+  return !last || last.role === 'lead' || last.role === 'head';
 }
 
 /** 이 실행을 사람이 고쳤나. 고친 기록이 없으면 null */
@@ -86,4 +120,56 @@ export async function latestEdits(
 export function editedMessage(e: MergeEdits): string {
   const who = e.by.length ? ` (${e.by.join(', ')})` : '';
   return `병합본에 사람이 고친 곳이 ${e.places}곳 있어요${who}. 다시 병합하면 고친 내용이 사라져요.`;
+}
+
+// ── HM-61 — 쓰기 직전에 다시 본다 ─────────────────────────────
+//
+// 시작할 때 묻는 것(409 edited · HM-49 보류)만으로는 모델이 도는 1~2분 — 그리고 줄에서 기다리는 몇 분 — 사이에 부서장이 저장한
+// 수정을 지키지 못한다. 그 뒤의 파일 쓰기가 덮는다(검토의 P2). 그래서 줄에 넣을 때 「지금 판」을 표시해 두고, 쓰기 직전에
+// (`unit:` 잠금 안에서) 다시 읽어 다르면 쓰지 않는다. 시각이 아니라 기록으로 비교한다 — 같은 밀리초에 넣고 저장해도 갈린다.
+
+/** HM-61 — 쓰지 않았을 때 실행에 남기는 문구. 수합 관리 병합 카드(CP-130)·점검 요약(HM-54)이 이 문구로 알아본다 — 화면과 같이 쓰므로 lib에 있다 */
+export { HELD_TEXT } from '@/lib/merge-rows';
+
+/**
+ * HM-61a — 그 부서·주차 병합본에 **사람이 한 일**의 표시. 병합 자신이 바꾸는 것은 넣지 않는다 — 줄에서 앞의 병합이 끝나 새 실행이 생겨도
+ * 뒤의 작업이 「누가 고쳤다」로 오해하지 않게(같은 부서의 「한 번 더」 작업이 바로 그 경우다).
+ * - `saves` 그 주차 성공 실행들의 저장 기록 수 합 — 저장은 늘 가장 최근 실행에 한 줄을 덧붙이고 지우지 않는다. `places: 0` 줄까지
+ *   (누가 파일을 다시 썼다는 사실이 중요하다)
+ * - `reviewId` 가장 최근 승인 — 승인은 파일을 바꾸지 않지만 덮으면 승인한 판이 사라진다
+ */
+export interface UnitMark {
+  saves: number;
+  reviewId: string | null;
+}
+
+export async function unitMark(divisionId: string, weekSlotId: string): Promise<UnitMark> {
+  const [runs, review] = await Promise.all([
+    prisma.mergeRun.findMany({
+      where: { divisionId, weekSlotId, status: 'succeeded', outputPath: { not: null } },
+      select: { reviewJson: true },
+    }),
+    prisma.mergeReview.findFirst({ where: { divisionId, weekSlotId, ...UNIT_REVIEW }, orderBy: NEWEST_FIRST, select: { id: true } }),
+  ]);
+  const saves = runs.reduce((n, r) => {
+    const list = parse(r.reviewJson).edits;
+    return n + (Array.isArray(list) ? list.length : 0);
+  }, 0);
+  return { saves, reviewId: review?.id ?? null };
+}
+
+export function sameMark(a: UnitMark, b: UnitMark): boolean {
+  return a.saves === b.saves && a.reviewId === b.reviewId;
+}
+
+/** 작업 표에 JSON으로 남긴 표시. 못 읽으면 null — 부르는 쪽이 시작할 때 다시 잡는다 */
+export function parseMark(raw: string | null | undefined): UnitMark | null {
+  if (!raw) return null;
+  try {
+    const v = JSON.parse(raw) as Partial<UnitMark>;
+    if (typeof v.saves !== 'number') return null;
+    return { saves: v.saves, reviewId: typeof v.reviewId === 'string' ? v.reviewId : null };
+  } catch {
+    return null;
+  }
 }

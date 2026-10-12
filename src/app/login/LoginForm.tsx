@@ -1,8 +1,10 @@
 'use client';
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
+import { safeNextPath } from '@/lib/next-path';
 
-export function LoginForm() {
+/** `next` — AU-34 로그인 뒤 돌아갈 화면(서버가 이미 거른 값). 화면에서도 한 번 더 거른다 — 이 컴포넌트를 다른 곳에서 써도 열린 리다이렉트가 되지 않게 */
+export function LoginForm({ next = null }: { next?: string | null }) {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -21,8 +23,8 @@ export function LoginForm() {
       .then(async (r) => {
         const b = await r.json();
         if (r.ok) {
-          // 초기 발급 비밀번호면 변경 화면으로 (AU-22)
-          router.replace(b.mustChangePassword ? '/password?first=1' : '/');
+          // 초기 발급 비밀번호면 변경 화면으로 (AU-22). 아니면 가려던 화면(AU-34) — 없으면 홈
+          router.replace(b.mustChangePassword ? '/password?first=1' : (safeNextPath(next) ?? '/'));
           router.refresh();
         } else {
           setError(b.message ?? '로그인에 실패했습니다.');
@@ -35,7 +37,7 @@ export function LoginForm() {
   return (
     <form onSubmit={submit} className="space-y-4">
       <div>
-        <label htmlFor="email" className="mb-1 block text-xs font-medium text-body">
+        <label htmlFor="email" className="label">
           KEI 이메일
         </label>
         <input
@@ -47,11 +49,11 @@ export function LoginForm() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="hong@kei.re.kr"
-          className="w-full rounded-xl border border-hairline px-3 py-2 text-sm"
+          className="input"
         />
       </div>
       <div>
-        <label htmlFor="password" className="mb-1 block text-xs font-medium text-body">
+        <label htmlFor="password" className="label">
           비밀번호
         </label>
         <input
@@ -61,18 +63,20 @@ export function LoginForm() {
           required
           value={password}
           onChange={(e) => setPassword(e.target.value)}
-          className="w-full rounded-xl border border-hairline px-3 py-2 text-sm"
+          className="input"
         />
       </div>
       {error && (
-        <p aria-live="polite" className="rounded-xl bg-error/10 px-3 py-2 text-sm text-error">
+        <p aria-live="polite" className="callout callout-error">
           {error}
         </p>
       )}
+      {/* CP-104 — 사용 안내의 첫 단계가 이 버튼을 가리킨다(카드 전체가 아니라 누를 곳 하나) */}
       <button
+        data-guide="login-submit"
         type="submit"
         disabled={busy}
-        className="w-full rounded-xl bg-ink px-4 py-2.5 text-sm font-medium text-white hover:bg-ink-active disabled:opacity-50"
+        className="btn-primary w-full"
       >
         {busy ? '로그인 중…' : '로그인'}
       </button>
@@ -83,9 +87,9 @@ export function LoginForm() {
       {/* eslint-disable-next-line @next/next/no-html-link-for-pages -- 인증 밖 페이지 */}
       <a
         href="/forgot"
-        className="block text-center text-xs text-muted underline underline-offset-2 hover:text-ink"
+        className="block text-center text-sm text-muted underline underline-offset-2 hover:text-ink"
       >
-        비밀번호를 잊으셨나요? 메신저로 재설정 링크 받기
+        비밀번호를 잊으셨나요?
       </a>
     </form>
   );

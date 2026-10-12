@@ -56,6 +56,7 @@ Excel에서 한글이 깨지면 인코딩 문제다 — `--bom`으로 다시 뽑
 
 - [ ] `main` 최신 (`git pull`)
 - [ ] 로컬 검증: `npm test` **전부** 통과, `npx tsc --noEmit -p .` 통과
+- [ ] 사용 안내·무대·둘러보기를 만진 판이면: `PLAYWRIGHT=<…/node_modules/playwright> node scripts/guide-check.cjs` 통과 (가짜 앱에서 도크·구멍·둘러보기를 잰다 — PG-T140·141·153)
 - [ ] **재배포면 §2b부터** — §1·§2는 첫 설치 한 번뿐이다
 
 ## 1. 호스트 준비 (1회, sudo 필요)
@@ -118,7 +119,8 @@ sudo find /data/worklog -type d -exec chmod g+s {} +
 |---|---|
 | `bash scripts/deploy.sh prod` | 운영 — main에서만 · 금지 시간대면 멈춤 · 디스크 5G 미만이면 멈춤 · `repman:rollback` 태그 · 빌드 · 기동 · health · 청소 |
 | `bash scripts/deploy.sh prod --no-build` | 빌드 없이 지금 `repman:latest`로 다시 띄운다(`--force-recreate`) — 환경변수 변경·롤백. 이것도 main에서만 — 이 체크아웃의 compose 설정이 운영에 들어간다 |
-| `bash scripts/deploy.sh test` | 테스트 서버(11112) — 금지 시간대 없음. `TINCASE_TEST_MODE`가 있으면 넘긴다 |
+| `bash scripts/deploy.sh test` | 테스트 서버(11112) — 금지 시간대 없음. `TINCASE_TEST_MODE`가 있으면 sudo **뒤에** 붙여 넘긴다(RU-45 · OPS-43h) |
+| `TINCASE_TEST_MODE=demo bash scripts/deploy.sh test --no-build` | 테스트 서버를 시연 데이터로 전환 — 굽지 않는다. 되돌리기는 `TINCASE_TEST_MODE=test …` (시연으로 떠 있는데 변수 없이 부르면 멈춘다). 절차는 [DEMO.md](DEMO.md) |
 | `bash scripts/deploy.sh prune` | 빌드 없이 청소만 — 손으로 빌드한 뒤 · 디스크 경보 때 |
 | `--ignore-window` | 운영 금지 시간대를 넘는다 — 긴급 수정·롤백·병합 일시정지(OPS-16a) 때만 |
 
@@ -167,7 +169,8 @@ ls -l /data/worklog/db/
 git -C ~/repman log -1 --oneline    # 지금 돌고 있는 커밋 — 적어 둔다
 ```
 
-롤백 태그(`repman:latest` → `repman:rollback`)는 **`deploy.sh prod`가 빌드 직전에 붙인다** — 손으로 하지 않는다.
+롤백 태그(`repman:rollback`)는 **`deploy.sh prod`가 빌드 직전에 붙인다** — 손으로 하지 않는다. 붙이는 곳은 **지금 떠서 health가 ok인 운영 컨테이너의
+이미지**다(OPS-17a, 2026-10-10 — 예전에는 `repman:latest`였다). 컨테이너가 멈췄거나 health가 ok가 아니면 옮기지 않는다 — 그 이미지는 되돌아갈 곳이 아니다.
 빌드가 `repman:latest`를 덮으면 옛 이미지는 태그 없는 찌꺼기가 되어 배포 끝 청소에 지워지는데, 태그가 붙잡고 있으면 닿지 않는다.
 
 ### 2b-3. 코드 · 스키마 · 권한
@@ -205,9 +208,52 @@ cd ~/repman && bash scripts/deploy.sh prod
 | `… 미만이라 빌드하지 않는다` | 우리 찌꺼기는 이미 치웠다. 출력된 순서대로 비운다. 빌드 없이 다시 띄우기는 `--no-build`로 된다 |
 | `빌드 실패` · `기동 실패` | 돌던 컨테이너는 그대로다. 찌꺼기는 `bash scripts/deploy.sh prune` |
 | `health가 … ok:true가 아니다` | 본문의 checks를 읽고, 배포 탓이면 아래 롤백 |
+| (health에 닿지 못함) 로그 `[boot] FATAL: DB 스키마가 이 판보다 오래됐습니다` | 2b-3의 `db push`를 빠뜨렸다(OPS-48). 로그에 없는 표·열이 적혀 있다. 롤백하지 않는다 — 스냅샷(2b-2)이 있는지 보고 `db push` → `bash scripts/deploy.sh prod --no-build` |
 | `다른 deploy.sh가 돌고 있다` | 겹치면 이쪽 청소가 저쪽 빌드의 스테이지 이미지를 지울 수 있다. 끝난 뒤 다시 |
 
+### 2b-5. v2 전환 — 한 번 (2026-10-13 화 — 10/10에 월요일에서 옮김, `main` v1.39.0 → v2)
+
+> 그날 아침의 시각별 순서 · 합칠 브랜치와 태그 · 배포 뒤 설정(부서 켜기·알림 스위치·섹션·3단계) · 롤백 판단 · Go/No-go는 [LAUNCH-v2.md](LAUNCH-v2.md),
+> 운영에서 나갈 쪽지 문구 전부는 [NOTIFICATIONS-v2.md](NOTIFICATIONS-v2.md), 부서 안내문은 [ANNOUNCE-v2.md](ANNOUNCE-v2.md). 이 절은 스키마와 기동 확인만 다룬다.
+
+절차는 2b-0 ~ 2b-4 그대로다. 다른 것은 2b-3의 `db push`가 **이번에는 반드시 무언가를 만든다**는 것뿐 — 「already in sync」면 체크아웃이 v2가 아니다.
+그날은 운영 DB에 push하기 전에 **2b-2 스냅샷의 사본**에 같은 push를 먼저 돌린다(LAUNCH-v2 ⑤-0) — 이행 리허설은 지어낸 사람의 DB로만 돌았다.
+바뀌는 것은 전부 **더하기만**이라 프롬프트 없이 끝나야 한다. 데이터 손실 경고·확인을 물으면 멈춘다(그럴 변경이 없다 — 체크아웃을 의심한다).
+`Division`은 열 넷이 기본값 있는 NOT NULL이라 Prisma가 **표를 새로 만들어 옮긴다**(행·외래 키 그대로 — 2026-10-09 main 스키마 DB 사본으로 확인). 그래서 스냅샷이 먼저다.
+빠뜨리고 띄우면 새 앱이 **뜨지 않는다** — 로그 첫 줄 `[boot] FATAL: DB 스키마가 이 판보다 오래됐습니다`에 없는 표 7 · 열 7이 적힌다(OPS-48). 그때는 push 뒤 `--no-build`로 다시 띄운다.
+
+| 무엇 | 더해지는 것 | 어디서 |
+|---|---|---|
+| 새 표 | `ReportSubmission` · `RollupRun` · `OrgRollupSetting` · `OrgSection` · `OrgSectionUpload` | 3단계 자동 진행 · 「전사」 (RU-*) |
+| 새 표 | `MergeJob` | 병합 줄 (HM-59 · ADR-0019) |
+| 새 표 | `GuideTourSeen` | 첫 로그인 둘러보기 기록 (DM-25 · API-60) |
+| 새 열 | `Division.rollupOrder` · `rollupNote` · `rollupPageBreak` · `rollupSelf` · `MergeReview.filePath` | 3단계 |
+| 새 열 | `MergeRun.outputSha` (옛 실행은 null) | 「병합 점검」이 파일과 기록을 맞춘다 (HM-56e) |
+| 새 열 | `SetupToken.supersededAt` (NULL 허용 — 옛 행은 null) | 더 새 링크에 밀린 설정 링크를 「이미 사용함」과 따로 적는다 (AU-30a · [ADR-0020](adr/0020-public-password-paths.md), 2026-10-10) |
+| 관계만 (열 없음) | `Division`·`WeekSlot`의 `reportSubmissions`·`rollupRuns` · `User.guideTours` | — |
+| 없음 | 가짜 알림 수신함 — DB가 아니라 저장소 파일(`dev/messenger-sink.jsonl`), 시험·시연 서버에만 | NT-56 |
+
+```bash
+DATABASE_URL=file:/data/worklog/db/worklog.db npx prisma db push --skip-generate    # 2b-3과 같은 줄 — 스냅샷(2b-2) 뒤
+sudo docker exec repman sqlite3 /data/db/worklog.db ".tables" | tr -s ' ' '\n' | grep -cE '^(ReportSubmission|RollupRun|OrgRollupSetting|OrgSection|OrgSectionUpload|MergeJob|GuideTourSeen)$'
+#   7이어야 한다
+```
+
+기동한 뒤(2b-4):
+
+- [ ] 로그에 `[merge] 자동 병합 스케줄러 등록 (1분 주기)` — 기동 env 검사(OPS-46)가 통과했다는 뜻이기도 하다. 운영 compose는 `TINCASE_ENV`를 빈 값 · `MESSENGER_SINK`를 `off`로 못 박는다(OPS-46a — `.env.production`에 적혀 있어도 이긴다)
+- [ ] `/ops` — 「병합 줄」 카드(이번 주 병합 없음), 머리에 [알림 수신함]이 **없다**(운영은 수신함이 닫혀 있다 — `/ops/notify-sink` 404)
+- [ ] 본부 부서(문서가 없는 본부)의 **알림 스위치가 꺼져 있다** — 켜 두면 본부 담당자에게 마감 독촉·「병합본이 아직 없어요」가 간다(CHANGELOG 「주말 시험」 ⚑)
+- [ ] 첫 마감 뒤: `[merge] 자동 병합 n건 줄에 넣음` → `[merge] 줄 k/n — …` · 마감 +15분 안에 「병합 점검」이 운영자와 기획조정실 담당에게 한 통(NT-60)
+- [ ] 아무 계정으로 처음 로그인하면 오른쪽 아래 둘러보기 카드 — [괜찮아요] 뒤 다른 PC에서도 다시 뜨지 않는다(`GuideTourSeen`, 운영자에게는 카드 없음)
+
+롤백(아래)은 옛 이미지로 그대로 된다 — 옛 앱은 새 표·열을 모르고 지나간다.
+
 ### 2b-롤백 — 재빌드하지 않는다 (OPS-17)
+
+> v2 전환(2026-10-13)에서 v1으로 되돌릴 때는 [LAUNCH-v2.md](LAUNCH-v2.md) §3.1 — `repman:rollback`이 아니라 그날 ①에서 붙인 고정 태그 `repman:v1.39.0`으로 한다.
+> 2026-10-10부터 `deploy.sh`는 지금 떠서 건강한 이미지에만 롤백 태그를 붙이므로(OPS-17a) ⑥을 빌드째 두 번 돌려도 아픈 v2로 옮기지는 않지만,
+> 첫 번째 v2가 health는 통과했는데 화면이 틀린 경우라면 둘째 실행이 그 v2에 붙인다 — 그래서 그날은 고정 태그다. 배포가 실패하면 `deploy.sh`의 안내도 고정 태그가 있으면 그쪽을 먼저 적는다.
 
 ```bash
 sudo docker tag repman:rollback repman:latest
@@ -219,9 +265,10 @@ bash scripts/deploy.sh prod --no-build     # 지금 태그로 다시 띄우고 h
 스냅샷으로 되돌린다 — 배포 뒤에 들어온 제출·수정도 함께 사라진다:
 
 ```bash
+sudo docker exec repman sqlite3 /data/db/worklog.db ".backup '/data/db/worklog.db.before-restore-$TS'"   # 덮기 전에 지금 DB를 남긴다 — 원인을 보고, 배포 뒤 들어온 것을 되살릴 길
 sudo docker compose stop app
-cp /data/worklog/db/worklog.db.predeploy-$TS /data/worklog/db/worklog.db   # 있는 파일에 덮는다 — 주인·권한이 그대로 남는다
-ls /data/worklog/db/                     # worklog.db-journal · -wal · -shm 이 남아 있으면 지운다
+rm -f /data/worklog/db/worklog.db-wal /data/worklog/db/worklog.db-shm /data/worklog/db/worklog.db-journal   # 덮기 전에 — 남은 로그가 스냅샷에 적용되지 않게
+cp /data/worklog/db/worklog.db.predeploy-$TS /data/worklog/db/worklog.db   # 있는 파일에 덮는다 — 주인·권한이 그대로 남는다 (닫힌 스냅샷 · 멈춘 앱)
 sudo docker compose up -d
 ```
 
@@ -236,13 +283,13 @@ sudo docker compose stop app
 D=2026-10-08                                                  # 되돌릴 날짜
 gunzip -c /mnt/backup/worklog/db/worklog-$D.db.gz > /data/worklog/db/worklog.db
 tar xzf /mnt/backup/worklog/files/divisions-$D.tar.gz -C /data/worklog
-# └ 이름은 divisions-지만 안에 divisions/와 (있으면) org/가 같이 들어 있다 — tar tzf로 확인할 수 있다
+# └ 이름은 divisions-지만 안에 divisions/와 (있으면) org/ · templates/가 같이 들어 있다 — tar tzf로 확인할 수 있다 (templates/는 2026-10-10 묶음부터)
 sudo chown -R 10001:mhchoi /data/worklog && sudo chmod -R g+rwX,o-rwx /data/worklog \
   && sudo find /data/worklog -type d -exec chmod g+s {} +     # §1의 세 줄
 sudo docker compose up -d && sleep 15 && curl -fsS http://127.0.0.1:11111/api/health | python3 -m json.tool
 ```
 
-- 파일 묶음은 **2026-10-08부터 매일**이다. 그 전 날짜는 일요일 것만 있고, `org/`(3단계 취합)는 들어 있지 않다.
+- 파일 묶음은 **2026-10-09부터 매일**이다(크론을 그날 바꿨다 — 그날 것은 11:46쯤 손으로 한 번, 자동은 10/10 03:30부터). 그 전 날짜는 일요일 것만(마지막 10/04) 있고, `org/`(3단계 취합)는 들어 있지 않다.
 - 파일 묶음(03:30)이 DB(03:00)보다 30분 늦다. 그 사이에 낸 파일은 행 없이 남는다 — 화면에 안 보일 뿐 해가 없다.
 - 복원한 뒤 health의 `checks.template`이 fail이면 양식 파일이 빠진 부서가 있다는 뜻이다 (OPS-41).
 
@@ -309,7 +356,7 @@ bash scripts/deploy.sh prune     # 우리 빌드 찌꺼기만 — 앞뒤 df를 �
 
 - [ ] 본인 계정으로 양식 다운로드 → 파일명에 주차 포함 확인
 - [ ] hwp 업로드 → v1 → 재업로드 → v2 · `이전 버전과 동일` 안내
-- [ ] `/manage` 현황 → 본인 제출 표시 · zip 다운로드 → 압축 해제 확인
+- [ ] `/manage` 현황 → 본인 제출 표시 · [열기] → 드로어 [원본 다운로드] 확인 (전체 zip은 2026-10-08 폐지 — PG-73)
 - [ ] `.hwpx` 업로드 시도 → 거부 문구에 변환 방법 표시
 - [ ] `docker compose restart` 후 health ok (재기동 내성)
 
@@ -325,9 +372,16 @@ crontab -e
 ~/repman/scripts/backup.sh db && ~/repman/scripts/backup.sh verify
 ```
 
+files 묶음(`divisions-날짜.tar.gz`)에는 `divisions/` · `org/`(있을 때) · **`templates/`**(전사 표준 양식, 있을 때 — 2026-10-10부터, OPS-08a)가 들어간다.
+로그 끝 `[divisions org templates]`로 무엇을 묶었는지 보인다.
+
 **NFS가 fstab에 있어야 한다.** `backup.sh`는 `/mnt/backup`이 마운트 지점이 아니면 `[backup] FATAL`을 찍고 멈춘다 —
-재부팅 뒤 마운트가 빠지면 루트 디스크에 쓰게 되기 때문이다. 지금 마운트는 손으로 한 것이라 운영자가 한 번 넣는다
-(sudo, 정확한 줄은 [spec 09 OPS-08](spec/09-deployment-ops.md)):
+재부팅 뒤 마운트가 빠지면 루트 디스크에 쓰게 되기 때문이다.
+
+- [x] **2026-10-10 넣었다**(운영자 · sudo) — 옵션 `defaults,_netdev,nofail,hard,timeo=600` · 원본 `/etc/fstab.bak-20261010` ·
+      `findmnt --verify` 오류 0 · `systemctl daemon-reload` 뒤 `mnt-backup.mount`가 생겨 붙어 있다. 그 전에는 손으로 붙인 마운트라 재부팅하면 빠졌다.
+
+새 서버라면 한 번 (sudo, 정확한 줄은 [spec 09 OPS-08](spec/09-deployment-ops.md)):
 
 ```bash
 findmnt -no SOURCE /mnt/backup        # 이 값을 아래 <NFS-내부-IP>:<경로> 자리에
@@ -336,6 +390,8 @@ sudo systemctl daemon-reload && sudo mount -a && findmnt /mnt/backup
 ```
 
 ## 8. 월요일 아침 안내문 (붙여넣기용 초안)
+
+> 아래는 v1 개통(2026-08-17) 때 것이다 — hwp 업로드 시절 문구라 지금은 쓰지 않는다. v2 전환(2026-10-13) 안내문은 [ANNOUNCE-v2.md](ANNOUNCE-v2.md).
 
 > [주간업무 제출 안내]
 > 이번 주부터 주간 업무일지를 웹으로 제출합니다. **사내망에서만 접속됩니다.**
@@ -350,13 +406,14 @@ sudo systemctl daemon-reload && sudo mount -a && findmnt /mnt/backup
 
 ## 장애 시 (OPS-18)
 
-시스템이 죽고 마감이 임박하면 **그 주는 이메일로 되돌린다**:
-`/data/worklog/divisions/AI_and_Public_Relations_Division/template/active.hwp`를 메일로 배포.
+시스템이 죽고 마감이 임박하면 **그 주는 이메일로 되돌린다**: 부서마다 `/data/worklog/divisions/<부서-slug>/template/active.hwp`를 메일로 배포
+(파일럿 때 예: `AI_and_Public_Relations_Division`). v2(2026-10-13 — 켠 부서 2곳에서 시작해 부서마다 늘어난다 · 3단계를 켜면 본부·전사 취합도)에서도 손으로 돌아간다 —
+누가 알리고 양식 사본을 어디 두는지는 [LAUNCH-v2.md](LAUNCH-v2.md) §5 질문 10.
 
 ## 배포 금지 시간대 (OPS-16)
 
 **그 주 마감 전날 11:30 ~ 마감 +2시간 30분 동안 재배포 금지.** 기본값(목 14:00 마감)이면 **수 11:30 ~ 목 16:30**.
-전날 11:45·당일 09:00·13:00·13:50 알림, 마감 직전 제출, 14:01 병합, 14:10·14:30 안내, 15:00 대외 마감,
+전날 11:45·13:00·13:50 알림, 마감 직전 제출, 14:01 병합, 14:10·14:30 안내, 15:00 대외 마감,
 3단계를 켰으면 16:00 본부 기한까지가 이 안에 있다. 배포는 **목 16:30 이후 ~ 다음 주 화요일**.
 **연휴 주는 마감이 당겨진다** — 배포 전에 §2b-0으로 이번 주 마감부터 본다. `deploy.sh prod`도 빌드 전에 같은 계산으로 막는다
 (넘는 길은 `--ignore-window` 하나).
@@ -406,17 +463,22 @@ environment:
   MERGE_MODEL: hf.co/unsloth/Qwen3.5-9B-GGUF:Q4_K_M
   MERGE_MODEL_URL: http://host.docker.internal:11437
   MERGE_MODEL_TIMEOUT_MS: "60000"   # 호출 한 번의 제한 — 모델 문을 통과한 뒤부터 잰다 (HM-52·57)
+  MERGE_MODEL_KEEP_ALIVE: "-1"      # 모델을 내리지 않는다 — 상주 (HM-53, 2026-10-08)
 ```
 
 함께 읽는 값(compose에 없으면 기본값): `MERGE_JOB_BUDGET_MS`(병합 한 번의 예산, 기본 240000 — 이것 + 6분이 지난
 `running`은 멈춘 실행으로 회수, 기동 때는 남은 `running`을 모두 회수, HM-55) · `MERGE_MODEL_RETRIES`(시간 초과·연결 실패·5xx 때 다시 부르는 횟수, 기본 1).
-스케줄러가 켜진 서버는 마감 10분 전에 모델을 한 번 데운다(HM-53) — 로그 `[merge] 모델 데우기`.
+**모델은 상주한다** (HM-53, 2026-10-08 「독점하듯이 사용해도 돼」 — 이 ollama는 Tincase만 쓴다). 모든 호출이 `keep_alive`에
+`MERGE_MODEL_KEEP_ALIVE`(기본 `"-1"` — 내리지 않음. 숫자는 초로 보낸다, `"30m"` 같은 기간도 된다)를 붙이고, 스케줄러가 켜진 서버는
+**기동하자마자** 한 번, 그리고 마감 10분 전에 한 번 더 데운다 — 로그 `[merge] 모델 데우기 — 기동 …`·`— 기준 …`.
+§9.4의 `/api/ps`에서 `expires_at`이 아주 먼 미래면 상주 중이다. 이 ollama를 다른 일과 나누게 되면 compose에서 그 값을 `"30m"` 같은 기간으로 바꾼다.
 
 ### 9.4 확인
 
 ```bash
 sudo docker exec repman node -e "fetch(process.env.MERGE_MODEL_URL+'/api/tags').then(r=>r.json()).then(d=>console.log(d.models.length))"
-sudo docker logs repman 2>&1 | grep '\[merge\]'      # 스케줄러 등록 확인
+sudo docker logs repman 2>&1 | grep '\[merge\]'      # 스케줄러 등록 · 「모델 데우기 — 기동」 확인
+curl -s 127.0.0.1:11437/api/ps                         # 모델이 올라와 있고 expires_at이 아주 먼 미래(상주)
 ```
 
 ### 9.5 되돌리기

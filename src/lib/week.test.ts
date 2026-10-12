@@ -6,6 +6,7 @@ import {
   deadlineFor,
   describeWeek,
   formatDeadlineKo,
+  formatDeadlineNearKo,
   formatSubmittedKo,
   isLocked,
   isMonthlyWeek,
@@ -328,5 +329,18 @@ describe('제출 시각 표시 (WS-T32~34)', () => {
     expect(formatSubmittedKo(kst(2026, 7, 31, 14, 0), kst(2026, 8, 1, 9, 0))).toBe('어제 14:00');
     expect(formatSubmittedKo(kst(2025, 12, 31, 14, 0), kst(2026, 1, 1, 9, 0))).toBe('어제 14:00');
     expect(formatSubmittedKo(kst(2025, 12, 30, 14, 0), kst(2026, 1, 1, 9, 0))).toBe('12/30 14:00');
+  });
+});
+
+describe('PG-67d 마감 글자 — 「오늘·내일」 (PG-T100)', () => {
+  it('[PG-T100] 같은 KST 날짜면 「오늘」, 하루 앞이면 「내일」, 그 밖에는 날짜 — 24시간이 아니라 달력으로', () => {
+    const 마감 = kst(2026, 10, 15, 14, 0); // 목 14:00
+    expect(formatDeadlineNearKo(마감, kst(2026, 10, 15, 9, 0))).toBe('오늘 14:00');
+    expect(formatDeadlineNearKo(마감, kst(2026, 10, 15, 0, 0))).toBe('오늘 14:00'); // 자정 직후
+    expect(formatDeadlineNearKo(마감, kst(2026, 10, 14, 23, 59))).toBe('내일 14:00'); // 24시간 넘게 남아도 내일
+    expect(formatDeadlineNearKo(마감, kst(2026, 10, 14, 0, 0))).toBe('내일 14:00');
+    expect(formatDeadlineNearKo(마감, kst(2026, 10, 13, 23, 59))).toBe('10월 15일(목) 14:00');
+    // 연말을 넘어서도 달력으로 센다
+    expect(formatDeadlineNearKo(kst(2027, 1, 1, 14, 0), kst(2026, 12, 31, 20, 0))).toBe('내일 14:00');
   });
 });

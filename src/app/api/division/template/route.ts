@@ -7,6 +7,8 @@ import { audit } from '@/server/audit';
 import { validateHwpUpload, UploadValidationError } from '@/lib/hwp/reader';
 import { sha256, templateRelPath, writeFileAtomic } from '@/server/storage';
 import { env } from '@/server/env';
+import { laterSyncCurrentWeek } from '@/server/rollup/auto';
+import { assertUsableTemplate } from '@/server/template-check';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,6 +33,19 @@ export const POST = handler(async (req: NextRequest) => {
   } catch (e) {
     if (e instanceof UploadValidationError) {
       throw new HttpError(422, 'invalid_file', `양식 검증 실패: ${e.message} (기존 양식은 그대로 유지됩니다)`);
+    }
+    throw e;
+  }
+  /*
+   * ST-19a·b (2026-10-10) — 「표가 파싱된다」로는 모자랐다. 표가 둘인 양식(3번 특이사항을 지운 꼴)도 경고와 함께 받았고, 그날부터
+   * 이 부서 전원의 웹 작성이 500, 병합은 3번 줄을 버렸다. 모양(5칸 표 셋)을 보고, 시험 작성·시험 병합을 해 다시 읽어 본 뒤에만 받는다.
+   * 대상은 신원의 부서다(TACP-6) — 부서명은 병합본 맨 위(HM-46)와 같은 길을 지나게 넣는다
+   */
+  try {
+    assertUsableTemplate(bytes, scope.division.nameKo);
+  } catch (e) {
+    if (e instanceof HttpError && e.code === 'invalid_template') {
+      throw new HttpError(422, 'invalid_template', `양식 검증 실패: ${e.message} (기존 양식은 그대로 유지됩니다)`);
     }
     throw e;
   }
@@ -70,6 +85,9 @@ export const POST = handler(async (req: NextRequest) => {
   await audit(scope.user.email, 'template_update', scope.division.id, `template:v${result.version}`, {
     bytes: bytes.length,
   });
+  // RU-72 — 양식이 본부본·전사본의 열쇠에 들어 있다(RU-74). 이번 주를 맞추면 그 양식을 쓰는 것만 다시 만들어진다 —
+  // 양식이 없어 실패하던 조립도 이 요청 뒤에 성공한다(RU-T106)
+  laterSyncCurrentWeek({ cause: 'template', causedBy: scope.user.email });
 
   return json(
     {

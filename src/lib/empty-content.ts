@@ -20,12 +20,11 @@ import type { WorklogRow } from './hwp/reader';
 /**
  * 걸러 볼 낱말. **부분 일치**다.
  *
- * **부서마다 따로 정한다** (`Division.emptyWords`). 이건 한 부서에서 실제로 겪은 일이지
- * 전사 규칙이 아니다 — 부서마다 쓰는 말이 다르고, 남의 부서에 우리 습관을 강요할 이유가 없다.
- * 비워두면 검사하지 않는다.
+ * **전사 기본값이다** (2026-10-08 — S7 · HM-51). 예전에는 부서마다 칸(`Division.emptyWords`)을 두고 비우면 검사하지
+ * 않았는데, 그 칸을 쓴 곳이 파일럿 한 곳뿐이었다. 10/12에 들어오는 부서는 칸을 몰라 이 기능이 없는 것과 같았을 것이다.
+ * 그래서 칸을 지우고 기본을 켰다. 값을 이미 적어 둔 부서는 그 값을 그대로 쓴다(`parseFlagWords`).
  *
- * 아래는 **처음 채워 넣는 기본값**이다. 「없음」 하나로 시작한다 —
- * 업무 내용에 그 낱말이 쓰일 일이 거의 없다.
+ * 「없음」 하나다 — 업무 내용에 그 낱말이 쓰일 일이 거의 없고, 「해당 없음」·「특이사항없음」도 부분 일치로 잡힌다.
  * 실측(제출물 12건·45행)에서 이 낱말에 걸린 것은 문제의 그 한 건뿐이었다 (오탐 0).
  *
  * 목록에 없는 것과 그 이유:
@@ -38,14 +37,18 @@ import type { WorklogRow } from './hwp/reader';
  */
 export const DEFAULT_FLAG_WORDS = ['없음'] as const;
 
-/** 부서 설정 문자열 → 낱말 목록. 쉼표·가운뎃점 아무거나 (분류 순서와 같은 관대함) */
+/**
+ * 부서 칸 → 걸러 볼 낱말. 쉼표·가운뎃점 아무거나 (분류 순서와 같은 관대함).
+ * **비어 있으면 전사 기본**(S7) — 작성 화면과 병합이 이 함수 하나로 읽으므로 둘이 갈라지지 않는다.
+ */
 export function parseFlagWords(raw: string): string[] {
-  return raw
+  const own = raw
     .split(/[,·\/|]/)
     .map((w) => w.trim())
     .filter(Boolean)
     .filter((w, i, a) => a.indexOf(w) === i)
     .slice(0, 12);
+  return own.length > 0 ? own : [...DEFAULT_FLAG_WORDS];
 }
 
 export interface FlaggedRow {
@@ -64,7 +67,7 @@ const TABLE_NO = { achievements: 1, plans: 2, notes: 3 } as const;
 
 /**
  * 이 행이 걸리는가. 걸리면 그 낱말을, 아니면 null.
- * `words`가 비면 **아무것도 걸리지 않는다** — 설정을 안 한 부서는 이 기능이 없는 것과 같다.
+ * `words`가 비면 **아무것도 걸리지 않는다** (순수 함수의 성질 — 부서 칸이 비어도 `parseFlagWords`가 기본을 준다).
  */
 export function flagWordOf(content: string, words: readonly string[]): string | null {
   if (words.length === 0) return null;

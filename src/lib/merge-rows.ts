@@ -7,6 +7,19 @@
 // 두 곳에 같은 식을 적고 「같아야 한다」고 주석을 달아 두면 언젠가 한쪽만 바뀐다.
 // 그래서 식을 하나만 두고 양쪽이 부른다.
 
+/**
+ * 모델을 아예 설정하지 않은 서버의 이유 문구. 병합 경고에 그대로 들어간다.
+ * 화면(MergePanel)은 이 문구로 «이번 주에 실패했다»와 «이 서버엔 원래 모델이 없다»를 가른다 —
+ * 원래 없는 것을 매주 ⚠ 두 줄로 되풀이하면 정작 실패한 주의 경고가 같은 모양에 묻힌다.
+ */
+export const MODEL_NOT_CONFIGURED = '모델이 설정되지 않았습니다';
+
+/**
+ * HM-61 — 쓰기 직전 확인이 병합을 쓰지 않았을 때 실행에 남는 문구. 서버(병합 기록 · 점검 요약)와 화면(MergePanel — 실패가 아니라
+ * 「고친 판을 지켰다」로 그린다)이 같은 글로 알아본다 — 두 곳에 따로 적으면 한쪽만 바뀐다.
+ */
+export const HELD_TEXT = '병합하는 동안 고친 판이 있어 덮지 않았어요';
+
 /** 표 순서. 구분 번호의 앞자리가 여기서 나온다 (실적=1, 계획=2, 특이사항=3) */
 export const BUCKETS = ['achievements', 'plans', 'notes'] as const;
 export type BucketKey = (typeof BUCKETS)[number];
@@ -125,6 +138,14 @@ export function mergeRowCells<T extends RowLike>(members: readonly T[], best: T)
     place: pick('place'),
     attendee: pick('attendee'),
   };
+}
+
+/**
+ * S8 · CP-117 — 수합 관리 병합본 카드의 「내용 다른 묶음 n건」. 글자까지 같게 적은 묶음은 잃은 것이 없어 세지 않는다.
+ * 옛 실행에는 `identical`이 없다 — 그때는 원문을 되짚는다. 전부 「다름」으로 몰면 없던 확인거리를 만들어 보이는 셈이다.
+ */
+export function differingGroups(groups: readonly { identical?: boolean; sources: readonly { content: string }[] }[]): number {
+  return groups.filter((g) => !(g.identical ?? new Set(g.sources.map((s) => s.content.trim())).size === 1)).length;
 }
 
 /**

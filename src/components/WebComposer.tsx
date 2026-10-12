@@ -7,10 +7,10 @@
 //
 // `구분`은 시스템이 다시 매기므로(ABS-5) 입력칸이 아니라 **번호 표시**로 둔다.
 import { flagWordOf, parseFlagWords } from '@/lib/empty-content';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { parseClipboardTable } from '@/lib/paste-table';
-import { composerStart, dateHint, type ComposerFrom } from '@/lib/composer';
+import { composerDraftKey, composerStart, dateHint, sameRows, submitBlocked, type ComposerFrom } from '@/lib/composer';
 import { PreviousWeekPanel, type PrevRow } from './PreviousWeekPanel';
 
 export interface ComposerRow {
@@ -38,20 +38,42 @@ const SECTIONS: { key: Bucket; no: number; title: string; hint: string }[] = [
 ];
 
 const blank = (): ComposerRow => ({ content: '', date: '', place: '', attendee: '', emphasis: false });
-const draftKey = (isoKey: string) => `tincase.compose.${isoKey}`;
+
+/*
+ * 브라우저 임시본 — 열쇠는 **사람 + 주차**다(WA-35d · `composerDraftKey`). 주차만이던 때는 한 브라우저를 쓰는 다음 사람이
+ * 앞사람의 안 낸 임시본을 열어 그대로 낼 수 있었다(2026-10-10 점검). 옛 열쇠는 읽지 않는다 — 로그아웃이 지운다(AppHeader).
+ */
+
+/** 브라우저 임시본 쓰기·지우기 — 저장소를 못 쓰면 임시 보관만 못 할 뿐이다 */
+function writeDraft(key: string, data: unknown) {
+  try {
+    localStorage.setItem(key, JSON.stringify(data));
+  } catch {
+    /* 사생활 보호 모드 등 */
+  }
+}
+function dropDraft(key: string) {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* 지우지 못해도 다음에 열 때 내용 비교(WA-37)가 다시 판정한다 */
+  }
+}
 
 /** 브라우저 임시본 읽기 — 사생활 보호 모드 등에서 저장소가 던지면 없는 것으로 친다 */
-function readDraft(isoKey: string): string | null {
+function readDraft(key: string): string | null {
   try {
-    return typeof window === 'undefined' ? null : window.localStorage.getItem(draftKey(isoKey));
+    return typeof window === 'undefined' ? null : window.localStorage.getItem(key);
   } catch {
     return null;
   }
 }
 
 export function WebComposer({
+  userId,
   isoKey,
-  guideLines,
+  title,
+  editedNote = null,
   initial,
   initialVersion,
   initialFailed = false,
@@ -59,18 +81,23 @@ export function WebComposer({
   onClose,
   emptyWordsRaw = '',
 }: {
+  /** WA-35d — 임시본 열쇠의 사람(세션의 사람 — 홈 카드의 `me.id`). 주차만으로 열쇠를 만들면 같은 브라우저의 다음 사람이 앞사람 임시본을 연다 */
+  userId: string;
   isoKey: string;
-  guideLines: string[];
+  /** WA-38 — 「10월 1주차 업무일지」 · 「9월 월간 업무일지」. 「업무일지 작성」은 어느 주인지 말하지 않는다 */
+  title: string;
+  /** WA-38 — 담당자가 고친 판이면 「○○ 고침 · 10-07 15:20」 한 줄(TACP-22). 고치지 않았으면 없음 */
+  editedNote?: string | null;
   /** WA-35 — 이번 주에 낸 판의 표 (「공유」 포함). 없으면 null */
   initial?: Record<Bucket, ComposerRow[]> | null;
-  /** WA-35 — 그 판의 버전 (「지금 낸 v2에서 시작합니다」) */
+  /** WA-35a — 그 판의 버전 ([지금 낸 v2로 다시 시작]) */
   initialVersion?: number;
   /** WA-35c — 낸 판이 있는데 못 불러왔다. 빈 표로 열되 그렇다고 말한다 */
   initialFailed?: boolean;
   /** WA-36a — 이번 주 월요일 00:00 KST. 일자 예시를 여기서 만든다 */
   weekStartMs: number;
   onClose: () => void;
-  /** HM-33 — 부서가 정한 「내용 없음」 낱말 (`Division.emptyWords`). 비면 검사하지 않는다 */
+  /** HM-33 — 부서가 적어 둔 「내용 없음」 낱말 (`Division.emptyWords`). 비면 전사 기본값으로 검사한다(S7 · HM-51 — `parseFlagWords`) */
   emptyWordsRaw?: string;
 }) {
   const emptyWords = useMemo(() => parseFlagWords(emptyWordsRaw), [emptyWordsRaw]);
@@ -79,7 +106,8 @@ export function WebComposer({
    * `start`를 따로 들고 있는 것은 WA-35b 때문이다 — 사람이 아무것도 안 바꿨으면 임시본을 쓰지 않는다.
    * 연 것만으로 쓰면 빈 표·옛 판이 임시본이 되어, 다음에 열 때 지금 낸 판을 가린다.
    */
-  const [start, setStart] = useState(() => composerStart(readDraft(isoKey), initial, blank));
+  const draftKey = composerDraftKey(userId, isoKey);
+  const [start, setStart] = useState(() => composerStart(readDraft(draftKey), initial, blank));
   const [data, setData] = useState<Record<Bucket, ComposerRow[]>>(start.data);
   const from: ComposerFrom = start.from;
   const [busy, setBusy] = useState(false);
@@ -87,29 +115,73 @@ export function WebComposer({
   const [pasted, setPasted] = useState<string | null>(null);
   const [done, setDone] = useState(false);
   const router = useRouter();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const titleRef = useRef<HTMLHeadingElement>(null);
+  /*
+   * WA-37 — 「바뀌었나」는 **내용으로** 판정한다. 참조로 보던 예전 판정은 한 글자 쳤다 지워도 바뀐 것이라
+   * 같은 내용의 새 판이 생겼다. 낸 판으로 연 화면은 내용이 같은 동안 [제출]이 꺼져 있다 — 보려고 연 사람이
+   * 실수로 새 판을 만들지 않게(S1: [열어보기]를 [열기] 하나로 합친 대가).
+   */
+  const unchanged = useMemo(() => sameRows(start.data, data), [start, data]);
 
   // 임시 보관은 **제출 전까지만**. 제출 후에도 남아 있으면 다음에 열었을 때
   // 낸 건지 안 낸 건지 헷갈린다 (지연 저장이 뒤늦게 되살리는 것도 막는다)
   useEffect(() => {
-    if (done || data === start.data) return; // WA-35b — 손대기 전에는 쓰지 않는다
-    const t = setTimeout(() => {
-      try {
-        localStorage.setItem(draftKey(isoKey), JSON.stringify(data));
-      } catch {
-        /* 저장소를 못 쓰면 임시 보관만 못 할 뿐이다 */
-      }
-    }, 800);
+    if (done) return;
+    // WA-35b·37 — 내용이 시작점으로 돌아왔으면 임시본도 시작점으로: 임시본에서 시작했으면 그 내용, 아니면 없음.
+    // 지연 저장이 써 둔 중간 내용(쳤다 지운 것)이 남아 다음에 낸 판을 가리지 않게
+    if (unchanged) {
+      if (start.from === 'draft') writeDraft(draftKey, data);
+      else dropDraft(draftKey);
+      return;
+    }
+    const t = setTimeout(() => writeDraft(draftKey, data), 800);
     return () => clearTimeout(t);
-  }, [data, isoKey, done, start]);
+  }, [data, draftKey, done, unchanged, start.from]);
+
+  /**
+   * WA-38 — 닫기(×·바탕·Esc). 바뀐 것이 있으면 임시본을 **바로** 쓰고 닫는다 — 800ms 지연 저장을 기다리면
+   * 빨리 닫은 사람의 마지막 글자가 사라진다. 다음에 열면 이어 쓰므로 「닫을까요?」를 묻지 않는다.
+   */
+  const close = useCallback(() => {
+    if (!done && !unchanged) writeDraft(draftKey, data);
+    onClose();
+  }, [done, unchanged, draftKey, data, onClose]);
+
+  // WA-38 — 열면 제목에 초점, Tab은 드로어 안에서 돈다, Esc로 닫는다 (FileDrawer CP-75와 같은 방식)
+  useEffect(() => {
+    titleRef.current?.focus();
+  }, []);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        close();
+        return;
+      }
+      if (e.key !== 'Tab' || !panelRef.current) return;
+      const focusables = panelRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), a[href], select, input, textarea, [tabindex]:not([tabindex="-1"])',
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && (document.activeElement === first || document.activeElement === titleRef.current)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [close]);
 
   /** WA-35a — 임시본을 버리고 지금 낸 판에서 다시. 적던 것이 사라지므로 묻는다 */
   const restartFromSubmitted = () => {
     if (!initial || !confirm(`작성하던 임시본을 지우고 지금 낸 v${initialVersion}에서 다시 시작할까요?`)) return;
-    try {
-      localStorage.removeItem(draftKey(isoKey));
-    } catch {
-      /* 지우지 못해도 아래에서 다시 시작한다 — 손대지 않으면 다시 쓰지 않는다 */
-    }
+    dropDraft(draftKey); // 지우지 못해도 아래에서 다시 시작한다 — 손대지 않으면 다시 쓰지 않는다
     const next = composerStart(null, initial, blank);
     setStart(next);
     setData(next.data);
@@ -147,15 +219,6 @@ export function WebComposer({
       rows[i] = { ...rows[i], emphasis: !rows[i].emphasis };
       return { ...d, [bucket]: rows };
     });
-  }, []);
-
-  /** 구역 비우기 — 잘못 붙여넣었을 때 한 줄씩 지우게 두면 아무도 안 쓴다 */
-  const clearSection = useCallback((bucket: Bucket) => {
-    setData((d) => ({ ...d, [bucket]: [blank()] }));
-  }, []);
-
-  const clearAll = useCallback(() => {
-    setData({ achievements: [blank(), blank(), blank()], plans: [blank(), blank()], notes: [blank()] });
   }, []);
 
   /**
@@ -215,11 +278,7 @@ export function WebComposer({
           return;
         }
         setDone(true); // 지연 저장이 다시 쓰지 못하게 먼저 막는다
-        try {
-          localStorage.removeItem(draftKey(isoKey));
-        } catch {
-          /* 저장소를 못 쓰면 지울 것도 없다 */
-        }
+        dropDraft(draftKey);
         // WA-35c — 표는 그대로 둔다. 다시 열면 방금 낸 판에서 시작하므로 「빈 화면」이라고 하지 않는다
         setMsg({ ok: true, text: `제출되었습니다 (v${body.version}).` });
         router.refresh();
@@ -236,62 +295,48 @@ export function WebComposer({
    * 연한 칸이 스무 개 늘어서 있으면 표가 아니라 회색 얼룩으로 보인다.
    */
   const cell =
-    'h-8 rounded-md border border-border-strong bg-canvas px-2 text-[13px] text-ink ' +
+    'h-8 w-full rounded-md border border-border-strong bg-canvas px-2 text-[13px] text-ink ' +
     'focus:border-ink focus:ring-1 focus:ring-ink focus:outline-none';
 
+  /*
+   * 2026-10-07 — 표 위의 띠를 걷었다. 예전에는 머리 아래에 띠가 셋(붙여넣기 안내 초록 · 작성 안내 회색 ·
+   * 지난번에 낸 것)이 쌓여 표가 화면 3분의 2 지점에서야 시작했다. 붙여넣기 안내는 머리 한 줄과
+   * 첫 칸의 안내 문구가 이미 말하고, 작성 안내는 접어 둔다(펼치면 그대로 보인다).
+   * 「지난번에 낸 것」은 그대로 펼쳐 둔다 — 접어 두었을 때 「있는지도 모르겠다」는 말을 들었다(WA-13).
+   */
   return (
     <div className="fixed inset-0 z-40 h-screen">
-      <div className="absolute inset-0 bg-ink/40" onClick={onClose} aria-hidden />
+      <div className="absolute inset-0 bg-ink/40" onClick={close} aria-hidden />
       <div
+        ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-label="웹에서 업무일지 작성"
-        className="absolute inset-y-0 right-0 flex h-full w-full max-w-5xl flex-col border-l border-hairline bg-canvas"
+        aria-labelledby="composer-title"
+        className="absolute inset-y-0 right-0 flex h-full w-full max-w-5xl flex-col border-l border-hairline bg-canvas shadow-[0_8px_32px_rgba(0,0,0,0.12)]"
       >
-        {/* 머리 */}
-        <div className="flex items-center justify-between border-b border-hairline px-7 py-4">
-          <div>
-            <h2 className="display text-xl">웹에서 작성</h2>
-            <p className="mt-0.5 text-sm text-muted">
-              한글 없이 바로 제출합니다 · 제출하면 부서 양식으로 만들어집니다
-            </p>
+        {/* 머리 — 제목은 그 주(WA-38). 붙여넣기는 첫 칸의 placeholder가 말한다 */}
+        <div className="flex items-start justify-between gap-3 border-b border-hairline px-4 py-4 sm:px-7">
+          <div className="min-w-0">
+            <h2 id="composer-title" ref={titleRef} tabIndex={-1} className="card-title outline-none">
+              {title}
+            </h2>
+            {/* TACP-22 — 담당자가 고친 판이면 누가 언제. 홈의 카드·줄에는 「고침」만 있고 이름은 여기서 본다 */}
+            {editedNote && <p className="mt-0.5 text-sm text-warning">{editedNote}</p>}
           </div>
-          <button
-            onClick={onClose}
-            aria-label="닫기"
-            className="rounded-full px-3 py-1 text-xl leading-none text-muted-soft hover:bg-surface-soft hover:text-body"
-          >
-            ×
-          </button>
+          <div className="flex shrink-0 items-center gap-2">
+            {pasted && <span className="text-sm font-medium text-success">{pasted}</span>}
+            <button onClick={close} aria-label="닫기" className="btn-ghost h-9 w-9 px-0 text-xl leading-none text-muted">
+              ×
+            </button>
+          </div>
         </div>
-
-        {/* 붙여넣기 안내 — 이걸 모르면 한 칸씩 옮겨 적는다 */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline-soft bg-brand-soft px-7 py-2.5 text-xs text-body-strong">
-          <span className="font-semibold">한글 표를 그대로 붙여넣을 수 있습니다</span>
-          <span className="text-body">
-            한글에서 표를 드래그 → <kbd className="rounded border border-border-strong bg-canvas px-1 font-sans">Ctrl</kbd>
-            <kbd className="ml-0.5 rounded border border-border-strong bg-canvas px-1 font-sans">C</kbd> → 아래 첫 칸에 붙여넣기
-          </span>
-          {pasted && <span className="ml-auto font-semibold text-success">{pasted}</span>}
-        </div>
-
-        {guideLines.length > 0 && (
-          <ul className="border-b border-hairline-soft bg-surface-soft px-7 py-2.5 text-xs leading-5 text-body">
-            {guideLines.map((l) => (
-              <li key={l}>· {l}</li>
-            ))}
-          </ul>
-        )}
 
         {/* 본문 */}
-        <div className="flex-1 overflow-y-auto px-7 py-5">
-          {/* WA-35 — 어디서 시작했는지 한 줄. 빈 표가 아니면 왜 채워져 있는지, 빈 표면 왜 빈지 말한다 */}
-          {from === 'submission' && initialVersion !== undefined && (
-            <p className="mb-4 text-sm text-body">
-              <span className="font-semibold text-ink">지금 낸 v{initialVersion}에서 시작합니다</span>
-              <span className="ml-1.5 text-muted">· 고쳐서 제출하면 v{initialVersion + 1}로 저장됩니다</span>
-            </p>
-          )}
+        <div className="flex-1 overflow-y-auto px-4 py-5 sm:px-7">
+          {/*
+            WA-35 — 낸 것과 **다른 것**을 보고 있을 때만 한 줄(임시본·못 불러옴). 낸 판에서 시작하면 말하지 않는다 —
+            [열기]로 열었으니 당연하다(R15, 2026-10-08)
+          */}
           {from === 'draft' && (
             <p className="mb-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-body">
               <span className="font-semibold text-ink">저장하지 않은 임시본에서 이어 씁니다</span>
@@ -318,26 +363,19 @@ export function WebComposer({
             onCopyPlansToAchievements={(rows) => appendRows('achievements', rows)}
           />
           {SECTIONS.map((s) => (
-            <section key={s.key} className="mb-5">
-              <div className="mb-2 flex items-baseline gap-2">
-                <h3 className="text-[15px] font-bold text-ink">
+            // CP-104 — 사용 안내는 첫 표(실적)를 가리킨다
+            <section key={s.key} data-guide={s.key === 'achievements' ? 'compose-table' : undefined} className="mb-6">
+              <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <h3 className="text-[15px] font-semibold text-ink">
                   {s.no}. {s.title}
                 </h3>
-                <span className="text-xs text-muted-soft">{s.hint}</span>
-                <span className="ml-auto text-xs font-medium text-muted">{filled[s.key]}줄</span>
-                {filled[s.key] > 0 && (
-                  <button
-                    onClick={() => clearSection(s.key)}
-                    className="rounded-md px-2 py-0.5 text-xs text-muted-soft hover:bg-error/10 hover:text-error"
-                  >
-                    비우기
-                  </button>
-                )}
+                <span className="text-xs text-muted">{s.hint}</span>
+                <span className="ml-auto text-xs font-medium text-muted tabular-nums">{filled[s.key]}줄</span>
               </div>
 
-              <div className="overflow-hidden rounded-xl border border-hairline">
-                {/* 머리글 — 한글 표와 같은 이름·순서 */}
-                <div className="flex gap-1.5 border-b border-hairline bg-surface-card px-2.5 py-1.5 text-[11px] font-semibold text-muted">
+              <div className="overflow-hidden rounded-lg border border-hairline">
+                {/* 머리글 — 한글 표와 같은 이름·순서. 좁은 화면에서는 칸이 두 줄로 쌓이므로 머리글을 감춘다 */}
+                <div className="hidden gap-1.5 border-b border-hairline bg-surface-soft px-2.5 py-1.5 text-xs font-medium text-muted sm:flex">
                   <span className="w-9 shrink-0 text-center">구분</span>
                   <span className="flex-1">업무 내용</span>
                   <span className="w-[74px] shrink-0">일자</span>
@@ -345,10 +383,10 @@ export function WebComposer({
                   <span className="w-28 shrink-0">참석자</span>
                   {/* WA-36 — 이름 없는 칸의 버튼은 뜻을 짐작하게 된다. 파란 점은 문서에 나가는 그 색이다 */}
                   <span className="w-10 shrink-0 text-center whitespace-nowrap">
-                    <span aria-hidden className="mr-0.5 inline-block size-1.5 rounded-full bg-[#0000ff] align-middle" />
+                    <span aria-hidden className="mr-0.5 inline-block size-1.5 rounded-full bg-emphasis align-middle" />
                     공유
                   </span>
-                  <span className="w-5 shrink-0" />
+                  <span className="w-6 shrink-0" />
                 </div>
 
                 {data[s.key].map((row, i) => {
@@ -370,72 +408,88 @@ export function WebComposer({
                     ? `${s.no}-${data[s.key].slice(0, i + 1).filter((r) => r.content.trim()).length}`
                     : '';
                   return (
+                    /*
+                      한 줄 = 내용 + 일자·장소·참석자. 넓은 화면은 한글 표처럼 한 줄로,
+                      좁은 화면(400px)은 내용을 한 줄 다 쓰고 나머지 셋을 그 밑에 셋으로 나눈다 —
+                      한 줄에 다섯 칸을 우겨넣으면 「업무 내용」 머리글이 한 글자씩 세로로 쪼개졌다.
+                    */
                     <div
                       key={i}
-                      className={`flex items-center gap-1.5 px-2.5 py-1 ${i % 2 ? 'bg-surface-soft/60' : ''}`}
+                      className={`group grid grid-cols-[1.75rem_minmax(0,1fr)_auto] items-center gap-x-1.5 gap-y-1 px-2 py-1.5 sm:flex sm:px-2.5 sm:py-1 ${
+                        i > 0 ? 'border-t border-hairline-soft sm:border-t-0' : ''
+                      } ${i % 2 ? 'sm:bg-surface-soft/60' : ''}`}
                     >
-                      <span className="w-9 shrink-0 text-center text-[10px] tabular-nums text-muted">
-                        {no}
-                      </span>
+                      <span className="text-center text-xs text-muted tabular-nums sm:w-9 sm:shrink-0">{no}</span>
                       <input
+                        // CP-104 — 사용 안내의 「업무 내용」 단계는 실적 표 첫 칸(붙여넣는 자리)을 가리킨다
+                        data-guide={s.key === 'achievements' && i === 0 ? 'compose-first' : undefined}
                         value={row.content}
                         onChange={(e) => set(s.key, i, 'content', e.target.value)}
                         onPaste={(e) => onPaste(s.key, i, e)}
-                        placeholder={isPasteTarget ? '여기에 한글 표를 붙여넣으세요 (Ctrl+V) · 직접 입력해도 됩니다' : ''}
+                        placeholder={isPasteTarget ? '한글 표 붙여넣기 (Ctrl+V)' : ''}
+                        aria-label={`${s.title} ${i + 1}번째 줄 업무 내용`}
                         aria-describedby={looksEmpty ? `empty-hint-${s.key}-${i}` : undefined}
-                        className={`${cell} flex-1 ${
+                        className={`${cell} sm:flex-1 ${
                           isPasteTarget
                             ? 'border-2 border-dashed border-brand bg-brand-soft placeholder:text-body-strong'
                             : looksEmpty
-                              ? 'border border-warning/50 bg-warning/5'
+                              ? 'border border-warning/50 bg-warning-soft'
                               : ''
                         }`}
                       />
-                      <input
-                        value={row.date}
-                        onChange={(e) => set(s.key, i, 'date', e.target.value)}
-                        placeholder={i === 0 ? hints[s.key] : ''}
-                        className={`${cell} w-[74px] shrink-0`}
-                      />
-                      <input
-                        value={row.place}
-                        onChange={(e) => set(s.key, i, 'place', e.target.value)}
-                        placeholder={i === 0 ? '중회의실' : ''}
-                        className={`${cell} w-28 shrink-0`}
-                      />
-                      <input
-                        value={row.attendee}
-                        onChange={(e) => set(s.key, i, 'attendee', e.target.value)}
-                        placeholder={i === 0 ? '원장 외 3명' : ''}
-                        className={`${cell} w-28 shrink-0`}
-                      />
-                      {/*
-                        HM-37 — 「공유」. 켜면 이 줄이 병합본에 **파란색**으로 나간다.
-                        체크박스가 아니라 **누르는 표식**인 것은 의도다 — 체크박스 스무 개가
-                        칸 옆에 늘어서면 적는 칸보다 체크박스가 먼저 보인다.
-                        켜진 줄만 눈에 띄면 된다.
-                      */}
-                      <button
-                        onClick={() => toggleEmphasis(s.key, i)}
-                        aria-pressed={row.emphasis === true}
-                        aria-label={`${i + 1}번째 줄 공유 표시`}
-                        title="전체 공유·전달이 필요한 주요 사항 — 병합본에 파란색으로 나갑니다"
-                        className={`w-10 shrink-0 rounded border px-1 py-0.5 text-center text-[11px] font-semibold whitespace-nowrap transition-colors ${
-                          row.emphasis
-                            ? 'border-[#0000ff] bg-[#0000ff] text-white'
-                            : 'border-hairline bg-canvas text-muted-soft hover:border-ink hover:text-ink'
-                        }`}
-                      >
-                        공유
-                      </button>
+                      {/* 줄 지우기 — 늘 보이면 스무 줄에 ×가 스무 개다. 그 줄에 손이 갔을 때만 (좁은 화면은 늘) */}
                       <button
                         onClick={() => removeRow(s.key, i)}
                         aria-label={`${i + 1}번째 줄 지우기`}
-                        className="w-5 shrink-0 rounded text-base leading-none text-muted-soft hover:text-error"
+                        className="h-8 w-6 shrink-0 rounded text-base leading-none text-muted-soft hover:text-error focus:opacity-100 sm:order-last sm:opacity-0 sm:group-focus-within:opacity-100 sm:group-hover:opacity-100"
                         title="이 줄 지우기"
                       >
                         ×
                       </button>
+                      <div className="col-start-2 col-end-4 grid grid-cols-[minmax(0,0.8fr)_minmax(0,1fr)_minmax(0,1fr)_auto] gap-1.5 sm:contents">
+                        <input
+                          value={row.date}
+                          onChange={(e) => set(s.key, i, 'date', e.target.value)}
+                          placeholder={i === 0 ? hints[s.key] : ''}
+                          aria-label={`${s.title} ${i + 1}번째 줄 일자`}
+                          className={`${cell} sm:w-[74px] sm:shrink-0`}
+                        />
+                        <input
+                          value={row.place}
+                          onChange={(e) => set(s.key, i, 'place', e.target.value)}
+                          placeholder={i === 0 ? '중회의실' : ''}
+                          aria-label={`${s.title} ${i + 1}번째 줄 장소`}
+                          className={`${cell} sm:w-28 sm:shrink-0`}
+                        />
+                        <input
+                          value={row.attendee}
+                          onChange={(e) => set(s.key, i, 'attendee', e.target.value)}
+                          placeholder={i === 0 ? '원장 외 3명' : ''}
+                          aria-label={`${s.title} ${i + 1}번째 줄 참석자`}
+                          className={`${cell} sm:w-28 sm:shrink-0`}
+                        />
+                        {/*
+                          HM-37 — 「공유」. 켜면 이 줄이 병합본에 **파란색**으로 나간다.
+                          체크박스가 아니라 **누르는 표식**인 것은 의도다 — 체크박스 스무 개가
+                          칸 옆에 늘어서면 적는 칸보다 체크박스가 먼저 보인다.
+                          켜진 줄만 눈에 띄면 된다.
+                        */}
+                        <button
+                          // CP-104 — 사용 안내의 「공유」 단계는 실적 표 첫 줄의 이 버튼을 가리킨다
+                          data-guide={s.key === 'achievements' && i === 0 ? 'compose-share' : undefined}
+                          onClick={() => toggleEmphasis(s.key, i)}
+                          aria-pressed={row.emphasis === true}
+                          aria-label={`${i + 1}번째 줄 공유 표시`}
+                          title="파란색으로 나감"
+                          className={`h-8 w-10 shrink-0 rounded-md border px-1 text-center text-xs font-semibold whitespace-nowrap transition-colors ${
+                            row.emphasis
+                              ? 'border-emphasis bg-emphasis text-white'
+                              : 'border-hairline bg-canvas text-muted hover:border-ink hover:text-ink'
+                          }`}
+                        >
+                          공유
+                        </button>
+                      </div>
                     </div>
                   );
                 })}
@@ -444,41 +498,28 @@ export function WebComposer({
                   잔소리는 다음부터 안 읽힌다. 「비워두셔도 됩니다」가 이 안내의 전부다.
                 */}
                 {emptyWords.length > 0 && data[s.key].some((r) => flagWordOf(r.content, emptyWords)) && (
-                  <p className="px-2.5 py-1.5 text-xs leading-5 text-body">
-                    <span className="font-medium text-ink">「없음」이라고 적으신 칸이 있어요.</span>{' '}
-                    적을 내용이 없으면 <strong className="font-medium">비워두셔도 됩니다</strong> — 그대로 두셔도 제출은 됩니다.
+                  <p className="border-t border-hairline-soft px-2.5 py-1.5 text-xs leading-5 text-body">
+                    「없음」 칸은 비워도 됩니다
                   </p>
                 )}
               </div>
             </section>
           ))}
-
-          <p className="pb-2 text-xs leading-6 text-muted-soft">
-            {/* WA-36 — 「공유」의 뜻. 툴팁은 터치·좁은 화면에서 안 뜬다 */}
-            <span className="font-medium text-[#0000ff]">공유</span> — 전 직원에게 전할 주요 사항에 누릅니다. 병합본에
-            파란색으로 나갑니다
-            <br />
-            일자는 특정 날짜가 있는 업무만 적습니다 (상시 업무는 비워 두세요) ·
-            빈 줄은 저장되지 않습니다 · 구분 번호는 제출할 때 다시 매겨집니다
-          </p>
         </div>
 
-        {/* 바닥 */}
-        <div className="flex items-center justify-between gap-3 border-t border-hairline bg-surface-soft px-7 py-3.5">
+        {/* 바닥 — 이 화면의 주 버튼은 [제출] 하나다 */}
+        <div data-guide="compose-footer" className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-hairline bg-canvas px-4 py-3 sm:px-7">
           <span aria-live="polite" className={`text-sm font-medium ${msg?.ok ? 'text-success' : 'text-error'}`}>
             {msg?.text}
           </span>
-          <div className="flex items-center gap-4">
-            {total > 0 && (
-              <button onClick={clearAll} className="text-sm text-muted-soft hover:text-error">
-                전체 지우기
-              </button>
-            )}
-            <span className="text-sm text-muted">
-              실적 {filled.achievements} · 계획 {filled.plans}
-              {filled.notes > 0 && ` · 특이 ${filled.notes}`}
-            </span>
-            <button onClick={submit} disabled={busy || total === 0} className="btn-primary">
+          <div className="ml-auto flex items-center gap-3 sm:gap-4">
+            {/* WA-37 — 낸 판으로 연 화면은 내용이 바뀌기 전에는 꺼져 있다 · 낸 뒤 닫히기까지도 꺼져 있다. 2026-10-08 — [전체 지우기]·합계는 걷었다(R15) */}
+            <button
+              data-guide="compose-submit"
+              onClick={submit}
+              disabled={submitBlocked({ busy, done, filled: total, from, unchanged })}
+              className="btn-primary"
+            >
               {busy ? '제출 중…' : '제출'}
             </button>
           </div>

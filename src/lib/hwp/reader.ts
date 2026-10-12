@@ -36,7 +36,7 @@ export const TABLE_TITLES = ['1. 주요 업무실적', '2. 주요 업무계획',
 export const TABLE_COLUMNS = ['구분', '업무실적 내용', '일자', '장소', '참석자'] as const;
 
 /** HM-15g — 자리표시자·공백 정규화 */
-function cellValue(raw: string): string {
+export function cellValue(raw: string): string {
   const v = raw.trim();
   if (/^O{2,}\/O{2,}$/i.test(v)) return ''; // "OO/OO"
   return v;
@@ -51,7 +51,7 @@ function cellValue(raw: string): string {
  * 한 글자라도 색이면 그 줄을 강조로 친다 — 「제5차 공청회 **(원장 참석)**」처럼 일부만
  * 칠하는 경우가 실제로 있고, 그때 표시된 뜻은 그 줄 전체에 걸린다.
  */
-function rowEmphasis(t: HwpTable, colors: readonly number[]): Map<number, boolean> {
+export function rowEmphasis(t: HwpTable, colors: readonly number[]): Map<number, boolean> {
   const out = new Map<number, boolean>();
   for (const c of t.cells) {
     if (c.col !== 1 || c.row < 1) continue;

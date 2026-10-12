@@ -110,7 +110,7 @@ export async function uploadSubmission(input: UploadInput, now = new Date()): Pr
       data: { isLatest: false },
     });
     const version = (last?.version ?? 0) + 1;
-    const rel = submissionRelPath(division.slug, slot.year, slot.label, user.name, version);
+    const rel = submissionRelPath(division.slug, slot.year, slot.label, user, version); // ST-02a — 이름 + 사람 꼬리
     const created = await tx.submission.create({
       data: {
         divisionId: division.id, // DM-12: 서버가 채운다. 요청 값 아님
@@ -183,7 +183,7 @@ export async function reviseSubmission(input: {
     target.division.slug,
     target.weekSlot.year,
     target.weekSlot.label,
-    target.user.name,
+    target.user, // ST-02a — 주인(그 부서원)의 꼬리. 고친 사람이 아니다
     version,
     `e${randomUUID().slice(0, 8)}`,
   );
@@ -281,7 +281,8 @@ export async function divisionStatus(divisionId: string, slotId: string): Promis
    */
   const notified = new Map<string, string>();
   // NT-31 — 「알림 받음」은 **마감 재촉 알림**만 센다. 승인 알림(NT-46)·병합 안내·3단계 알림까지 세면
-  // 그것을 받은 담당자가 「재촉받은 사람」으로 보인다 (2026-10-07 리뷰)
+  // 그것을 받은 담당자가 「재촉받은 사람」으로 보인다 (2026-10-07 리뷰).
+  // `deadline_day`(당일 아침, NT-45)는 2026-10-08에 걷었지만 지난 주차에는 그 기록이 있다 — 그 주를 열면 여전히 센다
   const logs = await prisma.notifyLog.findMany({
     where: { divisionId, weekSlotId: slotId, kind: { in: ['deadline_1d', 'deadline_day', 'deadline_1h', 'deadline_10m'] } },
   });
@@ -326,17 +327,35 @@ export async function divisionStatus(divisionId: string, slotId: string): Promis
   };
 }
 
-/** 부서 관점 주차 목록 (API-30 상당) */
-export async function divisionSlots(divisionId: string, limit = 26) {
-  const slots = await prisma.weekSlot.findMany({ orderBy: { opensAt: 'desc' }, take: limit });
-  const counts = await prisma.submission.groupBy({
-    by: ['weekSlotId'],
-    where: { divisionId, isLatest: true, weekSlotId: { in: slots.map((s) => s.id) } },
-    _count: { _all: true },
-  });
-  const roster = await prisma.user.count({ where: { divisionId, isActive: true, onRoster: true } });
-  const byId = new Map(counts.map((c) => [c.weekSlotId, c._count._all]));
-  return { slots, roster, submittedOf: (slotId: string) => byId.get(slotId) ?? 0 };
+/**
+ * PG-72 — 수합 관리의 주차 목록. **근거 있는 주만, 상한 없이.**
+ *
+ *   들어가는 주: (이 부서에 제출이 있는 주 ∪ 성공 병합본이 있는 주) ∪ 이번 주 ∪ 지금 보는 주. 최신이 위
+ *   수: 분자는 명단 안(onRoster ∧ isActive) 사람의 최신 제출, 분모는 지금 명단 수 — 제출 현황(PG-18)과 같은 기준
+ *
+ * 예전(`divisionSlots`)은 서버의 최근 26주를 그대로 늘어놓고 명단 밖 제출까지 세서, 쓰지 않은 주가 끼고
+ * 「12/11」이 나왔으며 반년이 지나면 옛 주가 목록에서 소리 없이 빠졌다.
+ */
+export async function divisionWeeks(divisionId: string, viewingSlotId?: string, now = new Date()) {
+  const current = currentWeek(now);
+  const [slots, any, counted, merged, roster] = await Promise.all([
+    prisma.weekSlot.findMany({ where: { opensAt: { lte: current.opensAt } }, orderBy: { opensAt: 'desc' } }),
+    prisma.submission.groupBy({ by: ['weekSlotId'], where: { divisionId, isLatest: true } }),
+    prisma.submission.groupBy({
+      by: ['weekSlotId'],
+      where: { divisionId, isLatest: true, user: { onRoster: true, isActive: true } },
+      _count: { _all: true },
+    }),
+    prisma.mergeRun.groupBy({ by: ['weekSlotId'], where: { divisionId, status: 'succeeded', outputPath: { not: null } } }),
+    prisma.user.count({ where: { divisionId, isActive: true, onRoster: true } }),
+  ]);
+  const evidence = new Set([...any.map((r) => r.weekSlotId), ...merged.map((r) => r.weekSlotId)]);
+  const byId = new Map(counted.map((c) => [c.weekSlotId, c._count._all]));
+  return {
+    slots: slots.filter((s) => evidence.has(s.id) || s.isoKey === current.isoKey || s.id === viewingSlotId),
+    roster,
+    submittedOf: (slotId: string) => byId.get(slotId) ?? 0,
+  };
 }
 
 export function effectiveDeadline(slot: WeekSlot, division: Division): Date {
@@ -390,6 +409,14 @@ export async function deleteSubmission(
   });
 
   for (const s of siblings) {
+    /*
+     * ST-34 (2026-10-10) — **그 제출물만 가리키는 파일만** 지운다. 꼬리(ST-02a) 전의 경로는 이름만이라, 같은 부서의 동명이인이
+     * 같은 주에 내면 두 행이 한 파일을 가리켰다. 그때 한 사람이 취소하면 다른 사람의 파일이 지워졌다 — 남은 행이 가리키면 둔다.
+     */
+    if ((await prisma.submission.count({ where: { filePath: s.filePath } })) > 0) {
+      logger.warn({ submissionId: s.id, relPath: s.filePath }, 'delete: 다른 제출물이 같은 파일을 가리켜 파일은 남긴다 (ST-34)');
+      continue;
+    }
     try {
       await unlink(resolveInRoot(s.filePath));
     } catch (e) {

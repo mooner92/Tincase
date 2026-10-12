@@ -10,7 +10,7 @@
 // 열어 두고 잊는 것이 이 기능의 유일한 위험이다 — 그러면 마감이 사실상 없어진다.
 // 그래서 여는 것이 아니라 **「언제까지」를 정하는 것**으로 만들었다. 시각이 지나면
 // 아무도 손대지 않아도 닫힌다. 사람이 기억해야 지켜지는 규칙은 언젠가 안 지켜진다.
-import { isLocked, type DeadlinePolicy, type SlotDeadline } from './week';
+import { isLocked, nextKstMidnight, type DeadlinePolicy, type SlotDeadline } from './week';
 
 /** 한 번 열 때 주는 시간. 대외 마감(15:00)까지 손쓸 수 있는 만큼 */
 export const OPEN_MINUTES = 30;
@@ -41,6 +41,32 @@ export function isSubmissionLocked(
 ): boolean {
   if (!isLocked(slot, division, now)) return false;
   return !isOpenNow(open, now);
+}
+
+/**
+ * PG-67d — 부서원 홈이 **보이지 않게** 새로 고칠 시각. 아래 가운데 `now`보다 뒤인 가장 이른 것:
+ *
+ *   열린 동안(open)     마감 — [작성하기]·[제출 취소]가 사라져야 한다
+ *   열림 동안(opened)   `openUntil` — 담당자가 연 30분이 끝난다 (TACP-18)
+ *   잠기기 전           다음 KST 자정 — 「내일 14:00」이 「오늘 14:00」이 된다
+ *   늘                  다음 주 월요일 00:00 KST — 이번 주 카드가 지난 주차로 내려간다
+ *
+ * 카운트다운을 지우면서 남긴 것은 이 일 하나다(옛 CP-13). 화면에 그리는 것은 없다.
+ */
+export function homeRefreshAt(i: {
+  now: Date;
+  phase: 'open' | 'opened' | 'locked';
+  deadline: Date;
+  openUntil: Date | null;
+  nextMonday: Date;
+}): Date {
+  const t = i.now.getTime();
+  const midnight = nextKstMidnight(i.now);
+  const cands = [i.nextMonday];
+  if (i.phase === 'open') cands.push(i.deadline, midnight);
+  if (i.phase === 'opened' && i.openUntil) cands.push(i.openUntil, midnight);
+  const later = cands.filter((d) => d.getTime() > t).sort((a, b) => a.getTime() - b.getTime());
+  return later[0] ?? i.nextMonday;
 }
 
 /**

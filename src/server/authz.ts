@@ -6,6 +6,8 @@ import { prisma } from './db';
 import { audit } from './audit';
 import { openingOf } from './deadline';
 import { isSubmissionLocked } from '@/lib/deadline';
+import { hqNodeOf, loadOrgSetting, loadTree, submitTarget, type RollupNode } from './rollup/tree';
+import type { GuideCap } from '@/lib/guide/deck';
 
 export class HttpError extends Error {
   constructor(
@@ -51,6 +53,20 @@ export function isDocumentManager(user: Pick<User, 'divisionRole'>): boolean {
   return user.divisionRole === 'lead' || user.divisionRole === 'head';
 }
 
+/**
+ * AU-04b · TACP §5 판정 순서 2 (v1.14) — **이 사람이 지금 Tincase에 들어올 수 있나.** 활성 계정 그리고 (부서 켜짐 또는 운영자).
+ *
+ * `requireScope`(아니면 403)와 비밀번호 찾기(AU-32a — 아니면 링크를 보내지 않는다)가 같은 식을 본다. 비밀번호 찾기가 이 식을 따로 적지
+ * 않고 여기를 부르는 이유: 2026-10-10까지 그 길은 부서 켜짐을 보지 않아, 꺼진 부서 사람(정해도 로그인할 수 없는 사람)에게도 실제 쪽지가 갔다.
+ * 두 곳이 같은 판정을 따로 적으면 다음에 한쪽만 바뀐다 (TACP-12).
+ */
+export function canSignIn(
+  user: Pick<User, 'isActive' | 'isOperator'>,
+  division: Pick<Division, 'isActive'>,
+): boolean {
+  return user.isActive && (division.isActive || user.isOperator);
+}
+
 /** AU-04/04b — 신원 → 활성 사용자 + 부서. 신원 출처(세션/Cloudflare)는 여기서 흡수된다 */
 export async function requireScope(headers: Headers): Promise<Scope> {
   const identity = await verifyAccess(headers);
@@ -60,7 +76,7 @@ export async function requireScope(headers: Headers): Promise<Scope> {
   if (!user || !user.isActive) {
     throw new HttpError(403, 'not_registered', '등록되지 않은 사용자입니다. 운영자에게 문의하세요.');
   }
-  if (!user.division.isActive && !user.isOperator) {
+  if (!canSignIn(user, user.division)) {
     throw new HttpError(
       403,
       'division_not_onboarded',
@@ -109,6 +125,21 @@ export async function requireOwnManager(headers: Headers): Promise<Scope> {
 }
 
 /**
+ * TACP-23 v1.7.2 · RU-71 — 병합본을 고쳐 저장한 사람이 **그 부서에서 무엇인가** — 고친 기록(`reviewJson.edits`)의 `role`.
+ *   head      부서장 — 그 저장이 곧 승인이다(HM-47)
+ *   lead      부서담당자 — 부서장 없는 단위에서는 그 단위의 결론이다(위로 간다)
+ *   operator  그 부서의 lead·head가 아닌 운영자(`requireOwnManager`가 들여보낸 §3.2 「write(자기 부서)」) — 그 부서의 결정이 아니다.
+ *             부서장 없는 단위에서도 위로 가지 않는다(TACP-3 「문서는 부서가」의 자동판)
+ * 역할이 겹치면 부서 역할이 이긴다 — 자기 부서의 lead인 운영자는 lead다(§2 「한 사람이 여러 모자」).
+ * 라우트가 `isHead`·`isLead`를 비교하지 않게 여기 둔다 (TACP-12).
+ */
+export function unitEditorRole(scope: Pick<Scope, 'isHead' | 'isLead'>): 'head' | 'lead' | 'operator' {
+  if (scope.isHead) return 'head';
+  if (scope.isLead) return 'lead';
+  return 'operator';
+}
+
+/**
  * TACP-16 · HM-47 — **병합본 승인 진입점.** head(실장·팀장·본부장…)만, 그것도 **자기 부서**만.
  * lead는 자기가 만든 문서를 승인하지 않는다 — 「검토했다」는 기록은 검토할 사람만 남긴다.
  * 대상 부서는 신원의 부서다 (TACP-6). 한 사람이 lead이면서 head일 수는 없다(역할 하나).
@@ -150,8 +181,71 @@ export async function requireSubmitter(headers: Headers): Promise<Scope> {
  */
 export async function requireOperator(headers: Headers): Promise<Scope> {
   const scope = await requireScope(headers);
-  if (!scope.user.isOperator) throw notFound();
+  if (!canOperate(scope.user)) throw notFound();
   return scope;
+}
+
+/**
+ * 운영(`/ops`)의 문 — 화면이 「← 운영」 같은 길을 그릴지도 이것으로 정한다 (TACP-9).
+ * 페이지가 `user.isOperator`를 직접 읽으면 문과 길이 따로 적힌다 (TACP-12).
+ */
+export function canOperate(user: Pick<User, 'isOperator'>): boolean {
+  return user.isOperator;
+}
+
+/**
+ * TACP §3.1 「감사 로그」 · v1.14 · AU-09a — 감사 로그를 읽는가. **운영자만.**
+ *
+ * readAll(총괄)이 아니다. 감사 로그는 부서 문서가 아니라 **사람들의 행동 기록**(로그인·비밀번호 초기화·내려받기)이고,
+ * TACP-8의 「전 부서 읽기」는 부서 문서에 대한 것이다. 2026-10-10까지 페이지가 `readAll`로 문을 열어 총괄이 전부를 읽었다(§9).
+ * 페이지의 문과 그리로 가는 링크(`/ops` · 「전사」 `orgPageView().audit`)가 이 하나를 본다 — 둘이 따로 적히면 갈라진다(TACP-9·12).
+ */
+export function canReadAuditLog(user: Pick<User, 'isOperator'>): boolean {
+  return canOperate(user);
+}
+
+/** HM-54 · TACP-30 — 「병합 점검」 요약을 받는 사람 한 명 */
+export interface MergeBatchRecipient {
+  id: string;
+  name: string;
+  employeeNo: string;
+  divisionId: string;
+  /** 운영자인가 — 링크(`/ops` 「병합 줄」)를 붙일지 정한다. 기획조정실 담당은 그 화면을 열 수 없다 */
+  operator: boolean;
+}
+
+/**
+ * TACP-30 (v1.10) — 「병합 점검」 요약(HM-54)을 **누가 받나.** 운영자 + 기획조정실 담당.
+ *
+ * 기획조정실은 이름으로 찾지 않는다 — **총괄(`isCoordinator`, 활성)이 있는 부서**다(RU-68 전사본 양식 후보와 같은 판정). 그 부서의 `lead`가
+ * 받는다(사용자 결정 2026-10-08 — 마감 병합이 다 끝났는지 확인하고 알리는 일을 기획조정실이 맡는다). 총괄은 총괄이라서 받지는 않는다(고른 안이 아니다) —
+ * 판정은 역할(`divisionRole`)이라, 총괄이 그 부서의 lead이기도 하면 lead로서 받는다.
+ * 그 lead가 남의 부서 문서를 읽게 되는 것이 아니다 — 요약은 부서 이름과 상태뿐이다(§3.3 그대로).
+ * 알림 공통 조건: 활성 · 알림 켬(NT-20) · 사번 있음(NT-01). 한 사람이 둘 다여도 한 번(사번으로).
+ */
+export async function mergeBatchAudience(): Promise<MergeBatchRecipient[]> {
+  const coordDivisions = await prisma.division.findMany({
+    where: { users: { some: { isCoordinator: true, isActive: true } } },
+    select: { id: true },
+  });
+  const users = await prisma.user.findMany({
+    where: {
+      isActive: true,
+      notifyEnabled: true,
+      employeeNo: { not: null },
+      OR: [{ isOperator: true }, { divisionRole: 'lead', divisionId: { in: coordDivisions.map((d) => d.id) } }],
+    },
+    select: { id: true, name: true, employeeNo: true, divisionId: true, isOperator: true },
+    orderBy: { id: 'asc' },
+  });
+  const seen = new Set<string>();
+  const out: MergeBatchRecipient[] = [];
+  for (const u of users) {
+    if (!u.employeeNo || seen.has(u.employeeNo)) continue;
+    seen.add(u.employeeNo);
+    out.push({ id: u.id, name: u.name, employeeNo: u.employeeNo, divisionId: u.divisionId, operator: canOperate(u) });
+  }
+  return out;
 }
 
 /**
@@ -346,4 +440,256 @@ export async function requireMergedAccess(
 
   if (!scope.readAll) throw notFound();
   await audit(scope.user.email, 'cross_division_read', divisionId, 'merged');
+}
+
+// ── TACP-21 — 위로 올린 제출 (본부·전사 취합) ─────────────────────────────
+
+/** RU-52 — 3단계 취합을 쓰는가. 꺼져 있으면 3단계의 문은 운영자의 설정 화면 하나뿐이다 */
+async function rollupOn(): Promise<boolean> {
+  return (await loadOrgSetting()).enabled;
+}
+
+/**
+ * TACP-21 v1.7 · RU-80 — 「위로」 상태 카드와 **내 부서 사본의 행방**(본부 도착 · 본부장 승인 · 총괄 도착 시각)을 보는가.
+ * 내 부서의 lead·head. 예전의 [제출]·취소 권한(`canSendReport`·`requireReportSender`)은 v1.7에서 없어졌다 — 승인이 곧 제출이다(TACP-23).
+ * 화면(카드)과 API(`GET /api/rollup/report`의 행방)가 이 하나를 본다 (TACP-9)
+ */
+export function canSeeHandoff(scope: Pick<Scope, 'isManager'>): boolean {
+  return scope.isManager;
+}
+
+/**
+ * RU-77 · TACP-23 — **비상구 「승인 없이 올리기」**를 쓸 수 있는 사람인가 — 그 단계의 lead만. head는 승인하면 되므로 없다
+ * (TACP-16의 「검토했다」는 기록을 흐리지 않는다). 시간 창·「이미 올라감」·「최종본 아님」은 게이트가 아니라 업무 규칙(409)이다.
+ */
+export function canUseHandoffEscape(scope: Pick<Scope, 'isLead'>): boolean {
+  return scope.isLead;
+}
+
+/**
+ * RU-77 — 비상구 진입점. 3단계가 켜져 있고(RU-52) — `unit`: 내 부서가 기여 단위이고 lead · `hq`: 내 부서가 본부 단계가 있는 본부이고 lead.
+ * 대상은 신원의 부서다(TACP-6). 그 외 404.
+ */
+export async function requireHandoffEscape(headers: Headers, level: 'unit' | 'hq'): Promise<{ scope: Scope; node: RollupNode | null }> {
+  const scope = await requireScope(headers);
+  if (!canUseHandoffEscape(scope) || !(await rollupOn())) throw notFound();
+  const tree = await loadTree();
+  if (level === 'hq') {
+    const node = hqNodeOf(tree, scope.division.id);
+    if (!node) throw notFound();
+    return { scope, node };
+  }
+  if (!submitTarget(tree, scope.division.id)) throw notFound();
+  return { scope, node: null };
+}
+
+/**
+ * TACP-21 — 본부 단계 **쓰기** 판정 (이미 인증한 scope). 내 부서가 본부 단계가 있는 본부(RU-07)이고 내가 lead·head일 때만.
+ * 「어느 본부인가」는 신원의 부서가 정한다 — 요청 값이 정하지 않는다 (TACP-6).
+ */
+export async function hqNodeOfManager(scope: Scope): Promise<RollupNode> {
+  if (!scope.isManager || !(await rollupOn())) throw notFound();
+  const node = hqNodeOf(await loadTree(), scope.division.id);
+  if (!node) throw notFound();
+  return node;
+}
+
+/** TACP-21 — 본부 단계 **쓰기** 진입점 — 순서·쪽 나누기·자기 문서 포함, 실패 때 [다시 시도] (TACP-23) */
+export async function requireHqManager(headers: Headers): Promise<{ scope: Scope; node: RollupNode }> {
+  const scope = await requireScope(headers);
+  return { scope, node: await hqNodeOfManager(scope) };
+}
+
+/**
+ * RU-55 · TACP-23 — **본부본 승인 = 총괄로 제출** 진입점. `requireHqManager` + head(이면서 lead 아님) — HM-47과 같은 규칙:
+ * 담당자는 자기가 만든 것을 승인하지 않는다. 라우트가 `isReviewer`를 따로 부르던 것을 대신한다 (TACP-12).
+ */
+export async function requireHqReviewer(headers: Headers): Promise<{ scope: Scope; node: RollupNode }> {
+  const { scope, node } = await requireHqManager(headers);
+  if (!isReviewer(scope)) throw notFound();
+  return { scope, node };
+}
+
+/**
+ * TACP-21 — 본부 화면 **읽기** 대상 해석. 내 본부(lead·head) 또는 readAll의 다른 본부.
+ * TACP-7의 본부판이다 — 본부 화면은 이 함수가 돌려준 본부만 그린다.
+ */
+export async function resolveHqView(
+  scope: Scope,
+  slug?: string | null,
+): Promise<{ node: RollupNode; canWrite: boolean }> {
+  if (!(await rollupOn()) && !scope.user.isOperator) throw notFound(); // RU-52
+  const tree = await loadTree();
+  const own = scope.isManager ? hqNodeOf(tree, scope.division.id) : null;
+  if (own && (!slug || slug === own.node.slug)) return { node: own, canWrite: true };
+  if (scope.readAll) {
+    const other = slug ? tree.nodes.find((n) => n.node.slug === slug && n.hasHqStep) : null;
+    if (other) {
+      if (other.node.id !== scope.division.id) {
+        await audit(scope.user.email, 'cross_division_read', other.node.id, `hq:${other.node.slug}`);
+      }
+      return { node: other, canWrite: false }; // TACP-8 — readAll은 읽기만
+    }
+  }
+  throw notFound();
+}
+
+/** TACP-21 — 전사 이어 붙이기를 할 수 있는가 (총괄·운영자 — §3.2 「전사 병합 실행」과 같은 칸) */
+export function canRunOrgRollup(user: Pick<User, 'isOperator' | 'isCoordinator'>): boolean {
+  return user.isOperator || user.isCoordinator;
+}
+
+/**
+ * TACP-21 · RU-52 — 전사 취합의 문. `/api/rollup/org/*`·메뉴·「전사」 화면의 취합 부분(`orgPageView().desk`)이 이 하나를 본다.
+ * 페이지가 `canRunOrgRollup`만 보고 스위치를 빠뜨리면, 꺼 둔 3단계가 총괄에게 그대로 열린다 — 판정을 복사하지 않는다 (TACP-12).
+ */
+export async function canOpenOrgDesk(scope: Scope): Promise<boolean> {
+  if (!canRunOrgRollup(scope.user)) return false;
+  // RU-52 — 꺼져 있을 때는 운영자만 (켜는 사람). 총괄에게는 켠 뒤에 열린다
+  return scope.user.isOperator || (await rollupOn());
+}
+
+export async function requireOrgRollup(headers: Headers): Promise<Scope> {
+  const scope = await requireScope(headers);
+  if (!(await canOpenOrgDesk(scope))) throw notFound();
+  return scope;
+}
+
+/**
+ * PG-49f · PG-51e — 「전사」 화면(`/org`)에서 **이 사람에게 그릴 것**. 화면은 이 값만 보고 그린다 (TACP-9·12).
+ *
+ *   progress  섹션별 제출 막대·미제출 이름·감사 문서·CSV — 전 부서를 늘어놓으므로 readAll (TACP §3.2)
+ *   desk      최종본 열·파일 올리기·만들기·섹션 구성 편집·본부 취합 길·3단계 스위치 — `canOpenOrgDesk`(RU-52 스위치 포함)
+ *   schedule  마감 바꾸기 (TACP-20)
+ *   operate   「← 운영」 (`/ops`의 문)
+ *   audit     「감사 로그」 링크 — `canReadAuditLog`(운영자만, TACP §3.1 · v1.14). progress에 묶여 있어 총괄에게 404로 가는 링크였다
+ *
+ * 문(`open`)은 둘 중 하나라도 있으면 열린다. 예전에는 [현황]·[취합] 두 탭이 각자 문을 가졌다(PG-49e) —
+ * 한 화면이 되면서 「무엇을 그리나」로 바뀌었다. 판정을 페이지에 풀어 적지 않는다 (TACP-12).
+ */
+export async function orgPageView(scope: Scope): Promise<{
+  open: boolean;
+  progress: boolean;
+  desk: boolean;
+  schedule: boolean;
+  operate: boolean;
+  audit: boolean;
+}> {
+  const progress = canReadAllDivisions(scope.user);
+  const desk = await canOpenOrgDesk(scope);
+  return {
+    open: progress || desk,
+    progress,
+    desk,
+    schedule: canScheduleDeadlines(scope.user),
+    operate: canOperate(scope.user),
+    audit: canReadAuditLog(scope.user),
+  };
+}
+
+/** 메뉴용 — 이 사람에게 본부 취합 화면이 있는가 (TACP-9: 할 수 없는 곳으로 가는 길은 그리지 않는다) */
+export async function hasHqDesk(scope: Scope): Promise<boolean> {
+  return scope.isManager && (await rollupOn()) && hqNodeOf(await loadTree(), scope.division.id) !== null;
+}
+
+/**
+ * TACP-21 — **보낸 사본** 읽기 판정. 반환되면 허용된 것이다.
+ *
+ *   보낸 부서 (`unit`)   부서원 모두 (TACP-15와 같은 넓이 — 위로 보낸 내 부서 문서다)
+ *   보낸 본부 (`hq`)     그 본부의 lead·head만 — 본부본은 「본부: write와 같음」(§TACP-21 표). 본부원(member)은 404
+ *   받는 본부            그 본부의 lead·head — 산하 단위가 보낸 `unit` 사본만 + 감사
+ *   readAll             전부 + 감사 (타 부서일 때)
+ *   그 외               404
+ */
+export async function findReadableReport(scope: Scope, reportId: string) {
+  const r = await prisma.reportSubmission.findUnique({
+    where: { id: reportId },
+    include: { division: true, weekSlot: true },
+  });
+  if (!r) throw notFound();
+  // 내 부서가 보낸 것 — 실·팀 사본은 부서원 모두, 본부본은 본부의 lead·head만
+  if (r.divisionId === scope.division.id && (r.level === 'unit' || scope.isManager)) return r;
+  if (r.level === 'unit' && scope.isManager) {
+    const node = hqNodeOf(await loadTree(), scope.division.id);
+    if (node?.contributors.some((c) => c.id === r.divisionId)) {
+      await audit(scope.user.email, 'cross_division_read', r.divisionId, `report:${r.id}`);
+      return r;
+    }
+  }
+  if (scope.readAll) {
+    await audit(scope.user.email, 'cross_division_read', r.divisionId, `report:${r.id}`);
+    return r;
+  }
+  throw notFound();
+}
+
+/** TACP-21 — 이어 붙인 결과 읽기. 본부본: 그 본부의 lead·head + readAll · 전사본: readAll */
+export async function findReadableRollup(scope: Scope, runId: string) {
+  const run = await prisma.rollupRun.findUnique({ where: { id: runId }, include: { weekSlot: true, division: true } });
+  if (!run) throw notFound();
+  if (run.level === 'hq' && run.divisionId === scope.division.id && scope.isManager) return run;
+  if (scope.readAll) {
+    if (run.divisionId && run.divisionId !== scope.division.id) {
+      await audit(scope.user.email, 'cross_division_read', run.divisionId, `rollup:${run.id}`);
+    }
+    return run;
+  }
+  throw notFound();
+}
+
+/**
+ * TACP-21 · RU-60 — 총괄이 올린 **섹션 파일** 내려받기 판정. 반환되면 허용된 것이고, 기록은 이미 남았다.
+ *
+ *   전사 취합의 문(`canOpenOrgDesk`)을 지나는 사람만 — 그 외 404
+ *   취소한 파일          → 404. 최종본에서 빠진 파일이 id만 알면 계속 받히면 「취소」가 화면에서만 일어난 일이 된다
+ *   받으면               → `download` 기록 (TACP-10 — 남의 부서 업무일지 본문이다. 본부본·사본 받기와 같다)
+ *
+ * 라우트가 업로드 행을 직접 조회하던 것을 여기로 옮겼다(TACP-12 — 판정 대상 조회도 판정의 일부다).
+ */
+export async function findReadableSectionUpload(scope: Scope, uploadId: string) {
+  if (!(await canOpenOrgDesk(scope))) throw notFound();
+  const u = await prisma.orgSectionUpload.findUnique({ where: { id: uploadId } });
+  if (!u || u.withdrawnAt) throw notFound();
+  const section = await prisma.orgSection.findUnique({ where: { id: u.sectionId }, select: { divisionId: true } });
+  await audit(scope.user.email, 'download', section?.divisionId ?? null, `org-section-upload:${u.id}`);
+  return u;
+}
+
+/** 메뉴에 그릴 취합 화면 — 헤더를 그리는 서버 쪽에서 한 번에 (TACP-9) */
+export async function rollupNav(scope: Scope): Promise<{ hqDesk: boolean; orgDesk: boolean }> {
+  return { hqDesk: await hasHqDesk(scope), orgDesk: await canOpenOrgDesk(scope) };
+}
+
+/**
+ * PG-61 — 사용 안내(혼자 보기)에서 **이 사람에게 펼칠 단계**. 단계마다 「쓰는 사람」(`GuideCap`)이 붙어 있고,
+ * 여기서 이 사람이 무엇을 갖는지 정한다 (TACP-9 — 할 수 없는 일의 안내를 늘어놓지 않는다 · TACP-12 — 판정은 여기 하나).
+ *
+ * 예전 `/guide`는 페이지 안에서 `scope.isManager`·`scope.isHead`를 직접 보고 절을 거르고 있었다 — 같은 판정이
+ * 화면마다 따로 적히면 갈라진다. 이제 각 칸은 그 행동의 **게이트를 그대로 부른다**: 안내에서 보이는 단계와
+ * 실제로 열리는 화면이 같은 식에서 나온다.
+ *
+ * 발표 모드(/guide/present)는 이것을 쓰지 않는다 — 강당에서 회사 전체에 흐름 전체를 보여 주는 것이다(PG-59).
+ */
+export async function guideCaps(scope: Scope): Promise<GuideCap[]> {
+  const [nav, org, rollup] = await Promise.all([rollupNav(scope), orgPageView(scope), rollupOn()]);
+  const caps: [GuideCap, boolean][] = [
+    ['all', true],
+    ['manager', scope.isManager], // 수합 관리·부서 설정의 문 (TACP-16)
+    ['head', isReviewer(scope)], // 병합본 승인 (HM-47)
+    ['report', canSeeHandoff(scope) && rollup], // 위로 — 「위로」 카드와 같은 식 (RU-80 · RU-52)
+    ['hq', nav.hqDesk],
+    ['org', org.open],
+    ['orgDesk', org.desk],
+    ['schedule', org.schedule],
+  ];
+  return caps.filter(([, on]) => on).map(([c]) => c);
+}
+
+/**
+ * PG-84 · TACP v1.12 노트 — 첫 로그인 **둘러보기 카드를 띄울 사람인가** (화면 판정, 권한 아님).
+ * 운영자는 뺀다(결정 Q5) — 모든 부서·모든 화면을 다루는 사람에게 「처음이시죠?」는 맞지 않는다. 메뉴로는 언제든 본다.
+ * 무엇을 권할지는 `guideCaps`(체험하기와 같은 판정)가 정한다 — 컴포넌트가 역할 플래그를 비교하지 않게(TACP-12)
+ */
+export function tourEligible(scope: Pick<Scope, 'user'>): boolean {
+  return !scope.user.isOperator;
 }

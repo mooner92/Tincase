@@ -168,11 +168,6 @@ export function dayBeforeAt(deadline: Date, hhmm: string): Date {
   return dayOffsetAt(deadline, -1, hhmm);
 }
 
-/** NT-45 — 마감 **당일**의 어느 시각(KST). 「당일 아침 알림」이 나갈 순간을 구한다 */
-export function sameDayAt(deadline: Date, hhmm: string): Date {
-  return dayOffsetAt(deadline, 0, hhmm);
-}
-
 /** 마감 날짜에서 달력으로 `days`일 떨어진 날의 hh:mm (KST) — 뺄셈이 아니라 날짜로 센다 */
 function dayOffsetAt(deadline: Date, days: number, hhmm: string): Date {
   const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(hhmm);
@@ -250,6 +245,29 @@ export function formatDeadlineKo(deadline: Date): string {
   const hh = String(k.getHours()).padStart(2, '0');
   const mm = String(k.getMinutes()).padStart(2, '0');
   return `${k.getMonth() + 1}월 ${k.getDate()}일(${dayNames[k.getDay()]}) ${hh}:${mm}`;
+}
+
+/**
+ * PG-67d — 부서원 카드의 마감 글자. 당일·전날은 「오늘 14:00」·「내일 14:00」, 그 밖에는 `formatDeadlineKo`.
+ *
+ * 카운트다운(옛 CP-11~17)을 지운 자리다. 「22시간 14분」은 매초 바뀌어 눈을 끌지만 할 일은 바꾸지 않는다 —
+ * 사람이 알아야 할 것은 「오늘인가」다. 날짜는 24시간 차이가 아니라 KST **달력 날짜**로 센다(WS-17과 같다).
+ */
+export function formatDeadlineNearKo(deadline: Date, now: Date = new Date()): string {
+  const k = new TZDate(deadline.getTime(), KST);
+  const n = new TZDate(now.getTime(), KST);
+  const day = (d: TZDate) => Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+  const diff = Math.round((day(k) - day(n)) / 86400_000);
+  const hhmm = `${String(k.getHours()).padStart(2, '0')}:${String(k.getMinutes()).padStart(2, '0')}`;
+  if (diff === 0) return `오늘 ${hhmm}`;
+  if (diff === 1) return `내일 ${hhmm}`;
+  return formatDeadlineKo(deadline);
+}
+
+/** 다음 KST 자정 — 「오늘·내일」 글자가 바뀌는 순간 (PG-67d) */
+export function nextKstMidnight(now: Date): Date {
+  const n = new TZDate(now.getTime(), KST);
+  return new Date(new TZDate(n.getFullYear(), n.getMonth(), n.getDate() + 1, 0, 0, 0, 0, KST).getTime());
 }
 
 /** ISO+09:00 직렬화 (API-04) — 클라이언트 재계산 방지 */

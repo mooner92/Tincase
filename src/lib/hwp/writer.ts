@@ -543,13 +543,13 @@ export function appendBodyParagraph(recs: HwpRecord[], text: string): void {
 
 // ── HM-46 — 맨 위 제목 한 줄 (부서명) ──────────────────────────
 
-interface Block {
+export interface Block {
   start: number;
   end: number;
 }
 
 /** 최상위(본문) 문단들의 레코드 범위 */
-function topParagraphs(recs: readonly HwpRecord[]): Block[] {
+export function topParagraphs(recs: readonly HwpRecord[]): Block[] {
   const out: Block[] = [];
   for (let i = 0; i < recs.length; i++) {
     if (recs[i].tag !== TAG.PARA_HEADER || recs[i].level !== 0) continue;
@@ -561,13 +561,13 @@ function topParagraphs(recs: readonly HwpRecord[]): Block[] {
 }
 
 /** 문단 **자신의** 레코드 중 tag인 첫 것. 컨트롤 안쪽(더 깊은 레벨)은 남의 것이다 */
-function ownRecord(recs: readonly HwpRecord[], b: Block, tag: number): number {
+export function ownRecord(recs: readonly HwpRecord[], b: Block, tag: number): number {
   const lv = recs[b.start].level + 1;
   for (let k = b.start + 1; k < b.end; k++) if (recs[k].tag === tag && recs[k].level === lv) return k;
   return -1;
 }
 
-function ownControls(recs: readonly HwpRecord[], b: Block): string[] {
+export function ownControls(recs: readonly HwpRecord[], b: Block): string[] {
   const lv = recs[b.start].level + 1;
   const out: string[] = [];
   for (let k = b.start + 1; k < b.end; k++) {
@@ -576,7 +576,7 @@ function ownControls(recs: readonly HwpRecord[], b: Block): string[] {
   return out;
 }
 
-function ownText(recs: readonly HwpRecord[], b: Block): string {
+export function ownText(recs: readonly HwpRecord[], b: Block): string {
   const k = ownRecord(recs, b, TAG.PARA_TEXT);
   return k < 0 ? '' : paraText(recs[k].data);
 }
@@ -629,7 +629,6 @@ export function prependTitleParagraph(recs: HwpRecord[], title: string): TitleRe
   let bodyEnd = old.length;
   while (bodyEnd > prefix && old.charCodeAt(bodyEnd - 1) < 32) bodyEnd--;
   const heading = old.slice(prefix, bodyEnd);
-  const tail = old.slice(bodyEnd);
 
   // 1) 원래 제목을 바로 아래에 다시 놓는다 (첫 문단이 비어 있었으면 옮길 것이 없다)
   if (heading.trim()) {
@@ -644,14 +643,49 @@ export function prependTitleParagraph(recs: HwpRecord[], title: string): TitleRe
     setCellText(recs, { row: -1, col: -1, start: first.end, end: first.end + copy.length }, heading);
   }
 
-  // 2) 첫 문단 — 컨트롤은 두고 보이는 글자만 부서명으로
+  // 2) 첫 문단 — 컨트롤은 두고 보이는 글자만 부서명으로 (첫 문단은 앞에서 늘어나지 않았다)
+  setParagraphText(recs, { start: first.start, end: first.end }, clean);
+  return 'inserted';
+}
+
+/**
+ * HM-46 · RU-10 — 본문 문단 하나의 **보이는 글자만** 바꾼다.
+ *
+ * 문단 맨 앞의 8칸 컨트롤(첫 문단의 `secd`·`cold`)과 문단 끝 표시는 그대로 둔다.
+ * 한글은 문단 머리가 밝힌 세 수(글자·서식 구간·줄)가 뒤따르는 레코드와 맞는지 본다(HM-28) —
+ * 그래서 셋을 모두 다시 맞춘다:
+ *   글자 수      새 글자 길이로
+ *   서식 구간    새 길이를 넘는 구간은 덜어내고(첫 구간은 남긴다) 구간 수를 고친다
+ *   줄 배치      캐시를 버리고 줄 수를 0으로 — 한글이 열 때 다시 계산한다
+ *
+ * 반환값은 레코드 수 변화다 — 호출자가 뒤쪽 인덱스를 다시 잡아야 한다.
+ */
+export function setParagraphText(recs: HwpRecord[], b: Block, text: string): number {
+  const clean = sanitizeCellText(text).replace(/\n/g, ' ');
+  let delta = 0;
+  let textIdx = ownRecord(recs, b, TAG.PARA_TEXT);
+  let old = '\r';
+  if (textIdx < 0) {
+    // 빈 문단 — 글자 레코드가 없다(HM-11a). 서식은 PARA_CHAR_SHAPE가 들고 있어 새로 만들어도 안전하다
+    textIdx = b.start + 1;
+    recs.splice(textIdx, 0, { tag: TAG.PARA_TEXT, level: recs[b.start].level + 1, data: Buffer.alloc(0), extended: false });
+    delta += 1;
+  } else {
+    old = recs[textIdx].data.toString('ucs2');
+  }
+  const prefix = leadingControlUnits(recs[textIdx].data); // 새로 넣은 빈 레코드면 0
+  let bodyEnd = old.length;
+  while (bodyEnd > prefix && old.charCodeAt(bodyEnd - 1) < 32) bodyEnd--;
+  const tail = old.slice(bodyEnd);
+
   const next = Buffer.from(old.slice(0, prefix) + clean + tail, 'ucs2');
   const nChars = next.length / 2;
   recs[textIdx] = { ...recs[textIdx], data: next };
-  setNChars(recs, first.start, nChars);
+  setNChars(recs, b.start, nChars);
 
-  // 서식 구간이 새 글자 길이를 넘으면 덜어낸다 (첫 구간은 남긴다). 구간 수도 맞춘다
-  const csIdx = ownRecord(recs, first, TAG.PARA_CHAR_SHAPE);
+  const end = b.end + delta;
+  const own = { start: b.start, end };
+  const csIdx = ownRecord(recs, own, TAG.PARA_CHAR_SHAPE);
   if (csIdx >= 0) {
     const d = recs[csIdx].data;
     const keep: Buffer[] = [];
@@ -660,15 +694,15 @@ export function prependTitleParagraph(recs: HwpRecord[], title: string): TitleRe
     }
     if (keep.length * 8 !== d.length) {
       recs[csIdx] = { ...recs[csIdx], data: Buffer.concat(keep) };
-      writeHeaderU16(recs, first.start, 12, keep.length);
+      writeHeaderU16(recs, b.start, 12, keep.length);
     }
   }
 
-  // 3) 줄 배치 캐시는 버리고 줄 수를 0으로 (HM-28) — 첫 문단 자신의 것만
-  const segIdx = ownRecord(recs, first, TAG.PARA_LINE_SEG);
+  const segIdx = ownRecord(recs, own, TAG.PARA_LINE_SEG);
   if (segIdx >= 0) {
     recs.splice(segIdx, 1);
-    writeHeaderU16(recs, first.start, 16, 0);
+    writeHeaderU16(recs, b.start, 16, 0);
+    delta -= 1;
   }
-  return 'inserted';
+  return delta;
 }

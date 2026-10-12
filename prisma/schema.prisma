@@ -59,6 +59,22 @@ model Division {
    */
   notifyEnabled Boolean @default(false)
 
+  /**
+   * RU-20 — **이 단위 아래**(본부라면 자기 문서 + 산하 실·팀)를 이어 붙이는 순서. Division.id의 JSON 배열.
+   * 목록에 없는 단위는 ERP 순서(등록 순서)로 뒤에 붙는다 — 새로 켠 실이 순서에서 사라지지 않게.
+   * 상하 관계는 따로 두지 않고 `parentKo`를 쓴다 — 인원 최신화(RS)가 이미 맞춰 주는 값이다
+   */
+  rollupOrder     String  @default("[]")
+  /// RU-21 — 순서·편집 메모. **사람이 읽는 것**이고 순서는 목록이 정한다 (같은 입력 → 같은 순서)
+  rollupNote      String  @default("")
+  /// RU-10 — 이어 붙일 때 둘째 단위부터 새 쪽에서 시작한다
+  rollupPageBreak Boolean @default(true)
+  /**
+   * RU-08 — 본부일 때 **본부 자기 문서**(본부 직속 인원이 쓴 것)도 이어 붙이는가.
+   * 본부가 켜져 있으면 기본으로 넣는다. 본부 담당자가 산하 실 것만 모으는 본부는 끈다 (Q3)
+   */
+  rollupSelf      Boolean @default(true)
+
   createdAt    DateTime      @default(now())
   users        User[]
   templates    Template[]
@@ -66,6 +82,8 @@ model Division {
   mergeRuns    MergeRun[]
   notifyLogs   NotifyLog[]
   slotOpenings SlotOpening[]
+  reportSubmissions ReportSubmission[]
+  rollupRuns        RollupRun[]
 }
 
 model User {
@@ -113,6 +131,8 @@ model User {
   submissions Submission[]
   sessions    Session[]
   setupTokens SetupToken[]
+  /// DM-25 — 화면 둘러보기 기록. 관계 필드만이라 User 표에 열이 생기지 않는다
+  guideTours  GuideTourSeen[]
 
   @@index([divisionId, isActive, onRoster, sortOrder])
 }
@@ -160,6 +180,8 @@ model WeekSlot {
   mergeRuns    MergeRun[]
   notifyLogs   NotifyLog[]
   slotOpenings SlotOpening[]
+  reportSubmissions ReportSubmission[]
+  rollupRuns        RollupRun[]
 
   @@index([opensAt])
 }
@@ -248,16 +270,19 @@ model StandardTemplate {
 /// **링크를 보내는 것만으로는 기존 비밀번호가 바뀌지 않는다.** 쓰는 순간에만 바뀐다 —
 /// 그래서 이미 쓰고 있는 사람에게 잘못 보내도 그 사람은 아무 영향을 받지 않는다.
 model SetupToken {
-  id        String    @id @default(cuid())
-  userId    String
+  id           String    @id @default(cuid())
+  userId       String
   /// 원문은 어디에도 저장하지 않는다 (세션 토큰과 같은 방식)
-  tokenHash String    @unique
-  expiresAt DateTime
+  tokenHash    String    @unique
+  expiresAt    DateTime
   /// 쓴 시각. 한 번 쓰면 죽는다
-  usedAt    DateTime?
-  /// 누가 보냈나 — 계정 관련 행위에는 언제나 이름이 붙는다
-  createdBy String
-  createdAt DateTime  @default(now())
+  usedAt       DateTime?
+  /// AU-30a (2026-10-10) — 더 새 링크가 나가 죽은 시각. 「쓴 시각」과 다른 칸이다 — 같은 칸에 두면 밀린 링크가
+  /// 「비밀번호가 이미 설정되었습니다」로 보여, 받은 사람이 로그인하러 갔다가 막힌다 (ADR-0020)
+  supersededAt DateTime?
+  /// 누가 보냈나 — 계정 관련 행위에는 언제나 이름이 붙는다. 본인 요청(AU-32)은 `self:<메일>`
+  createdBy    String
+  createdAt    DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -296,6 +321,11 @@ model MergeRun {
    */
   reviewJson   String?
   errorText    String?
+  /**
+   * HM-56e (2026-10-08) — 병합이 쓴 바이트의 sha256. 수정 저장(API-50)이 파일을 다시 쓰면 함께 바뀐다.
+   * 「병합 점검」(HM-54)이 디스크 파일과 기록이 같은지 이것으로 본다. 옛 실행은 null
+   */
+  outputSha    String?
   startedAt    DateTime  @default(now())
   finishedAt   DateTime?
 
@@ -303,6 +333,43 @@ model MergeRun {
   weekSlot WeekSlot @relation(fields: [weekSlotId], references: [id])
 
   @@index([divisionId, weekSlotId, startedAt])
+}
+
+/**
+ * HM-59 (2026-10-08) — 병합 **줄**의 작업. `MergeRun`은 결과 기록으로 그대로 두고, 「무엇을 언제 병합할 차례인가」는 여기에 둔다 —
+ * `MergeRun`에 'queued'를 끼우면 「가장 최근 실행」을 고르는 질의 여러 곳이 흔들린다. 재시작에도 줄이 남도록 DB에 둔다(ADR-0019).
+ * 관계(외래 키)는 두지 않는다 — 더하기만 하는 표라 Division·WeekSlot 모델을 건드리지 않는다
+ */
+model MergeJob {
+  id             String    @id @default(cuid())
+  divisionId     String
+  weekSlotId     String
+  /// "auto" 자동 · "reopen" 마감 열기가 닫힘(DM-20) · "manual" [지금 병합]·[다시 병합] · "model_retry" (3단계 몫)
+  trigger        String
+  actorEmail     String?
+  /// [다시 병합]에서 409 edited를 확인하고 들어온 것 (API-55) — 쓰기 직전 확인(HM-61)도 넘긴다
+  overwriteEdits Boolean   @default(false)
+  /// 작을수록 먼저. 넣을 때마다 커진다(FIFO) — 스케줄러는 한 주기를 제출 수 적은 부서부터 넣는다 (HM-59c)
+  orderKey       Int
+  /// "queued" | "running" | "done" | "failed" | "cancelled"
+  status         String
+  /// 일꾼이 잡은 횟수 — 회수(HM-59e)가 2번째부터는 다시 넣지 않는다
+  attempt        Int       @default(0)
+  /// HM-61 — 넣을 때의 판 { saves, reviewId } (JSON — 사람이 한 일만, 병합 자신의 새 실행은 넣지 않는다). 쓰기 직전에 이것과 다르면 쓰지 않는다
+  baseMark       String?
+  /// HM-59b — 잡힐 때의 최신 제출 묶음(sha). 병합 중에 새 제출이 왔는지 이것으로 가른다
+  sourceKey      String?
+  enqueuedAt     DateTime
+  startedAt      DateTime?
+  /// 이 시각이 지나도 running이면 죽은 것 (HM-59e)
+  leaseUntil     DateTime?
+  finishedAt     DateTime?
+  mergeRunId     String?
+  errorText      String?
+
+  @@index([status, orderKey])
+  @@index([divisionId, weekSlotId, status])
+  @@index([weekSlotId, orderKey])
 }
 
 model AuditLog {
@@ -348,6 +415,99 @@ model NotifyLog {
 }
 
 /**
+ * RU-01 — 위로 올린 **제출**. 실·팀 → 본부(`unit`), 본부 → 총괄(`hq`).
+ *
+ * 그 시점 병합본의 **사본**을 가리킨다 (RU-02). 하위가 다시 병합하거나 고쳐도 위가 보고 있던
+ * 문서는 바뀌지 않는다 — 새 판을 올리려면 다시 제출한다. 다시 내면 새 행이 생기고, 가장 최근의
+ * 취소되지 않은 행이 「지금 제출된 것」이다. 행은 지우지 않는다 — 언제 무엇을 올렸는지가 남는다.
+ */
+model ReportSubmission {
+  id          String    @id @default(cuid())
+  /// "unit" = 실·팀이 위로 · "hq" = 본부가 총괄로
+  level       String
+  divisionId  String
+  weekSlotId  String
+  /// 사본 (STORAGE_ROOT 기준). 원본 병합본 경로를 가리키지 않는다 — 원본은 다시 병합하면 덮인다
+  filePath    String
+  sha256      String
+  byteSize    Int
+  /// 어디서 나왔나 — unit: MergeRun.id · hq: RollupRun.id · 지난 자료 적재(RU-44): null
+  sourceRunId String?
+  /// "app" | "import" (RU-44 — 테스트 서버에 지난 자료를 넣은 것)
+  origin      String    @default("app")
+  /// User.id — 또는 'system'(RU-78 · TACP-23: 부서장 없는 단위의 사본·켤 때 따라잡은 승인). 화면은 「자동」으로 쓴다
+  submittedBy String
+  submittedAt DateTime  @default(now())
+  /// RU-03 — 제출 취소. 2026-10-08(v1.7)부터는 생기지 않는다 — 지난 기록만 남는다
+  withdrawnAt DateTime?
+  withdrawnBy String?
+  /// RU-74 — 이 사본을 낳은 승인(MergeReview.id). 승인 하나에 사본은 많아야 하나 — 두 요청이 같은 승인을 넘기려 해도 DB가 하나만 받는다
+  reviewId    String?   @unique
+  /// RU-77·78 · DM-18b — 무엇을 근거로 갔나: approved | no_head | unapproved | manual(v1.7 전의 [제출])
+  basis       String    @default("manual")
+  /// RU-78 — 일으킨 사건: approval · merge_final:<runId> · edit:<runId> · rollup_enabled · escape · catch_up …
+  cause       String?
+
+  division Division @relation(fields: [divisionId], references: [id])
+  weekSlot WeekSlot @relation(fields: [weekSlotId], references: [id])
+
+  @@index([weekSlotId, level, divisionId, submittedAt])
+}
+
+/**
+ * RU-10 — 본부(`hq`)·전사(`org`) 이어 붙이기 한 번. 실·팀 병합(MergeRun)과 따로 둔다 —
+ * 연구 본부처럼 **같은 부서가 실·팀 병합과 본부 병합을 둘 다** 가질 수 있어서, 한 표에 두면
+ * 「그 부서의 최근 병합」이 어느 쪽인지 갈린다.
+ */
+model RollupRun {
+  id          String    @id @default(cuid())
+  /// "hq" | "org"
+  level       String
+  /// hq: 본부 Division.id · org: null (전사는 어느 부서의 것도 아니다)
+  divisionId  String?
+  weekSlotId  String
+  /// "running" | "succeeded" | "failed"
+  status      String
+  outputPath  String?
+  /// 이어 붙인 ReportSubmission.id — **붙인 순서 그대로** (JSON). 「바뀜」 판정이 이걸 본다
+  inputIds    String
+  /// 단위별 결과 — [{name, divisionId, submissionId, rows:{a,p,n}, emphasis}] (JSON)
+  unitsJson   String?
+  warnings    String?
+  errorText   String?
+  /// User.id — v1.7부터 자동 조립은 'system'(TACP-23). 일으킨 사건·사람은 cause와 감사 기록에 남는다
+  createdBy   String
+  startedAt   DateTime  @default(now())
+  finishedAt  DateTime?
+  /// RU-74 — 입력 열쇠(sha256). 가장 최근 성공한 실행과 같으면 다시 만들지 않는다. v1.7 전 행은 null
+  inputKey    String?
+  /// RU-78 — 화면의 「무엇 때문에」: unit_handoff:<사본 id> · hq_handoff:<사본 id> · order · template · retry · read_repair …
+  cause       String?
+
+  division Division? @relation(fields: [divisionId], references: [id])
+  weekSlot WeekSlot  @relation(fields: [weekSlotId], references: [id])
+
+  @@index([level, divisionId, weekSlotId, startedAt])
+}
+
+/** RU-20·21 — 전사 단계의 순서와 메모 (한 행). 본부 단계는 Division.rollupOrder에 있다 */
+model OrgRollupSetting {
+  id        String   @id @default("org")
+  /// 본부·본부 밖 단위의 Division.id 순서 (JSON)
+  order     String   @default("[]")
+  note      String   @default("")
+  pageBreak Boolean  @default(true)
+  /// RU-52 — 3단계 취합을 쓰는가. 꺼져 있으면 [제출] 카드·본부/전사 메뉴·단계 알림이 하나도 안 나타난다
+  enabled        Boolean @default(false)
+  /// RU-51 — 실·팀 → 위로 제출 기한 = 그 주 부서 마감 + 이 분 (기본 60 = 지금의 대외 마감)
+  unitDueMinutes Int     @default(60)
+  /// RU-51 — 본부 → 총괄 제출 기한 = 그 주 부서 마감 + 이 분 (기본 120)
+  hqDueMinutes   Int     @default(120)
+  updatedBy String?
+  updatedAt DateTime @updatedAt
+}
+
+/**
  * HM-47 — 부서장(head)의 **검토 완료(승인)**. 고쳐 저장하거나 [고칠 것 없음 · 승인]을 누르면 생긴다.
  *
  * 담당자는 실장이 **언제·무엇을** 다듬었는지 알아야 제출할 수 있다 (2026-10-07 요청).
@@ -365,7 +525,63 @@ model MergeReview {
   changes    String   @default("[]")
   /// 승인한 판 — 그 뒤 병합본이 바뀌면 「승인 뒤 바뀜」으로 보인다
   sha256     String
+  /**
+   * RU-73 · HM-47 (2026-10-08) — 승인한 판의 **불변 사본** (STORAGE_ROOT 기준). 병합본 파일은 다시 병합·수정 저장에 덮이므로
+   * 승인한 바이트는 여기에만 남는다. 3단계에서 위로 가는 사본이 이 파일이다. 본부 승인(`hq_approve`)은 그 본부본 실행 파일.
+   * v1.7 전 행은 null
+   */
+  filePath   String?
   createdAt  DateTime @default(now())
 
   @@index([divisionId, weekSlotId, createdAt])
+}
+
+/**
+ * RU-60 — **전사 취합본의 섹션.** 실제 최종본은 13섹션·고정 순서다(2026-10-07 분석). 순서·제목·채우는 부서를 여기서 정한다.
+ * 기획경영본부처럼 블록이 없는 본부는 섹션이 아니다 — 산하 실이 각자 섹션이다.
+ */
+model OrgSection {
+  id         String  @id @default(cuid())
+  sortOrder  Int
+  /// 생성할 제목 (RU-61) — 「기획경영본부(기획조정실)」. 제출자는 제목을 쓰지 않는다
+  title      String
+  /// 이 섹션을 채우는 Tincase 부서. 없거나 꺼져 있으면 총괄이 받은 파일을 올린다
+  divisionId String?
+  /// 양식 종류 — exec(임원실)·global·unit(실형)·hq(본부·센터형)·eval(환경평가형). 검증 규칙이 쓴다
+  kind       String  @default("unit")
+  isActive   Boolean @default(true)
+
+  @@index([sortOrder])
+}
+
+/** RU-60 — 총괄이 올린 섹션 원본 (취합게시판으로 받은 파일). 가장 최근의 취소 안 된 것을 쓴다 */
+model OrgSectionUpload {
+  id          String    @id @default(cuid())
+  sectionId   String
+  weekSlotId  String
+  filePath    String
+  originalName String
+  sha256      String
+  byteSize    Int
+  uploadedBy  String
+  uploadedAt  DateTime  @default(now())
+  withdrawnAt DateTime?
+
+  @@index([sectionId, weekSlotId, uploadedAt])
+}
+
+/// DM-25 · PG-84 — 화면 둘러보기(첫 로그인 안내)를 권했고 사람이 고른 기록. 장마다 한 줄.
+/// 고르지 않았으면 줄이 없다 — 그러면 다음에 또 권한다. 「봤다」를 브라우저에 두지 않는 이유: 다른 PC·브라우저에서 또 뜬다.
+/// User 열로 두지 않은 이유: 인원 최신화(DM-20)가 User 행을 고친다 — 보존 규칙과 섞이지 않게 따로 둔다. 더하기만이라
+/// `prisma db push`가 표 하나를 만들 뿐 기존 행·열은 그대로다
+model GuideTourSeen {
+  userId    String
+  chapter   String // 'member' | 'lead' | 'head' | 'hq' | 'org'
+  outcome   String // 'dismissed' | 'started' | 'done' | 'skipped'
+  version   Int      @default(1) // 둘러보기의 판 — 내용이 크게 바뀌어 다시 권해야 할 때 올린다
+  decidedAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, chapter])
 }

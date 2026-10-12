@@ -131,3 +131,15 @@ describe('메신저 알림 (NT-T01~T08)', () => {
     expect(received[0].has('Option')).toBe(false);
   });
 });
+
+// NT-53 — 병합 알림의 링크는 종류와 상관없이 수합 관리다. 부서장의 검토·승인도 수합 관리에서 하고,
+// 「보관함」은 홈의 지난 주차로 합쳐졌다(PG-70). 이미 나간 옛 링크는 그 주소의 보내기 페이지가 받는다.
+describe('NT-53 병합 알림 링크', () => {
+  it('[NT-T66] merge-notices.ts가 만드는 링크는 모두 `/{slug}/manage` — 옛 보관함 주소가 없다', async () => {
+    const { readFileSync } = await import('node:fs');
+    const path = await import('node:path');
+    const src = readFileSync(path.resolve(__dirname, '../src/server/notify/merge-notices.ts'), 'utf8');
+    expect(src).not.toMatch(/['"`/]archive['"`]/);
+    expect(src).toContain('url: base ? `${base}/manage` : undefined');
+  });
+});
