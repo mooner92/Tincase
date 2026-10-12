@@ -97,14 +97,15 @@ export interface MergeFacts {
 
 /**
  * RU-53 · NT-47′ (2026-10-08 개정) — 담당자 마지막 알림의 끝 줄. 3단계를 쓰면 **누를 버튼이 없다** — 부서장의 승인이 곧 제출이다(ADR-0015).
- * 그래서 「무엇을 기다리나」를 기한과 함께 말한다. 안 쓰면 게시판 문구 그대로.
+ * 그래서 「무엇을 기다리나」를 기한과 함께 말한다. 안 쓰면 「수합 관리에서 [받기]로 받아 취합게시판에 올려주세요」 한 줄 —
+ * 웹디스크 올리기는 절차에서 빠졌다(운영자 결정 2026-10-12 · NT-T86).
  *   승인 전           「아직 부서장 승인 전이에요 — 승인되면 저절로 ○○에 올라갑니다(기한 15:00).」
  *   승인 뒤 바뀜      「부서장이 승인한 뒤 병합본이 바뀌었어요 — 다시 승인되면 저절로 ○○에 올라갑니다(기한 15:00).」
  *   부서장 없는 부서  「병합본이 ○○에 올라갔어요 — 고칠 곳은 고쳐 저장하면 다시 올라갑니다.」
  * (승인돼 올라갔으면 이 알림 자체를 보내지 않는다 — pickJobs)
  */
 export function submitLines(f: Pick<MergeFacts, 'submitTo' | 'submitDue'> & Partial<Pick<MergeFacts, 'hasHead' | 'approval'>>): string[] {
-  if (!f.submitTo) return ['Tincase에서 hwp로 받아 취합게시판에 올리고', '웹디스크에 업로드해주세요.'];
+  if (!f.submitTo) return ['Tincase 수합 관리에서 [받기]로 받아 취합게시판에 올려주세요.'];
   const due = f.submitDue ? `(기한 ${f.submitDue})` : '';
   if (f.hasHead === false) return [`병합본이 ${f.submitTo}에 올라갔어요 — 고칠 곳은 고쳐 저장하면 다시 올라갑니다.`];
   if (f.approval && !f.approval.changedAfter) return [`부서장이 승인해 ${f.submitTo}에 올라갔어요.`];

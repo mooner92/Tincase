@@ -3,7 +3,8 @@
 //   merge_review        「고칠 부분을 알려주세요」는 담당자에게 말하라는 뜻으로 읽혔다 → 단추 이름([고칠 것 없음 · 승인])과 「고쳐 저장 = 승인」
 //   merge_missing · ①   「제출된 파일」은 v1 낱말 · 낸 사람이 0이면 [지금 병합]을 누를 일이 없다 → 「이번 주 제출이 한 건도 없어…」
 //   merge_done ② 승인 뒤 바뀜   3단계가 꺼져 있으면 부서장에게 「다시 승인」 쪽지가 가지 않는다 → 「직접 부탁해 주세요」 (켜져 있으면 넣지 않는다)
-//   그대로 둔 것        끝 줄 「취합게시판 … 웹디스크」 — 운영자가 정할 일(docs/KNOWN-ISSUES-v2.md 열린 질문)
+//   끝 줄               「취합게시판 … 웹디스크」 → 「수합 관리에서 [받기]로 받아 취합게시판에 올려주세요」 한 줄 (운영자 결정 2026-10-12 —
+//                       웹디스크 올리기는 절차에서 빠졌다. 승인 완료 쪽지의 끝 줄과 같은 문장)
 //
 // 문구는 순수 함수(composeNotice)로 본다 — DB가 없다. 사람·부서는 지어낸 것이다.
 import { describe, expect, it } from 'vitest';
@@ -81,8 +82,14 @@ describe('[NT-T86] ★ 마감 뒤 쪽지의 할 일 — v2 흐름에 맞춘 문�
     expect(kept.contents).not.toContain('직접 부탁해 주세요');
   });
 
-  it('그대로 둔 것 — 3단계가 꺼진 담당자 끝 줄 「취합게시판 … 웹디스크」는 바꾸지 않았다(운영자가 정할 일)', async () => {
+  it('끝 줄 — 3단계가 꺼진 담당자 끝 줄은 한 줄, 웹디스크는 절차에서 빠졌다(운영자 결정 2026-10-12)', async () => {
     const m = await msg('merge_done');
-    expect(m.contents.split('\n').slice(-2)).toEqual(['Tincase에서 hwp로 받아 취합게시판에 올리고', '웹디스크에 업로드해주세요.']);
+    expect(m.contents.split('\n').at(-1)).toBe('Tincase 수합 관리에서 [받기]로 받아 취합게시판에 올려주세요.');
+    expect(m.contents).not.toContain('웹디스크');
+    // 승인 완료 쪽지(NT-46)의 끝 줄과 같은 문장이다 — 두 쪽지가 같은 일을 다르게 말하지 않는다
+    const { approvalMessage } = await import('@/server/merge/review');
+    const slot = { label: '10월 2주차', opensAt: new Date('2026-10-11T15:00:00Z') } as never;
+    const a = approvalMessage(who, '홍길동 실장', slot, new Date('2026-10-15T05:12:00Z'), []);
+    expect(a.contents.split('\n').at(-1)).toBe('Tincase 수합 관리에서 [받기]로 받아 취합게시판에 올려주세요.');
   });
 });

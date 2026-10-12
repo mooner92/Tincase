@@ -158,7 +158,7 @@ describe('[OPS-T37b] e2e 출시 범위 (--scope=launch · OPS-50h)', () => {
       [
         { kind: 'deadline_10m', recipients: [to('on@example.invalid')] },
         { kind: 'merge_batch:1:u1', recipients: [to('lead@example.invalid')] },
-        { kind: 'merge_approved:r1', recipients: [to('lead@example.invalid')], contents: 'Tincase에서 받아 취합게시판에 올려주세요.' },
+        { kind: 'merge_approved:r1', recipients: [to('lead@example.invalid')], contents: 'Tincase 수합 관리에서 [받기]로 받아 취합게시판에 올려주세요.' },
       ],
       facts,
     );

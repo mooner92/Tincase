@@ -45,7 +45,7 @@ const NOTICE_LINES = 4;
 
 /**
  * NT-46 · NT-46′ — 승인 알림. 3단계에서 승인이 곧 제출이면(`handedOffTo`) 끝 줄이 「○○에 자동으로 올라갔어요」다 —
- * 담당자가 할 일(취합게시판에 올리기)이 없어졌다. 꺼져 있으면 지금 문구 그대로.
+ * 담당자가 할 일(취합게시판에 올리기)이 없어졌다. 꺼져 있으면 `merge_done`의 끝 줄과 같은 한 줄(NT-T86).
  */
 export function approvalMessage(
   lead: { name: string; employeeNo: string },
@@ -66,7 +66,7 @@ export function approvalMessage(
       changes.length ? `바뀐 곳: ${summarizeChanges(changes)}` : '고친 곳 없이 승인했어요.',
       ...lines,
       '',
-      handedOffTo ? `${handedOffTo}에 자동으로 올라갔어요.` : 'Tincase에서 받아 취합게시판에 올려주세요.',
+      handedOffTo ? `${handedOffTo}에 자동으로 올라갔어요.` : 'Tincase 수합 관리에서 [받기]로 받아 취합게시판에 올려주세요.',
     ].join('\n'),
   };
 }
