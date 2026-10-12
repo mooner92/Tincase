@@ -9,6 +9,7 @@
 import { runDueReminders } from './notify/deadline-reminder';
 import { runDueMergeNotices } from './notify/merge-notices';
 import { runDueMergeBatchNotices } from './notify/merge-batch';
+import { runAllApprovedNotice } from './notify/all-approved';
 import { runDueRollupNotices } from './rollup/notices';
 import { runDueRollupSync } from './rollup/auto';
 import { coalesce } from './rollup/lock';
@@ -51,6 +52,13 @@ export function runMergeNotices(): Promise<void> {
       for (const r of await runDueMergeBatchNotices()) console.log(`[알림] ${r.kind} — 기준 ${r.deadline.toISOString()}: ${r.sent}/${r.targets}명`);
     } catch (e) {
       console.error('[알림] 병합 점검 요약 오류', e);
+    }
+    // NT-62 — 켜진 부서가 모두 승인되면 총괄에게 한 통(3단계가 꺼진 동안)
+    try {
+      const r = await runAllApprovedNotice();
+      if (r) console.log(`[알림] all_approved — ${r.isoKey}: ${r.sent}/${r.targets}명`);
+    } catch (e) {
+      console.error('[알림] 모두 승인 알림 오류', e);
     }
   });
 }
