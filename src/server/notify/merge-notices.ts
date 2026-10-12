@@ -166,7 +166,7 @@ function staleBlock(stale: number, action: string): string[] {
 export function pickJobs(
   atReview: boolean,
   atSubmit: boolean,
-  facts: Pick<MergeFacts, 'ok' | 'approval'> & Partial<Pick<MergeFacts, 'submitTo' | 'hasHead'>>,
+  facts: Pick<MergeFacts, 'ok' | 'approval'> & Partial<Pick<MergeFacts, 'submitTo' | 'hasHead' | 'stale' | 'flagged'>>,
 ): { kind: NoticeKind; role: 'lead' | 'head' }[] {
   const jobs: { kind: NoticeKind; role: 'lead' | 'head' }[] = [];
   if (atReview) {
@@ -174,9 +174,12 @@ export function pickJobs(
       if (!facts.approval || facts.approval.changedAfter) jobs.push({ kind: 'merge_review', role: 'head' });
     } else jobs.push({ kind: 'merge_missing', role: 'lead' });
   }
-  // NT-47′ · RU-53 — 3단계에서 부서장이 승인해 이미 올라갔으면 담당자에게 할 일이 없다 — NT-46′이 그 순간 이미 말했다
-  const handedOff = !!facts.submitTo && facts.hasHead === true && facts.ok && !!facts.approval && !facts.approval.changedAfter;
-  if (atSubmit && !handedOff) jobs.push({ kind: 'merge_done', role: 'lead' });
+  // NT-47′ · RU-53 — 3단계에서 부서장이 승인해 이미 올라갔으면 담당자에게 할 일이 없다 — NT-46′이 그 순간 이미 말했다.
+  // ADR-0021 D5 — 3단계에서 병합본이 **있으면** 담당자에게는 대개 할 일이 없다: 승인 전이면 부서장이 승인하거나 기한에 저절로 가고(③),
+  // 부서장이 없으면 이미 올라갔다(④) — 보내지 않는다. 병합본이 없을 때(①)는 할 일이 있다([지금 병합]). 병합 뒤에 늦게 낸 사람이 있거나
+  // 확인할 줄이 있으면(병합본에 빠졌거나 걸렸다) 그것은 담당자의 일이다 — 그대로 보낸다(리뷰 2026-10-13: 기한에 그 판이 저절로 간다)
+  const quiet = !!facts.submitTo && facts.ok && !(facts.stale ?? 0) && !(facts.flagged?.length ?? 0);
+  if (atSubmit && !quiet) jobs.push({ kind: 'merge_done', role: 'lead' });
   return jobs;
 }
 
@@ -228,6 +231,10 @@ export function composeNotice(kind: NoticeKind, who: Person, slotLabel: string, 
         'Tincase 수합 관리에서 확인하고, 고칠 것이 없으면 [고칠 것 없음 · 승인]을 눌러 주세요.',
         '고칠 곳은 직접 고쳐 저장하면 그것이 승인입니다 — 담당자에게 바로 알려집니다.',
         '각 항목을 누가 냈는지도 함께 보입니다.',
+        // ADR-0021 — 3단계에서는 승인이 곧 제출이고, 기한까지 승인이 없으면 그때 판이 저절로 올라간다. 부서장이 그것을 알고 있어야 한다
+        ...(f.submitTo
+          ? [`승인하면 바로 ${f.submitTo}에 올라가요${f.submitDue ? ` · ${f.submitDue}까지 승인이 없으면 그때 병합본이 자동으로 올라가요` : ''}.`]
+          : []),
       ]
         .filter((l, i, a) => !(l === '' && a[i - 1] === ''))
         .join('\n'),

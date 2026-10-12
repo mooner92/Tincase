@@ -23,8 +23,8 @@ export interface FinalCell {
   source: FinalSource;
   label: string;
   refId: string | null;
-  /** RU-83 — 주황 표시: 비상구로 올라온 판(`unapproved`) · 총괄에는 본부장이 앞서 승인한 옛 판(`reapprove`) */
-  flag?: 'unapproved' | 'reapprove' | null;
+  /** RU-83 — 주황 표시: 비상구로 올라온 판(`unapproved`) · 기한이 지나 자동으로 온 판(`due`, ADR-0021) · 총괄에는 본부장이 앞서 승인한 옛 판(`reapprove`) */
+  flag?: 'unapproved' | 'due' | 'reapprove' | null;
 }
 
 export interface OrgBoardRow {
@@ -67,7 +67,7 @@ const WORD: Record<FinalSource, string> = {
   missing: '미제출',
 };
 /** RU-83 — 칩 덧표시: 들어가기는 하지만 주황으로 */
-const FLAG_WORD = { unapproved: '승인 없이', reapprove: '본부장 재승인 대기' } as const;
+const FLAG_WORD = { unapproved: '승인 없이', due: '기한 지나 자동', reapprove: '본부장 재승인 대기' } as const;
 
 function Bar({ value, max }: { value: number; max: number }) {
   const pct = max > 0 ? Math.round((value / max) * 100) : 0;

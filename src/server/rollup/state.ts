@@ -8,17 +8,17 @@ import { effectiveDeadline } from '../worklog';
 import { NEWEST_FIRST, UNIT_REVIEW, HQ_REVIEW } from '../merge/review-scope';
 import { toKstIso } from '@/lib/week';
 import { currentReport, fileSha } from './report';
-import { escapeClosesAt, escapeOpensAt, hasHead, targetLabel, unitDue, unitTarget } from './handoff';
+import { DUE_BASIS, escapeClosesAt, hasHead, pastDue, targetLabel, unitDue, unitTarget } from './handoff';
 import { decidesForUnit, lastEditor } from '../merge/edits';
 import { rollupEnabled, stageCells, stageTimes } from './schedule';
 import { parseOrder } from './tree';
 
 /**
  * 12 §2a 실·팀 상태 기계.
- *   부서장 있음  U0 받는 중 · U1 승인 기다림 · U2 올라감 · U3 승인 뒤 바뀜 · U4 승인 없이 올라감 · Uf 병합본 없음
+ *   부서장 있음  U0 받는 중 · U1 승인 기다림 · U2 올라감 · U3 승인 뒤 바뀜 · U4 승인 없이 올라감 · U5 기한 지나 자동으로 올라감(ADR-0021) · Uf 병합본 없음
  *   부서장 없음  H0 받는 중(마감 뒤 저절로) · H1 올라감 · H2 운영자가 고친 판(안 올라감 — 2026-10-08 결정 b) · Hf 병합본 없음
  */
-export type UnitHandoffState = 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'Uf' | 'H0' | 'H1' | 'H2' | 'Hf';
+export type UnitHandoffState = 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'Uf' | 'H0' | 'H1' | 'H2' | 'Hf';
 
 export interface HandoffTrail {
   /** 본부 도착 (본부 단계가 있을 때) */
@@ -42,10 +42,15 @@ export interface HandoffView {
   /** RU-80 · TACP-21 v1.7 — 내 사본의 행방, **시각만**. 볼 수 없는 사람에게는 null */
   trail: HandoffTrail | null;
   /**
-   * RU-77 — 비상구. 이 사람이 쓸 수 있고 지금 상태가 맞을 때만(U1·U3), 그리고 창이 닫히기 전(「본부 → 총괄」 + 24시간 — 결정 a)까지만.
-   * `open`이 거짓이면 아직 창 전이다 — 화면은 그리지 않는다. 닫힌 뒤(지난 주차 포함)에는 null
+   * RU-77 — 비상구. 이 사람이 쓸 수 있고 지금 상태가 맞을 때만(U1·U3 — 마감 뒤 최종본이 있다), 그리고 창이 닫히기 전(「본부 → 총괄」 + 24시간 — 결정 a)까지만.
+   * ADR-0021 D3 — 여는 시각은 없다(마감 뒤 병합본이 생기면 바로). 닫힌 뒤(지난 주차 포함)에는 null
    */
-  escape: { open: boolean; opensAtKst: string } | null;
+  escape: { open: boolean } | null;
+  /**
+   * ADR-0021 — 아직 기한 전인가. 승인 전 줄의 「15:00까지 승인이 없으면 그때 판이 자동으로」는 기한 전에만 참이다 —
+   * 기한 뒤(이미 따라가는 중)나 창이 닫힌 뒤(저절로 가지 않는다), 운영자가 고친 판(올리지 않는다)에서는 그 말을 하지 않는다
+   */
+  beforeDue: boolean;
 }
 
 const kst = (d: Date) => toKstIso(d).slice(5, 16).replace('T', ' ');
@@ -106,7 +111,6 @@ export async function unitHandoffView(
     prisma.mergeReview.findFirst({ where: { divisionId: division.id, weekSlotId: slot.id, ...UNIT_REVIEW }, orderBy: NEWEST_FIRST }),
   ]);
   const cells = stageCells(t.anchor, t);
-  const due = unitDue(t, target);
   const sha = await fileSha(run?.outputPath);
   const final = !!run && run.startedAt >= deadline;
   const past = now >= deadline;
@@ -119,7 +123,7 @@ export async function unitHandoffView(
     else if (run && final && !decidesForUnit(lastEditor(run.reviewJson))) state = 'H2';
     else state = sentRow ? 'H1' : 'H0';
   } else if (sentRow && sha && sentRow.sha256 === sha) {
-    state = sentRow.basis === 'unapproved' ? 'U4' : 'U2';
+    state = sentRow.basis === 'unapproved' ? 'U4' : sentRow.basis === DUE_BASIS ? 'U5' : 'U2';
   } else if (sentRow) {
     state = 'U3';
   } else if (!run) {
@@ -137,9 +141,8 @@ export async function unitHandoffView(
       by = sentRow.basis === 'no_head' ? '자동 (부서장 없음)' : await nameOf(sentRow.submittedBy);
     }
   }
-  // 결정 a — 닫힌 뒤에는 그리지 않는다(API는 409 too_late). 열리기 전은 `open: false`로 내려 화면이 숨긴다
+  // 결정 a — 닫힌 뒤에는 그리지 않는다(API는 409 too_late). ADR-0021 D3 — 마감 뒤 최종본이 있으면 바로 열려 있다
   const escapable = opts.canEscape && head && final && (state === 'U1' || state === 'U3') && now <= escapeClosesAt(t);
-  const opens = escapeOpensAt(due);
   return {
     target: targetLabel(target),
     toHq,
@@ -148,8 +151,21 @@ export async function unitHandoffView(
     state,
     sent: sentRow ? { id: sentRow.id, atKst: kst(sentRow.submittedAt), basis: sentRow.basis, by } : null,
     trail: opts.trail && sentRow ? await trailOf(sentRow, toHq, target.kind === 'hq' ? target.node.node.id : null, slot) : null,
-    escape: escapable ? { open: now >= opens, opensAtKst: toKstIso(opens).slice(11, 16) } : null,
+    escape: escapable ? { open: true } : null,
+    beforeDue: now < unitDue(t, target),
   };
+}
+
+/**
+ * ADR-0021 · 리뷰 2026-10-13 — 지금 담당자가 고쳐 저장하면 그 판이 **곧 위로 가나**: 3단계 · 기여 단위 · 부서장 있음 · 기한이 지났고 창 안.
+ * 병합본 드로어가 「부서장이 다시 승인해야 올라갑니다」 대신 「바로 ○○에 올라갑니다」라고 말해야 할 때다(부서장 없는 단위는 원래 저장이 곧 넘김)
+ */
+export async function saveGoesUp(divisionId: string, slot: WeekSlot, now = new Date()): Promise<boolean> {
+  if (!(await rollupEnabled())) return false;
+  const target = await unitTarget(divisionId);
+  if (!target || !(await hasHead(divisionId))) return false;
+  const t = await stageTimes(slot);
+  return pastDue(unitDue(t, target), t, now);
 }
 
 /**

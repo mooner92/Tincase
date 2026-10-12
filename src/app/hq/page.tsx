@@ -12,13 +12,12 @@ import { WeekPicker } from '@/components/WeekPicker';
 import { HqApprovalCard } from '@/components/HqApprovalCard';
 import { hqBoard } from '@/server/rollup/run';
 import { readRepairHq } from '@/server/rollup/auto';
-import { escapeClosesAt, escapeOpensAt } from '@/server/rollup/handoff';
+import { escapeClosesAt } from '@/server/rollup/handoff';
 import { rollupSlot } from '@/server/rollup/slot';
-import { stageTimes } from '@/server/rollup/schedule';
+import { stageCells, stageTimes } from '@/server/rollup/schedule';
 import { kst, runView, unitRow, weekOptions } from '@/server/rollup/view';
 import { stageLabels } from '@/server/rollup/notices';
 import { STAGE_HQ, STAGE_UNIT } from '@/lib/rollup-stages';
-import { toKstIso } from '@/lib/week';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,13 +44,9 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
   const baseHref = canWrite ? '/hq' : `/hq?node=${encodeURIComponent(node.node.slug)}`;
   // RU-55 — [검토 완료 · 승인]은 본부의 head에게만 (requireHqReviewer와 같은 판정 — TACP-9)
   const canApprove = canWrite && isReviewer(scope);
-  // RU-77 — 본부 lead의 비상구. 「본부 → 총괄」 기한 15분 전부터 그 기한 + 24시간까지만 그린다 (닫힌 뒤·지난 주차는 없음 — 결정 a)
-  const opens = escapeOpensAt(times.hqDue);
+  // RU-77 — 본부 lead의 비상구. 본부본이 있으면 바로(ADR-0021 D3) 「본부 → 총괄」 기한 + 24시간까지만 그린다 (닫힌 뒤·지난 주차는 없음 — 결정 a)
   const now = new Date();
-  const escape =
-    canWrite && canUseHandoffEscape(scope) && board.hasHead && now <= escapeClosesAt(times)
-      ? { open: now >= opens, opensAtKst: toKstIso(opens).slice(11, 16) }
-      : null;
+  const escape = canWrite && canUseHandoffEscape(scope) && board.hasHead && now <= escapeClosesAt(times) ? { open: true } : null;
   const current = runView(board.current);
 
   return (
@@ -127,6 +122,8 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
                   board.hqReport && { atKst: kst(board.hqReport.submittedAt)!, basis: board.hqReport.basis, by: board.hqReport.submittedBy }
                 }
                 escape={escape}
+                // ADR-0021 — 「16:00에는 지금 본부본이 자동으로」는 기한 전에만 참이다
+                hqDueKo={now < times.hqDue ? stageCells(times.anchor, times).hqDueKo : undefined}
               />
             )}
           </RunCard>

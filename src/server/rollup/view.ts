@@ -9,7 +9,7 @@ export const kst = (d: Date | null | undefined) => (d ? toKstIso(d).slice(5, 16)
 
 /**
  * RU-82 — 산하 칩. 칩에는 상태와 시각만, 누가(승인한 사람·올린 사람)는 칩 옆에 흐리게 — 칩 하나에 낱말 셋이면 칩이 문장이 된다 (CP-100).
- *   올라옴(승인) · 부서장 없음(자동) · 주황 「부서장 승인 없이」 · 부서장 승인 전 · 미제출
+ *   올라옴(승인) · 부서장 없음(자동) · 주황 「부서장 승인 없이」 · 주황 「기한 지나 자동」(ADR-0021) · 부서장 승인 전 · 미제출
  */
 export function chipOf(u: Pick<UnitStatus, 'report' | 'merged' | 'final' | 'hasHead'>): StatusChip {
   const r = u.report;
@@ -17,6 +17,7 @@ export function chipOf(u: Pick<UnitStatus, 'report' | 'merged' | 'final' | 'hasH
     const href = `/api/rollup/report/${r.id}`;
     if (r.origin === 'import') return { kind: 'sent', label: `적재 ${kst(r.submittedAt)}`, href };
     if (r.basis === 'unapproved') return { kind: 'unapproved', label: `부서장 승인 없이 ${kst(r.submittedAt)}`, by: r.submittedBy, href };
+    if (r.basis === 'due') return { kind: 'due', label: `기한 지나 자동 ${kst(r.submittedAt)}`, href };
     if (r.basis === 'no_head') return { kind: 'nohead', label: `부서장 없음 · 자동 ${kst(r.submittedAt)}`, href };
     if (r.basis === 'approved') return { kind: 'sent', label: `올라옴 ${kst(r.submittedAt)}`, by: r.approvedBy ? `${r.approvedBy} 승인` : undefined, href };
     return { kind: 'sent', label: `제출 ${kst(r.submittedAt)}`, by: r.submittedBy, href }; // v1.7 전의 [제출]

@@ -1,8 +1,12 @@
 // RU-70~79 · TACP-23 — 위로 가는 사본(`ReportSubmission`)을 만드는 **유일한** 곳 (RU-T123).
 //
 // 2026-10-08(ADR-0015) 전에는 사람이 [본부에 제출]·[총괄에 제출]을 눌러 사본을 만들었다. 그 앞에는 언제나 이미 끝난 결정이 있었다 —
-// 실장이 승인했다, 본부장이 승인했다. 그래서 이제 **결정이 곧 넘김**이다. 사본이 생기는 경우는 TACP-23의 표 그대로 다섯뿐이고
-// (승인 · 부서장 없는 단위의 최종본 · 켤 때 따라잡기 · 본부장 없는 본부 · 비상구), 그 밖의 어떤 것도 위로 보내지 않는다.
+// 실장이 승인했다, 본부장이 승인했다. 그래서 이제 **결정이 곧 넘김**이다. 사본이 생기는 경우는 TACP-23의 표 그대로 여섯뿐이고
+// (승인 · 부서장 없는 단위의 최종본 · 켤 때 따라잡기 · 본부장 없는 본부 · 비상구 · **기한** — ADR-0021), 그 밖의 어떤 것도 위로 보내지 않는다.
+//
+// ADR-0021 (2026-10-12 운영자) — **기한이 곧 제출.** 그 단계의 기한이 지나도 승인이 없으면 지금 판이 올라간다(`basis=due`, `system`).
+// 결정할 사람이 자리에 없는 날이 일상이라(회의·세미나·출장) 기한에 단계가 멈추지 않게. 기한 뒤에는 「가장 나중 사건의 판」이 위에 있다 —
+// 판이 바뀌면 따라가고, 부서장이 늦게라도 승인하면 승인한 판이 대신한다. 정확성(아래)은 그대로다: 올라가는 것은 그 순간의 바이트다.
 //
 // 정확성(RU-73): 자동 사본은 언제나 **승인한 바이트**다. 실·팀은 승인 요청이 본 판을 확인한 바로 그 메모리의 바이트를 불변 파일로
 // 쓰고(`freeze`) 사본은 그 파일을 가리킨다 — 병합본 파일은 다시 병합·수정 저장에 덮이기 때문이다(HM-49). 본부본은 실행마다 따로 쓴
@@ -10,7 +14,7 @@
 //
 // 동시성(RU-75): 같은 (부서, 주차)의 일은 `unit:` 잠금으로, 본부는 `hq:` 잠금으로 줄을 선다. 그 위에 DB가 한 번 더 막는다 —
 // 사본을 만드는 트랜잭션 안에서 「이 승인이 가장 최근 승인인가」·「지금 사본보다 나중인가」·「지금 사본과 sha·근거가 같은가」를 다시 본다.
-import type { MergeReview, MergeRun, Prisma, ReportSubmission, RollupRun, WeekSlot } from '@prisma/client';
+import type { Division, MergeReview, MergeRun, Prisma, ReportSubmission, RollupRun, WeekSlot } from '@prisma/client';
 import { prisma } from '../db';
 import { audit } from '../audit';
 import { logger } from '../logger';
@@ -20,7 +24,6 @@ import { effectiveDeadline } from '../worklog';
 import { HQ_REVIEW, NEWEST_FIRST, UNIT_REVIEW } from '../merge/review-scope';
 import { decidesForUnit, lastEditor } from '../merge/edits';
 import type { RowChange } from '@/lib/merge-diff';
-import { toKstIso } from '@/lib/week';
 import { currentReport, reportRelPath, type ReportLevel } from './report';
 import { loadTree, submitTarget, type OrgTree, type RollupNode } from './tree';
 import { liveUntil, rollupEnabled, stageTimes, type StageTimes } from './schedule';
@@ -29,14 +32,23 @@ import { withLock, withUnitLock } from './lock';
 /** RU-78 · TACP-23 — 사람이 아닌 기록의 주체. 이메일이 아니어서(`@` 없음) 로그인 신원과 섞이지 않는다. 화면은 「자동」 */
 export const SYSTEM = 'system';
 
-/** RU-77 — 비상구(승인 없이 올리기)는 그 단계 기한 이만큼 전부터 열린다. 기한 15분 전 알림(RU-56·56a)과 같은 시각 */
+/**
+ * RU-56·56a — 기한 이만큼 전에 막고 있는 사람에게 알린다. 예전(ADR-0015)에는 같은 시각에 비상구가 열렸다 —
+ * ADR-0021부터 비상구는 마감 뒤 병합본(본부본)이 생기면 바로 열리고, 이 값은 알림 시각만 정한다
+ */
 export const ESCAPE_MINUTES = 15;
 
 /** RU-78 — 일으킨 사건과 사람. 조립·따라잡기의 기록에 붙는다 (`causedBy`는 사람의 이메일, 없으면 null) */
 export interface AutoCause {
   cause: string;
   causedBy: string | null;
+  /** 기한 판정의 지금(ADR-0021) — 시험이 시계를 옮긴다. 없으면 진짜 지금 */
+  now?: Date;
 }
+
+/** ADR-0021 — 기한으로 올라간 사본의 근거·사건. 위의 화면은 주황 「기한 지나 자동」 */
+export const DUE_BASIS = 'due';
+export const DUE_CAUSE = 'due';
 
 /** 불변 사본 — 지우지도 덮지도 않는다 */
 export interface Frozen {
@@ -61,9 +73,12 @@ export const hqLockKey = (nodeId: string, slotId: string) => `hq:${nodeId}:${slo
 // RU-75 — 같은 (부서, 주차)의 줄. 병합 기록도 이 줄에 서야 해서 잠금 표 옆(lock.ts)에 산다 — 부르는 쪽은 그대로 여기서 가져간다
 export { unitLockKey, withUnitLock } from './lock';
 
-/** RU-71 — 「부서장(본부장)이 있다」 = 그 부서에 켜진 head 계정이 있다. 사건마다 다시 본다(계정이 생기거나 꺼질 수 있다) */
+/**
+ * RU-71 — 「부서장(본부장)이 있다」 = 그 부서가 **켜져 있고** 그 부서에 켜진 head 계정이 있다. 사건마다 다시 본다(계정이 생기거나 꺼질 수 있다).
+ * ADR-0021 D4 — 꺼진 부서의 사람은 로그인할 수 없다(AU-04b). 예전에는 꺼진 본부의 본부장도 「있음」으로 보고 승인을 기다리다 조용히 멈췄다
+ */
 export async function hasHead(divisionId: string): Promise<boolean> {
-  return (await prisma.user.count({ where: { divisionId, isActive: true, divisionRole: 'head' } })) > 0;
+  return (await prisma.user.count({ where: { divisionId, isActive: true, divisionRole: 'head', division: { isActive: true } } })) > 0;
 }
 
 /** RU-07 — 이 단위의 사본이 가는 곳. 저장하지 않고 그때그때 나무로 정한다. 기여 단위가 아니면 null */
@@ -76,9 +91,17 @@ export function unitDue(t: Pick<StageTimes, 'unitDue' | 'hqDue'>, target: UnitTa
   return target.kind === 'hq' ? t.unitDue : t.hqDue;
 }
 
-/** RU-77 — 비상구가 열리는 시각 */
-export function escapeOpensAt(due: Date): Date {
+/** RU-56·56a — 기한 15분 전 알림의 시각 (ADR-0021 전에는 비상구도 이때 열렸다) */
+export function dueSoonAt(due: Date): Date {
   return new Date(due.getTime() - ESCAPE_MINUTES * 60_000);
+}
+
+/**
+ * ADR-0021 — 기한이 지났고 그 주를 아직 맞추는 창 안인가. 이때부터 그 단계는 「가장 나중 사건의 판」을 위에 둔다.
+ * 창이 닫힌 뒤(「본부 → 총괄」 기한 + 24시간)에는 자동으로 아무것도 바꾸지 않는다 — 그 주의 보고는 이미 NAMS로 갔다(결정 a와 같은 끝)
+ */
+export function pastDue(due: Date, t: Pick<StageTimes, 'hqDue'>, now: Date): boolean {
+  return now >= due && now <= liveUntil(t);
 }
 
 /**
@@ -90,11 +113,12 @@ export function escapeClosesAt(t: Pick<StageTimes, 'hqDue'>): Date {
   return liveUntil(t);
 }
 
-/** RU-77 — 창 밖이면 409. 열리기 전 `too_early`, 닫힌 뒤 `too_late` (게이트가 아니라 업무 규칙이다 — 사람은 이미 `requireHandoffEscape`가 봤다) */
-function requireEscapeWindow(due: Date, t: Pick<StageTimes, 'hqDue'>, now: Date): void {
-  if (now < escapeOpensAt(due)) {
-    throw new HttpError(409, 'too_early', `승인 없이 올리기는 기한(${toKstIso(due).slice(11, 16)}) ${ESCAPE_MINUTES}분 전부터 열립니다.`);
-  }
+/**
+ * RU-77 — 닫힌 뒤면 409 `too_late` (게이트가 아니라 업무 규칙이다 — 사람은 이미 `requireHandoffEscape`가 봤다).
+ * ADR-0021 D3 — 여는 시각은 없다: 마감 뒤 병합본(본부본)이 생기면 바로 열린다(그 조건은 부르는 쪽의 `not_final`·`no_rollup`이 본다).
+ * 예전에는 기한 15분 전에 열려(`too_early`) 부서장이 오늘 없다는 것을 아는 담당자도 기다려야 했다
+ */
+function requireEscapeWindow(t: Pick<StageTimes, 'hqDue'>, now: Date): void {
   if (now > escapeClosesAt(t)) {
     throw new HttpError(409, 'too_late', '이 주차는 「본부 → 총괄」 기한이 하루 넘게 지나 승인 없이 올릴 수 없습니다 — 승인하면 올라갑니다.');
   }
@@ -294,8 +318,56 @@ async function verifiedSize(filePath: string, expected: string): Promise<number 
 }
 
 /**
+ * ADR-0021 D1 — 기한이 지난 실·팀(부서장 있음)에서 위에 있어야 할 것: **가장 나중 사건의 판**. `unit:` 잠금 안에서 부른다.
+ *   지금 판(마감 뒤 최종본)이 이미 위에 있다                       → null (할 일 없음)
+ *   지금 판이 가장 최근 승인의 판이고 그 승인 뒤 다른 판이 안 올라갔다 → undefined (승인 경로가 `approved`로 따라잡는다)
+ *   운영자가 마지막으로 고친 판이다                                  → undefined (결정 b — 그 단위의 결론이 아니라 지금 판은 올리지 않는다.
+ *                                                                      승인 경로로 넘긴다 — 아직 안 넘어간 승인이 있으면 그것이 간다(RU-79). 리뷰 2026-10-13)
+ *   그 밖                                                            → 그 순간의 바이트를 불변 사본으로 떠 `basis=due`
+ * 마감 뒤 최종본이 없으면 undefined — 마감 전 미리보기를 승인해 올라가 있을 수 있다(승인 경로가 본다). 병합이 안 됐으면 보낼 것이 없다
+ */
+async function dueUnitLocked(division: Division, slot: WeekSlot, target: UnitTarget, ctx: AutoCause): Promise<ReportSubmission | null | undefined> {
+  const run = await prisma.mergeRun.findFirst({
+    where: { divisionId: division.id, weekSlotId: slot.id, status: 'succeeded', outputPath: { not: null }, startedAt: { gte: effectiveDeadline(slot, division) } },
+    orderBy: { startedAt: 'desc' },
+  });
+  if (!run?.outputPath) return undefined;
+  let bytes: Buffer;
+  try {
+    bytes = await readStoredFile(run.outputPath);
+  } catch {
+    return undefined;
+  }
+  const digest = sha256(bytes);
+  const cur = await currentReport(division.id, slot.id, 'unit');
+  if (cur && cur.sha256 === digest) return null;
+  const approved = await latestUnitReview(division.id, slot.id);
+  if (approved && approved.sha256 === digest && !(cur && cur.submittedAt > approved.createdAt)) return undefined;
+  if (!decidesForUnit(lastEditor(run.reviewJson))) return undefined;
+  const frozen = await freeze(division.slug, slot, 'unit', bytes);
+  const sub = await prisma.reportSubmission.create({
+    data: {
+      level: 'unit',
+      divisionId: division.id,
+      weekSlotId: slot.id,
+      filePath: frozen.filePath,
+      sha256: frozen.sha256,
+      byteSize: frozen.byteSize,
+      sourceRunId: run.id,
+      submittedBy: SYSTEM,
+      submittedAt: new Date(),
+      basis: DUE_BASIS,
+      cause: DUE_CAUSE,
+    },
+  });
+  await auditSubmit(SYSTEM, sub, { isoKey: slot.isoKey, auto: true, causedBy: ctx.causedBy, trigger: ctx.cause, replaced: cur?.id ?? null, target: targetLabel(target) });
+  return sub;
+}
+
+/**
  * RU-71 — 실·팀 단위 **맞추기**. 같은 상태에서 몇 번을 돌려도 결과가 같다(RU-74) — 그래서 시키는 곳이 여럿이어도 된다.
- *   부서장 있음  가장 최근 승인이 아직 안 넘어갔으면 넘긴다(3단계를 켤 때 · 요청 안의 넘김이 어긋났을 때). 기록은 `system` + 일으킨 것
+ *   부서장 있음  가장 최근 승인이 아직 안 넘어갔으면 넘긴다(3단계를 켤 때 · 요청 안의 넘김이 어긋났을 때). 기록은 `system` + 일으킨 것.
+ *                **기한이 지났으면**(ADR-0021 D1) 지금 판(마감 뒤 최종본)이 위에 있어야 한다 — 승인한 판이 아니면 `basis=due`로
  *   부서장 없음  마감 뒤 최종본(HM-34)의 **지금 파일**을 넘긴다 — 담당자의 저장이 그 단위의 마지막 판단이다(§12 Q8). `basis=no_head`.
  *                단, 그 파일을 마지막으로 쓴 것이 운영자(그 단위 lead 아님)면 넘기지 않는다 — 그 단위의 결론이 아니다(결정 b)
  * 3단계가 꺼져 있거나 기여 단위가 아니면 아무것도 하지 않는다(RU-79). 넘겼으면 그 사본.
@@ -307,6 +379,11 @@ export async function syncUnit(divisionId: string, slot: WeekSlot, ctx: AutoCaus
   return withUnitLock(divisionId, slot.id, async () => {
     const division = await prisma.division.findUniqueOrThrow({ where: { id: divisionId } });
     if (await hasHead(divisionId)) {
+      const t = await stageTimes(slot);
+      if (pastDue(unitDue(t, target), t, ctx.now ?? new Date())) {
+        const due = await dueUnitLocked(division, slot, target, ctx);
+        if (due !== undefined) return due;
+      }
       const latest = await latestUnitReview(divisionId, slot.id);
       if (!latest) return null;
       const review = await ensureFrozen(latest, division.slug, slot);
@@ -366,7 +443,7 @@ export async function syncUnit(divisionId: string, slot: WeekSlot, ctx: AutoCaus
 
 /**
  * RU-77 — **비상구: 승인 없이 올리기** (실·팀 lead). 승인할 사람이 자리에 없는 날의 길이다. 게이트(`requireHandoffEscape`)는 사람을,
- * 여기는 업무 규칙(409)을 본다: 기한 15분 전부터 「본부 → 총괄」 기한 + 24시간까지 · 마감 뒤 최종본만 · 지금 판이 이미 올라가 있지 않을 때만.
+ * 여기는 업무 규칙(409)을 본다: 마감 뒤 최종본이 생기면 바로(ADR-0021 D3) 「본부 → 총괄」 기한 + 24시간까지 · 마감 뒤 최종본만 · 지금 판이 이미 올라가 있지 않을 때만.
  * 위에서는 주황 「부서장 승인 없이」로 보인다(`basis=unapproved`). 나중에 부서장이 승인하면 승인한 판이 대신한다.
  */
 export async function escapeUnit(scope: Scope, slot: WeekSlot, now = new Date()): Promise<Handoff> {
@@ -378,7 +455,7 @@ export async function escapeUnit(scope: Scope, slot: WeekSlot, now = new Date())
       throw new HttpError(409, 'no_head', '부서장 승인 단계가 없는 부서입니다 — 마감 뒤 병합본이 저절로 올라갑니다.');
     }
     const t = await stageTimes(slot);
-    requireEscapeWindow(unitDue(t, target), t, now);
+    requireEscapeWindow(t, now);
     const run = await prisma.mergeRun.findFirst({
       where: { divisionId: division.id, weekSlotId: slot.id, status: 'succeeded', outputPath: { not: null } },
       orderBy: { startedAt: 'desc' },
@@ -514,13 +591,52 @@ async function catchUpHqApproval(node: RollupNode, slot: WeekSlot, ctx: AutoCaus
 }
 
 /**
+ * ADR-0021 D2 — 「본부 → 총괄」 기한이 지난 본부(본부장 있음)에서 총괄에 있어야 할 것: **가장 나중 사건의 판**. `hq:` 잠금 안에서.
+ * 판정은 실·팀(`dueUnitLocked`)과 같다 — 지금 본부본이 이미 위에 있으면 null, 가장 최근 본부장 승인의 판이면 undefined(따라잡기가 `approved`로),
+ * 그 밖이면 지금 본부본을 `basis=due`로. 본부본은 실행마다 따로 쓴 파일이라 덮이지 않는다(RU-73) — 그 파일을 sha로 확인해 가리킨다
+ */
+async function dueHqLocked(node: RollupNode, slot: WeekSlot, ctx: AutoCause): Promise<ReportSubmission | null | undefined> {
+  const run = await latestHqRun(node.node.id, slot.id);
+  const file = run ? await runSha(run) : null;
+  if (!run || !file) return undefined;
+  const cur = await currentReport(node.node.id, slot.id, 'hq');
+  if (cur && cur.sha256 === file.sha) return null;
+  const approved = await latestHqReview(node.node.id, slot.id);
+  if (approved && approved.sha256 === file.sha && !(cur && cur.submittedAt > approved.createdAt)) return undefined;
+  const sub = await prisma.reportSubmission.create({
+    data: {
+      level: 'hq',
+      divisionId: node.node.id,
+      weekSlotId: slot.id,
+      filePath: run.outputPath!,
+      sha256: file.sha,
+      byteSize: file.size,
+      sourceRunId: run.id,
+      submittedBy: SYSTEM,
+      submittedAt: new Date(),
+      basis: DUE_BASIS,
+      cause: DUE_CAUSE,
+    },
+  });
+  await auditSubmit(SYSTEM, sub, { isoKey: slot.isoKey, auto: true, causedBy: ctx.causedBy, trigger: ctx.cause, replaced: cur?.id ?? null, target: '총괄' });
+  return sub;
+}
+
+/**
  * RU-71 — 본부 사본 **맞추기**. `hq:` 잠금을 쥔 채로 부른다(조립 직후 — auto.ts).
- *   본부장 있음  가장 최근 승인이 안 넘어갔으면 넘긴다(따라잡기)
+ *   본부장 있음  가장 최근 승인이 안 넘어갔으면 넘긴다(따라잡기). **「본부 → 총괄」 기한이 지났으면**(ADR-0021 D2) 지금 본부본이 위에 있어야 한다
  *   본부장 없음  지금 본부본이 곧 넘김이다 — 다시 만들어질 때마다 `basis=no_head` (`system`)
  * 넘겼으면 그 사본.
  */
 export async function syncHqHandoffLocked(node: RollupNode, slot: WeekSlot, ctx: AutoCause): Promise<ReportSubmission | null> {
-  if (await hasHead(node.node.id)) return catchUpHqApproval(node, slot, ctx);
+  if (await hasHead(node.node.id)) {
+    const t = await stageTimes(slot);
+    if (pastDue(t.hqDue, t, ctx.now ?? new Date())) {
+      const due = await dueHqLocked(node, slot, ctx);
+      if (due !== undefined) return due;
+    }
+    return catchUpHqApproval(node, slot, ctx);
+  }
   const run = await latestHqRun(node.node.id, slot.id);
   const file = run ? await runSha(run) : null;
   if (!run || !file) return null;
@@ -546,7 +662,7 @@ export async function syncHqHandoffLocked(node: RollupNode, slot: WeekSlot, ctx:
 }
 
 /**
- * RU-77 — 본부 비상구 「본부장 승인 없이 총괄로」(본부 lead). 「본부 → 총괄」 기한 15분 전부터 그 기한 + 24시간까지, 지금 본부본이 승인되지 않았고
+ * RU-77 — 본부 비상구 「본부장 승인 없이 총괄로」(본부 lead). 본부본이 있으면 바로(ADR-0021 D3) 「본부 → 총괄」 기한 + 24시간까지, 지금 본부본이 승인되지 않았고
  * 아직 올라가 있지 않을 때만. 총괄 화면에 주황 「본부장 승인 없이」. 나중에 본부장이 승인하면 승인한 판이 대신한다.
  */
 export async function escapeHq(scope: Scope, node: RollupNode, slot: WeekSlot, now = new Date()): Promise<Handoff> {
@@ -555,7 +671,7 @@ export async function escapeHq(scope: Scope, node: RollupNode, slot: WeekSlot, n
       throw new HttpError(409, 'no_head', '본부장 승인 단계가 없는 본부입니다 — 본부본이 저절로 총괄에 올라갑니다.');
     }
     const t = await stageTimes(slot);
-    requireEscapeWindow(t.hqDue, t, now);
+    requireEscapeWindow(t, now);
     const run = await latestHqRun(node.node.id, slot.id);
     const file = run ? await runSha(run) : null;
     if (!run || !file) throw new HttpError(409, 'no_rollup', '아직 이어 붙인 본부본이 없습니다.');

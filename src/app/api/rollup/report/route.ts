@@ -1,6 +1,6 @@
 // RU-80 · RU-77 · RU-84 — 위로 간 사본의 **상태**와 **비상구** (TACP-21 v1.7 · TACP-23).
 //   GET    ?level=unit|hq&isoKey=                   내 부서의 「위로」 상태 (행방은 lead·head에게만 — canSeeHandoff)
-//   POST   { level, isoKey, withoutApproval: true }  비상구 「승인 없이 올리기」 — 그 단계 lead만, 기한 15분 전부터
+//   POST   { level, isoKey, withoutApproval: true }  비상구 「승인 없이 올리기」 — 그 단계 lead만, 마감 뒤 병합본(본부본)이 있으면 바로(RU-92)
 //   DELETE                                           없앴다(RU-03) — 모든 역할 404
 //
 // 2026-10-08(ADR-0015) 전에는 POST가 [본부에 제출]·[총괄에 제출], DELETE가 [제출 취소]였다. 승인이 곧 제출이 되면서

@@ -6,6 +6,10 @@
 //   시각  「기한이 15분 남았는데 당신이 막고 있다」 — 스케줄러(`runDueRollupNotices`)가 본다
 // 시각은 전부 그 주의 기준 시각에서 계산한다(RU-50) — 총괄이 연휴로 마감을 옮기면 같은 간격으로 따라간다.
 //
+// ADR-0021 (2026-10-12) — 기한이 곧 제출이다. 그래서 「기한 15분 전」·「본부본 준비」가 **기한에 무엇이 저절로 가는지**를 말하고, 기한이 지나
+// 판이 저절로 따라가는 뒤로는 「다시 승인해 주세요」를 보내지 않는다(할 일이 아니다). 본부 담당도 「본부본 준비」를 받는다(운영자 요청 — 본부장이
+// 자리에 없을 때 담당이 먼저 안다). 들어올 수 없는 사람(꺼진 부서 — AU-04b)에게는 보내지 않는다. 자기가 일으킨 변경을 자기에게 알리지 않는다.
+//
 // 본부·총괄 사람에게 가는 것은 **3단계 스위치(RU-52)**를, 실·팀 사람에게 가는 것(RU-56a)은 부서 알림 스위치(NT-30)도 따른다.
 // 본인 설정(NT-20)·사번(NT-01)은 그대로. 종류마다 `NotifyLog`로 한 번 — 테스트 서버는 메신저가 꺼져 있어 아무것도 안 나간다(RU-41).
 import type { RollupRun, WeekSlot } from '@prisma/client';
@@ -21,10 +25,12 @@ import { formatDeadlineKo, slotKind, toKstIso } from '@/lib/week';
 import { STAGE_HQ, STAGE_UNIT } from '@/lib/rollup-stages';
 import { currentReport, fileSha } from './report';
 import { loadOrgSetting, loadTree, submitTarget, type OrgTree, type RollupNode } from './tree';
-import { stagesFrom } from './schedule';
+import { liveUntil, stagesFrom } from './schedule';
+import { hasHead } from './handoff';
+import { resolveSections, uncoveredCopies } from './sections';
 
 const WINDOW_MINUTES = 12; // 스케줄러 주기보다 넉넉하게 — 반드시 한 번 걸린다 (NT-40과 같다)
-/** RU-56·56a — 기한 몇 분 전에 막고 있는 사람에게 알리나. 같은 시각부터 비상구가 열린다(RU-77 — handoff.ts `ESCAPE_MINUTES`) */
+/** RU-56·56a — 기한 몇 분 전에 막고 있는 사람에게 알리나 (handoff.ts `ESCAPE_MINUTES`와 같은 값 — ADR-0021 뒤로 비상구는 더 일찍 열린다) */
 export const DUE_SOON_MINUTES = 15;
 /** @deprecated 이름만 남긴다 — `DUE_SOON_MINUTES` */
 export const HQ_DUE_SOON_MINUTES = DUE_SOON_MINUTES;
@@ -37,14 +43,31 @@ interface Person {
   name: string;
   employeeNo: string;
   divisionId: string;
+  divisionRole: string;
+  email: string;
 }
 
-async function people(where: { divisionId?: string; divisionRole?: string; isCoordinator?: boolean }): Promise<Person[]> {
+/**
+ * 받을 사람. ADR-0021 D4 — **들어올 수 있는 사람만**: 그 부서가 켜져 있거나 운영자(AU-04b의 예외). 꺼진 본부의 본부장에게 「승인해 주세요」를
+ * 보내면 눌러도 들어오지 못한다 — 그 본부는 「본부장 없음」으로 저절로 간다(handoff.ts `hasHead`)
+ */
+async function people(where: { divisionId?: string; divisionRole?: string | { in: string[] }; isCoordinator?: boolean }): Promise<Person[]> {
   const us = await prisma.user.findMany({
-    where: { ...where, isActive: true, notifyEnabled: true, employeeNo: { not: null } },
-    select: { id: true, name: true, employeeNo: true, divisionId: true },
+    where: {
+      ...where,
+      isActive: true,
+      notifyEnabled: true,
+      employeeNo: { not: null },
+      OR: [{ division: { isActive: true } }, { isOperator: true }],
+    },
+    select: { id: true, name: true, employeeNo: true, divisionId: true, divisionRole: true, email: true },
   });
   return us.map((u) => ({ ...u, employeeNo: u.employeeNo! }));
+}
+
+/** 기한이 지나 판이 저절로 따라가는 중인가 (ADR-0021) — 그때는 「다시 승인」이 할 일이 아니다 */
+function afterDue(due: Date, hqDue: Date, now: Date): boolean {
+  return now >= due && now <= liveUntil({ hqDue });
 }
 
 export interface RollupNoticeOutcome {
@@ -102,8 +125,19 @@ async function canNotify(): Promise<boolean> {
 type Who = { name: string; employeeNo: string };
 const head = (p: Who) => `[${p.employeeNo}]${p.name}님`;
 
-/** RU-54 — 본부장: 본부본 준비. `again`이면 기한에 일부로 보낸 뒤 다 모인 것 */
-export function hqReadyMessage(p: Who, slot: WeekSlot, node: string, arrived: string[], missing: string[], again = false) {
+/**
+ * RU-54 — 본부장(과 본부 담당 — ADR-0021 D5): 본부본 준비. `again`이면 기한에 일부로 보낸 뒤 다 모인 것.
+ * 끝 줄은 받는 사람의 할 일 — 본부장은 [검토 완료 · 승인], 담당은 본부장이 자리에 없을 때의 길. 둘 다 기한에 무엇이 저절로 가는지(`hqDue`)
+ */
+export function hqReadyMessage(
+  p: Who & { divisionRole?: string },
+  slot: WeekSlot,
+  node: string,
+  arrived: string[],
+  missing: string[],
+  again = false,
+  hqDue?: Date,
+) {
   const n = arrived.length + missing.length;
   return {
     subject: again
@@ -115,7 +149,10 @@ export function hqReadyMessage(p: Who, slot: WeekSlot, node: string, arrived: st
         : `${head(p)} ${weekLabel(slot)} 산하 ${arrived.length}/${n}곳이 올라와 본부본이 준비됐어요.`,
       ...(missing.length ? [`아직 ${missing.length}곳: ${missing.join('·')}`] : []),
       '',
-      'Tincase 본부 취합에서 검토하고 [검토 완료 · 승인]을 누르면 바로 총괄로 갑니다.',
+      p.divisionRole === 'lead'
+        ? '본부장이 Tincase 본부 취합에서 승인하면 바로 총괄로 갑니다. 본부장이 자리에 없으면 [본부장 승인 없이 총괄로]로 먼저 올릴 수 있어요.'
+        : 'Tincase 본부 취합에서 검토하고 [검토 완료 · 승인]을 누르면 바로 총괄로 갑니다.',
+      ...(hqDue ? [`${hhmm(hqDue)}까지 승인이 없으면 그때 본부본이 자동으로 총괄로 가요.`] : []),
     ].join('\n'),
   };
 }
@@ -141,6 +178,7 @@ export function hqHeadDueSoonMessage(p: Who, slot: WeekSlot, due: Date) {
       `${head(p)} ${hhmm(due)}까지 본부본 승인이 필요해요 — ${DUE_SOON_MINUTES}분 남았어요.`,
       '',
       'Tincase 본부 취합에서 검토하고 승인하면 바로 총괄로 갑니다.',
+      `${hhmm(due)}까지 승인이 없으면 그때 본부본이 자동으로 총괄로 가요.`,
     ].join('\n'),
   };
 }
@@ -153,13 +191,26 @@ export function unitDueSoonMessage(p: Who, slot: WeekSlot, target: string, due: 
       `${head(p)} ${hhmm(due)}까지 병합본 승인이 필요해요 — ${DUE_SOON_MINUTES}분 남았어요.`,
       '',
       `Tincase 수합 관리에서 병합본을 승인하면 바로 ${target}에 올라갑니다.`,
+      `${hhmm(due)}까지 승인이 없으면 그때 병합본이 자동으로 ${target}에 올라가요.`,
     ].join('\n'),
   };
 }
 
-/** RU-57 — 총괄: 전사본 준비. `again`이면 기한에 일부로 보낸 뒤 다 들어온 것 */
-export function orgReadyMessage(p: Who, slot: WeekSlot, arrived: string[], missing: string[], again = false) {
-  const n = arrived.length + missing.length;
+/**
+ * RU-57 — 총괄: 전사본 준비. `again`이면 기한에 일부로 보낸 뒤 다 들어온 것.
+ * ADR-0021 D6 — `offline`(Tincase를 안 쓰는 섹션 — 총괄이 [올리기]로 넣는 곳)은 「아직」과 따로 적는다: 기다릴 것이 아니라 총괄이 할 일이다
+ */
+export function orgReadyMessage(
+  p: Who,
+  slot: WeekSlot,
+  arrived: string[],
+  missing: string[],
+  again = false,
+  offline: string[] = [],
+  /** 어느 섹션에도 없어 최종본에서 빠지는 사본 — `uncoveredCopies`의 문장 그대로(총괄이 섹션을 정할 일) */
+  uncovered: string[] = [],
+) {
+  const n = arrived.length + missing.length + offline.length;
   return {
     subject: again ? `[Tincase] ${slot.label} ${n}곳이 다 들어왔어요 — 전사본` : `[Tincase] ${slot.label} ${arrived.length}/${n}곳 도착 — 전사본이 준비돼 있어요`,
     contents: [
@@ -167,8 +218,10 @@ export function orgReadyMessage(p: Who, slot: WeekSlot, arrived: string[], missi
       '',
       `도착 ${arrived.length}곳${arrived.length ? `: ${arrived.join('·')}` : ''}`,
       ...(missing.length ? [`아직 ${missing.length}곳: ${missing.join('·')}`] : []),
+      ...(offline.length ? [`Tincase 밖 ${offline.length}곳: ${offline.join('·')} — 「전사」의 [올리기]로 넣어 주세요`] : []),
+      ...(uncovered.length ? ['', ...uncovered] : []),
       '',
-      'Tincase 「전사」에서 전사본을 받으세요.',
+      'Tincase 「전사」에서 확인하고 전사본을 받으세요.',
     ].join('\n'),
   };
 }
@@ -220,19 +273,29 @@ async function hqArrivals(node: RollupNode, slot: WeekSlot) {
 
 /**
  * RU-54 · RU-55a — 본부본이 새로 만들어진 직후.
- *   승인한 적이 있고 그 판(sha)이 지금과 다르다 → RU-55a 「다시 승인」 (풀린 승인마다 한 번)
- *   승인한 적이 없고 산하가 다 모였다 → RU-54 「본부본 준비」(처음) 또는 「다 모였어요」(기한에 일부로 보낸 뒤)
- * 본부 담당자에게는 보내지 않는다 — 할 일이 없다.
+ *   승인한 적이 있고 그 판(sha)이 지금과 다르다 → RU-55a 「다시 승인」 (풀린 승인마다 한 번) — **「본부 → 총괄」 기한 전에만**(ADR-0021: 뒤로는 저절로 따라간다)
+ *   승인한 적이 없고 산하가 다 모였다 → RU-54 「본부본 준비」(처음) 또는 「다 모였어요」(기한에 일부로 보낸 뒤) — 본부장과 **본부 담당**(ADR-0021 D5)
+ * 본부장이 없는 본부(꺼진 본부 포함 — D4)는 본부본이 곧 총괄로 가므로 보내지 않는다. 그 변경을 일으킨 사람에게는 「다시 승인」을 보내지 않는다(자기가 한 일).
  */
-export async function noticeHqBuilt(node: RollupNode, slot: WeekSlot, run: RollupRun, why: string): Promise<RollupNoticeOutcome[]> {
+export async function noticeHqBuilt(
+  node: RollupNode,
+  slot: WeekSlot,
+  run: RollupRun,
+  why: string,
+  opts: { causedBy?: string | null; now?: Date } = {},
+): Promise<RollupNoticeOutcome[]> {
   if (!(await canNotify())) return [];
+  if (!(await hasHead(node.node.id))) return [];
   const out: RollupNoticeOutcome[] = [];
   const heads = await people({ divisionId: node.node.id, divisionRole: 'head' });
+  const deciders = await people({ divisionId: node.node.id, divisionRole: { in: ['head', 'lead'] } });
+  const t = stagesFrom(await weekAnchor(slot), await loadOrgSetting());
   const sha = await fileSha(run.outputPath);
   const approval = await hqApprovalFor(node.node.id, slot.id);
   if (approval) {
-    if (sha && approval.sha256 !== sha) {
-      const r = await deliver(`ru_hq_reapprove:${approval.id}`, node.node.id, slot, heads, (p) => hqReapproveMessage(p, slot, node.node.nameKo, why, approval.createdAt), link('/hq'));
+    if (sha && approval.sha256 !== sha && !afterDue(t.hqDue, t.hqDue, opts.now ?? new Date())) {
+      const to = heads.filter((h) => h.email !== opts.causedBy);
+      const r = await deliver(`ru_hq_reapprove:${approval.id}`, node.node.id, slot, to, (p) => hqReapproveMessage(p, slot, node.node.nameKo, why, approval.createdAt), link('/hq'));
       if (r) out.push(r);
     }
     return out;
@@ -241,7 +304,7 @@ export async function noticeHqBuilt(node: RollupNode, slot: WeekSlot, run: Rollu
   if (missing.length > 0) return out; // 일부는 기한(스케줄러)에
   let ready = await sentBefore(node.node.id, slot.id, 'ru_hq_ready');
   if (!ready) {
-    const r = await deliver('ru_hq_ready', node.node.id, slot, heads, (p) => hqReadyMessage(p, slot, node.node.nameKo, arrived, missing), link('/hq'), { complete: true });
+    const r = await deliver('ru_hq_ready', node.node.id, slot, deciders, (p) => hqReadyMessage(p, slot, node.node.nameKo, arrived, missing, false, t.hqDue), link('/hq'), { complete: true });
     if (r) {
       out.push(r);
       return out;
@@ -251,16 +314,23 @@ export async function noticeHqBuilt(node: RollupNode, slot: WeekSlot, run: Rollu
     ready = await sentBefore(node.node.id, slot.id, 'ru_hq_ready');
   }
   if (ready && !JSON.parse(ready.detail ?? '{}').complete) {
-    const r = await deliver('ru_hq_complete', node.node.id, slot, heads, (p) => hqReadyMessage(p, slot, node.node.nameKo, arrived, missing, true), link('/hq'));
+    const r = await deliver('ru_hq_complete', node.node.id, slot, deciders, (p) => hqReadyMessage(p, slot, node.node.nameKo, arrived, missing, true, t.hqDue), link('/hq'));
     if (r) out.push(r);
   }
   return out;
 }
 
-/** 이 섹션 출처들에서 도착·미도착 이름 — 켜진 섹션 기준 (RU-57) */
-export function orgArrivals(sources: readonly { section: { title: string }; kind: string }[]) {
+/**
+ * 이 섹션 출처들에서 도착·미도착 이름 — 켜진 섹션 기준 (RU-57). 사건(조립 직후)과 시각(기한)이 **같은 셈**을 쓴다(ADR-0021 D6 — 예전에는
+ * 기한 쪽이 나무 단위로 세어 둘이 달랐다). `offline` — 아직 안 들어왔고 Tincase를 안 쓰는 섹션(총괄이 올릴 곳)
+ */
+export function orgArrivals(sources: readonly { section: { title: string }; kind: string; offline?: boolean }[]) {
   const ok = (k: string) => k === 'tincase' || k === 'upload';
-  return { arrived: sources.filter((s) => ok(s.kind)).map((s) => s.section.title), missing: sources.filter((s) => !ok(s.kind)).map((s) => s.section.title) };
+  return {
+    arrived: sources.filter((s) => ok(s.kind)).map((s) => s.section.title),
+    missing: sources.filter((s) => !ok(s.kind) && !s.offline).map((s) => s.section.title),
+    offline: sources.filter((s) => !ok(s.kind) && s.offline).map((s) => s.section.title),
+  };
 }
 
 /**
@@ -271,14 +341,16 @@ export function orgArrivals(sources: readonly { section: { title: string }; kind
 export async function noticeOrgBuilt(
   slot: WeekSlot,
   run: RollupRun,
-  sources: readonly { section: { title: string }; kind: string }[],
+  sources: readonly { section: { title: string }; kind: string; offline?: boolean }[],
   why: string,
+  opts: { causedBy?: string | null } = {},
 ): Promise<RollupNoticeOutcome[]> {
   if (!(await canNotify())) return [];
   const out: RollupNoticeOutcome[] = [];
   const coords = await people({ isCoordinator: true });
-  const { arrived, missing } = orgArrivals(sources);
-  if (missing.length === 0) {
+  const { arrived, missing, offline } = orgArrivals(sources);
+  // ADR-0021 D6 — 들어온 곳이 하나도 없으면(섹션이 비었다) 「준비」가 아니다
+  if (arrived.length > 0 && missing.length === 0 && offline.length === 0) {
     for (const c of coords) {
       let ready = await sentBefore(c.divisionId, slot.id, orgReadyKind(c.id));
       if (!ready) {
@@ -311,6 +383,7 @@ export async function noticeOrgBuilt(
   for (const [email, d] of byActor) {
     const person = coords.find((x) => x.id === idOf.get(email));
     if (!person) continue; // 받은 사람이 총괄이 아니거나 알림을 끈 사람
+    if (opts.causedBy && person.email === opts.causedBy) continue; // ADR-0021 D5 — 자기가 올린 파일·바꾼 구성으로 바뀐 것은 이미 안다
     const runId = d.target!.slice('rollup:'.length);
     const got = runs.find((r) => r.id === runId);
     if (!got || (await fileSha(got.outputPath)) === sha) continue;
@@ -422,12 +495,15 @@ export async function runDueRollupNotices(now = new Date()): Promise<RollupNotic
 
   for (const n of tree.nodes.filter((x) => x.hasHqStep)) {
     try {
+      // ADR-0021 D4 — 본부장이 없는(꺼진 본부 포함) 본부는 본부본이 곧 총괄로 간다 — 기다리는 사람이 없다
+      if (!(await hasHead(n.node.id))) continue;
       const heads = await people({ divisionId: n.node.id, divisionRole: 'head' });
+      const deciders = await people({ divisionId: n.node.id, divisionRole: { in: ['head', 'lead'] } });
       // RU-54 — 「실·팀 → 본부」 기한에 하나라도 와 있고 본부본이 승인을 기다리면 그때 (다 모인 순간에 이미 갔으면 안 간다)
       if (atUnit && (await hqAwaitingApproval(n.node.id, slot))) {
         const { arrived, missing } = await hqArrivals(n, slot);
         if (arrived.length > 0) {
-          const r = await deliver('ru_hq_ready', n.node.id, slot, heads, (p) => hqReadyMessage(p, slot, n.node.nameKo, arrived, missing), link('/hq'), {
+          const r = await deliver('ru_hq_ready', n.node.id, slot, deciders, (p) => hqReadyMessage(p, slot, n.node.nameKo, arrived, missing, false, t.hqDue), link('/hq'), {
             complete: missing.length === 0,
           });
           if (r) out.push(r);
@@ -444,26 +520,45 @@ export async function runDueRollupNotices(now = new Date()): Promise<RollupNotic
   }
   if (atHq) {
     try {
-      // RU-57 — 「본부 → 총괄」 기한에 일부라도 — 다 들어온 순간에 이미 갔으면 안 간다. 이름은 낸 곳(arrivalName)
-      const arrived: string[] = [];
-      const missing: string[] = [];
-      for (const n of tree.nodes) {
-        const ok = n.hasHqStep ? await currentReport(n.node.id, slot.id, 'hq') : await currentReport(n.contributors[0].id, slot.id, 'unit');
-        (ok ? arrived : missing).push(arrivalName(n));
-      }
-      for (const c of await people({ isCoordinator: true })) {
-        // 총괄이 여럿이면 각자 — NotifyLog는 그 총괄의 부서에 남기고, 종류에 **사람**을 붙인다.
-        // (부서·주차·종류)가 유일하므로 종류가 같으면 같은 부서의 둘째 총괄은 「이미 보냄」으로 건너뛰어진다
-        const r = await deliver(orgReadyKind(c.id), c.divisionId, slot, [c], (p) => orgReadyMessage(p, slot, arrived, missing), link('/org'), {
-          complete: missing.length === 0,
-        });
-        if (r) out.push(r);
+      /*
+       * RU-57 — 「본부 → 총괄」 기한에 일부라도 — 다 들어온 순간에 이미 갔으면 안 간다. ADR-0021 D6:
+       *   · 셈은 사건 쪽(조립 직후)과 같다 — 섹션 출처(`resolveSections`). 예전에는 나무 단위로 세어 두 알림이 다른 수를 말했다
+       *   · 기한의 자동 제출이 끝난 **뒤**의 상태다 — 스케줄러는 같은 주기에 맞추기(`runDueRollupSync`)를 먼저 끝낸다
+       *   · 전사본이 하나도 만들어지지 않았으면(아무것도 안 옴·실패) 「준비돼 있어요」를 보내지 않는다 — 실패는 RU-57b가 말한다
+       */
+      const built = await prisma.rollupRun.findFirst({ where: { level: 'org', weekSlotId: slot.id, status: 'succeeded' }, select: { id: true } });
+      const sources = await resolveSections(slot, tree, { create: false });
+      const { arrived, missing, offline } = orgArrivals(sources);
+      const copies = await uncoveredCopies(slot, sources, tree);
+      const uncovered = [...copies, ...noSectionLines(tree, sources, copies)];
+      if (built && (arrived.length > 0 || uncovered.length > 0)) {
+        for (const c of await people({ isCoordinator: true })) {
+          // 총괄이 여럿이면 각자 — NotifyLog는 그 총괄의 부서에 남기고, 종류에 **사람**을 붙인다.
+          // (부서·주차·종류)가 유일하므로 종류가 같으면 같은 부서의 둘째 총괄은 「이미 보냄」으로 건너뛰어진다
+          const r = await deliver(orgReadyKind(c.id), c.divisionId, slot, [c], (p) => orgReadyMessage(p, slot, arrived, missing, false, offline, uncovered), link('/org'), {
+            complete: missing.length === 0 && offline.length === 0,
+          });
+          if (r) out.push(r);
+        }
       }
     } catch (e) {
       logger.error({ err: (e as Error).message }, '[알림] 총괄 도착 알림 실패');
     }
   }
   return out;
+}
+
+/**
+ * Tincase로 내는 단위인데 어느 켜진 섹션도 가리키지 않는다 — 그 단위의 것은 전사본에 들어갈 자리가 없다(총괄이 섹션을 정할 일).
+ * 이름은 **낸 단위**의 것(`arrivalName` — 꺼진 본부 아래 한 실만 쓰면 그 실). 사본이 이미 와 있으면 `uncoveredCopies`가 더 자세히 말하므로 뺀다
+ */
+function noSectionLines(tree: OrgTree, sources: readonly { section: { divisionId: string | null } }[], copyLines: readonly string[]): string[] {
+  const claimed = new Set(sources.map((s) => s.section.divisionId).filter((id): id is string => !!id));
+  return tree.nodes
+    .filter((n) => !claimed.has(n.node.id) && !n.contributors.some((c) => claimed.has(c.id)))
+    .map(arrivalName)
+    .filter((name) => !copyLines.some((l) => l.includes(`「${name}」`)))
+    .map((name) => `「${name}」은(는) 어느 섹션에도 없어 전사본에 들어갈 자리가 없어요 — [섹션 구성 편집]에서 부서를 정해 주세요`);
 }
 
 /** 화면용 — 이번 주 단계 기한 글자 */

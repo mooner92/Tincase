@@ -3,7 +3,9 @@
 //
 // 버튼이 아니라 **상태**다. 부서장의 승인이 곧 위로 가는 제출이므로 담당자가 누를 것은 없다 — 알아야 할 것은
 // 「지금 어디까지 갔나」: 칩 하나 + 한 줄(상태 · 받는 곳 · 기한 · 올라간 시각과 승인한 사람) + 행방 한 줄.
-// 버튼은 하나도 없고, 담당자에게만 기한 15분 전부터 승인 전·승인 뒤 바뀜일 때 글자 링크 「부서장 승인 없이 올리기」(RU-77).
+// 버튼은 하나도 없고, 담당자에게만 승인 전·승인 뒤 바뀜일 때 글자 링크 「부서장 승인 없이 올리기」(RU-77 — ADR-0021 D3: 마감 뒤 병합본이 생기면 바로).
+//
+// ADR-0021 (2026-10-12) — **기한이 곧 제출.** 기한까지 승인이 없으면 그때 판이 저절로 올라간다(U5 「기한 지나 자동」). 그래서 승인 전 줄이 그것을 말한다.
 import { useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 
@@ -12,10 +14,12 @@ export interface HandoffCardView {
   toHq: boolean;
   dueKo: string;
   hasHead: boolean;
-  state: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'Uf' | 'H0' | 'H1' | 'H2' | 'Hf';
+  state: 'U0' | 'U1' | 'U2' | 'U3' | 'U4' | 'U5' | 'Uf' | 'H0' | 'H1' | 'H2' | 'Hf';
   sent: { id: string; atKst: string; basis: string; by: string } | null;
   trail: { hqArrivedKst: string | null; hqApprovedKst: string | null; orgArrivedKst: string | null } | null;
-  escape: { open: boolean; opensAtKst: string } | null;
+  escape: { open: boolean } | null;
+  /** ADR-0021 — 아직 기한 전. 「그때 판이 자동으로」는 이때만 말한다 */
+  beforeDue?: boolean;
 }
 
 const CHIP: Record<HandoffCardView['state'], { cls: string; word: string; dot?: boolean }> = {
@@ -24,6 +28,7 @@ const CHIP: Record<HandoffCardView['state'], { cls: string; word: string; dot?: 
   U2: { cls: 'chip-ok', word: '올라감', dot: true },
   U3: { cls: 'chip-warn', word: '승인 뒤 바뀜' },
   U4: { cls: 'chip-warn', word: '승인 없이 올라감', dot: true },
+  U5: { cls: 'chip-warn', word: '기한 지나 자동', dot: true },
   Uf: { cls: 'chip-muted', word: '병합본 없음' },
   H0: { cls: 'chip-muted', word: '받는 중' },
   H1: { cls: 'chip-ok', word: '올라감', dot: true },
@@ -40,19 +45,32 @@ function line(v: HandoffCardView): ReactNode {
   switch (v.state) {
     case 'U0':
     case 'U1':
-      return <>부서장이 승인하면 바로 {v.target}에 올라감 · {due}</>;
+      return (
+        <>
+          부서장이 승인하면 바로 {v.target}에 올라감 · {due}
+          {v.beforeDue !== false && ' 승인이 없으면 그때 판이 자동으로'}
+        </>
+      );
     case 'U2':
       return <>{v.target}에 올라감 {v.sent?.atKst} · {v.sent?.by}</>;
     case 'U3':
       return (
         <span className="text-warning">
-          부서장이 다시 승인하면 올라감 · 지금 {v.target}에는 {v.sent?.atKst}에 {v.sent?.basis === 'unapproved' ? '승인 없이 올린' : '승인한'} 판 · {due}
+          부서장이 다시 승인하면 올라감 · 지금 {v.target}에는 {v.sent?.atKst}에 {sentWord(v.sent?.basis)} 판 · {due}
+          {v.beforeDue !== false && ' 승인이 없으면 지금 판이 자동으로'}
         </span>
       );
     case 'U4':
       return (
         <span className="text-warning">
           부서장 승인 없이 올라감 {v.sent?.atKst} · {v.sent?.by}
+        </span>
+      );
+    case 'U5':
+      // ADR-0021 D1 — 기한이 지나 지금 판이 저절로 올라갔다. 부서장이 승인하면 승인한 판이 대신한다(화면에는 적지 않는다)
+      return (
+        <span className="text-warning">
+          기한 지나 자동으로 {v.target}에 올라감 {v.sent?.atKst} · 부서장 승인 없이
         </span>
       );
     case 'H0':
@@ -70,6 +88,11 @@ function line(v: HandoffCardView): ReactNode {
     default:
       return <>마감 뒤 병합본 없음 · {due}</>;
   }
+}
+
+/** 위에 가 있는 판이 어떻게 갔나 — 「승인한」은 승인으로 간 것에만(기한 사본을 「승인한 판」이라 부르지 않는다 — 리뷰 2026-10-13) */
+function sentWord(basis: string | undefined): string {
+  return basis === 'unapproved' ? '승인 없이 올린' : basis === 'due' ? '기한에 자동으로 간' : basis === 'no_head' ? '자동으로 간' : '승인한';
 }
 
 /** RU-80 — 행방 한 줄, 시각만 (TACP-21 v1.7) */
@@ -132,7 +155,7 @@ export function HandoffCard({ view, isoKey }: { view: HandoffCardView; isoKey: s
         </span>
       </div>
 
-      {/* RU-77 — 비상구. 승인할 사람이 자리에 없는 날의 길이다 — 기한 15분 전부터, 글자 링크로, 누르면 한 번 더 묻는다 */}
+      {/* RU-77 — 비상구. 승인할 사람이 자리에 없는 날의 길이다 — 마감 뒤 병합본이 생기면 바로(ADR-0021 D3), 글자 링크로, 누르면 한 번 더 묻는다 */}
       {view.escape?.open && (
         <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
           {ask ? (

@@ -93,8 +93,11 @@ export function makeSchedulerTick(): () => Promise<void> {
        * RU-72 — 3단계 자동 진행의 **안전망**. 넘김·조립은 승인 요청과 화면 열기가 이미 맞춘다 — 여기는 그것들이 놓친 것
        * (요청 뒤 프로세스 종료 등)을 따라잡을 뿐이다. 알림보다 먼저 — 알림이 맞춘 상태를 보게.
        */
+      // 리뷰 2026-10-13 — 맞추기와 알림이 **같은 지금**을 본다. 따로 시계를 읽으면 15:59:59.8에 맞추기(기한 전 — 기한 사본 없음)·
+      // 16:00:00.3에 알림(기한 — 「전사본 준비」 한 통)이 되어, 총괄이 본부가 아직 안 간 상태로 한 통을 받는다(ADR-0021 D6)
+      const rollupNow = new Date();
       try {
-        await runDueRollupSync();
+        await runDueRollupSync(rollupNow);
       } catch (e) {
         console.error('[자동] 3단계 맞추기 오류', e);
       }
@@ -104,7 +107,7 @@ export function makeSchedulerTick(): () => Promise<void> {
        * 자동 병합이 멈춰 있어도 계속된다. 병합 줄과도 상관없다 — 줄이 15시를 넘겨 돌아도 14:45 · 15:00 창을 놓치지 않는다(HM-60a).
        */
       try {
-        for (const r of await runDueRollupNotices()) console.log(`[알림] ${r.kind}: ${r.sent}/${r.targets}명`);
+        for (const r of await runDueRollupNotices(rollupNow)) console.log(`[알림] ${r.kind}: ${r.sent}/${r.targets}명`);
       } catch (e) {
         console.error('[알림] 3단계 알림 오류', e);
       }

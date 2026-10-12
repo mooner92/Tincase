@@ -19,7 +19,7 @@ import { resolveSections } from './sections';
 import { hqNodeOf, loadTree, type RollupNode } from './tree';
 import { liveUntil, rollupEnabled, stageTimes } from './schedule';
 import { coalesce, settled, withLock } from './lock';
-import { hasHead, hqLockKey, syncHqHandoffLocked, syncUnit, targetLabel, unitTarget, type AutoCause } from './handoff';
+import { hasHead, hqLockKey, pastDue, syncHqHandoffLocked, syncUnit, targetLabel, unitDue, unitTarget, type AutoCause } from './handoff';
 import { notifyReapprove, type ReapproveReason } from '../merge/review';
 import { noticeHqBuilt, noticeOrgBuilt, noticeRollupFailed } from './notices';
 
@@ -87,13 +87,17 @@ async function buildHq(nodeId: string, slot: WeekSlot, opts: SyncOptions): Promi
       }
     }
     // 본부장 없음 → 지금 본부본이 곧 넘김 · 본부장 있음 → 어긋난 승인 따라잡기 (handoff.ts)
-    const handed = await syncHqHandoffLocked(node, slot, { cause: built ? `hq_rebuilt:${(built as RollupRun).id}` : opts.cause, causedBy: opts.causedBy });
-    if (handed) later('syncOrg', () => syncOrg(slot, { cause: `hq_handoff:${handed.id}`, causedBy: opts.causedBy }));
+    const handed = await syncHqHandoffLocked(node, slot, {
+      cause: built ? `hq_rebuilt:${(built as RollupRun).id}` : opts.cause,
+      causedBy: opts.causedBy,
+      now: opts.now,
+    });
+    if (handed) later('syncOrg', () => syncOrg(slot, { cause: `hq_handoff:${handed.id}`, causedBy: opts.causedBy, now: opts.now }));
   });
   const run = built as RollupRun | null;
   if (!run) return;
   try {
-    if (run.status === 'succeeded') await noticeHqBuilt(node, slot, run, await causeLabel(run.cause));
+    if (run.status === 'succeeded') await noticeHqBuilt(node, slot, run, await causeLabel(run.cause), { causedBy: opts.causedBy, now: opts.now });
     else await noticeRollupFailed('hq', node, slot, run);
   } catch (e) {
     // 알림은 결과이지 조건이 아니다 (HM-47) — 본부본은 이미 만들어졌다
@@ -118,7 +122,7 @@ const orgFlightKey = (slotId: string) => `flight:org:${slotId}`;
 async function buildOrg(slot: WeekSlot, opts: SyncOptions): Promise<void> {
   const tree = await loadTree();
   let built: RollupRun | null = null;
-  let arrivals: { section: { title: string }; kind: string }[] = [];
+  let arrivals: { section: { title: string }; kind: string; offline?: boolean }[] = [];
   await withLock(`org:${slot.id}`, async () => {
     await failStaleRunning('org', null, slot);
     // RU-83 — 섹션 목록이 아직 저장되지 않았으면 **만들지 않고** 기본 13개를 이름으로 맞춰 쓴다 (system이 총괄의 설정을 바꾸지 않는다)
@@ -134,7 +138,7 @@ async function buildOrg(slot: WeekSlot, opts: SyncOptions): Promise<void> {
   const run = built as RollupRun | null;
   if (!run) return;
   try {
-    if (run.status === 'succeeded') await noticeOrgBuilt(slot, run, arrivals, await causeLabel(run.cause));
+    if (run.status === 'succeeded') await noticeOrgBuilt(slot, run, arrivals, await causeLabel(run.cause), { causedBy: opts.causedBy });
     else await noticeRollupFailed('org', null, slot, run);
   } catch (e) {
     logger.error({ err: (e as Error).message }, '[알림] 전사본 알림 실패');
@@ -167,7 +171,8 @@ export function laterAfterUnit(divisionId: string, slot: WeekSlot, opts: SyncOpt
 
 /**
  * RU-72 · HM-47 — 실·팀 병합본의 **판이 바뀐 뒤**(병합 성공·담당자 수정 저장). 승인한 사람이 아닌 일이 판을 바꿨다:
- *   부서장 있음  위로 보내지 않는다(승인이 아니다). 승인한 적이 있으면 부서장에게 NT-52 「다시 승인해 주세요」(새 판마다 한 번)
+ *   부서장 있음  기한 전 — 위로 보내지 않는다(승인이 아니다). 승인한 적이 있으면 부서장에게 NT-52 「다시 승인해 주세요」(새 판마다 한 번)
+ *                기한 뒤 — 그 판이 곧 올라간다(ADR-0021 D1 — 최신 판을 따라간다). 「다시 승인」은 보내지 않는다 — 할 일이 아니다
  *   부서장 없음  마감 뒤 최종본이면 그것이 곧 넘김 — `syncUnit`(`system`, `basis=no_head`) 그리고 받는 곳을 맞춘다
  * 3단계가 꺼져 있거나 기여 단위가 아니면 아무것도 하지 않는다. 던지지 않는다 — 병합·저장은 이미 끝났다.
  */
@@ -177,12 +182,15 @@ export async function onUnitVersionChanged(divisionId: string, slot: WeekSlot, o
     const target = await unitTarget(divisionId);
     if (!target) return;
     if (await hasHead(divisionId)) {
-      const division = await prisma.division.findUniqueOrThrow({ where: { id: divisionId } });
-      await notifyReapprove(division, slot, targetLabel(target), opts.reason);
-      return;
+      const t = await stageTimes(slot);
+      if (!pastDue(unitDue(t, target), t, opts.now ?? new Date())) {
+        const division = await prisma.division.findUniqueOrThrow({ where: { id: divisionId } });
+        await notifyReapprove(division, slot, targetLabel(target), opts.reason);
+        return;
+      }
     }
     const sub = await syncUnit(divisionId, slot, opts);
-    if (sub) laterAfterUnit(divisionId, slot, { cause: `unit_handoff:${sub.id}`, causedBy: opts.causedBy });
+    if (sub) laterAfterUnit(divisionId, slot, { cause: `unit_handoff:${sub.id}`, causedBy: opts.causedBy, now: opts.now });
   } catch (e) {
     logger.error({ err: (e as Error).message, divisionId }, '[자동] 병합본이 바뀐 뒤 맞추기 실패');
   }
@@ -231,22 +239,71 @@ export async function isLiveSlot(slot: WeekSlot, now = new Date()): Promise<bool
   return now.getTime() <= liveUntil(await stageTimes(slot)).getTime();
 }
 
-/** RU-72 — `/hq`를 그리기 **전에**. 열쇠가 같으면 질의 몇 번으로 끝난다. 보는 사람과 상관없이 같은 결과다(조립은 `system`의 것) */
-export async function readRepairHq(node: RollupNode, slot: WeekSlot): Promise<void> {
+/**
+ * ADR-0021 D8 — 기한은 시각이라 사건이 없다. 스케줄러가 꺼진 테스트 서버(RU-41)에서는 **화면을 여는 순간**이 기한을 맞춘다:
+ * 기한이 지난 실·팀을 먼저 맞추고(지금 판 → `due`), 그 위를 그다음에. 기한 전이면 아무것도 하지 않는다(질의 몇 번)
+ */
+async function syncDueUnits(divisionIds: readonly string[], slot: WeekSlot, now: Date): Promise<void> {
+  if (!(await rollupEnabled())) return;
+  const t = await stageTimes(slot);
+  if (now < t.unitDue && now < t.hqDue) return;
+  for (const id of divisionIds) {
+    const target = await unitTarget(id);
+    if (!target || !pastDue(unitDue(t, target), t, now)) continue;
+    try {
+      await syncUnit(id, slot, { cause: 'read_repair', causedBy: null, now });
+    } catch (e) {
+      logger.error({ err: (e as Error).message, divisionId: id }, '[자동] 기한 맞추기 실패');
+    }
+  }
+}
+
+/**
+ * ADR-0021 D8 — 실·팀 수합 관리(「위로」 카드)를 그리기 **전에**. 기한이 지났으면 그 단위를 맞추고 받는 곳까지(요청 뒤) 맞춘다.
+ * 기한 전이거나 3단계가 꺼져 있으면 아무것도 하지 않는다
+ */
+export async function readRepairUnit(divisionId: string, slot: WeekSlot, now = new Date()): Promise<void> {
   try {
-    if (await isLiveSlot(slot)) await syncHq(node, slot, { cause: 'read_repair', causedBy: null });
-    else await settled(hqFlightKey(node.node.id, slot.id));
+    if (!(await rollupEnabled()) || !(await isLiveSlot(slot, now))) return;
+    const target = await unitTarget(divisionId);
+    if (!target) return;
+    const t = await stageTimes(slot);
+    if (!pastDue(unitDue(t, target), t, now)) return;
+    const sub = await syncUnit(divisionId, slot, { cause: 'read_repair', causedBy: null, now });
+    if (sub) laterAfterUnit(divisionId, slot, { cause: `unit_handoff:${sub.id}`, causedBy: null, now });
+  } catch (e) {
+    logger.error({ err: (e as Error).message, divisionId }, '[자동] 실·팀 읽기 수리 실패');
+  }
+}
+
+/** RU-72 — `/hq`를 그리기 **전에**. 열쇠가 같으면 질의 몇 번으로 끝난다. 보는 사람과 상관없이 같은 결과다(조립은 `system`의 것) */
+export async function readRepairHq(node: RollupNode, slot: WeekSlot, now = new Date()): Promise<void> {
+  try {
+    if (await isLiveSlot(slot, now)) {
+      await syncDueUnits(
+        node.contributors.map((c) => c.id),
+        slot,
+        now,
+      );
+      await syncHq(node, slot, { cause: 'read_repair', causedBy: null, now });
+    } else await settled(hqFlightKey(node.node.id, slot.id));
   } catch (e) {
     // 화면은 그린다 — 맞추지 못한 것은 화면이 그대로 보인다(상태·실패 이유)
     logger.error({ err: (e as Error).message, node: node.node.nameKo }, '[자동] 본부 읽기 수리 실패');
   }
 }
 
-/** RU-72 — `/org`를 그리기 **전에** */
-export async function readRepairOrg(slot: WeekSlot): Promise<void> {
+/**
+ * RU-72 — `/org`를 그리기 **전에**. ADR-0021 D8 — 기한이 지났으면 위에서 아래로 다 맞춘 뒤(실·팀 기한 → 본부 기한) 전사본을 맞춘다 —
+ * 스케줄러가 꺼진 테스트 서버에서도 총괄이 연 순간 그 주가 기한대로 모여 있다
+ */
+export async function readRepairOrg(slot: WeekSlot, now = new Date()): Promise<void> {
   try {
-    if (await isLiveSlot(slot)) await syncOrg(slot, { cause: 'read_repair', causedBy: null });
-    else await settled(orgFlightKey(slot.id));
+    if (await isLiveSlot(slot, now)) {
+      const t = await stageTimes(slot);
+      if (t.enabled && now >= t.unitDue) await syncAll(slot, { cause: 'read_repair', causedBy: null, now });
+      else await syncOrg(slot, { cause: 'read_repair', causedBy: null, now });
+    } else await settled(orgFlightKey(slot.id));
   } catch (e) {
     logger.error({ err: (e as Error).message }, '[자동] 전사 읽기 수리 실패');
   }
@@ -262,7 +319,7 @@ export async function runDueRollupSync(now = new Date()): Promise<boolean> {
   const slot = await ensureCurrentSlot(now);
   const t = await stageTimes(slot);
   if (now < t.anchor || now.getTime() > liveUntil(t).getTime()) return false;
-  await syncAll(slot, { cause: 'scheduler', causedBy: null });
+  await syncAll(slot, { cause: 'scheduler', causedBy: null, now });
   return true;
 }
 
