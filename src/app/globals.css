@@ -418,34 +418,40 @@ body {
     outline: calc(0.25 * var(--cu, 1cqw)) solid var(--color-stage-ink);
     outline-offset: calc(0.3 * var(--cu, 1cqw));
   }
-  /* 손 — 손끝(24% 4%)을 축으로 기울이고 뒤집는다(transform은 GuideStage가 단다). 윤곽은 짙은 잉크 — 흰 구멍 위에서도 보인다 */
+  /* 커서(PG-92) — 끝(transform-origin은 GuideStage가 단다)을 버튼 모서리에. 기울이거나 뒤집지 않는다. 그림자 — 흰 구멍 위에서도 보인다 */
   .coach-hand {
     position: absolute;
     pointer-events: none;
     overflow: visible;
-    transform-origin: 24% 4%;
-    filter: drop-shadow(0 0.2cqw 0.35cqw rgb(0 0 0 / 0.35));
+    filter: drop-shadow(0 0.15cqw 0.3cqw rgb(0 0 0 / 0.35));
+  }
+  .coach-cursor {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+    user-select: none;
+  }
+  /* 기본 커서 — 브랜드색 화살표에 흰 테. 사용자의 흰·검은 화살표와 색으로 갈린다 */
+  .coach-cursor path {
+    fill: var(--color-brand);
+    stroke: var(--color-canvas);
+    stroke-width: 1.6;
+    stroke-linejoin: round;
   }
   /*
-   * 두드리기 — 손끝이 다가가 한 번 누르고(작아짐) 물러난다. **세 번 하고 멈춘다**(약 4초): 발표자가 40초 말하는 동안
-   * 손이 계속 두드리면 청중이 말 대신 손을 본다(2026-10-08 검토). 어두운 곳을 누르면 처음부터 다시 세 번.
-   * 거리는 손 그림의 단위(1 = 0.1cqw)다 — 그림 안의 cqw는 그림 배율만큼 한 번 더 커진다
+   * 두드리기 — 커서 끝이 다가가 한 번 누르고(작아짐) 물러난다. **세 번 하고 멈춘다**(약 4초): 발표자가 40초 말하는 동안
+   * 커서가 계속 두드리면 청중이 말 대신 커서를 본다(2026-10-08 검토). 어두운 곳을 누르면 처음부터 다시 세 번.
+   * 거리는 커서 상자의 비율이다(오른쪽 아래로 물러났다가 끝으로 다가간다) — 무대 크기와 함께 커진다
    */
   .coach-hand-tap {
-    transform-origin: 24% 4%;
+    transform-origin: inherit;
     animation: coach-tap 1.3s ease-in-out 3;
-  }
-  .coach-hand path,
-  .coach-hand rect {
-    fill: var(--color-canvas);
-    stroke: var(--color-stage-ink);
-    stroke-width: 1.5;
-    stroke-linejoin: round;
   }
   @keyframes coach-tap {
     0%,
     100% {
-      transform: translate(5px, 9px);
+      transform: translate(14%, 18%);
     }
     40% {
       transform: translate(0, 0);
@@ -511,7 +517,7 @@ body {
   }
   @keyframes coach-push {
     from {
-      transform: translate(5px, 9px);
+      transform: translate(14%, 18%);
     }
     60%,
     to {

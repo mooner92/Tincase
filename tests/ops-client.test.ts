@@ -6,6 +6,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 
 vi.mock('next/navigation', () => ({ useRouter: () => ({ refresh: () => {} }) }));
 vi.mock('next/link', () => ({
@@ -85,5 +87,54 @@ describe('PG-64 운영 화면 — 불러오는 중과 없음을 가른다', () =
     expect(html).not.toContain('이 분류에 해당하는 부서가 없습니다');
     // 탭 이름 뒤에 숫자 배지가 없다 (불러오기 전의 0은 「없다」로 읽힌다)
     expect(html).not.toMatch(/제출 확인\s*(<!-- -->)?\s*<span[^>]*>\s*0\s*<\/span>/);
+  });
+});
+
+// PG-94 — [편집]한 줄이 넓어지면 줄 끝 칸이 화면 밖으로 밀려 [완료]·[열기]가 안 보였다(운영자 2026-10-12 —
+// 「저장 버튼이 없다 · 새로 고침해야 인원을 연다」). 바꾼 「업무일지」 값 때문에 줄이 다른 탭으로 사라지기도 했다.
+describe('[PG-T173] 부서 표 — 고치는 동안에도 [완료]·[열기]가 보이고 줄이 사라지지 않는다 (PG-94)', () => {
+  const actions = async (editing: boolean) => {
+    const { RowActions } = await import('@/app/ops/OpsClient');
+    const row = createElement(RowActions, { name: '가부서', editing, onEdit: () => {}, onOpen: () => {} });
+    return renderToStaticMarkup(createElement('table', null, createElement('tbody', null, createElement('tr', null, row))));
+  };
+
+  it('줄 끝 칸은 오른쪽에 붙는다(sticky) — 바탕을 칠해 밑으로 지나가는 칸이 비치지 않는다 · 머리 칸도 같이', async () => {
+    const read = await actions(false);
+    expect(read).toMatch(/<td class="sticky right-0 z-10 [^"]*bg-canvas"/);
+    const edit = await actions(true);
+    expect(edit).toMatch(/<td class="sticky right-0 z-10 [^"]*bg-surface-soft"/);
+    const { OpsClient } = await import('@/app/ops/OpsClient');
+    expect(renderToStaticMarkup(createElement(OpsClient))).toMatch(/<th class="sticky right-0 z-10 [^"]*">편집 · 인원<\/th>/);
+  });
+
+  it('고치는 줄의 [완료]는 주 단추 · 읽는 줄의 [편집]은 가벼운 단추 · [열기]는 늘 있다 — 이름에 부서', async () => {
+    const read = await actions(false);
+    expect(read).toContain('aria-label="가부서 편집" class="btn-ghost">편집</button>');
+    expect(read).toContain('aria-label="가부서 인원 열기" class="btn-ghost">열기</button>');
+    const edit = await actions(true);
+    expect(edit).toContain('aria-label="가부서 편집 완료" class="btn-primary h-8 px-3 text-sm">완료</button>');
+    expect(edit).toContain('>열기</button>');
+  });
+
+  it('고치는 줄은 「업무일지」 값이 바뀌어도 지금 탭에 남는다 · 다른 줄은 값대로 · 옛 값(unclear)은 「이력 없음」', async () => {
+    const { rowsInTab } = await import('@/app/ops/OpsClient');
+    const rows = [
+      { id: 'a', boardStatus: 'confirmed' },
+      { id: 'b', boardStatus: 'none' },
+      { id: 'c', boardStatus: 'unclear' },
+    ];
+    expect(rowsInTab(rows, 'confirmed', null).map((r) => r.id)).toEqual(['a']);
+    expect(rowsInTab(rows, 'none', null).map((r) => r.id)).toEqual(['b', 'c']);
+    // b를 고치다 「제출함」으로 바꿨다 → 「이력 없음」 탭에 그대로
+    const moved = rows.map((r) => (r.id === 'b' ? { ...r, boardStatus: 'confirmed' } : r));
+    expect(rowsInTab(moved, 'none', 'b').map((r) => r.id)).toEqual(['b', 'c']);
+    expect(rowsInTab(moved, 'none', null).map((r) => r.id)).toEqual(['c']); // [완료] 뒤에는 제 탭으로
+  });
+
+  it('「저장됨」은 화면 아래에 떠 있다 — 표를 내려 본 채로도 보인다 · 고치는 줄에는 「바꾸면 바로 저장」', async () => {
+    const src = readFileSync(path.join(__dirname, '../src/app/ops/OpsClient.tsx'), 'utf8');
+    expect(src).toMatch(/aria-live="polite"\s+className="fixed bottom-6 [^"]*empty:hidden"/);
+    expect(src).toContain('바꾸면 바로 저장돼요 · 끝나면 [완료]');
   });
 });

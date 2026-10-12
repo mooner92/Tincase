@@ -34,6 +34,8 @@ fixtures/*.hwpx
 
 # Cloudflare Account/Tunnel ID, 내부 IP 등 실제 값
 docs/private/
+# PG-92 — 사용 안내 커서(운영자가 고른 제3자 그림). 공개 저장소에 넣지 않는다 — 체크아웃에만 두고 빌드가 집어 간다
+public/guide/local/
 
 .env.production
 

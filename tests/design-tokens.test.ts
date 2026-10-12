@@ -160,7 +160,7 @@ describe('UI-T94 흰 무대 대비 (PG-82 · CP-105 개정)', () => {
     }
     const present = readFileSync(path.join(SRC, 'components/GuidePresent.tsx'), 'utf8');
     expect(present).toMatch(/aria-label="검은 화면" className="fixed inset-0 z-50 bg-blackout"/);
-    // 손 윤곽은 짙은 잉크 — 흰 구멍 위에서 사라지지 않게
-    expect(css).toMatch(/\.coach-hand rect \{\s*fill: var\(--color-canvas\);\s*stroke: var\(--color-stage-ink\);/);
+    // 기본 커서(PG-92)는 브랜드색 화살표에 흰 테 — 흰 무대 위 7:1(위 「강조」), 흰 구멍 위에서도 사라지지 않는다
+    expect(css).toMatch(/\.coach-cursor path \{\s*fill: var\(--color-brand\);\s*stroke: var\(--color-canvas\);/);
   });
 });

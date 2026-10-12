@@ -92,6 +92,52 @@ export function NotifyCell({ name, on, editing, busy, onToggle }: { name: string
   );
 }
 
+/**
+ * 「제출 확인」·「이력 없음」 탭의 줄. 「이력 없음」은 «confirmed가 아닌 전부»다 — 옛 `unclear` 값이 남아 있어도 어느 탭에도 안 보이는
+ * 부서가 생기지 않는다. PG-94 — 고치는 줄은 「업무일지」 값을 바꿔도 이 탭에 남는다. 예전에는 바꾸는 순간 다른 탭으로 옮겨 가
+ * 줄이 사라졌다 — 저장이 안 된 것처럼 보였다. [완료]를 누르면 제 탭으로 간다
+ */
+export function rowsInTab<T extends { id: string; boardStatus: string }>(rows: readonly T[], tab: 'confirmed' | 'none', editingId: string | null): T[] {
+  return rows.filter((d) => d.id === editingId || (tab === 'confirmed' ? d.boardStatus === 'confirmed' : d.boardStatus !== 'confirmed'));
+}
+
+/**
+ * PG-94 — 줄 끝 「편집 · 인원」 칸. 표는 가로로 스크롤되는 상자 안에 있고 [편집]한 줄은 입력칸으로 넓어진다 — 그 순간 이 칸이
+ * 화면 오른쪽 밖으로 밀려 [완료]도 [열기]도 안 보였다(운영자 2026-10-12: 「저장 버튼이 없다 · 새로 고침해야 인원을 연다」).
+ * 그래서 이 칸은 **오른쪽에 붙는다**(sticky) — 표가 얼마나 넓어지든 늘 보인다. 바탕을 칠해야 밑으로 지나가는 칸이 비치지 않는다.
+ * 고치는 줄의 [완료]는 주 단추다 — 값은 바꾸는 즉시 저장되고(첫 칸의 안내), [완료]는 편집을 닫는다
+ */
+export function RowActions({
+  name,
+  editing,
+  onEdit,
+  onOpen,
+}: {
+  name: string;
+  editing: boolean;
+  onEdit: () => void;
+  onOpen: () => void;
+}) {
+  return (
+    <td
+      className={`sticky right-0 z-10 py-0 text-right whitespace-nowrap shadow-[-10px_0_10px_-10px_rgb(0_0_0_/_0.25)] ${
+        editing ? 'bg-surface-soft' : 'bg-canvas'
+      }`}
+    >
+      <button
+        onClick={onEdit}
+        aria-label={`${name} ${editing ? '편집 완료' : '편집'}`}
+        className={editing ? 'btn-primary h-8 px-3 text-sm' : 'btn-ghost'}
+      >
+        {editing ? '완료' : '편집'}
+      </button>
+      <button onClick={onOpen} aria-label={`${name} 인원 열기`} className="btn-ghost">
+        열기
+      </button>
+    </td>
+  );
+}
+
 export function OpsClient() {
   /*
    * PG-64 — `null`은 「아직 모름」이다. 빈 배열로 시작하면 불러오는 동안(그리고 실패하면 계속)
@@ -265,16 +311,16 @@ export function OpsClient() {
     }),
     [divisions],
   );
-  // 「이력 없음」은 «confirmed가 아닌 전부»다 — 옛 `unclear` 값이 남아 있어도
-  // 어느 탭에도 안 보이는 부서가 생기지 않는다
-  const shown = (divisions ?? []).filter((d) =>
-    tab === 'confirmed' ? d.boardStatus === 'confirmed' : d.boardStatus !== 'confirmed',
-  );
+  const shown = rowsInTab(divisions ?? [], tab, editingId);
   const selectedName = divisions?.find((d) => d.id === selected)?.nameKo ?? null;
 
   return (
     <div className="space-y-4 lg:space-y-6">
-      <div aria-live="polite" className="min-h-5 text-sm text-ink empty:hidden">
+      {/* PG-94 — 「저장됨」은 화면 아래 가운데에 잠깐. 페이지 맨 위에 두면 표를 내려 본 채로는 저장됐는지 안 보였다 */}
+      <div
+        aria-live="polite"
+        className="fixed bottom-6 left-1/2 z-50 -translate-x-1/2 rounded-lg bg-ink px-4 py-2 text-sm text-white shadow-lg empty:hidden"
+      >
         {msg}
       </div>
 
@@ -366,7 +412,7 @@ export function OpsClient() {
                 <th>업무일지</th>
                 <th>상태</th>
                 <th>알림</th>
-                <th className="text-right">편집 · 인원</th>
+                <th className="sticky right-0 z-10 text-right shadow-[-10px_0_10px_-10px_rgb(0_0_0_/_0.25)]">편집 · 인원</th>
               </tr>
             </thead>
             <tbody>
@@ -377,6 +423,8 @@ export function OpsClient() {
                     <td className="py-2">
                       <span className={`font-medium ${d.isActive ? 'text-ink' : 'text-muted'}`}>{d.nameKo}</span>
                       {d.boardNote && <p className="mt-0.5 max-w-md text-xs leading-4 text-muted">{d.boardNote}</p>}
+                      {/* PG-94 — 저장 단추가 따로 없는 까닭. 바꾸는 즉시 저장되고 위에 「저장됨」이 뜬다 */}
+                      {editing && <p className="mt-0.5 text-xs leading-4 text-muted">바꾸면 바로 저장돼요 · 끝나면 [완료]</p>}
                     </td>
                     <td className="tabular-nums">{d.memberCount}</td>
                     <td>
@@ -474,14 +522,12 @@ export function OpsClient() {
                         onToggle={() => flipNotify(d)}
                       />
                     </td>
-                    <td className="py-0 text-right whitespace-nowrap">
-                      <button onClick={() => setEditingId(editing ? null : d.id)} className="btn-ghost">
-                        {editing ? '완료' : '편집'}
-                      </button>
-                      <button onClick={() => openRoster(d.id)} className="btn-ghost">
-                        열기
-                      </button>
-                    </td>
+                    <RowActions
+                      name={d.nameKo}
+                      editing={editing}
+                      onEdit={() => setEditingId(editing ? null : d.id)}
+                      onOpen={() => openRoster(d.id)}
+                    />
                   </tr>
                 );
               })}

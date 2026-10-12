@@ -1,7 +1,18 @@
 import type { NextConfig } from "next";
+import { existsSync } from "node:fs";
+import path from "node:path";
+
+/*
+ * PG-92 — 사용 안내의 「누르라는 커서」. 운영자가 고른 그림(게임 커서)은 제3자 저작물이라 **공개 저장소에 넣지 않는다** —
+ * 체크아웃의 `public/guide/local/cursor.png`(.gitignore)에 있으면 그것을, 없으면 저장소의 기본 커서(SVG 화살표)를 쓴다.
+ * 빌드 때 한 번 정한다(클라이언트 번들에 박힌다). 그림을 넣거나 뺐으면 다시 빌드한다.
+ */
+const GUIDE_CURSOR = "/guide/local/cursor.png";
+const guideCursorSrc = existsSync(path.join(process.cwd(), "public", GUIDE_CURSOR)) ? GUIDE_CURSOR : "";
 
 const nextConfig: NextConfig = {
   output: 'standalone', // OPS-04a — Docker 배포용
+  env: { GUIDE_CURSOR_SRC: guideCursorSrc },
   // Next 16 dev 서버는 허용되지 않은 origin의 내부 자산 요청을 403으로 막는다.
   // 이 서버는 사내망 IP로 접속하므로 개발 중 클라이언트 JS가 통째로 안 뜬다
   // (버튼이 아무 반응도 안 하고, 원인이 화면에 드러나지 않아 찾기 어렵다).
