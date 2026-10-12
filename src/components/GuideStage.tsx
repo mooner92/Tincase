@@ -551,42 +551,43 @@ function CoachOverlay({
           }}
         />
       )}
-      {hand && <Hand hand={hand} />}
+      {hand && <CoachCursor hand={hand} />}
       <CoachBubble layout={layout} width={bubbleW} label={label} say={say} foot={foot} onMeasure={onMeasure} />
     </div>
   );
 }
 
 /**
- * 누르라는 손 — 집게손가락이 위를 가리키는 그림(손끝 = 상자의 24%·4%, coach.ts HAND)을 손끝을 축으로 20° 기울이고,
- * 말풍선 반대쪽으로 뻗게 뒤집는다(`fx`·`fy`). 손끝에는 두드릴 때마다 흰 물결 — 세 번 두드리고 멈춘다(globals.css)
+ * PG-92 — 체크아웃에 둔 커서 그림(`public/guide/local/cursor.png`, .gitignore)의 주소. 없으면 빈 값 → 기본 SVG 화살표.
+ * next.config가 빌드 때 정한다 — 공개 저장소에 제3자 그림을 넣지 않기 위해서다
  */
-function Hand({ hand }: { hand: HandBox }) {
+const CURSOR_SRC = process.env.GUIDE_CURSOR_SRC ?? '';
+
+/**
+ * 누르라는 커서(PG-92 — 2026-10-12, 손 그림을 바꿨다). 끝(= 상자의 `HAND.tipX`·`tipY`)을 버튼 오른쪽 아래 모서리 쪽에 얹고
+ * 몸은 구멍 밖으로 — 실제 커서처럼 기울이거나 뒤집지 않는다. 끝에는 두드릴 때마다 흰 물결 — 세 번 두드리고 멈춘다(globals.css).
+ * 사용자의 실제 커서와 헷갈리지 않게 모양·색이 다르다: 운영자가 고른 그림(장갑 손가락)이 있으면 그것, 없으면 브랜드색 화살표
+ */
+export function CoachCursor({ hand }: { hand: HandBox }) {
   const { box } = hand;
   return (
     <>
       <span aria-hidden className="coach-tap-ripple" style={{ left: hand.tipX, top: hand.tipY }} />
-      <svg
+      <span
         aria-hidden
-        viewBox="0 0 34 41"
+        data-cursor={CURSOR_SRC ? 'image' : 'arrow'}
         className="coach-hand"
-        style={{
-          left: box.x,
-          top: box.y,
-          width: box.w,
-          height: box.h,
-          transform: `scale(${hand.fx}, ${hand.fy}) rotate(${HAND.angle}deg)`,
-        }}
+        style={{ left: box.x, top: box.y, width: box.w, height: box.h, transformOrigin: `${HAND.tipX * 100}% ${HAND.tipY * 100}%` }}
       >
-        <g className="coach-hand-tap">
-          <path d="M5 21 C3.4 26 3.8 31 6.8 35 C9.4 38.6 13 40 18 40 C24 40 28.6 37 29 31 L29.2 21 Z" />
-          <path d="M5.4 23.4 C2.4 21.6 0.6 23.4 1.6 26.2 L4.8 32.4 Z" />
-          <rect x="22.6" y="16.4" width="6.4" height="11" rx="3.2" />
-          <rect x="16.8" y="14.4" width="6.6" height="12.6" rx="3.3" />
-          <rect x="11" y="12.6" width="6.6" height="14" rx="3.3" />
-          <rect x="4.8" y="1.4" width="6.8" height="25" rx="3.4" />
-        </g>
-      </svg>
+        {CURSOR_SRC ? (
+          // eslint-disable-next-line @next/next/no-img-element -- 27×32 그림 하나(4배로 그린 것을 줄여 보인다)
+          <img src={CURSOR_SRC} alt="" draggable={false} className="coach-hand-tap coach-cursor" />
+        ) : (
+          <svg viewBox="0 0 27 32" className="coach-hand-tap coach-cursor">
+            <path d="M3.5 0.5 L3.5 25 L9.2 19.6 L13.4 29 L17.6 27.1 L13.5 17.9 L21.4 17.9 Z" />
+          </svg>
+        )}
+      </span>
     </>
   );
 }

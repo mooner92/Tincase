@@ -30,6 +30,8 @@ export function GuideSelf({ caps, tour }: { caps: GuideCap[]; tour?: { slug: str
   const [hint, setHint] = useState(0);
   // 목차는 지금 장만 펼친다 — 장이 짧아(3~8단계) 다 펼쳐도 되지만, 목차가 길면 지금 자리가 안 보인다
   const [open, setOpen] = useState<Set<string>>(() => new Set(chapters.slice(0, 1).map((c) => c.chapter.id)));
+  // PG-93 — 「자세히」는 한 번 펼치면 닫을 때까지 펼친 채다. 슬라이드를 넘길 때마다 닫혀서 매번 다시 눌러야 했다(2026-10-12 운영자)
+  const [moreOpen, setMoreOpen] = useState(false);
   const slide = slides[index];
 
   // #lead-3 — 주소로 바로 그 단계. 이 사람에게 없는 단계(다른 역할의 것)면 처음으로
@@ -224,7 +226,11 @@ export function GuideSelf({ caps, tour }: { caps: GuideCap[]; tour?: { slug: str
             </button>
           </div>
           {more && (
-            <details key={slide.key} className="disclosure border-t border-hairline-soft px-5 py-3 sm:px-7">
+            <details
+              open={moreOpen}
+              onToggle={(e) => setMoreOpen(e.currentTarget.open)}
+              className="disclosure border-t border-hairline-soft px-5 py-3 sm:px-7"
+            >
               <summary className="text-sm">자세히</summary>
               <p className="mt-1.5 text-[15px] leading-6 text-body">{more}</p>
             </details>

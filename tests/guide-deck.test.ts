@@ -745,21 +745,20 @@ describe('[PG-T89] 코치 마크 — 순수 함수', () => {
     expect(low.side).toBe('above');
   });
 
-  it('손은 말풍선 반대쪽으로 뻗는다 — 오른쪽 말풍선이면 왼쪽 아래로, 아래 말풍선이면 위에서 내려온다', () => {
+  it('[PG-T172] 커서는 뒤집지 않는다 — 어느 쪽 말풍선이든 끝은 왼쪽 위, 몸은 오른쪽 아래 · 말풍선이 커서를 피한다 (PG-92)', () => {
     const right = coachLayout(view, { x: 300, y: 500, w: 150, h: 80 }, bubble, { hand: true });
     expect(right.side).toBe('right');
-    expect(right.hand!.fx).toBe(-1);
+    expect([right.hand!.fx, right.hand!.fy]).toEqual([1, 1]);
     expect(right.hand!.x + right.hand!.w).toBeLessThan(right.bubble.x);
-    // 양옆이 다 막힌 넓은 버튼 — 말풍선은 아래, 손은 위
+    // 양옆이 다 막힌 넓은 버튼 — 말풍선은 아래, 커서를 비켜서
     const btn = { x: 700, y: 300, w: 420, h: 80 };
     const l = coachLayout(view, btn, { w: 900, h: 190 }, { hand: true });
     expect(l.side).toBe('below');
-    expect(l.hand!.fy).toBe(-1);
+    expect([l.hand!.fx, l.hand!.fy]).toEqual([1, 1]);
     expect(intersects(l.bubble, l.hand!)).toBe(false);
-    // 무대 아래 끝의 버튼 — 손이 무대 밖으로 나가지 않게 위로
-    const low = coachLayout(view, { x: 300, y: 1000, w: 150, h: 70 }, bubble, { hand: true });
-    expect(low.hand!.fy).toBe(-1);
-    expect(inside(low.hand!, { x: 0, y: 0, w: view.w, h: view.h })).toBe(true);
+    // 그림 상자는 돌리지 않았으니 바깥 상자 그대로다
+    expect(l.hand!.w).toBeCloseTo(l.hand!.box.w);
+    expect(l.hand!.h).toBeCloseTo(l.hand!.box.h);
   });
 
   it('무대 위·아래 끝에 붙은 구멍 — 말풍선은 가장자리 안으로 밀린다(구멍 쪽으로는 밀리지 않는다)', () => {
@@ -781,19 +780,19 @@ describe('[PG-T89] 코치 마크 — 순수 함수', () => {
     expect(full.fits).toBe(false);
   });
 
-  it('손끝은 버튼의 오른쪽 아래 모서리 쪽(0.78·0.90)에 얹고, 손은 20° 기울여 구멍 밖으로 뻗는다', () => {
+  it('커서 끝은 버튼의 오른쪽 아래 모서리 쪽(0.78·0.90) · 기울이지 않고 몸은 구멍 밖 오른쪽 아래로 (PG-92)', () => {
     const hole = { x: 100, y: 100, w: 200, h: 80 };
     const h = handOf(hole, u);
     expect(h.tipX).toBeCloseTo(100 + 200 * 0.78);
     expect(h.tipY).toBeCloseTo(100 + 80 * 0.9);
-    expect(HAND.angle).toBe(-20);
+    expect(HAND.angle).toBe(0);
+    // 그림 비율 27:32 · 끝은 그림의 손가락 끝(3.5, 0.5)
+    expect(HAND.w / HAND.h).toBeCloseTo(27 / 32);
+    expect(h.box.x + HAND.tipX * h.box.w).toBeCloseTo(h.tipX);
+    expect(h.box.y + HAND.tipY * h.box.h).toBeCloseTo(h.tipY);
     const c = handCenter(h);
-    expect(c.x).toBeGreaterThan(h.tipX); // 오른쪽 아래로 뻗는다
-    expect(c.y).toBeGreaterThan(hole.y + hole.h);
-    // 거울 — 왼쪽 아래 모서리 쪽을 짚고 왼쪽으로 뻗는다
-    const m = handOf(hole, u, -1, 1);
-    expect(m.tipX).toBeCloseTo(100 + 200 * 0.22);
-    expect(handCenter(m).x).toBeLessThan(m.tipX);
+    expect(c.x).toBeGreaterThan(h.tipX); // 오른쪽 아래로
+    expect(c.y).toBeGreaterThan(h.tipY);
   });
 
   it('말풍선 어림 — 38cqw를 넘지 않고, 글이 길면 높아진다 · 긴 이름은 제 줄 · 무대 크기에 비례한다', () => {
