@@ -699,7 +699,7 @@ describe('ADR-0021 — 기한이 곧 제출: 알림은 할 일이 생긴 사람�
     expect(to(take())).toEqual([P.hqHead.no]);
   });
 
-  it('[RU-T159] ★ 총괄 — 「본부 → 총괄」 기한의 한 통(D6): 전사본이 없으면 안 감 · 들어온 곳이 0이면 안 감 · Tincase 밖 섹션은 「아직」과 따로 · 셈은 섹션', async () => {
+  it('[RU-T159] ★ 총괄 — 「본부 → 총괄」 기한의 한 통(D6): 전사본이 없으면 안 감 · 들어온 곳이 0이면 안 감 · Tincase 밖 섹션은 세지 않는다(RU-96) · 셈은 섹션', async () => {
     const prisma = await db();
     const { writeFileAtomic } = await import('@/server/storage');
     const { stageTimes } = await import('@/server/rollup/schedule');
@@ -707,7 +707,7 @@ describe('ADR-0021 — 기한이 곧 제출: 알림은 할 일이 생긴 사람�
     const wk = await weekAhead(3);
     const t = await stageTimes(wk);
     const at = new Date(t.hqDue.getTime() + 60_000);
-    // Tincase를 안 쓰는(꺼진) 부서의 섹션 — 총괄이 [올리기]로 넣을 곳
+    // Tincase를 안 쓰는(꺼진) 부서의 섹션 — RU-96: 전사 단계가 다루지 않는다
     const off = await prisma.division.create({ data: { slug: 'NT_OFF', nameKo: '꺼진실', nameEn: 'NT_OFF', isActive: false, boardStatus: 'confirmed' } });
     const section = await prisma.orgSection.create({ data: { sortOrder: 99, title: '꺼진실', divisionId: off.id } });
     try {
@@ -715,7 +715,7 @@ describe('ADR-0021 — 기한이 곧 제출: 알림은 할 일이 생긴 사람�
       // 아무것도 안 왔고 전사본도 없다 — 「준비돼 있어요」 없음 (예전에는 「0/n곳 도착」이 갔다)
       expect((await due(at)).filter((r) => r.kind.startsWith('ru_org_ready'))).toEqual([]);
       expect(take().filter((g) => g.to === P.c1.no || g.to === P.c2.no)).toEqual([]);
-      // 단독단이 올라오고 전사본이 만들어졌다 → 총괄 각자에게 한 통: 도착 1 · 아직(Tincase) · Tincase 밖은 따로
+      // 단독단이 올라오고 전사본이 만들어졌다 → 총괄 각자에게 한 통: 도착 1 · 아직(Tincase) · 꺼진 부서의 섹션은 없다
       const rel = 'divisions/NT_SOLO/reports/ahead-3.hwp';
       await writeFileAtomic(rel, Buffer.from('단독단 3주 뒤'));
       await prisma.reportSubmission.create({
@@ -730,8 +730,9 @@ describe('ADR-0021 — 기한이 곧 제출: 알림은 할 일이 생긴 사람�
       const c = got[0].contents;
       expect(c).toContain('도착 1곳: 단독단');
       expect(c).toMatch(/아직 \d곳: .*본부가/);
-      expect(c).toContain('Tincase 밖 1곳: 꺼진실 — 「전사」의 [올리기]로 넣어 주세요');
-      expect(c).not.toMatch(/아직 \d곳: [^\n]*꺼진실/);
+      // RU-96 (2026-10-14) — 켜진 부서만 다룬다: Tincase 밖 섹션은 셈에도 줄에도 없다(전에는 「Tincase 밖 1곳 — [올리기]」로 따로 적었다)
+      expect(c).not.toContain('꺼진실');
+      expect(c).not.toContain('Tincase 밖');
     } finally {
       await prisma.orgSection.delete({ where: { id: section.id } });
     }

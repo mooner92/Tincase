@@ -203,10 +203,23 @@ async function arrivalLabel(r: ReportSubmission, who: 'unit' | 'hq', names: Map<
 }
 
 /**
+ * RU-96 — 이 섹션의 부서가 Tincase 안인가: 단위 나무에 있다(켜져 있거나, 켜진 산하를 둔 본부). 그 나무 칸을, 아니면 undefined.
+ * 섹션에 부서가 없거나 그 부서가 꺼져 있으면 「Tincase 밖」이다 — 전사 단계는 그 섹션을 다루지 않는다(아래 resolveSections).
+ */
+export function sectionNode(tree: OrgTree, divisionId: string | null) {
+  if (!divisionId) return undefined;
+  return tree.nodes.find((n) => n.node.id === divisionId || n.contributors.some((c) => c.id === divisionId));
+}
+
+/**
  * 섹션마다 무엇으로 채울지 — 전사 조립과 현황판이 같은 판정을 쓴다.
  * `create: false`면 섹션 목록이 비어 있어도 만들지 않는다 — 자동 조립(`system`)은 총괄의 설정을 바꾸지 않는다 (loadSections)
+ *
+ * RU-96 (2026-10-14 운영자 — 「활성화된 부서들만 취급 — 하나씩 편입하면서 키워 나간다」) — **켜진 부서의 섹션만** 돌려준다.
+ * Tincase 밖 섹션은 전사본(「미제출」 자리)·총괄 알림의 셈·「전사」 표에서 빠진다. 섹션 구성(순서·제목·부서)은 그대로라 그 부서를 켜면
+ * 다음 맞추기에 저절로 들어온다. `all: true` — 밖 섹션도(`offline`) 함께: 섹션 목록 API처럼 구성 전체를 보여야 하는 곳만
  */
-export async function resolveSections(slot: WeekSlot, tree?: OrgTree, opts: { create?: boolean } = {}): Promise<SectionSource[]> {
+export async function resolveSections(slot: WeekSlot, tree?: OrgTree, opts: { create?: boolean; all?: boolean } = {}): Promise<SectionSource[]> {
   const sections = (await loadSections(opts)).filter((s) => s.isActive);
   const t = tree ?? (await loadTree());
   const names = new Map(
@@ -236,10 +249,9 @@ export async function resolveSections(slot: WeekSlot, tree?: OrgTree, opts: { cr
   };
   const out: SectionSource[] = [];
   for (const section of sections) {
+    const node = sectionNode(t, section.divisionId);
+    if (!node && !opts.all) continue; // RU-96 — Tincase 밖 섹션은 다루지 않는다
     const upload = await latestUpload(section.id, slot.id);
-    const node = section.divisionId
-      ? t.nodes.find((n) => n.node.id === section.divisionId || n.contributors.some((c) => c.id === section.divisionId))
-      : undefined;
     if (node && section.divisionId) {
       if (node.hasHqStep) {
         // 본부 단계가 있는 본부 — 본부가 낸 판에 든 사본. 실의 섹션은 그 실의 것, 본부 자신의 섹션은 남은 것 전부 (RU-67).

@@ -177,6 +177,12 @@ export default async function OrgPage({ searchParams }: { searchParams: Promise<
                   </div>
                 }
               />
+              {/* RU-96 — 켜진 부서만 다룬다. 뺀 섹션은 이름만 한 줄로 — 부서를 켜면 표와 전사본으로 들어온다 */}
+              {board.offline.length > 0 && (
+                <p className="mt-2 px-1 text-xs text-muted" data-testid="org-offline">
+                  Tincase를 쓰지 않는 섹션 {board.offline.length}곳은 전사본에 넣지 않습니다 — 그 부서를 켜면 여기에 들어옵니다: {board.offline.join(' · ')}
+                </p>
+              )}
             </div>
             {board.ready !== null && (
               <div className="mt-6">

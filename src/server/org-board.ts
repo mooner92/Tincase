@@ -6,7 +6,7 @@
 import type { WeekSlot } from '@prisma/client';
 import { prisma } from './db';
 import { progressNodes } from './monitor';
-import { resolveSections, sectionList, uncoveredCopies, type SectionItem, type SectionSource } from './rollup/sections';
+import { resolveSections, sectionList, sectionNode, uncoveredCopies, type SectionItem, type SectionSource } from './rollup/sections';
 import { loadTree, type OrgTree } from './rollup/tree';
 import { orgRunState } from './rollup/orgrun';
 import { fileSha } from './rollup/report';
@@ -51,34 +51,36 @@ export async function orgBoard(
 
   // 취합을 여는 사람: 섹션마다 무엇이 들어가나(resolveSections — 섹션 목록이 비어 있으면 기본 13개를 만든다, 예전 [취합] 탭과 같다).
   // 읽기만 하는 사람: 목록을 만들지 않고 읽는다(PG-51d)
-  const tree = can.desk ? await loadTree() : null;
-  const sources: SectionSource[] | null = can.desk ? await resolveSections(slot, tree!) : null;
-  const sections: SectionItem[] = sources
-    ? sources.map(({ section: s }) => ({
-        id: s.id,
-        title: s.title,
-        divisionId: s.divisionId,
-        divisionName: s.divisionId ? (nameOf.get(s.divisionId) ?? null) : null,
-        kind: s.kind,
-      }))
-    : await sectionList(divisions);
+  const tree = await loadTree();
+  const sources: SectionSource[] | null = can.desk ? await resolveSections(slot, tree) : null;
+  // 섹션 구성 **전체**(최종본 순서) — 편집기와 제출 묶음은 전체로 본다. resolveSections가 목록을 만든 뒤에 읽는다
+  const sections: SectionItem[] = await sectionList(divisions);
 
   const data = can.progress ? await progressNodes(slot) : null;
+  // 묶음은 전체 섹션으로 — 밖 섹션을 빼고 묶으면 그 아래 부서가 「섹션 밖」으로 잘못 옮겨 간다
   const grouped = data ? groupBySection(sections, data.nodes) : null;
   const hqLink = (slug: string) => `/hq?node=${encodeURIComponent(slug)}${weekQuery ? `&${weekQuery}` : ''}`;
 
-  const rows: OrgBoardRow[] = sections.map((s, i) => {
-    const src = sources?.[i];
-    const hq = tree ? hqOf(tree, s.divisionId) : null;
-    return {
+  // RU-96 — 표에는 Tincase 안 섹션만. 번호는 보이는 줄 순서(= 전사본 순서)
+  const srcOf = new Map((sources ?? []).map((x) => [x.section.id, x]));
+  const rows: OrgBoardRow[] = [];
+  const offline: string[] = [];
+  sections.forEach((s, i) => {
+    if (!sectionNode(tree, s.divisionId)) {
+      offline.push(s.title);
+      return;
+    }
+    const src = srcOf.get(s.id);
+    const hq = can.desk ? hqOf(tree, s.divisionId) : null; // 본부 취합 길은 취합을 여는 사람에게만
+    rows.push({
       key: s.id,
-      no: i + 1,
+      no: rows.length + 1,
       title: s.title,
-      offline: !s.divisionName,
+      offline: false,
       progress: grouped ? grouped.sections[i] : null,
       final: src ? { sectionId: s.id, source: src.kind, label: src.label, refId: src.refId ?? null, flag: src.flag ?? null } : null,
       hq: hq ? { name: hq.nameKo, href: hqLink(hq.slug) } : null,
-    };
+    });
   });
   // PG-51c — 집계 부서인데 어느 섹션에도 닿지 않는 곳. 숨기면 합계가 감사 문서와 갈라진다 (PG-T73)
   if (grouped && grouped.outside.teams.length > 0) {
@@ -90,7 +92,7 @@ export async function orgBoard(
   const state = sources ? await orgRunState(slot, sources) : null;
   const run = state?.current ?? null;
   // RU-64 「누락」 — 지금 상태로 본다(만든 뒤에 섹션을 고치면 바로 사라져야 한다). 취합을 여는 사람에게만
-  const coverage = sources ? await uncoveredCopies(slot, sources, tree!) : null;
+  const coverage = sources ? await uncoveredCopies(slot, sources, tree) : null;
   return {
     rows,
     /** 제출 합계 — 섹션과 「섹션 밖」을 더한 것 = 감사 문서의 합계 */
@@ -109,6 +111,8 @@ export async function orgBoard(
     changedSinceDownload: run && viewer ? await changedSinceDownload(slot, viewer.email, run.sha256) : null,
     /** 도착했는데 어느 섹션에도 안 들어가는 사본 — 최종본에서 빠진다 (취합을 여는 사람에게만) */
     coverage,
+    /** RU-96 — 표에서 뺀 Tincase 밖 섹션 제목(구성 순서). 부서를 켜면 표로 들어온다 */
+    offline,
     /** 섹션 구성 편집기에 넘길 것 (취합을 여는 사람에게만) */
     editor: sources && {
       sections: sections.map((s) => ({ id: s.id, title: s.title, divisionId: s.divisionId })),
