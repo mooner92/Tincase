@@ -28,7 +28,7 @@ export const GET = handler(async (req: NextRequest) => {
   const slot = await rollupSlot(req.nextUrl.searchParams.get('isoKey'));
   if (level === 'hq') {
     // TACP-21 — 본부본의 상태는 본부 쓰기와 같은 칸이다(lead·head). 본부원(member)에게는 404
-    const node = await hqNodeOfManager(scope);
+    const node = await hqNodeOfManager(scope, req.nextUrl.searchParams.get('node')); // ADR-0022 D2 — 맡은 본부 중 고르기
     const [board, t] = await Promise.all([hqBoard(node, slot), stageTimes(slot)]);
     return json({ state: { level: 'hq', target: '총괄', dueKo: stageCells(t.anchor, t).hqDueKo, hqState: board.state } });
   }
@@ -40,7 +40,8 @@ export const GET = handler(async (req: NextRequest) => {
   return json({ state: view && { level: 'unit', ...view, sent } });
 });
 
-const body = z.object({ level: z.enum(['unit', 'hq']), isoKey: z.string().optional(), withoutApproval: z.literal(true).optional() });
+// ADR-0022 D2 — `node`는 본부를 여럿 맡은 사람의 고르기(그 사람의 본부 안에서만 — TACP-6)
+const body = z.object({ level: z.enum(['unit', 'hq']), isoKey: z.string().optional(), withoutApproval: z.literal(true).optional(), node: z.string().max(80).optional() });
 
 export const POST = handler(async (req: NextRequest) => {
   // 본문부터 본다 — 비상구가 아니면(예전 [제출]) 누구에게나 404다 (RU-T118). 그다음 신원·게이트
@@ -49,7 +50,7 @@ export const POST = handler(async (req: NextRequest) => {
     await requireScope(req.headers); // 인증 안 된 요청은 401 그대로
     throw notFound();
   }
-  const { scope, node } = await requireHandoffEscape(req.headers, parsed.data.level);
+  const { scope, node } = await requireHandoffEscape(req.headers, parsed.data.level, parsed.data.node);
   const slot = await rollupSlot(parsed.data.isoKey);
   if (parsed.data.level === 'hq') {
     const r = await escapeHq(scope, node!, slot);

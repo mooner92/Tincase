@@ -23,6 +23,8 @@ interface Plan {
   newDivisions: { nameKo: string; parentKo: string }[];
   leadWarnings: string[];
   conflicts: string[];
+  /** ADR-0022 D1 — ERP 소속은 다르지만 Tincase 소속을 고정한 사람(옮기지 않음) */
+  pinned?: string[];
   blockers: string[];
   unchanged: number;
   applied: { created: number; updated: number; deactivated: number; divisionsCreated: number } | null;
@@ -160,6 +162,11 @@ export function RosterSync() {
               {c}
             </p>
           ))}
+
+          {/* ADR-0022 D1 — 운영자가 고정한 소속. 매주 같은 줄이 나오지만 할 일은 없다 — 고정을 풀려면 인원 드로어에서 */}
+          {(plan.pinned ?? []).length > 0 && (
+            <p className="text-sm text-muted">소속 고정 {plan.pinned!.length}명 — {plan.pinned!.join(' · ')}</p>
+          )}
 
           {plan.newDivisions.length > 0 && (
             <p className="text-sm text-body">

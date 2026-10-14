@@ -45,6 +45,8 @@ export interface DbPerson {
   isActive: boolean;
   isOperator: boolean;
   isCoordinator: boolean;
+  /** ADR-0022 D1 — Tincase 소속을 ERP와 다르게 고정했다(운영자가 옮겼다). 없으면 거짓 */
+  divisionPinned?: boolean;
 }
 
 /**
@@ -109,6 +111,8 @@ export interface SyncPlan {
   leadWarnings: string[];
   /** 이름은 같은데 사번·이메일이 엇갈린 사람 등 — 건드리지 않고 알린다 */
   conflicts: string[];
+  /** ADR-0022 D1 — ERP 부서가 다르지만 Tincase 소속을 고정한 사람. 옮기지 않고 알리기만 한다 */
+  pinned: string[];
   /** 이게 비어 있지 않으면 **적용할 수 없다** (RS-11) */
   blockers: string[];
   /** 바뀌지 않은 사람 수 */
@@ -130,6 +134,7 @@ export function planRosterSync(
   const changes: Change[] = [];
   const backfills: Change[] = [];
   const conflicts: string[] = [];
+  const pinned: string[] = [];
   const leadWarnings: string[] = [];
   let unchanged = 0;
 
@@ -189,8 +194,13 @@ export function planRosterSync(
     const notes: string[] = [];
 
     if (cur.divisionKo !== p.divisionKo) {
-      apply.divisionKo = p.divisionKo;
-      notes.push(`부서 ${cur.divisionKo} → ${p.divisionKo}`);
+      if (cur.divisionPinned) {
+        // ADR-0022 D1 — 운영자가 소속을 고정했다(ERP 소속과 다른 부서의 글을 맡는다). 매주 되돌리면 그 사람이 맡은 부서가 비어 버린다
+        pinned.push(`${p.name} — ERP 소속 ${p.divisionKo} · Tincase 소속 ${cur.divisionKo}(고정 — 옮기지 않음)`);
+      } else {
+        apply.divisionKo = p.divisionKo;
+        notes.push(`부서 ${cur.divisionKo} → ${p.divisionKo}`);
+      }
     }
     if (cur.name !== p.name) {
       apply.name = p.name;
@@ -301,6 +311,7 @@ export function planRosterSync(
     newDivisions,
     leadWarnings,
     conflicts,
+    pinned,
     blockers,
     unchanged,
   };

@@ -333,7 +333,7 @@ describe('[NT-T85] ★ 운영이 시험 서버 설정을 물려받지 않는다 
 });
 
 describe('[NT-T80] 보내는 곳은 모두 종류를 싣는다 (NT-56c) — 빠지면 수신함에 「종류 없음」, 리허설은 뜻밖의 알림으로 잡는다', () => {
-  it('src의 sendAlert 호출마다 `kind` — 갈래를 합칠 때 새 알림(「병합 점검」)이 빠졌던 자리', async () => {
+  it('src의 sendAlert · sendOrQueue 호출마다 `kind` — 갈래를 합칠 때 새 알림(「병합 점검」)이 빠졌던 자리 · 보낼 함(ADR-0022 D4)을 지나는 길도', async () => {
     const { readdirSync, statSync } = await import('node:fs');
     const walk = (dir: string): string[] =>
       readdirSync(dir).flatMap((n) => {
@@ -343,8 +343,8 @@ describe('[NT-T80] 보내는 곳은 모두 종류를 싣는다 (NT-56c) — 빠�
     const calls: { at: string; args: string }[] = [];
     for (const file of walk(path.join(root, 'src'))) {
       const src = readFileSync(file, 'utf8');
-      for (const m of src.matchAll(/\bsendAlert\(/g)) {
-        if (/function\s+sendAlert\($/.test(src.slice(Math.max(0, m.index - 30), m.index + 10))) continue; // 정의
+      for (const m of src.matchAll(/\b(?:sendAlert|sendOrQueue)\(/g)) {
+        if (/function\s+(?:sendAlert|sendOrQueue)\($/.test(src.slice(Math.max(0, m.index - 30), m.index + m[0].length))) continue; // 정의
         // 괄호를 맞춰 인자 전체를 잘라 낸다
         let depth = 0;
         let end = m.index + m[0].length - 1;
@@ -367,7 +367,9 @@ describe('[NT-T80] 보내는 곳은 모두 종류를 싣는다 (NT-56c) — 빠�
       return out;
     };
     expect(calls.length).toBeGreaterThanOrEqual(9);
-    expect(calls.filter((c) => !/\bkind\b/.test(topLevel(c.args))).map((c) => c.at)).toEqual([]);
+    // 보낼 함이 창 0일 때 받은 것을 그대로 넘기는 한 곳(`sendAlert(input)`)은 부른 쪽의 `kind`를 그대로 싣는다
+    const passThrough = (c: { args: string }) => /^(?:sendAlert|sendOrQueue)\(input\)$/.test(c.args.replace(/\s+/g, ''));
+    expect(calls.filter((c) => !passThrough(c) && !/\bkind\b/.test(topLevel(c.args))).map((c) => c.at)).toEqual([]);
   });
 
   it('수신함 화면은 「병합 점검」을 이름으로 보인다', async () => {

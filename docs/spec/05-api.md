@@ -329,6 +329,7 @@ lead에게는 이 엔드포인트가 존재하지 않는다(404).
 
 | ID | 요구사항 |
 |---|---|
+| API-67 | **`PUT /api/ops/roster` — 소속 옮기기 · 본부 담당** (2026-10-14 — ADR-0022): `divisionId`(옮기기 — 고정이 같이 켜진다, 감사 `roster_move`) · `divisionPinned: false`(고정 풀기만 — `true`는 422, 감사 `roster_unpin`) · `hqDesk`(본부 id — 산하가 있는 부서만, 아니면 422 · `null`이면 해제 · 감사 `hq_desk`). GET은 사람마다 `divisionPinned` · `hqDeskIds`, 그리고 그 부서를 소속과 따로 맡은 `desks`. 문은 그대로 `requireOperator`. 본부 쪽 요청(`POST /api/rollup/hq` 본문 · `PUT /api/rollup/hq/order?node=` · `POST /api/rollup/report` 본문 · `GET /api/rollup/report?level=hq&node=`)은 `node`(본부 슬러그)를 받을 수 있다 — 그 사람의 본부 중 고르기뿐이다(TACP-6 · v1.16) |
 | API-66 | **`notifyEnabled`** (2026-10-09 — NT-61): 불리언만 받는다 — 그 밖의 값(`null`·`"true"`·`1` …)은 422 `invalid_request`. 켜짐(`isActive`)과 따로 저장한다 — 꺼진 부서에도 켤 수 있고 켜기 전까지는 효과가 없다(NT-30). 감사 `rule_update`의 `detail`에 `changed`(`notifyEnabled` 포함)와 바뀐 값 `notifyEnabled`. GET의 부서마다 `notifyEnabled`. 문은 그대로 `requireOperator` |
 
 ### `GET·POST·PUT /api/ops/users` · `PUT /api/ops/roster`

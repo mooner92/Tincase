@@ -17,6 +17,7 @@ import { runDueMerges } from './merge/run';
 import { kickMergeQueue, recoverMergeJobs, setMergeQueueHooks } from './merge/queue';
 import { warmModelIfDue } from './merge/warmup';
 import { mergePauseState } from './merge/pause';
+import { batchWindowMs, flushOutbox } from './notify/outbox';
 
 /** 알림이 실패해도 병합은 돌아야 한다 — 본업이 남의 사정에 멈추지 않게 따로 감싼다 */
 export async function runReminders(now: Date = new Date()): Promise<void> {
@@ -110,6 +111,19 @@ export function makeSchedulerTick(): () => Promise<void> {
         for (const r of await runDueRollupNotices(rollupNow)) console.log(`[알림] ${r.kind}: ${r.sent}/${r.targets}명`);
       } catch (e) {
         console.error('[알림] 3단계 알림 오류', e);
+      }
+
+      /*
+       * ADR-0022 D4 — 보낼 함 비우기(안전망). 보통은 넣은 뒤 창이 지나면 타이머가 비운다 — 여기는 그 사이 프로세스가 다시 떴거나
+       * 메신저가 실패해 남은 줄을 매분 다시 본다. 병합 일시정지와 상관없다(알림은 사람의 결정에서도 나온다) — 그래서 일시정지 판정 앞
+       */
+      if (batchWindowMs() > 0) {
+        try {
+          const f = await flushOutbox();
+          if (f.batches) console.log(`[알림] 보낼 함 — ${f.batches}통 · ${f.sent}줄${f.failed ? ` · 못 보냄 ${f.failed}` : ''}`);
+        } catch (e) {
+          console.error('[알림] 보낼 함 비우기 오류', e);
+        }
       }
 
       /*

@@ -6,7 +6,7 @@
 // PG-95 (2026-10-14) — 부서는 **조직도 모양**(본부 → 산하 실)으로 묶고, 검색과 「켜짐 · 꺼짐」 거르기로 찾는다. 예전의 취합게시판
 // 제출 이력 탭(「제출 확인 · 이력 없음」, DM-15)은 걷었다 — 연구 실들도 본부 표로 내고 있어 모든 부서가 쓰게 됐다(운영자 「이력 없음은 없애도 되겠네」).
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { RosterDrawer, type UserRow } from './RosterDrawer';
+import { RosterDrawer, type DeskHolder, type UserRow } from './RosterDrawer';
 import { RosterSync } from './RosterSync';
 import { copyText } from '@/lib/clipboard';
 import { arrangeDivisions, showCounts, type ShowFilter } from '@/lib/division-groups';
@@ -138,6 +138,8 @@ export function OpsClient() {
   const [q, setQ] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
   const [users, setUsers] = useState<UserRow[]>([]);
+  /** ADR-0022 D2 — 연 부서(본부)를 소속과 따로 맡은 사람 */
+  const [desks, setDesks] = useState<DeskHolder[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [issued, setIssued] = useState<IssuedPassword[]>([]);
@@ -169,7 +171,10 @@ export function OpsClient() {
   const loadUsers = useCallback((divisionId: string) => {
     fetch(`/api/ops/roster?division=${divisionId}`)
       .then((r) => r.json())
-      .then((b) => setUsers(b.users ?? []));
+      .then((b) => {
+        setUsers(b.users ?? []);
+        setDesks(b.desks ?? []);
+      });
   }, []);
 
   const openRoster = (divisionId: string) => {
@@ -297,6 +302,11 @@ export function OpsClient() {
   const counts = useMemo(() => showCounts(divisions ?? []), [divisions]);
   const shown = arrangeDivisions(divisions ?? [], { q, show }, editingId);
   const selectedName = divisions?.find((d) => d.id === selected)?.nameKo ?? null;
+  // ADR-0022 — 드로어의 소속 · 본부 담당 고르기. 본부 = 누군가의 상위부서인 부서(조직도 순서 그대로)
+  const divisionOptions = useMemo(() => {
+    const parents = new Set((divisions ?? []).map((d) => d.parentKo));
+    return (divisions ?? []).map((d) => ({ id: d.id, nameKo: d.nameKo, isHq: parents.has(d.nameKo) }));
+  }, [divisions]);
 
   return (
     <div className="space-y-4 lg:space-y-6">
@@ -551,7 +561,10 @@ export function OpsClient() {
       {/* 스크롤 없이 바로 보이도록 드로어로 (기존엔 표 아래에 펼쳐져 스크롤이 필요했다) */}
       <RosterDrawer
         divisionName={selectedName}
+        divisionId={selected}
         users={users}
+        divisions={divisionOptions}
+        desks={desks}
         busy={busy}
         onClose={() => setSelected(null)}
         onPatch={patchUser}

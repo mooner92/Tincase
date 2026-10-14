@@ -37,7 +37,12 @@ export type AuditAction =
   /** RU-20 — 이어 붙이는 순서·메모를 바꿨다 */
   | 'rollup_order'
   /** TACP-22 — 담당자가 부서원 제출물을 새 판으로 고쳤다. 누구의 몇 판을 고쳤는지 남는다 */
-  | 'submission_revise';
+  | 'submission_revise'
+  /** ADR-0022 D1 — 운영자가 한 사람의 Tincase 소속을 옮겼다(고정). 권한이 바뀌는 일이라 따로 남긴다 */
+  | 'roster_move'
+  | 'roster_unpin'
+  /** ADR-0022 D2 · TACP-21 — 운영자가 본부 담당을 지정·해제했다 */
+  | 'hq_desk';
 
 export async function audit(
   actor: string,

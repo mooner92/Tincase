@@ -10,7 +10,9 @@ import { prisma } from '../db';
 import { audit } from '../audit';
 import { logger } from '../logger';
 import { env } from '../env';
-import { messengerStatus, sendAlert } from '../messenger';
+import { messengerStatus } from '../messenger';
+// ADR-0022 D4 — 알림은 보낼 함을 지난다(같은 사람에게 짧은 사이 여럿이면 한 통). 창이 0이면 바로 보낸다
+import { sendOrQueue } from '../notify/outbox';
 import { claimNotice, settleNotice } from '../notify/claim';
 import { readStoredFile, sha256 } from '../storage';
 import { HttpError, type Scope } from '../authz';
@@ -102,7 +104,7 @@ async function notifyLeads(review: MergeReview, reviewer: string, slot: WeekSlot
   const sent: string[] = [];
   const blocked: string[] = [];
   for (const l of leads) {
-    const r = await sendAlert({
+    const r = await sendOrQueue({
       recvIds: [l.employeeNo!],
       ...approvalMessage({ name: l.name, employeeNo: l.employeeNo! }, reviewer, slot, review.createdAt, changes, handedOffTo),
       url,
@@ -260,7 +262,7 @@ export async function notifyReapprove(division: Division, slot: WeekSlot, target
   const blocked: string[] = [];
   try {
     for (const h of heads) {
-      const r = await sendAlert({ recvIds: [h.employeeNo!], ...reapproveMessage({ name: h.name, employeeNo: h.employeeNo! }, slot, target, reason), url, kind });
+      const r = await sendOrQueue({ recvIds: [h.employeeNo!], ...reapproveMessage({ name: h.name, employeeNo: h.employeeNo! }, slot, target, reason), url, kind });
       sent.push(...r.sent);
       blocked.push(...r.blocked);
     }

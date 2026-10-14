@@ -20,11 +20,33 @@ export interface UserRow {
   mustChangePassword: boolean;
   lastLoginAt: string | null;
   locked: boolean;
+  /** ADR-0022 D1 — Tincase 소속을 ERP와 다르게 고정했다(운영자가 옮겼다) */
+  divisionPinned?: boolean;
+  /** ADR-0022 D2 — 소속과 따로 맡은 본부(부서 id) */
+  hqDeskIds?: string[];
+}
+
+/** ADR-0022 — 드로어의 「소속」·「본부 담당」 고르기에 쓰는 부서 목록 */
+export interface DivisionOption {
+  id: string;
+  nameKo: string;
+  /** 산하가 있는 부서(본부·센터) — 본부 담당으로 고를 수 있다 */
+  isHq: boolean;
+}
+
+/** ADR-0022 D2 — 이 부서(본부)를 소속과 따로 맡은 사람 — 본부 줄의 드로어 머리에 */
+export interface DeskHolder {
+  userId: string;
+  name: string;
+  divisionName: string;
 }
 
 export function RosterDrawer({
   divisionName,
+  divisionId,
   users,
+  divisions = [],
+  desks = [],
   busy,
   onClose,
   onPatch,
@@ -32,7 +54,13 @@ export function RosterDrawer({
   onSendSetupLink,
 }: {
   divisionName: string | null;
+  /** 지금 연 부서 — 「소속」 고르기의 지금 값 */
+  divisionId?: string | null;
   users: UserRow[];
+  /** ADR-0022 — 소속 옮기기 · 본부 담당 고르기 (없으면 그 칸을 그리지 않는다) */
+  divisions?: DivisionOption[];
+  /** ADR-0022 D2 — 이 부서를 소속과 따로 맡은 본부 담당 */
+  desks?: DeskHolder[];
   busy: boolean;
   onClose: () => void;
   onPatch: (userId: string, patch: Record<string, unknown>) => void;
@@ -87,6 +115,12 @@ export function RosterDrawer({
             <p className="mt-0.5 text-xs text-muted">
               전체 {users.length}명 · 제출 대상 {roster}명 · 비밀번호 발급 {issued}/{users.length}
             </p>
+            {/* ADR-0022 D2 — 소속 밖에서 이 본부를 맡은 사람. 해제는 그 사람의 소속 부서 드로어에서 */}
+            {desks.length > 0 && (
+              <p className="mt-0.5 text-xs text-body" data-testid="hq-desks">
+                본부 담당(겸임): {desks.map((d) => `${d.name}(${d.divisionName})`).join(' · ')}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {/*
@@ -130,6 +164,7 @@ export function RosterDrawer({
                 <th className="px-4 py-2 font-medium whitespace-nowrap">이름</th>
                 <th className="px-4 py-2 font-medium whitespace-nowrap">이메일</th>
                 <th className="px-4 py-2 font-medium whitespace-nowrap">역할</th>
+                {divisions.length > 0 && <th className="px-4 py-2 font-medium whitespace-nowrap">소속 · 겸임</th>}
                 <th className="px-4 py-2 font-medium whitespace-nowrap">제출 대상</th>
                 <th className="px-4 py-2 font-medium whitespace-nowrap">사번</th>
                 <th className="px-4 py-2 font-medium whitespace-nowrap">알림</th>
@@ -163,6 +198,57 @@ export function RosterDrawer({
                       <option value="head">부서장 (검토)</option>
                     </select>
                   </td>
+                  {divisions.length > 0 && (
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {/* ADR-0022 D1 — 소속 옮기기: ERP와 다른 부서의 글을 맡는 사람. 옮기면 고정(인원 최신화가 되돌리지 않는다) */}
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          aria-label={`${u.name} 소속`}
+                          value={divisionId ?? ''}
+                          disabled={busy}
+                          onChange={(e) => {
+                            const to = divisions.find((d) => d.id === e.target.value);
+                            if (to && confirm(`${u.name} 님의 Tincase 소속을 ${to.nameKo}(으)로 옮깁니다 — ERP와 달라 고정됩니다(인원 최신화가 되돌리지 않음)`))
+                              onPatch(u.id, { divisionId: to.id });
+                          }}
+                          className="rounded border border-border-strong px-1 py-0.5 text-xs"
+                        >
+                          {divisions.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.nameKo}
+                            </option>
+                          ))}
+                        </select>
+                        {u.divisionPinned && (
+                          <button
+                            disabled={busy}
+                            onClick={() => onPatch(u.id, { divisionPinned: false })}
+                            title="고정 풀기 — 다음 인원 최신화가 ERP 부서로 옮긴다"
+                            className="chip chip-warn px-1.5 py-0 text-xs"
+                          >
+                            고정 · 풀기
+                          </button>
+                        )}
+                      </div>
+                      {/* ADR-0022 D2 — 소속과 따로 맡는 본부. 본부 화면을 담당 권한으로 열고 본부 알림을 받는다(승인은 없다) */}
+                      <select
+                        aria-label={`${u.name} 본부 담당`}
+                        value={u.hqDeskIds?.[0] ?? ''}
+                        disabled={busy}
+                        onChange={(e) => onPatch(u.id, { hqDesk: e.target.value || null })}
+                        className="mt-1 rounded border border-border-strong px-1 py-0.5 text-xs"
+                      >
+                        <option value="">본부 담당 — 없음</option>
+                        {divisions
+                          .filter((d) => d.isHq && d.id !== divisionId)
+                          .map((d) => (
+                            <option key={d.id} value={d.id}>
+                              본부 담당 — {d.nameKo}
+                            </option>
+                          ))}
+                      </select>
+                    </td>
+                  )}
                   <td className="px-4 py-2 text-center">
                     <input
                       aria-label={`${u.name} 집계 대상`}

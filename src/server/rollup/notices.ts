@@ -16,7 +16,9 @@ import type { RollupRun, WeekSlot } from '@prisma/client';
 import { prisma } from '../db';
 import { logger } from '../logger';
 import { env } from '../env';
-import { messengerStatus, sendAlert } from '../messenger';
+import { messengerStatus } from '../messenger';
+// ADR-0022 D4 — 알림은 보낼 함을 지난다(같은 사람에게 짧은 사이 여럿이면 한 통). 창이 0이면 바로 보낸다
+import { sendOrQueue } from '../notify/outbox';
 import { claimNotice, settleNotice } from '../notify/claim';
 import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
 import { weekAnchor } from '../slot-deadline';
@@ -51,7 +53,7 @@ interface Person {
  * 받을 사람. ADR-0021 D4 — **들어올 수 있는 사람만**: 그 부서가 켜져 있거나 운영자(AU-04b의 예외). 꺼진 본부의 본부장에게 「승인해 주세요」를
  * 보내면 눌러도 들어오지 못한다 — 그 본부는 「본부장 없음」으로 저절로 간다(handoff.ts `hasHead`)
  */
-async function people(where: { divisionId?: string; divisionRole?: string | { in: string[] }; isCoordinator?: boolean }): Promise<Person[]> {
+async function people(where: { id?: { in: string[] }; divisionId?: string; divisionRole?: string | { in: string[] }; isCoordinator?: boolean }): Promise<Person[]> {
   const us = await prisma.user.findMany({
     where: {
       ...where,
@@ -64,6 +66,28 @@ async function people(where: { divisionId?: string; divisionRole?: string | { in
   });
   return us.map((u) => ({ ...u, employeeNo: u.employeeNo! }));
 }
+
+/**
+ * ADR-0022 D2 — 이 본부의 **담당**: 본부 부서에 소속된 lead + 운영자가 지정한 본부 담당(소속은 실). 같은 사람은 한 번.
+ * 지정된 사람도 「들어올 수 있는 사람」 규칙(소속 부서가 켜짐 · 운영자)을 그대로 따른다
+ */
+async function hqLeads(nodeId: string): Promise<Person[]> {
+  const own = await people({ divisionId: nodeId, divisionRole: 'lead' });
+  const desks = await prisma.hqDesk.findMany({ where: { divisionId: nodeId }, select: { userId: true } });
+  // 이 본부에서 이 사람은 담당이다 — 소속 실의 역할(부서원·실장)이 무엇이든 본부 쪽지는 담당의 문구로(승인 단추가 없는 사람에게 「승인하세요」라 하지 않게)
+  const extra = desks.length ? (await people({ id: { in: desks.map((d) => d.userId) } })).map((p) => ({ ...p, divisionRole: 'lead' })) : [];
+  return uniqPeople([...own, ...extra]);
+}
+
+/** 본부장 + 본부 담당 — 본부본 준비·다 모였어요를 받는 사람(ADR-0021 · ADR-0022 D2) */
+async function hqDeciders(nodeId: string): Promise<Person[]> {
+  return uniqPeople([...(await people({ divisionId: nodeId, divisionRole: 'head' })), ...(await hqLeads(nodeId))]);
+}
+
+const uniqPeople = (ps: Person[]) => [...new Map(ps.map((p) => [p.id, p])).values()];
+
+/** 본부 화면 링크 — 그 본부를 고른다(본부를 여럿 맡은 담당도 바로 그 본부로, ADR-0022 D2) */
+const hqLink = (node: RollupNode) => link(`/hq?node=${encodeURIComponent(node.node.slug)}`);
 
 /** 기한이 지나 판이 저절로 따라가는 중인가 (ADR-0021) — 그때는 「다시 승인」이 할 일이 아니다 */
 function afterDue(due: Date, hqDue: Date, now: Date): boolean {
@@ -103,7 +127,7 @@ async function deliver(
   const blocked: string[] = [];
   try {
     for (const p of to) {
-      const r = await sendAlert({ recvIds: [p.employeeNo], ...msg(p), url, kind });
+      const r = await sendOrQueue({ recvIds: [p.employeeNo], ...msg(p), url, kind });
       sent.push(...r.sent);
       blocked.push(...r.blocked);
     }
@@ -295,14 +319,14 @@ export async function noticeHqBuilt(
   if (!(await hasHead(node.node.id))) return [];
   const out: RollupNoticeOutcome[] = [];
   const heads = await people({ divisionId: node.node.id, divisionRole: 'head' });
-  const deciders = await people({ divisionId: node.node.id, divisionRole: { in: ['head', 'lead'] } });
+  const deciders = await hqDeciders(node.node.id);
   const t = stagesFrom(await weekAnchor(slot), await loadOrgSetting());
   const sha = await fileSha(run.outputPath);
   const approval = await hqApprovalFor(node.node.id, slot.id);
   if (approval) {
     if (sha && approval.sha256 !== sha && !afterDue(t.hqDue, t.hqDue, opts.now ?? new Date())) {
       const to = heads.filter((h) => h.email !== opts.causedBy);
-      const r = await deliver(`ru_hq_reapprove:${approval.id}`, node.node.id, slot, to, (p) => hqReapproveMessage(p, slot, node.node.nameKo, why, approval.createdAt), link('/hq'));
+      const r = await deliver(`ru_hq_reapprove:${approval.id}`, node.node.id, slot, to, (p) => hqReapproveMessage(p, slot, node.node.nameKo, why, approval.createdAt), hqLink(node));
       if (r) out.push(r);
     }
     return out;
@@ -311,7 +335,7 @@ export async function noticeHqBuilt(
   if (missing.length > 0) return out; // 일부는 기한(스케줄러)에
   let ready = await sentBefore(node.node.id, slot.id, 'ru_hq_ready');
   if (!ready) {
-    const r = await deliver('ru_hq_ready', node.node.id, slot, deciders, (p) => hqReadyMessage(p, slot, node.node.nameKo, arrived, missing, false, t.hqDue), link('/hq'), { complete: true });
+    const r = await deliver('ru_hq_ready', node.node.id, slot, deciders, (p) => hqReadyMessage(p, slot, node.node.nameKo, arrived, missing, false, t.hqDue), hqLink(node), { complete: true });
     if (r) {
       out.push(r);
       return out;
@@ -321,7 +345,7 @@ export async function noticeHqBuilt(
     ready = await sentBefore(node.node.id, slot.id, 'ru_hq_ready');
   }
   if (ready && !JSON.parse(ready.detail ?? '{}').complete) {
-    const r = await deliver('ru_hq_complete', node.node.id, slot, deciders, (p) => hqReadyMessage(p, slot, node.node.nameKo, arrived, missing, true, t.hqDue), link('/hq'));
+    const r = await deliver('ru_hq_complete', node.node.id, slot, deciders, (p) => hqReadyMessage(p, slot, node.node.nameKo, arrived, missing, true, t.hqDue), hqLink(node));
     if (r) out.push(r);
   }
   return out;
@@ -412,8 +436,8 @@ export async function noticeRollupFailed(level: 'hq' | 'org', node: RollupNode |
   const key = (run.inputKey ?? run.id).slice(0, 12);
   const error = run.errorText ?? '알 수 없는 오류';
   if (level === 'hq' && node) {
-    const leads = await people({ divisionId: node.node.id, divisionRole: 'lead' });
-    const r = await deliver(`ru_hq_failed:${key}`, node.node.id, slot, leads, (p) => rollupFailedMessage(p, slot, `${node.node.nameKo} 본부본`, error), link('/hq'));
+    const leads = await hqLeads(node.node.id);
+    const r = await deliver(`ru_hq_failed:${key}`, node.node.id, slot, leads, (p) => rollupFailedMessage(p, slot, `${node.node.nameKo} 본부본`, error), hqLink(node));
     return r ? [r] : [];
   }
   const coords = await people({ isCoordinator: true });
@@ -508,12 +532,12 @@ export async function runDueRollupNotices(now = new Date()): Promise<RollupNotic
       // ADR-0021 D4 — 본부장이 없는(꺼진 본부 포함) 본부는 본부본이 곧 총괄로 간다 — 기다리는 사람이 없다
       if (!(await hasHead(n.node.id))) continue;
       const heads = await people({ divisionId: n.node.id, divisionRole: 'head' });
-      const deciders = await people({ divisionId: n.node.id, divisionRole: { in: ['head', 'lead'] } });
+      const deciders = await hqDeciders(n.node.id);
       // RU-54 — 「실·팀 → 본부」 기한에 하나라도 와 있고 본부본이 승인을 기다리면 그때 (다 모인 순간에 이미 갔으면 안 간다)
       if (atUnit && (await hqAwaitingApproval(n.node.id, slot))) {
         const { arrived, missing } = await hqArrivals(n, slot);
         if (arrived.length > 0) {
-          const r = await deliver('ru_hq_ready', n.node.id, slot, deciders, (p) => hqReadyMessage(p, slot, n.node.nameKo, arrived, missing, false, t.hqDue), link('/hq'), {
+          const r = await deliver('ru_hq_ready', n.node.id, slot, deciders, (p) => hqReadyMessage(p, slot, n.node.nameKo, arrived, missing, false, t.hqDue), hqLink(n), {
             complete: missing.length === 0,
           });
           if (r) out.push(r);
@@ -521,7 +545,7 @@ export async function runDueRollupNotices(now = new Date()): Promise<RollupNotic
       }
       // RU-56 — 본부장이 막고 있을 때만 (승인 전·승인 뒤 바뀜·승인 없이 감)
       if (atHqSoon && (await hqAwaitingApproval(n.node.id, slot))) {
-        const r = await deliver('ru_hq_due_soon', n.node.id, slot, heads, (p) => hqHeadDueSoonMessage(p, slot, t.hqDue), link('/hq'));
+        const r = await deliver('ru_hq_due_soon', n.node.id, slot, heads, (p) => hqHeadDueSoonMessage(p, slot, t.hqDue), hqLink(n));
         if (r) out.push(r);
       }
     } catch (e) {

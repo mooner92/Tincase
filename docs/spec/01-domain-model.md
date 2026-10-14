@@ -572,6 +572,14 @@ model GuideTourSeen {
 - 「봤다」를 브라우저에 두지 않는 이유: 다른 PC·브라우저에서 또 뜬다. 사용자는 지우지 않으므로(DM-03) Cascade는 형식이다
 - 쓰는 곳은 `POST /api/me/tour`(API-60) 하나, 읽는 곳은 페이지의 제안 계산(`src/server/tour.ts`) 하나 — 둘 다 세션의 사람 것만
 
+### DM-26 — 한 사람이 여러 자리 (2026-10-14 · ADR-0022) — 더하기만
+
+| 무엇 | 저장 | 뜻 |
+|---|---|---|
+| **소속 고정** | `User.divisionPinned` | Tincase 소속을 ERP와 다르게 둔다(운영자가 /ops에서 옮기면 켜진다). 인원 최신화는 이 사람의 부서를 옮기지 않고 「고정」으로 알리기만(`SyncPlan.pinned`). 고정을 풀면(`divisionPinned:false`) 다음 최신화가 ERP 부서로 옮긴다 |
+| **본부 담당 지정** | `HqDesk { userId, divisionId(본부) }` | 실 소속 사람이 그 본부의 **담당**을 겸한다 — 본부 화면 담당 권한 · 본부 비상구 · 산하 사본·본부본 읽기 · 본부 알림(TACP-21 v1.16). 승인(본부장)은 생기지 않는다. 한 사람에 하나(화면) · 운영자만 · 감사 `hq_desk` |
+| **보낼 함** | `NotifyOutbox { recvId, subject, contents, url, kind, sentAt, attempts, batchId }` | 알림 묶기(NT-63) — 같은 사람에게 창(`NOTIFY_BATCH_MS`) 안에 둘 이상이면 한 통. 설정 링크·비밀번호 찾기는 지나지 않는다 |
+
 ### DM-20 — 인원 최신화는 **계획하고 승인한다** (RS-01~16)
 
 ERP에 API가 없어 주 1회 운영자가 「부서별 인원 현황」 엑셀을 올린다.

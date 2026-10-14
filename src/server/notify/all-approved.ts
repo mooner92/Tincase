@@ -16,7 +16,9 @@
 import type { Division, WeekSlot } from '@prisma/client';
 import { prisma } from '../db';
 import { env } from '../env';
-import { messengerStatus, sendAlert } from '../messenger';
+import { messengerStatus } from '../messenger';
+// ADR-0022 D4 — 알림은 보낼 함을 지난다(같은 사람에게 짧은 사이 여럿이면 한 통). 창이 0이면 바로 보낸다
+import { sendOrQueue } from './outbox';
 import { claimNotice, settleNotice } from './claim';
 import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
 import { approvalOf } from '../merge/review';
@@ -137,7 +139,7 @@ export async function runAllApprovedNotice(now: Date = new Date()): Promise<AllA
     targets++;
     const out: string[] = [];
     try {
-      const r = await sendAlert({ recvIds: [p.employeeNo!], ...allApprovedMessage({ name: p.name, employeeNo: p.employeeNo! }, slot, units), url, kind });
+      const r = await sendOrQueue({ recvIds: [p.employeeNo!], ...allApprovedMessage({ name: p.name, employeeNo: p.employeeNo! }, slot, units), url, kind });
       out.push(...r.sent);
     } finally {
       await settleNotice(claim, out, detail);
