@@ -244,6 +244,11 @@ beforeAll(async () => {
     ],
   });
   await prisma.orgRollupSetting.create({ data: { id: 'org', enabled: true, unitDueMinutes: 60, hqDueMinutes: 120 } });
+  // ADR-0021 — 요청이 일으키는 맞추기는 진짜 시계로 기한을 본다. 기한이 이미 지났으면 판이 저절로 따라가 「다시 승인」 같은 알림이 나가지
+  // 않는다 — 이 파일은 기한 **전**의 알림을 본다. 기한을 지금 + 60분·+120분에 둔다(시각 알림은 그 기한에서 센 `now`를 넘겨 본다)
+  const { weekAnchor } = await import('@/server/slot-deadline');
+  const m = Math.floor((Date.now() - (await weekAnchor(await slot())).getTime()) / 60_000);
+  await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { unitDueMinutes: m + 60, hqDueMinutes: m + 120 } });
 }, 60_000);
 
 afterAll(async () => {
@@ -262,12 +267,21 @@ describe('NT-46′·47′·52 — 실·팀 알림 문구 (순수)', () => {
     expect(off).not.toContain('자동으로 올라갔어요');
   });
 
-  it('[NT-T64] NT-47′ — 승인돼 올라갔으면 안 보냄 · 승인 전 「승인되면 저절로」 · 부서장 없음 「올라갔어요」 · 3단계를 안 쓰면 게시판 문구', async () => {
+  it('[NT-T64] NT-47′ · ADR-0021 D5 — 3단계에서 병합본이 있으면 담당자 마지막 안내(③④)는 없다 · 병합본이 없으면(①) 그대로 · 3단계를 안 쓰면 게시판 문구', async () => {
     const { pickJobs, submitLines } = await import('@/server/notify/merge-notices');
     const ok = { by: '홍 실장', at: new Date(), summary: '', changedAfter: false };
     const base = { submitTo: '본부가', submitDue: '15:00' };
     expect(pickJobs(false, true, { ok: true, approval: ok, ...base, hasHead: true })).toEqual([]);
-    expect(pickJobs(false, true, { ok: true, approval: { ...ok, changedAfter: true }, ...base, hasHead: true })).toEqual([{ kind: 'merge_done', role: 'lead' }]);
+    // 승인 전·승인 뒤 바뀜 — 부서장이 승인하거나 기한에 저절로 간다. 담당자에게 할 일이 없다(예전 ③ 「부서장 승인을 기다려요」)
+    expect(pickJobs(false, true, { ok: true, approval: { ...ok, changedAfter: true }, ...base, hasHead: true })).toEqual([]);
+    expect(pickJobs(false, true, { ok: true, approval: null, ...base, hasHead: true })).toEqual([]);
+    // 부서장 없음 — 이미 올라갔다(예전 ④ 「올라갔어요」)
+    expect(pickJobs(false, true, { ok: true, approval: null, ...base, hasHead: false })).toEqual([]);
+    // 병합본이 없으면 할 일이 있다([지금 병합]) — 그대로 간다
+    expect(pickJobs(false, true, { ok: false, approval: null, ...base, hasHead: true })).toEqual([{ kind: 'merge_done', role: 'lead' }]);
+    // 병합 뒤에 늦게 낸 사람이 있거나 확인할 줄이 있으면 담당자의 일이다 — 기한에 그 판이 저절로 간다(리뷰 2026-10-13)
+    expect(pickJobs(false, true, { ok: true, approval: null, ...base, hasHead: true, stale: 2 })).toEqual([{ kind: 'merge_done', role: 'lead' }]);
+    expect(pickJobs(false, true, { ok: true, approval: null, ...base, hasHead: true, flagged: [{} as never] })).toEqual([{ kind: 'merge_done', role: 'lead' }]);
     expect(pickJobs(false, true, { ok: true, approval: ok, submitTo: null, submitDue: null, hasHead: true })).toEqual([{ kind: 'merge_done', role: 'lead' }]); // 3단계를 안 쓰면 그대로
     expect(submitLines({ ...base, hasHead: true, approval: null }).join(' ')).toBe('아직 부서장 승인 전이에요 — 승인되면 저절로 본부가에 올라갑니다(기한 15:00).');
     expect(submitLines({ ...base, hasHead: true, approval: { ...ok, changedAfter: true } }).join(' ')).toContain('다시 승인되면 저절로 본부가에 올라갑니다(기한 15:00)');
@@ -288,21 +302,27 @@ describe('RU-53~57b · NT-52 — 3단계 알림은 막고 있는 사람에게만
     expect(got[0].contents).toContain('본부가에 자동으로 올라갔어요');
   });
 
-  it('[RU-T125] ★ RU-54 — 일부만 모였으면 「실·팀 → 본부」 기한에 본부장에게 한 번 · 뒤에 다 모이면 「다 모였어요」 한 번 · 본부 담당자에게는 없음', async () => {
+  it('[RU-T125] ★ RU-54 — 일부만 모였으면 「실·팀 → 본부」 기한에 본부장과 **본부 담당**에게 한 번(ADR-0021 D5) · 뒤에 다 모이면 「다 모였어요」 한 번 · 기한에 무엇이 저절로 가는지', async () => {
     const t = await times();
-    expect(await due(plus(t.unitDue, 1))).toEqual([expect.objectContaining({ kind: 'ru_hq_ready', sent: 1 })]);
+    expect(await due(plus(t.unitDue, 1))).toEqual([expect.objectContaining({ kind: 'ru_hq_ready', sent: 2 })]);
     let got = take();
-    expect(to(got)).toEqual([P.hqHead.no]);
-    expect(got[0].contents).toContain('산하 1/2곳');
-    expect(got[0].contents).toContain('아직 1곳: 실둘');
+    expect(to(got)).toEqual([P.hqHead.no, P.hqLead.no]);
+    for (const g of got) {
+      expect(g.contents).toContain('산하 1/2곳');
+      expect(g.contents).toContain('아직 1곳: 실둘');
+      expect(g.contents).toMatch(/\d\d:\d\d까지 승인이 없으면 그때 본부본이 자동으로 총괄로 가요\./);
+    }
+    // 끝 줄은 받는 사람의 할 일 — 본부장은 [검토 완료 · 승인], 담당은 본부장이 자리에 없을 때의 길
+    expect(got.find((g) => g.to === P.hqHead.no)!.contents).toContain('[검토 완료 · 승인]을 누르면 바로 총괄로');
+    expect(got.find((g) => g.to === P.hqLead.no)!.contents).toContain('[본부장 승인 없이 총괄로]');
     expect(await due(plus(t.unitDue, 2))).toEqual([]); // 같은 창에서 두 번 가지 않는다
     // 실둘(부서장 없음) 마감 뒤 병합 → 저절로 올라옴 → 다 모임
     nextMerge.set(divId.u2, '실둘 최종본');
     expect((await mergeNow(P.u2Lead.email)).status).toBe(202);
     await settle();
     got = take();
-    expect(to(got)).toEqual([P.hqHead.no]);
-    expect(got[0].subject).toContain('다 모였어요');
+    expect(to(got)).toEqual([P.hqHead.no, P.hqLead.no]);
+    expect(got.every((g) => g.subject.includes('다 모였어요'))).toBe(true);
     // 다시 만들어져도 「다 모였어요」는 한 번
     expect((await save(P.u2Lead.email, 'u2', '실둘 고침')).status).toBe(200);
     await settle();
@@ -419,8 +439,10 @@ describe('RU-53~57b · NT-52 — 3단계 알림은 막고 있는 사람에게만
     expect(sent.map((r) => r.kind).sort()).toEqual([`ru_org_ready:${userId.c1}`, `ru_org_ready:${userId.c2}`].sort());
     const got = take();
     expect(to(got)).toEqual([P.c1.no, P.c2.no]);
+    // ADR-0021 D6 — 셈은 섹션(조립 직후의 판정과 같다). 본부가는 승인한 옛 본부본이 총괄에 있고 거기에 실하나·실둘이 다 들어 있다(§12 Q10)
+    expect(got[0].contents).toContain('도착 2곳: 본부가(실하나)·본부가(실둘)');
     expect(got[0].contents).toContain('아직 1곳: 단독단');
-    // 다 들어온다 — 단독단 승인 (본부가는 승인한 옛 판이 총괄에 있어 이미 「도착」이다 — §12 Q10)
+    // 다 들어온다 — 단독단 승인
     expect((await approve(P.soloHead.email, 'solo')).status).toBe(200);
     await settle();
     const complete = take().filter((g) => g.to === P.c1.no || g.to === P.c2.no);
@@ -533,7 +555,10 @@ describe('결정 f — 같은 알림을 둘이 같은 순간에 판정해도 한
     }
     expect(take().filter((g) => g.to === P.hqHead.no)).toHaveLength(1);
     expect(await logs()).toBe(1);
-    expect(JSON.parse((await prisma.notifyLog.findFirstOrThrow({ where: { divisionId: divId.hq, weekSlotId: next.id, kind: 'ru_hq_ready' } })).recipients)).toEqual([P.hqHead.no]);
+    // 본부장과 본부 담당(ADR-0021 D5) — 한 줄에 둘
+    expect(JSON.parse((await prisma.notifyLog.findFirstOrThrow({ where: { divisionId: divId.hq, weekSlotId: next.id, kind: 'ru_hq_ready' } })).recipients).sort()).toEqual(
+      [P.hqHead.no, P.hqLead.no].sort(),
+    );
 
     // 못 보냈으면(메신저 고장) 잡은 줄을 놓는다 — 「실제로 나간 것만 기록한다」. 다음 판정이 다시 보낸다
     await prisma.notifyLog.deleteMany({ where: { divisionId: divId.hq, weekSlotId: next.id } });
@@ -544,7 +569,7 @@ describe('결정 f — 같은 알림을 둘이 같은 순간에 판정해도 한
       mailbox.fail = false;
     }
     expect(await logs()).toBe(0);
-    expect((await noticeHqBuilt(node, next, run, '')).map((r) => r.sent)).toEqual([1]);
+    expect((await noticeHqBuilt(node, next, run, '')).map((r) => r.sent)).toEqual([2]);
     expect(take().filter((g) => g.to === P.hqHead.no)).toHaveLength(1);
     expect(await logs()).toBe(1);
 
@@ -600,5 +625,187 @@ describe('결정 f — 같은 알림을 둘이 같은 순간에 판정해도 한
     expect(counts.sort()).toEqual([0, 1]);
     expect(take().filter((g) => g.to === P.u1Head.no)).toHaveLength(1);
     expect(await prisma.notifyLog.count({ where: { divisionId: divId.u1, weekSlotId: s.id, kind: { startsWith: 'merge_reapprove:' } } })).toBe(1);
+  });
+});
+
+// ADR-0021 (2026-10-12 운영자) — 기한이 곧 제출. 알림은 「기한에 무엇이 저절로 가는지」를 말하고, 기한 뒤로는 「다시 승인」이 할 일이 아니다.
+// 총괄에게는 한 통 — 전사본이 없거나 아무것도 안 왔으면 「준비돼 있어요」를 보내지 않는다. 자기가 일으킨 변경을 자기에게 알리지 않는다.
+describe('ADR-0021 — 기한이 곧 제출: 알림은 할 일이 생긴 사람에게만 (RU-T157~160)', () => {
+  const who = { name: '가', employeeNo: '1' };
+  /** 이 파일의 다른 시험과 섞이지 않게 — 몇 주 뒤의 빈 주차 */
+  const weekAhead = async (weeks: number) => {
+    const { ensureCurrentSlot } = await import('@/server/worklog');
+    return ensureCurrentSlot(new Date((await slot()).opensAt.getTime() + (weeks * 7 + 2) * 86400_000));
+  };
+
+  it('[RU-T157] 문구 — 기한 15분 전(실·팀장·본부장)·본부본 준비(본부장·본부 담당)·부서장 검토 요청이 기한에 무엇이 저절로 가는지 말한다 (순수)', async () => {
+    const { unitDueSoonMessage, hqHeadDueSoonMessage, hqReadyMessage } = await import('@/server/rollup/notices');
+    const { composeNotice } = await import('@/server/notify/merge-notices');
+    const s = await slot();
+    const due = new Date('2026-10-15T06:00:00Z'); // 목 15:00 KST
+    expect(unitDueSoonMessage(who, s, '본부가', due, true).contents).toContain('15:00까지 승인이 없으면 그때 병합본이 자동으로 본부가에 올라가요.');
+    expect(hqHeadDueSoonMessage(who, s, due).contents).toContain('15:00까지 승인이 없으면 그때 본부본이 자동으로 총괄로 가요.');
+    const head = hqReadyMessage({ ...who, divisionRole: 'head' }, s, '본부가', ['실하나'], [], false, due).contents;
+    const lead = hqReadyMessage({ ...who, divisionRole: 'lead' }, s, '본부가', ['실하나'], [], false, due).contents;
+    expect(head).toContain('[검토 완료 · 승인]을 누르면 바로 총괄로');
+    expect(lead).toContain('[본부장 승인 없이 총괄로]');
+    expect(lead).not.toContain('[검토 완료 · 승인]을 누르면');
+    for (const c of [head, lead]) expect(c).toContain('15:00까지 승인이 없으면 그때 본부본이 자동으로 총괄로 가요.');
+    // 부서장 검토 요청 — 3단계면 받는 곳과 기한에 무엇이 저절로 가는지. 꺼져 있으면 그 줄이 없다
+    const facts = {
+      ok: true,
+      sources: 1,
+      counts: { achievements: 1, plans: 0, notes: 0 },
+      flagged: [],
+      stale: 0,
+      approval: null,
+      hasHead: true,
+      submitTo: '본부가',
+      submitDue: '15:00',
+      submitted: 1,
+    } as Parameters<typeof composeNotice>[4];
+    expect(composeNotice('merge_review', who, '10월 2주차', false, facts).contents).toContain(
+      '승인하면 바로 본부가에 올라가요 · 15:00까지 승인이 없으면 그때 병합본이 자동으로 올라가요.',
+    );
+    expect(composeNotice('merge_review', who, '10월 2주차', false, { ...facts, submitTo: null, submitDue: null }).contents).not.toContain('자동으로');
+  });
+
+  it('[RU-T158] 본부장 「다시 승인」(RU-55a)은 「본부 → 총괄」 기한 **전**에만 · 그 변경을 일으킨 본부장 자신에게는 보내지 않는다', async () => {
+    const prisma = await db();
+    const { writeFileAtomic } = await import('@/server/storage');
+    const { noticeHqBuilt } = await import('@/server/rollup/notices');
+    const { stageTimes } = await import('@/server/rollup/schedule');
+    const { hqNodeOf, loadTree } = await import('@/server/rollup/tree');
+    const wk = await weekAhead(2);
+    const t = await stageTimes(wk);
+    const out = 'divisions/NT_HQ/rollup/ahead-2.hwp';
+    await writeFileAtomic(out, Buffer.from('본부가 바뀐 본부본'));
+    const run = await prisma.rollupRun.create({ data: { level: 'hq', divisionId: divId.hq, weekSlotId: wk.id, status: 'succeeded', outputPath: out, inputIds: '[]', createdBy: 'system' } });
+    // 앞서 다른 판을 승인했다 — 지금 본부본과 sha가 다르다
+    await prisma.mergeReview.create({
+      data: { divisionId: divId.hq, weekSlotId: wk.id, mergeRunId: 'old-run', reviewerId: userId.hqHead, kind: 'hq_approve', sha256: sha('본부가 옛 본부본'), filePath: out },
+    });
+    const node = hqNodeOf(await loadTree(), divId.hq)!;
+    const plusMin = (d: Date, m: number) => new Date(d.getTime() + m * 60_000);
+    take();
+    // 기한 뒤 — 판은 저절로 따라간다. 「다시 승인」은 할 일이 아니다
+    expect(await noticeHqBuilt(node, wk, run, '', { now: plusMin(t.hqDue, 1) })).toEqual([]);
+    // 일으킨 사람이 본부장 자신(순서 바꾸기 등) — 자기가 한 일이다
+    expect(await noticeHqBuilt(node, wk, run, '순서를 바꿔서', { now: plusMin(t.hqDue, -30), causedBy: P.hqHead.email })).toEqual([]);
+    expect(take()).toEqual([]);
+    // 기한 전 · 다른 사람이 일으켰다 — 본부장에게 한 번
+    const r = await noticeHqBuilt(node, wk, run, '실하나 승인으로', { now: plusMin(t.hqDue, -30), causedBy: P.u1Head.email });
+    expect(r.map((x) => x.kind)).toEqual([expect.stringMatching(/^ru_hq_reapprove:/)]);
+    expect(to(take())).toEqual([P.hqHead.no]);
+  });
+
+  it('[RU-T159] ★ 총괄 — 「본부 → 총괄」 기한의 한 통(D6): 전사본이 없으면 안 감 · 들어온 곳이 0이면 안 감 · Tincase 밖 섹션은 「아직」과 따로 · 셈은 섹션', async () => {
+    const prisma = await db();
+    const { writeFileAtomic } = await import('@/server/storage');
+    const { stageTimes } = await import('@/server/rollup/schedule');
+    const { orgReadyKind } = await import('@/server/rollup/notices');
+    const wk = await weekAhead(3);
+    const t = await stageTimes(wk);
+    const at = new Date(t.hqDue.getTime() + 60_000);
+    // Tincase를 안 쓰는(꺼진) 부서의 섹션 — 총괄이 [올리기]로 넣을 곳
+    const off = await prisma.division.create({ data: { slug: 'NT_OFF', nameKo: '꺼진실', nameEn: 'NT_OFF', isActive: false, boardStatus: 'confirmed' } });
+    const section = await prisma.orgSection.create({ data: { sortOrder: 99, title: '꺼진실', divisionId: off.id } });
+    try {
+      take();
+      // 아무것도 안 왔고 전사본도 없다 — 「준비돼 있어요」 없음 (예전에는 「0/n곳 도착」이 갔다)
+      expect((await due(at)).filter((r) => r.kind.startsWith('ru_org_ready'))).toEqual([]);
+      expect(take().filter((g) => g.to === P.c1.no || g.to === P.c2.no)).toEqual([]);
+      // 단독단이 올라오고 전사본이 만들어졌다 → 총괄 각자에게 한 통: 도착 1 · 아직(Tincase) · Tincase 밖은 따로
+      const rel = 'divisions/NT_SOLO/reports/ahead-3.hwp';
+      await writeFileAtomic(rel, Buffer.from('단독단 3주 뒤'));
+      await prisma.reportSubmission.create({
+        data: { level: 'unit', divisionId: divId.solo, weekSlotId: wk.id, filePath: rel, sha256: sha('단독단 3주 뒤'), byteSize: 1, submittedBy: 'system', basis: 'due' },
+      });
+      await prisma.rollupRun.create({ data: { level: 'org', weekSlotId: wk.id, status: 'succeeded', outputPath: rel, inputIds: '[]', createdBy: 'system' } });
+      await prisma.notifyLog.deleteMany({ where: { weekSlotId: wk.id } });
+      const sent = await due(at);
+      expect(sent.map((r) => r.kind).sort()).toEqual([orgReadyKind(userId.c1), orgReadyKind(userId.c2)].sort());
+      const got = take().filter((g) => g.to === P.c1.no || g.to === P.c2.no);
+      expect(to(got)).toEqual([P.c1.no, P.c2.no]);
+      const c = got[0].contents;
+      expect(c).toContain('도착 1곳: 단독단');
+      expect(c).toMatch(/아직 \d곳: .*본부가/);
+      expect(c).toContain('Tincase 밖 1곳: 꺼진실 — 「전사」의 [올리기]로 넣어 주세요');
+      expect(c).not.toMatch(/아직 \d곳: [^\n]*꺼진실/);
+    } finally {
+      await prisma.orgSection.delete({ where: { id: section.id } });
+    }
+  });
+
+  it('[RU-T160] 받은 전사본이 바뀌었어도 그 변경을 일으킨 총괄 자신에게는 알리지 않는다(RU-57a) — 받은 다른 총괄에게는 그대로', async () => {
+    const prisma = await db();
+    const { writeFileAtomic } = await import('@/server/storage');
+    const { noticeOrgBuilt } = await import('@/server/rollup/notices');
+    const wk = await weekAhead(4);
+    const mk = async (name: string, body: string) => {
+      const rel = `divisions/NT_SOLO/org/${name}.hwp`;
+      await writeFileAtomic(rel, Buffer.from(body));
+      return prisma.rollupRun.create({ data: { level: 'org', weekSlotId: wk.id, status: 'succeeded', outputPath: rel, inputIds: '[]', createdBy: 'system' } });
+    };
+    const old = await mk('old', '전사본 처음');
+    for (const p of [P.c1, P.c2]) await prisma.auditLog.create({ data: { actor: p.email, action: 'download', target: `rollup:${old.id}` } });
+    const fresh = await mk('new', '전사본 총괄이 파일을 올려 바뀜');
+    take();
+    // 총괄 1이 섹션 파일을 올려 바뀌었다 — 총괄 1은 이미 안다. 총괄 2는 받은 판이 바뀐 것을 모른다
+    const r = await noticeOrgBuilt(wk, fresh, [], '섹션 파일이 바뀌어서', { causedBy: P.c1.email });
+    expect(r.map((x) => x.kind)).toEqual([`ru_org_changed:${old.id}:${userId.c2}`]);
+    expect(to(take())).toEqual([P.c2.no]);
+  });
+
+  it('[RU-T164] 총괄 — Tincase로 내는 곳이 다 들어온 순간 한 통 · Tincase 밖 섹션은 기다리지 않는다(2026-10-14) · 「다 들어왔어요」도 Tincase 셈', async () => {
+    const prisma = await db();
+    const { writeFileAtomic } = await import('@/server/storage');
+    const { noticeOrgBuilt, orgReadyKind, orgCompleteKind } = await import('@/server/rollup/notices');
+    const src = (title: string, kind: string, offline = false) => ({ section: { title }, kind, offline });
+    const mk = async (n: number) => {
+      const wk = await weekAhead(n);
+      const rel = `divisions/NT_SOLO/org/ahead-${n}.hwp`;
+      await writeFileAtomic(rel, Buffer.from(`전사본 ${n}주 뒤`));
+      const run = await prisma.rollupRun.create({ data: { level: 'org', weekSlotId: wk.id, status: 'succeeded', outputPath: rel, inputIds: '[]', createdBy: 'system' } });
+      return { wk, run };
+    };
+    const mine = () => take().filter((g) => g.to === P.c1.no || g.to === P.c2.no);
+
+    // ① 승인으로 다 들어온 순간 — 섹션 대부분이 Tincase 밖이어도(2026-10 두 부서만 켬) 기한(16:00)을 기다리지 않는다
+    {
+      const { wk, run } = await mk(5);
+      take();
+      expect(await noticeOrgBuilt(wk, run, [src('기조', 'tincase'), src('AI', 'none'), src('밖', 'none', true)], '')).toEqual([]);
+      const r = await noticeOrgBuilt(wk, run, [src('기조', 'tincase'), src('AI', 'tincase'), src('밖', 'none', true)], '');
+      expect(r.map((x) => x.kind).sort()).toEqual([orgReadyKind(userId.c1), orgReadyKind(userId.c2)].sort());
+      const got = mine();
+      expect(to(got)).toEqual([P.c1.no, P.c2.no]);
+      expect(got[0].subject).toContain('Tincase로 내는 2곳이 다 들어왔어요 — 전사본이 준비돼 있어요');
+      expect(got[0].contents).toContain('도착 2곳: 기조·AI');
+      expect(got[0].contents).toContain('Tincase 밖 1곳: 밖 — 「전사」의 [올리기]로 넣어 주세요');
+      expect(got[0].contents).not.toContain('아직');
+      // 또 만들어져도 · 총괄이 Tincase 밖을 올려 채워도 더 가지 않는다 — 한 통이고, 올린 것은 총괄 자신의 일이다
+      expect(await noticeOrgBuilt(wk, run, [src('기조', 'tincase'), src('AI', 'tincase'), src('밖', 'none', true)], '')).toEqual([]);
+      expect(await noticeOrgBuilt(wk, run, [src('기조', 'tincase'), src('AI', 'tincase'), src('밖', 'upload')], '섹션 파일이 바뀌어서', { causedBy: P.c1.email })).toEqual([]);
+      expect(mine()).toEqual([]);
+    }
+
+    // ② 기한에 일부로 갔다(Tincase 하나 아직) → 그 곳이 들어오면 「다 들어왔어요」 한 번 — Tincase 밖이 남아 있어도. 「3곳이 다」라고 말하지 않는다
+    {
+      const { wk, run } = await mk(6);
+      for (const c of [P.c1, P.c2]) {
+        const u = await prisma.user.findUniqueOrThrow({ where: { email: c.email }, select: { id: true, divisionId: true } });
+        await prisma.notifyLog.create({ data: { divisionId: u.divisionId, weekSlotId: wk.id, kind: orgReadyKind(u.id), recipients: '[]', detail: JSON.stringify({ complete: false }) } });
+      }
+      take();
+      const r = await noticeOrgBuilt(wk, run, [src('기조', 'tincase'), src('AI', 'tincase'), src('밖', 'none', true)], '');
+      expect(r.map((x) => x.kind).sort()).toEqual([orgCompleteKind(userId.c1), orgCompleteKind(userId.c2)].sort());
+      const got = mine();
+      expect(to(got)).toEqual([P.c1.no, P.c2.no]);
+      expect(got[0].subject).toContain('Tincase로 내는 2곳이 다 들어왔어요 — 전사본');
+      expect(got[0].subject).not.toContain('3곳');
+      expect(got[0].contents).toContain('Tincase 밖 1곳: 밖');
+      expect(await noticeOrgBuilt(wk, run, [src('기조', 'tincase'), src('AI', 'tincase'), src('밖', 'none', true)], '')).toEqual([]);
+    }
   });
 });

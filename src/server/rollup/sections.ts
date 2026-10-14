@@ -123,9 +123,10 @@ export type SectionSourceKind = 'tincase' | 'upload' | 'waiting_hq' | 'not_in_hq
 /**
  * RU-83 — 칩에 덧붙는 표시. 조립에는 영향이 없다(들어가는 것은 kind가 정한다).
  *   unapproved  비상구로 올라온 판 — 주황 「승인 없이」 (RU-77)
+ *   due         기한이 지나 자동으로 올라온 판 — 주황 「기한 지나 자동」 (ADR-0021)
  *   reapprove   실이 다시 올렸는데 총괄에는 본부장이 앞서 승인한 옛 판이 있다 — 「본부장 재승인 대기」(§12 Q10)
  */
-export type SectionFlag = 'unapproved' | 'reapprove';
+export type SectionFlag = 'unapproved' | 'due' | 'reapprove';
 
 /** 섹션을 이루는 사본 하나 — 본부본에 붙어 있던 제목 그대로 (RU-67) */
 export interface SectionPart {
@@ -193,6 +194,7 @@ async function arrivalLabel(r: ReportSubmission, who: 'unit' | 'hq', names: Map<
   if (r.origin === 'import') return `적재 ${at}`;
   if (r.basis === 'no_head') return `자동 ${at} · ${boss} 없음`;
   if (r.basis === 'unapproved') return `${boss} 승인 없이 ${at} · ${names.get(r.submittedBy) ?? ''}`.trim();
+  if (r.basis === 'due') return `기한 지나 자동 ${at} · ${boss} 승인 없이`;
   if (r.basis === 'approved' && r.reviewId) {
     const review = await prisma.mergeReview.findUnique({ where: { id: r.reviewId }, select: { reviewerId: true, createdAt: true } });
     if (review) return `승인 ${kstShort(review.createdAt)} · ${names.get(review.reviewerId) ?? boss}`;
@@ -247,7 +249,8 @@ export async function resolveSections(slot: WeekSlot, tree?: OrgTree, opts: { cr
         const mine = copies.filter((c) => c.divisionId === section.divisionId || (own && !claimed.has(c.divisionId)));
         if (hq && mine.length) {
           const at = `${node.node.nameKo} ${await arrivalLabel(hq, 'hq', names)}`;
-          const flag: SectionFlag | undefined = hq.basis === 'unapproved' ? 'unapproved' : (await outdated(mine)) ? 'reapprove' : undefined;
+          const flag: SectionFlag | undefined =
+            hq.basis === 'unapproved' ? 'unapproved' : hq.basis === 'due' ? 'due' : (await outdated(mine)) ? 'reapprove' : undefined;
           if (!own) {
             out.push({ section, kind: 'tincase', filePath: mine[0].filePath, refId: mine[0].id, offline: false, label: at, flag });
             continue;
@@ -306,7 +309,7 @@ export async function resolveSections(slot: WeekSlot, tree?: OrgTree, opts: { cr
             refId: r.id,
             offline: false,
             label: await arrivalLabel(r, 'unit', names),
-            flag: r.basis === 'unapproved' ? 'unapproved' : undefined,
+            flag: r.basis === 'unapproved' ? 'unapproved' : r.basis === 'due' ? 'due' : undefined,
           });
           continue;
         }

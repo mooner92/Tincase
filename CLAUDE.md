@@ -7,8 +7,11 @@
 사용자에게 보이는 곳(UI·문서·계정 안내문)에는 Tincase를 쓴다.
 로고 자산과 사용 규칙은 [`public/brand/README.md`](public/brand/README.md).
 
-**현재 상태: v1.39.0 — 운영 = `main`, 사내망 가동 중.** 3단계 취합 · 웹 작성만 받는 제출 · 「전사」 한 화면은
-`feat/org-rollup` 브랜치와 테스트 서버(11112)에만 있다. 동작의 정본은 `docs/spec/`, 바뀐 것은 CHANGELOG.
+**현재 상태: v2.1.0 — 운영 = `main`, 사내망 가동 중 (2026-10-12 v2 전환 · 2026-10-14 「기한이 곧 제출」).** 웹 작성만 받는 제출 · 부서원 홈 하나 ·
+「전사」 한 화면 · 병합 줄이 운영에 있다. 켠 부서는 기획조정실 · AI홍보전략실 둘. **3단계 취합은 운영자가 「전사」 스위치로 켠다**(두 부서만 켠
+동안의 절차 LAUNCH-v2 §7a — 기획경영본부는 꺼 둔 채라 본부장 단계 없이 곧 총괄로). 릴리스는 `feat/rollup-auto`(워크트리 `~/repman-c`)에서
+만들어 `~/repman`의 main에 합치고 태그한다(v2.0.x까지는 `feat/org-rollup` · `~/repman-rollup`). 동작의 정본은 `docs/spec/`, 바뀐 것은 CHANGELOG.
+사용 안내 커서 그림은 git 밖이다 — `public/guide/local/cursor.png`(.gitignore, PG-92). 없으면 기본 화살표로 그려진다.
 `docs/STATUS.md`는 2026-08 기준이라 지금과 다르다.
 먼저 [README.md](README.md) → [docs/spec/00-overview.md](docs/spec/00-overview.md) → [ROADMAP.md](ROADMAP.md) 순으로 읽을 것.
 

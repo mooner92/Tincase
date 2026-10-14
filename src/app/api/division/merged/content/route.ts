@@ -17,7 +17,7 @@ import { slotKind, toKstIso } from '@/lib/week';
 import { alreadyApproved, latestReview, recordReview, requireViewedVersion, titled, worklogRows } from '@/server/merge/review';
 import { freeze, supersededSince, withUnitLock } from '@/server/rollup/handoff';
 import { laterAfterUnit, onUnitVersionChanged } from '@/server/rollup/auto';
-import { handoffHint } from '@/server/rollup/state';
+import { handoffHint, saveGoesUp } from '@/server/rollup/state';
 import { decidesForUnit, lastEditor, withEdit } from '@/server/merge/edits';
 import { cleanCell } from '@/server/worklog-doc';
 import { diffWorklog } from '@/lib/merge-diff';
@@ -114,6 +114,8 @@ export const GET = handler(async (req: NextRequest) => {
     canApprove: division.id === scope.division.id && isReviewer(scope),
     // RU-80 — 3단계에서 승인이 곧 제출이면 받는 곳(「기획경영본부」·「총괄」). 부서장의 [승인] 옆 설명과, 승인 뒤 담당자가 고칠 때의 한 줄이 이것을 쓴다
     handoffTo: await handoffHint(division.id),
+    // ADR-0021 — 기한이 지나 담당자의 저장이 곧 위로 가나(드로어가 「다시 승인해야」 대신 「바로 올라갑니다」라고 말한다)
+    handoffAuto: await saveGoesUp(division.id, slot),
     title: boardTitle(slot.month, slot.label, division.nameKo, slotKind(slot)),
     slot: { isoKey: slot.isoKey, label: slot.label, year: slot.year, kind: slotKind(slot) },
     editedAt: toKstIso(run.finishedAt ?? run.startedAt),

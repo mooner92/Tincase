@@ -279,6 +279,9 @@ async function unitState(key: Key) {
  * 비상구는 「본부 → 총괄」 + 24시간에 닫히므로, 마감을 그 주 월 00:00에 두고 기한을 +60·+120분에 두면 목요일에 돌린 시험에서는 창이 이미 닫혀 있다.
  * 시험이 무슨 요일·시각에 돌든 비상구 창(열림 ~ 닫힘) 안에 있게 한다
  */
+/** 기한 전에 두는 간격 — 「본부 → 총괄」 = 지금 + 이 분, 「실·팀 → 본부」 = 그 60분 전. 파일이 도는 동안(몇 분) 기한이 오지 않게 */
+const BEFORE_DUE = 120;
+
 async function dueNow(offsetMinutes = 0) {
   const { weekAnchor } = await import('@/server/slot-deadline');
   const m = Math.floor((Date.now() - (await weekAnchor(await slot())).getTime()) / 60_000) + offsetMinutes;
@@ -343,7 +346,9 @@ beforeAll(async () => {
   });
   // RU-52 — 3단계를 켠 상태에서 (꺼짐은 RU-T98이 따로)
   await prisma.orgRollupSetting.create({ data: { id: 'org', enabled: true, unitDueMinutes: 60, hqDueMinutes: 120 } });
-  await dueNow(); // 비상구 창 안에서 시작한다 (결정 a — 창은 「본부 → 총괄」 + 24시간에 닫힌다)
+  // 기한 **전**에서 시작한다 — 「실·팀 → 본부」 = 지금 + 60분, 「본부 → 총괄」 = 지금 + 120분. ADR-0021부터 기한이 지나면 지금 판이 저절로 올라가므로
+  // (승인을 보는 이 파일의 시험이 기한 뒤에 돌면 다른 것을 본다) 기한 뒤의 동작은 RU-T150~가 시계를 옮겨 따로 본다. 비상구 창 안이기도 하다(결정 a)
+  await dueNow(BEFORE_DUE);
 }, 60_000);
 
 afterAll(() => {
@@ -855,21 +860,17 @@ describe('RU-72·83 전사 · 읽기 수리 · 죽은 조립', () => {
 });
 
 describe('RU-77 비상구 — 승인 없이 올리기', () => {
-  it('[RU-T113] ★ 실·팀: 기한 15분 전보다 이르면 too_early · 미리보기면 not_final · U1·U3에서 → unapproved(lead) · 이미 올라갔으면 already_sent · 뒤에 승인하면 대신 · 창은 마감 예외를 따라', async () => {
+  it('[RU-T113] ★ 실·팀: 마감 뒤 병합본이 있으면 기한이 멀어도 바로 열린다(ADR-0021 D3) · 미리보기면 not_final · U1·U3에서 → unapproved(lead) · 이미 올라갔으면 already_sent · 뒤에 승인하면 대신', async () => {
     const prisma = await db();
     const { hqBoard } = await import('@/server/rollup/run');
     await merged('u1', '실하나 실장 출장');
     expect((await unitState('u1')).state).toBe('U3');
-    // 기한을 멀리 — 창이 아직 안 열렸다
+    // 기한을 멀리 — 예전(ADR-0015)에는 기한 15분 전까지 too_early였다. 이제 마감 뒤 병합본이 있으면 바로 열린다
     await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { unitDueMinutes: 14 * 24 * 60, hqDueMinutes: 15 * 24 * 60 } });
-    let r = await escape(ID.u1Lead, 'unit');
-    expect([r.status, (await r.json()).error]).toEqual([409, 'too_early']);
-    expect((await unitState('u1')).escape?.open).toBe(false);
+    expect((await unitState('u1')).escape?.open).toBe(true);
     // 게이트 — head·member·총괄은 404 (head는 승인하면 된다)
     for (const who of [ID.u1Head, ID.u1Member, ID.coord]) expect((await escape(who, 'unit')).status, who).toBe(404);
-    await dueNow();
-    expect((await unitState('u1')).escape?.open).toBe(true);
-    r = await escape(ID.u1Lead, 'unit');
+    let r = await escape(ID.u1Lead, 'unit');
     expect(r.status).toBe(200);
     expect((await r.json()).basis).toBe('unapproved');
     const sub = (await current('u1'))!;
@@ -888,38 +889,32 @@ describe('RU-77 비상구 — 승인 없이 올리기', () => {
     expect([approved.basis, approved.sha256]).toEqual(['approved', sub.sha256]);
     expect(approved.id).not.toBe(sub.id);
     await settle();
-    // 마감 예외로 기준 시각이 뒤로 가면 창도 같이 간다 (WS-19)
+    // 마감 예외로 마감이 뒤로 가면(WS-19) 지금 판은 마감 전 미리보기다 — not_final (여는 조건은 「마감 뒤 병합본」 하나다)
     await merged('u1', '실하나 예외 주');
     await prisma.weekSlot.update({ where: { isoKey }, data: { deadlineDowOverride: 7, deadlineTimeOverride: '23:00' } });
     try {
       r = await escape(ID.u1Lead, 'unit');
-      expect([r.status, (await r.json()).error]).toEqual([409, 'too_early']);
-      // 기한은 지났는데(창 안) 지금 판이 마감 전 미리보기면 not_final — 기준 시각이 옮겨졌으니 그 둘레로 다시 잡는다
-      await dueNow();
-      r = await escape(ID.u1Lead, 'unit');
       expect([r.status, (await r.json()).error]).toEqual([409, 'not_final']);
     } finally {
       await prisma.weekSlot.update({ where: { isoKey }, data: { deadlineDowOverride: null, deadlineTimeOverride: null } });
-      await dueNow();
+      await dueNow(BEFORE_DUE);
     }
     // 부서장 없는 단위에는 비상구가 없다 — 저절로 올라간다
     r = await escape(ID.u2Lead, 'unit');
     expect([r.status, (await r.json()).error]).toEqual([409, 'no_head']);
   });
 
-  it('[RU-T114] 본부: 「본부 → 총괄」 기한 기준 · 승인 안 된 지금 본부본만 · 주황 · 뒤에 본부장이 승인하면 대신', async () => {
+  it('[RU-T114] 본부: 본부본이 있으면 기한이 멀어도 바로(ADR-0021 D3) · 승인 안 된 지금 본부본만 · 주황 · 뒤에 본부장이 승인하면 대신', async () => {
     const prisma = await db();
     const { hqBoard } = await import('@/server/rollup/run');
     await settle();
     let board = await hqBoard(await node('hq'), await slot());
     expect(['Q1', 'Q3']).toContain(board.state);
+    // 기한을 멀리 — 예전에는 too_early. 이제 본부본이 있으면 바로 열린다
     await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { hqDueMinutes: 15 * 24 * 60 } });
-    let r = await escape(ID.hqLead, 'hq');
-    expect([r.status, (await r.json()).error]).toEqual([409, 'too_early']);
-    await dueNow();
     for (const who of [ID.hqHead, ID.hqMember, ID.u1Lead, ID.coord]) expect((await escape(who, 'hq')).status, who).toBe(404);
     expect((await escape(ID.hq2Lead, 'hq')).status).toBe(409); // 본부장 없는 본부 — 저절로 간다 (no_head)
-    r = await escape(ID.hqLead, 'hq');
+    const r = await escape(ID.hqLead, 'hq');
     expect(r.status).toBe(200);
     const sub = (await current('hq', 'hq'))!;
     expect([sub.basis, sub.submittedBy]).toEqual(['unapproved', userId.hqLead]);
@@ -933,6 +928,7 @@ describe('RU-77 비상구 — 승인 없이 올리기', () => {
     expect((await current('hq', 'hq'))!.basis).toBe('approved');
     expect((await hqBoard(await node('hq'), await slot())).state).toBe('Q2');
     await settle();
+    await dueNow(BEFORE_DUE);
   });
 });
 
@@ -1345,7 +1341,7 @@ describe('운영자 결정 a~d — 비상구 창 · 운영자 수정 · 병합 �
       expect([r.status, (await r.json()).error]).toEqual([409, 'too_late']);
       r = await escape(ID.hqLead, 'hq');
       expect([r.status, (await r.json()).error]).toEqual([409, 'too_late']);
-      // 화면 — 「위로」 카드도 /hq도 링크를 그리지 않는다 (열리기 전의 `open: false`와 달리 아예 없다)
+      // 화면 — 「위로」 카드도 /hq도 링크를 그리지 않는다(아예 없다). 창이 닫힌 뒤에는 기한 자동 제출도 없다(ADR-0021 — 그 주는 끝났다)
       expect((await unitState('u1')).escape).toBeNull();
       expect((await (await report.GET(nx(`/api/rollup/report?level=unit&isoKey=${isoKey}`, ID.u1Lead))).json()).state.escape).toBeNull();
       pageAs.who = ID.hqLead;
@@ -1353,7 +1349,7 @@ describe('운영자 결정 a~d — 비상구 창 · 운영자 수정 · 병합 �
       expect(props(elements(await HqPage({ searchParams: Promise.resolve({}) })), 'HqApprovalCard')!.escape).toBeNull();
     } finally {
       pageAs.who = '';
-      await dueNow();
+      await dueNow(BEFORE_DUE);
     }
     // 지난 주차 — 그 주의 「본부 → 총괄」 기한은 일주일 전이다
     const prev = await ensureCurrentSlot(new Date((await slot()).opensAt.getTime() - 3 * 86400_000));
@@ -1365,10 +1361,10 @@ describe('운영자 결정 a~d — 비상구 창 · 운영자 수정 · 병합 �
     await settle();
   });
 
-  it('[RU-T139] (경계 — 검증) 닫히는 시각 그 순간까지는 열려 있고 1ms 뒤에 닫힌다 · 열리는 시각도 · API·「위로」 카드·읽기 수리가 같은 끝 · 지난 주차도', async () => {
+  it('[RU-T139] (경계 — 검증) 닫히는 시각 그 순간까지는 열려 있고 1ms 뒤에 닫힌다 · 여는 시각은 없다(ADR-0021 D3 — 마감 직후에도 창 안) · API·「위로」 카드·읽기 수리가 같은 끝 · 지난 주차도', async () => {
     const prisma = await db();
     const { requireScope } = await import('@/server/authz');
-    const { escapeUnit, escapeHq, escapeOpensAt, escapeClosesAt, unitDue, unitTarget } = await import('@/server/rollup/handoff');
+    const { escapeUnit, escapeHq, escapeClosesAt } = await import('@/server/rollup/handoff');
     const { liveUntil, stageTimes } = await import('@/server/rollup/schedule');
     const { isLiveSlot } = await import('@/server/rollup/auto');
     const { unitHandoffView } = await import('@/server/rollup/state');
@@ -1392,15 +1388,15 @@ describe('운영자 결정 a~d — 비상구 창 · 운영자 수정 · 병합 �
     expect(closes.getTime()).toBe(t.hqDue.getTime() + 24 * 3600_000);
     const unitScope = await requireScope(new Headers({ 'x-test-identity': ID.u1Lead }));
     const hqScope = await requireScope(new Headers({ 'x-test-identity': ID.hqLead }));
-    const opens = escapeOpensAt(unitDue(t, (await unitTarget(divId.u1))!));
+    // 마감 바로 뒤(기준 시각 + 1분) — 기한보다 훨씬 이르다. 예전(ADR-0015)에는 too_early였다
+    const early = at(t.anchor, 60_000);
 
-    // API — 닫히는 시각 그 순간은 창 안, 1ms 뒤는 too_late. 열리는 시각 1ms 전은 too_early, 그 순간은 창 안
+    // API — 닫히는 시각 그 순간은 창 안, 1ms 뒤는 too_late. 마감 직후도 창 안(too_early는 없다)
     expect(await outcome(escapeUnit(unitScope, s, at(closes, 1)))).toBe('too_late');
     expect(inside(await outcome(escapeUnit(unitScope, s, closes)))).toBe(true);
-    expect(await outcome(escapeUnit(unitScope, s, at(opens, -1)))).toBe('too_early');
-    expect(inside(await outcome(escapeUnit(unitScope, s, opens)))).toBe(true);
+    expect(inside(await outcome(escapeUnit(unitScope, s, early)))).toBe(true);
     expect(await outcome(escapeHq(hqScope, await node('hq'), s, at(closes, 1)))).toBe('too_late');
-    expect(await outcome(escapeHq(hqScope, await node('hq'), s, at(escapeOpensAt(t.hqDue), -1)))).toBe('too_early');
+    expect(inside(await outcome(escapeHq(hqScope, await node('hq'), s, early)))).toBe(true);
     expect(inside(await outcome(escapeHq(hqScope, await node('hq'), s, closes)))).toBe(true);
     await settle();
 
@@ -1409,10 +1405,9 @@ describe('운영자 결정 a~d — 비상구 창 · 운영자 수정 · 병합 �
     const d = await prisma.division.findUniqueOrThrow({ where: { id: divId.u1 } });
     const view = async (now: Date) => (await unitHandoffView(d, s, { trail: false, canEscape: true, now }))!;
     expect((await view(closes)).state).toBe('U3');
-    expect((await view(closes)).escape).toEqual({ open: true, opensAtKst: expect.any(String) });
+    expect((await view(closes)).escape).toEqual({ open: true });
     expect((await view(at(closes, 1))).escape).toBeNull();
-    expect((await view(at(opens, -1))).escape?.open).toBe(false);
-    expect((await view(opens)).escape?.open).toBe(true);
+    expect((await view(early)).escape).toEqual({ open: true });
 
     // 지난 주차 — 비상구는 그 주의 같은 끝에서 닫힌다. 읽기 수리(isLiveSlot)는 그 주가 「이번 주」인 동안은 끝이 지나도 계속 맞춘다 —
     // 결정 a의 의도된 차이다(이미 내린 결정의 결과를 맞추는 일과, 결정 없이 올리는 길은 다르다). 그 주가 지나고 끝도 지나면 둘 다 닫혀 있다
@@ -1627,5 +1622,253 @@ describe('운영자 결정 a~d — 비상구 창 · 운영자 수정 · 병합 �
       await syncHq(await node('hq'), await slot(), { cause: 'template', causedBy: null });
       await settle();
     }
+  });
+});
+
+// ADR-0021 (2026-10-12 운영자) — **기한이 곧 제출.** 결정할 사람이 자리에 없는 날이 일상이라 기한에 단계가 멈추지 않게 —
+// 기한이 지나도 승인이 없으면 지금 판이 저절로 올라가고(`basis=due`, `system`), 그 뒤로는 최신 판을 따라간다. 늦은 승인은 그 판이 대신한다.
+// 요청이 일으키는 맞추기는 진짜 시계로 기한을 본다(이 파일은 기한 전 — BEFORE_DUE). 여기서는 맞추기에 `now`를 넘겨 기한 뒤를 본다.
+describe('ADR-0021 — 기한이 곧 제출 (RU-T150~156)', () => {
+  const plus = (d: Date, min: number) => new Date(d.getTime() + min * 60_000);
+  const times = async () => (await import('@/server/rollup/schedule')).stageTimes(await slot());
+
+  it('[RU-T150] ★ 실·팀(부서장 있음): 기한 전에는 승인을 기다리고, 기한이 지나면 지금 판이 저절로 — due · system · 그 순간의 바이트 · 같은 판은 한 번 · 위의 화면은 주황', async () => {
+    const prisma = await db();
+    const { syncUnit } = await import('@/server/rollup/handoff');
+    const { hqBoard } = await import('@/server/rollup/run');
+    const { chipOf } = await import('@/server/rollup/view');
+    await dueNow(BEFORE_DUE);
+    await settle();
+    const s = await slot();
+    const t = await times();
+    await merged('u1', '실하나 기한 시험');
+    const v = await viewed('u1');
+    expect((await current('u1'))?.sha256).not.toBe(v.sha256);
+    expect(['U1', 'U3']).toContain((await unitState('u1')).state);
+    // 기한 1분 전 — 아무것도 안 간다(승인을 기다린다)
+    expect(await syncUnit(divId.u1, s, { ...opts, now: plus(t.unitDue, -1) })).toBeNull();
+    // 기한 1분 뒤 — 지금 판이 그 순간의 바이트로
+    const sub = (await syncUnit(divId.u1, s, { ...opts, now: plus(t.unitDue, 1) }))!;
+    expect([sub.basis, sub.submittedBy, sub.cause, sub.sha256, sub.sourceRunId, sub.reviewId]).toEqual(['due', 'system', 'due', v.sha256, v.runId, null]);
+    expect(sha(await stored(sub.filePath))).toBe(v.sha256);
+    expect(sub.filePath).not.toBe((await prisma.mergeRun.findUniqueOrThrow({ where: { id: v.runId } })).outputPath); // 불변 사본 — 병합본 파일이 아니다
+    const log = await prisma.auditLog.findFirstOrThrow({ where: { action: 'report_submit', target: `report:${sub.id}` } });
+    const detail = JSON.parse(log.detail!);
+    expect([log.actor, detail.basis, detail.auto, detail.cause]).toEqual(['system', 'due', true, 'due']);
+    // 같은 판 — 다시 맞춰도 새 행이 없다(RU-74)
+    expect(await syncUnit(divId.u1, s, { ...opts, now: plus(t.unitDue, 2) })).toBeNull();
+    // 화면 — 「위로」 카드 U5 · 본부 산하 칩 · 전사 섹션 표시
+    expect((await unitState('u1')).state).toBe('U5');
+    const board = await hqBoard(await node('hq'), s);
+    expect(chipOf(board.units.find((u) => u.division.nameKo === '실하나')!)).toMatchObject({ kind: 'due' });
+    expect(chipOf(board.units.find((u) => u.division.nameKo === '실하나')!).label).toMatch(/^기한 지나 자동 /);
+  });
+
+  it('[RU-T151] ★ 기한 뒤에는 최신 판을 따라간다 — 담당자 저장은 곧 올라감 · 운영자 저장은 안 감(결정 b) · 부서장이 늦게 승인하면 그 판이 approved로 대신 · 승인한 판 그대로면 아무것도 안 함', async () => {
+    const prisma = await db();
+    const { syncUnit } = await import('@/server/rollup/handoff');
+    const s = await slot();
+    const late = plus((await times()).unitDue, 5);
+    // 담당자가 고친다 — 요청 자체는 진짜 시계(기한 전)라 넘기지 않는다. 기한 뒤의 맞추기가 따라간다
+    expect((await save(ID.u1Lead, 'u1', '실하나 기한 뒤 담당 고침')).status).toBe(200);
+    await settle();
+    let v = await viewed('u1');
+    const lead = (await syncUnit(divId.u1, s, { ...opts, now: late }))!;
+    expect([lead.basis, lead.sha256]).toEqual(['due', v.sha256]);
+    // 운영자(그 부서 소속 — §3.2 「수정 — write(자기 부서)」)가 고친 판은 그 단위의 결론이 아니다 — 위의 것을 그대로 둔다
+    const op = await prisma.user.create({ data: { email: 'a-u1-op@test.local', name: 'u1Op', divisionId: divId.u1, isOperator: true, mustChangePassword: false } });
+    try {
+      expect((await save('a-u1-op@test.local', 'u1', '실하나 운영자 고침')).status).toBe(200);
+      await settle();
+      expect(await syncUnit(divId.u1, s, { ...opts, now: late })).toBeNull();
+      expect((await current('u1'))!.id).toBe(lead.id);
+    } finally {
+      await prisma.user.update({ where: { id: op.id }, data: { isActive: false } });
+    }
+    // 부서장이 늦게라도 승인 — 승인한 판이 approved로 대신한다(승인은 닫지 않는다)
+    expect((await approve(ID.u1Head, 'u1')).status).toBe(200);
+    v = await viewed('u1');
+    const ap = (await current('u1'))!;
+    expect([ap.basis, ap.sha256]).toEqual(['approved', v.sha256]);
+    // 승인한 판 그대로 — 기한 뒤의 맞추기도 아무것도 안 한다
+    expect(await syncUnit(divId.u1, s, { ...opts, now: late })).toBeNull();
+    // 승인 뒤 다시 바뀌면(U3) — 기한 뒤라 최신 판이 간다(승인한 옛 판 대신 — 운영자가 고른 「가장 최신 병합본」)
+    expect((await save(ID.u1Lead, 'u1', '실하나 승인 뒤 또 고침')).status).toBe(200);
+    await settle();
+    v = await viewed('u1');
+    const again = (await syncUnit(divId.u1, s, { ...opts, now: late }))!;
+    expect([again.basis, again.sha256]).toEqual(['due', v.sha256]);
+    expect((await unitState('u1')).state).toBe('U5');
+  });
+
+  it('[RU-T152] 기한 뒤 판이 바뀐 사건(병합·담당자 저장)은 「다시 승인」 대신 그 판을 올린다 — onUnitVersionChanged · 창이 닫힌 뒤에는 아무것도 저절로 안 간다', async () => {
+    const { onUnitVersionChanged } = await import('@/server/rollup/auto');
+    const { liveUntil } = await import('@/server/rollup/schedule');
+    const t = await times();
+    await merged('u1', '실하나 기한 뒤 다시 병합');
+    const v = await viewed('u1');
+    await onUnitVersionChanged(divId.u1, await slot(), { ...opts, now: plus(t.unitDue, 10), reason: { kind: 'merge', late: 0 } });
+    await settle();
+    expect((await current('u1'))).toMatchObject({ basis: 'due', sha256: v.sha256 });
+    // 창이 닫힌 뒤(「본부 → 총괄」 기한 + 24시간) — 그 주의 보고는 이미 갔다. 판이 바뀌어도 저절로 바꾸지 않는다
+    await merged('u1', '실하나 창 닫힌 뒤');
+    const { syncUnit } = await import('@/server/rollup/handoff');
+    expect(await syncUnit(divId.u1, await slot(), { ...opts, now: plus(liveUntil(t), 1) })).toBeNull();
+    expect((await current('u1'))!.sha256).toBe(v.sha256);
+  });
+
+  it('[RU-T153] ★ 본부: 「본부 → 총괄」 기한이 지나면 지금 본부본이 저절로 총괄로 — due · system · Q5 · 전사 섹션 주황 · 본부장이 늦게 승인하면 approved', async () => {
+    const { syncHq } = await import('@/server/rollup/auto');
+    const { hqBoard } = await import('@/server/rollup/run');
+    const { resolveSections } = await import('@/server/rollup/sections');
+    const t = await times();
+    // 실하나의 새 판이 올라와 본부본이 다시 이어 붙는다 → 본부장 승인 전(Q1·Q3)
+    await merged('u1', '실하나 본부 기한');
+    expect((await approve(ID.u1Head, 'u1')).status).toBe(200);
+    await settle();
+    expect(['Q1', 'Q3']).toContain((await hqBoard(await node('hq'), await slot())).state);
+    const hv = (await hqViewed('hq'))!;
+    // 기한 전 — 그대로
+    await syncHq(await node('hq'), await slot(), { ...opts, now: plus(t.hqDue, -1) });
+    expect((await current('hq', 'hq'))?.sha256).not.toBe(hv.sha256);
+    // 기한 뒤 — 지금 본부본이 총괄로
+    await syncHq(await node('hq'), await slot(), { ...opts, now: plus(t.hqDue, 1) });
+    await settle();
+    const sub = (await current('hq', 'hq'))!;
+    expect([sub.basis, sub.submittedBy, sub.cause, sub.sha256, sub.sourceRunId]).toEqual(['due', 'system', 'due', hv.sha256, hv.runId]);
+    expect((await hqBoard(await node('hq'), await slot())).state).toBe('Q5');
+    expect((await resolveSections(await slot())).find((x) => x.section.title === '본부가(실하나)')!.flag).toBe('due');
+    // 본부장이 늦게 승인 — 승인한 판이 대신(같은 바이트라도 근거가 바뀐다)
+    expect((await hqApprove(ID.hqHead)).status).toBe(200);
+    expect((await current('hq', 'hq'))).toMatchObject({ basis: 'approved', sha256: hv.sha256 });
+    expect((await hqBoard(await node('hq'), await slot())).state).toBe('Q2');
+    await settle();
+  });
+
+  it('[RU-T154] ★ (D4) 꺼진 본부의 본부장은 없는 것과 같다 — 들어올 수 없으니 본부본이 곧 총괄로(no_head) · 그 본부장에게 「본부본 준비」를 보내지 않는다', async () => {
+    const prisma = await db();
+    const { hasHead } = await import('@/server/rollup/handoff');
+    const { syncHq } = await import('@/server/rollup/auto');
+    expect(await hasHead(divId.hq)).toBe(true);
+    await prisma.division.update({ where: { id: divId.hq }, data: { isActive: false } });
+    try {
+      expect(await hasHead(divId.hq)).toBe(false);
+      // 실하나가 또 올라와 본부본이 바뀐다 → 본부장 없음 → 곧 총괄로
+      await merged('u1', '실하나 꺼진 본부');
+      expect((await approve(ID.u1Head, 'u1')).status).toBe(200);
+      await settle();
+      await syncHq(await node('hq'), await slot(), opts);
+      await settle();
+      const hv = (await hqViewed('hq'))!;
+      expect((await current('hq', 'hq'))).toMatchObject({ basis: 'no_head', submittedBy: 'system', sha256: hv.sha256 });
+      // 화면도 같은 판정 — 본부 취합 화면이 「승인 전」을 그리지 않는다(리뷰 2026-10-13)
+      const { hqBoard } = await import('@/server/rollup/run');
+      expect((await hqBoard(await node('hq'), await slot())).hasHead).toBe(false);
+    } finally {
+      await prisma.division.update({ where: { id: divId.hq }, data: { isActive: true } });
+    }
+    expect(await hasHead(divId.hq)).toBe(true);
+  });
+
+  it('[RU-T155] ★ (D8) 스케줄러가 꺼져 있어도 화면을 여는 순간이 기한을 맞춘다 — 실·팀 수합 관리 · /hq · /org(위에서 아래로) · 스케줄러 안전망도 같다', async () => {
+    const { readRepairUnit, readRepairHq, readRepairOrg, runDueRollupSync } = await import('@/server/rollup/auto');
+    const { hqBoard } = await import('@/server/rollup/run');
+    const t = await times();
+    // 실하나: 새 판(승인 전)
+    await merged('u1', '실하나 읽기 수리');
+    let v = await viewed('u1');
+    // 기한 전에 열면 아무것도 안 한다
+    await readRepairUnit(divId.u1, await slot(), plus(t.unitDue, -1));
+    expect((await current('u1'))?.sha256).not.toBe(v.sha256);
+    // 기한 뒤에 열면 올라간다
+    await readRepairUnit(divId.u1, await slot(), plus(t.unitDue, 1));
+    await settle();
+    expect(await current('u1')).toMatchObject({ basis: 'due', sha256: v.sha256 });
+    // /hq — 산하를 먼저 맞추고(실하나 새 판) 「본부 → 총괄」 기한 뒤면 본부본도 총괄로
+    await merged('u1', '실하나 본부 화면');
+    v = await viewed('u1');
+    await readRepairHq(await node('hq'), await slot(), plus(t.hqDue, 1));
+    await settle();
+    expect(await current('u1')).toMatchObject({ basis: 'due', sha256: v.sha256 });
+    const hv = (await hqViewed('hq'))!;
+    expect(await current('hq', 'hq')).toMatchObject({ basis: 'due', sha256: hv.sha256 });
+    expect((await hqBoard(await node('hq'), await slot())).state).toBe('Q5');
+    // /org — 위에서 아래로 한 번
+    await merged('u1', '실하나 전사 화면');
+    v = await viewed('u1');
+    await readRepairOrg(await slot(), plus(t.hqDue, 2));
+    await settle();
+    expect(await current('u1')).toMatchObject({ basis: 'due', sha256: v.sha256 });
+    expect((await current('hq', 'hq'))!.sha256).toBe((await hqViewed('hq'))!.sha256);
+    // 스케줄러 안전망 — 같은 결과
+    await merged('u1', '실하나 스케줄러');
+    v = await viewed('u1');
+    expect(await runDueRollupSync(plus(t.hqDue, 3))).toBe(true);
+    await settle();
+    expect(await current('u1')).toMatchObject({ basis: 'due', sha256: v.sha256 });
+  });
+
+  it('[RU-T156] 부서장 없는 단위·이미 위에 있는 판은 기한과 상관없다 — 부서장 없음은 그대로 no_head · 비상구로 올린 지금 판은 기한에 다시 보내지 않는다', async () => {
+    const { syncUnit } = await import('@/server/rollup/handoff');
+    const t = await times();
+    const late = plus(t.unitDue, 30);
+    // 부서장 없는 실둘 — 기한 뒤에도 근거는 no_head
+    hooks.nextMerge.set(divId.u2, '실둘 기한 상관없음');
+    expect((await mergeNow(ID.u2Lead, { overwriteEdits: true })).status).toBe(202);
+    await settle();
+    await syncUnit(divId.u2, await slot(), { ...opts, now: late });
+    expect((await current('u2'))!.basis).toBe('no_head');
+    // 실하나 — 담당자가 비상구로 지금 판을 올렸다 → 기한이 지나도 그 판은 이미 위에 있다(새 행 없음)
+    await merged('u1', '실하나 비상구 뒤 기한');
+    const r = await escape(ID.u1Lead, 'unit');
+    expect(r.status).toBe(200);
+    await settle();
+    const esc = (await current('u1'))!;
+    expect(esc.basis).toBe('unapproved');
+    expect(await syncUnit(divId.u1, await slot(), { ...opts, now: late })).toBeNull();
+    expect((await current('u1'))!.id).toBe(esc.id);
+  });
+
+  it('[RU-T161] (리뷰) 기한 뒤 운영자가 고친 판은 올리지 않지만, 아직 안 넘어간 승인은 그대로 간다 — 3단계를 켜기 전에 승인하고 운영자가 고친 뒤 켜는 경우', async () => {
+    const prisma = await db();
+    const { syncUnit } = await import('@/server/rollup/handoff');
+    const late = plus((await times()).unitDue, 20);
+    // 3단계를 끈 채 부서장 승인(사본은 안 생긴다 — RU-79) → 운영자가 고친다 → 기한 뒤에 켠다(맞추기)
+    await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { enabled: false } });
+    const op = await prisma.user.create({ data: { email: 'a-u1-op2@test.local', name: 'u1Op2', divisionId: divId.u1, isOperator: true, mustChangePassword: false } });
+    let approvedSha = '';
+    try {
+      await merged('u1', '실하나 끈 동안 승인');
+      expect((await approve(ID.u1Head, 'u1')).status).toBe(200);
+      approvedSha = (await viewed('u1')).sha256;
+      expect((await save('a-u1-op2@test.local', 'u1', '실하나 운영자가 고친 판')).status).toBe(200);
+      await settle();
+    } finally {
+      await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { enabled: true } });
+      await prisma.user.update({ where: { id: op.id }, data: { isActive: false } });
+    }
+    const sub = (await syncUnit(divId.u1, await slot(), { ...opts, now: late }))!;
+    // 운영자의 판(지금 판)이 아니라 승인한 판이 간다 — 예전에는 기한 판정이 null로 끝나 승인이 영영 안 갔다
+    expect([sub.basis, sub.sha256]).toEqual(['approved', approvedSha]);
+    expect(sub.sha256).not.toBe((await viewed('u1')).sha256);
+  });
+
+  it('[RU-T162] (리뷰) 기한이 지나면 담당자의 저장이 곧 올라간다는 것을 드로어가 말한다 — saveGoesUp · 「위로」 카드는 기한 뒤 「그때 판이 자동으로」를 말하지 않는다', async () => {
+    const { saveGoesUp, unitHandoffView } = await import('@/server/rollup/state');
+    const t = await times();
+    const s = await slot();
+    expect(await saveGoesUp(divId.u1, s, plus(t.unitDue, -1))).toBe(false);
+    expect(await saveGoesUp(divId.u1, s, plus(t.unitDue, 1))).toBe(true);
+    expect(await saveGoesUp(divId.u2, s, plus(t.unitDue, 1))).toBe(false); // 부서장 없는 단위는 원래 저장이 곧 넘김 — 따로 말하지 않는다
+    const d = await (await db()).division.findUniqueOrThrow({ where: { id: divId.u1 } });
+    expect((await unitHandoffView(d, s, { trail: false, canEscape: true, now: plus(t.unitDue, -1) }))!.beforeDue).toBe(true);
+    expect((await unitHandoffView(d, s, { trail: false, canEscape: true, now: plus(t.unitDue, 1) }))!.beforeDue).toBe(false);
+    const src = (await import('node:fs')).readFileSync(path.resolve(__dirname, '../src/components/MergedDrawer.tsx'), 'utf8');
+    expect(src).toContain('기한이 지나 고쳐 저장하면 바로 ${data.handoffTo}에 올라갑니다');
+  });
+
+  it('[RU-T163] (리뷰) 스케줄러 한 주기의 맞추기와 알림은 같은 「지금」을 본다 — 기한 경계에서 갈리지 않게', async () => {
+    const src = (await import('node:fs')).readFileSync(path.resolve(__dirname, '../src/server/scheduler.ts'), 'utf8');
+    expect(src).toMatch(/const rollupNow = new Date\(\);[\s\S]*runDueRollupSync\(rollupNow\)[\s\S]*runDueRollupNotices\(rollupNow\)/);
   });
 });

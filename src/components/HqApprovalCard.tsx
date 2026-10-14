@@ -1,7 +1,7 @@
 'use client';
 // RU-55 · RU-82 — 본부장 승인 = **총괄로 제출**. 본부본 카드(RunCard)의 아래 구역 둘로 그린다 — 혼자 카드가 아니다(CP-97):
 //   본부장 승인   상태 · 누가 · 언제, 본부장에게 [검토 완료 · 승인](주 버튼 — 화면이 그린 판의 runId·sha를 싣는다)
-//   총괄          지금 총괄에 가 있는 것 — 승인 · 총괄로 감 / 주황 「승인 뒤 바뀜」 / 주황 「본부장 승인 없이」
+//   총괄          지금 총괄에 가 있는 것 — 승인 · 총괄로 감 / 주황 「승인 뒤 바뀜」 / 주황 「본부장 승인 없이」 / 주황 「기한 지나 자동」(ADR-0021)
 // 2026-10-08(ADR-0015) 전에는 승인 뒤에 본부 담당자가 [총괄에 제출]을 눌렀다. 이제 승인이 곧 제출이라 그 버튼과 알림이 없다.
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -20,6 +20,7 @@ export function HqApprovalCard({
   missing,
   hqReport,
   escape,
+  hqDueKo,
 }: {
   isoKey: string;
   state: HqStateView;
@@ -39,7 +40,9 @@ export function HqApprovalCard({
   /** 지금 총괄에 가 있는 본부본 */
   hqReport: { atKst: string; basis: string; by: string } | null;
   /** RU-77 — 본부 lead의 비상구 「본부장 승인 없이 총괄로」. 창이 열렸을 때만 그린다 */
-  escape: { open: boolean; opensAtKst: string } | null;
+  escape: { open: boolean } | null;
+  /** ADR-0021 D2 — 「본부 → 총괄」 기한 (「16:00」). 그때까지 승인이 없으면 지금 본부본이 자동으로 총괄로 간다 */
+  hqDueKo?: string;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
@@ -123,17 +126,22 @@ export function HqApprovalCard({
               </>
             ) : shown === 'Q3' && hqReport ? (
               <span className="text-warning">
-                승인 뒤 본부본이 바뀌었어요 — 총괄에는 {hqReport.atKst}에 {hqReport.basis === 'unapproved' ? '승인 없이 올린' : '승인한'} 판이 있어요
+                승인 뒤 본부본이 바뀌었어요 — 총괄에는 {hqReport.atKst}에{' '}
+                {hqReport.basis === 'unapproved' ? '승인 없이 올린' : hqReport.basis === 'due' ? '기한에 자동으로 간' : '승인한'} 판이 있어요
               </span>
             ) : shown === 'Q4' && hqReport ? (
               <span className="text-warning">
                 본부장 승인 없이 총괄로 감 · {hqReport.atKst} · {hqReport.by}
               </span>
+            ) : shown === 'Q5' && hqReport ? (
+              <span className="text-warning">기한 지나 자동으로 총괄로 감 · {hqReport.atKst} · 본부장 승인 없이</span>
             ) : (
-              <span className="text-muted">본부장 승인을 기다려요 — 승인하면 바로 총괄로 갑니다</span>
+              <span className="text-muted">
+                본부장 승인을 기다려요 — 승인하면 바로 총괄로 갑니다{hqDueKo ? ` · ${hqDueKo}에는 지금 본부본이 자동으로` : ''}
+              </span>
             )}
           </p>
-          {/* RU-77 — 비상구. 기한 15분 전부터 본부 lead에게만, 글자 링크로. 누르면 그 자리에서 한 번 더 묻는다 */}
+          {/* RU-77 — 비상구. 본부본이 있으면 바로(ADR-0021 D3) 본부 lead에게만, 글자 링크로. 누르면 그 자리에서 한 번 더 묻는다 */}
           {/* 비상구는 실패 상태(Qf)에 넓히지 않는다 — 결정 d는 본부장의 승인만이다(비상구는 최소로) */}
           {escape?.open && (state === 'Q1' || state === 'Q3') && (
             <div className="mt-2 flex flex-wrap items-center gap-2">

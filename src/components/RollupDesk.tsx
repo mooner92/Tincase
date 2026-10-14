@@ -12,10 +12,11 @@ export interface StatusChip {
    *   sent        올라옴 (승인 시각 · 승인한 사람 흐리게)
    *   nohead      부서장 없음 — 마감 뒤 병합본이 저절로 올라옴
    *   unapproved  주황 「부서장 승인 없이」 (RU-77 비상구)
+   *   due         주황 「기한 지나 자동」 (ADR-0021 — 기한까지 승인이 없어 그때 판이 올라옴)
    *   pending     부서장 승인 전 (마감 뒤 병합본은 있다)
    *   waiting     아직 병합 전 · 미제출
    */
-  kind: 'sent' | 'nohead' | 'unapproved' | 'pending' | 'waiting';
+  kind: 'sent' | 'nohead' | 'unapproved' | 'due' | 'pending' | 'waiting';
   label: string;
   /** 승인한 사람·올린 사람 — 칩 밖에 흐리게 */
   by?: string;
@@ -48,12 +49,13 @@ const chipClass: Record<StatusChip['kind'], string> = {
   sent: 'chip-ok',
   nohead: 'chip-ok',
   unapproved: 'chip-warn',
+  due: 'chip-warn',
   pending: 'chip-muted',
   waiting: 'chip-muted',
 };
 
 export function Chip({ chip }: { chip: StatusChip }) {
-  const ok = chip.kind === 'sent' || chip.kind === 'nohead' || chip.kind === 'unapproved';
+  const ok = chip.kind === 'sent' || chip.kind === 'nohead' || chip.kind === 'unapproved' || chip.kind === 'due';
   const body = (
     <span className={`chip ${chipClass[chip.kind]}`}>
       {ok && <span aria-hidden className="dot" />}

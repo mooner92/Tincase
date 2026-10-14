@@ -316,7 +316,8 @@ export async function causeLabel(cause: string | null): Promise<string> {
   if ((kind === 'unit_handoff' || kind === 'hq_handoff') && ref) {
     const s = await prisma.reportSubmission.findUnique({ where: { id: ref }, include: { division: { select: { nameKo: true } } } });
     if (!s) return '';
-    const how = s.basis === 'unapproved' ? '승인 없이 올려서' : s.basis === 'no_head' ? '병합본이 올라와서' : '승인으로';
+    const how =
+      s.basis === 'unapproved' ? '승인 없이 올려서' : s.basis === 'due' ? '기한이 지나 자동으로 올라와서' : s.basis === 'no_head' ? '병합본이 올라와서' : '승인으로';
     return `${s.division.nameKo} ${how}`;
   }
   return (
@@ -356,7 +357,12 @@ async function unitStatuses(divs: TreeDivision[], slot: WeekSlot, reports: (Repo
       where: { divisionId: { in: divs.map((d) => d.id) }, weekSlotId: slot.id, status: 'succeeded' },
       select: { divisionId: true, startedAt: true },
     }),
-    prisma.user.groupBy({ by: ['divisionId'], where: { divisionId: { in: divs.map((d) => d.id) }, isActive: true, divisionRole: 'head' }, _count: { _all: true } }),
+    // RU-93 — 부서장이 있다 = 그 부서가 켜져 있고 켜진 head 계정이 있다(handoff.ts `hasHead`와 같은 판정)
+    prisma.user.groupBy({
+      by: ['divisionId'],
+      where: { divisionId: { in: divs.map((d) => d.id) }, isActive: true, divisionRole: 'head', division: { isActive: true } },
+      _count: { _all: true },
+    }),
     prisma.division.findMany({ where: { id: { in: divs.map((d) => d.id) } } }),
   ]);
   const headSet = new Set(heads.map((h) => h.divisionId));
@@ -384,7 +390,7 @@ export interface HqApprovalView {
 
 /**
  * RU-82 — 본부 상태 (12 §2a 본부 상태 기계).
- *   Q0 비어 있음 · Q1 준비됨·승인 전 · Q2 승인·총괄로 감 · Q3 보낸 뒤 바뀜 · Q4 승인 없이 감 · Qf 만들기 실패
+ *   Q0 비어 있음 · Q1 준비됨·승인 전 · Q2 승인·총괄로 감 · Q3 보낸 뒤 바뀜 · Q4 승인 없이 감 · Q5 기한 지나 자동으로 감(ADR-0021) · Qf 만들기 실패
  * 이름은 화면과 같이 쓰므로 lib에 있다(`hqApprovable`도 거기)
  */
 export type HqState = HqStateCode;
@@ -435,7 +441,7 @@ export function hqStateOf(b: Pick<HqBoard, 'units' | 'lastRun' | 'current' | 'ap
   const R = b.current;
   if (!R?.sha256) return b.lastRun?.status === 'failed' ? 'Qf' : 'Q0';
   const S = b.hqReport;
-  if (S && S.sha256 === R.sha256) return S.basis === 'unapproved' ? 'Q4' : 'Q2';
+  if (S && S.sha256 === R.sha256) return S.basis === 'unapproved' ? 'Q4' : S.basis === 'due' ? 'Q5' : 'Q2';
   if (S) return 'Q3';
   return 'Q1';
 }
@@ -453,7 +459,8 @@ export async function hqBoard(node: RollupNode, slot: WeekSlot): Promise<HqBoard
     currentReport(node.node.id, slot.id, 'hq'),
     prisma.division.findUnique({ where: { id: node.node.id }, select: { rollupNote: true } }),
     hqInputKey(node, inputs),
-    prisma.user.count({ where: { divisionId: node.node.id, isActive: true, divisionRole: 'head' } }),
+    // RU-93 — 꺼진 본부의 본부장은 없는 것과 같다(handoff.ts `hasHead`)
+    prisma.user.count({ where: { divisionId: node.node.id, isActive: true, divisionRole: 'head', division: { isActive: true } } }),
   ]);
   const [last, current] = await Promise.all([runCell(lastRun, key), runCell(currentRun, key)]);
   const [hqReport] = await reportCells([hq]);

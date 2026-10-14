@@ -88,6 +88,18 @@ async function merged(key: keyof typeof DIV, content: string) {
   });
 }
 
+/**
+ * ADR-0021 — 기한을 지금 + 60분·+120분에(기한 **전**). 기한이 지나면 지금 판이 저절로 올라가(`basis=due`) 이 파일이 보는 승인·넘김과 다른 것을
+ * 본다. 기한을 바꾸는 시험(RU-T42 · 비상구 창)은 끝에 이것으로 되돌린다
+ */
+async function dueAhead() {
+  const { prisma } = await import('@/server/db');
+  const { weekAnchor } = await import('@/server/slot-deadline');
+  const anchor = await weekAnchor(await prisma.weekSlot.findUniqueOrThrow({ where: { isoKey } }));
+  const m = Math.floor((Date.now() - anchor.getTime()) / 60_000);
+  await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { unitDueMinutes: m + 60, hqDueMinutes: m + 120 } });
+}
+
 /** RU-T118 — 예전의 [제출] 요청(비상구가 아님). v1.7부터 누구에게나 404 */
 async function submitUnit(identity: string) {
   const { POST } = await import('@/app/api/rollup/report/route');
@@ -168,8 +180,9 @@ beforeAll(async () => {
   await mk(ID.hq2Lead, 'hq2', { divisionRole: 'lead' });
   await mk(ID.soloLead, 'solo', { divisionRole: 'lead' });
   await mk(ID.coord, 'solo', { isCoordinator: true });
-  // RU-52 — 3단계를 켠 상태에서 시험한다 (꺼졌을 때는 RU-T40이 따로 본다)
+  // RU-52 — 3단계를 켠 상태에서 시험한다 (꺼졌을 때는 RU-T40이 따로 본다).
   await prisma.orgRollupSetting.create({ data: { id: 'org', enabled: true } });
+  await dueAhead();
 }, 60_000);
 
 afterAll(() => {
@@ -519,6 +532,7 @@ d('RU-50~58 단계 일정 · 스위치 · 본부장 승인', () => {
     expect((await put(ID.hqLead, { hqDueMinutes: 240 })).status).toBe(404);
     const { prisma } = await import('@/server/db');
     expect((await prisma.orgRollupSetting.findUniqueOrThrow({ where: { id: 'org' } })).hqDueMinutes).toBe(180);
+    await dueAhead(); // 뒤 시험은 기한 전에서 (ADR-0021)
   });
 
   it('[RU-T43] ★ 본부장 승인 — head만, 본 판에만, 같은 판은 한 번. 다시 이어 붙어 바이트가 바뀌면 「승인 뒤 바뀜」', async () => {
@@ -1116,19 +1130,10 @@ describe('TACP-23 자동 진행의 경계 (RU-T118~123)', () => {
     expect(runs.length).toBeGreaterThan(0);
     expect(runs.every((r) => r.createdBy === 'system' && r.cause === `unit_handoff:${sub.id}`)).toBe(true);
     expect(await prisma.auditLog.count({ where: { action: 'rollup', actor: P.u5Head } })).toBe(0);
-    // 비상구 — 승인 뒤 바뀐 판을 담당자가 (기한 15분 전부터) 올린다
+    // 비상구 — 승인 뒤 바뀐 판을 담당자가 올린다. ADR-0021 D3 — 기한 전이어도(기한 = 지금 + 60분) 마감 뒤 병합본이 있으면 바로 열려 있다
     await fakeMerged('u5', '실다섯 승인 뒤 바뀜');
-    // 기한을 「지금」 둘레로 — 실·팀 → 본부 = 지금 - 60분, 본부 → 총괄 = 지금. 비상구는 「본부 → 총괄」 + 24시간에 닫히므로(RU-77 · 결정 a)
-    // 그 주 월 00:00 기준의 고정 분으로 두면 시험을 돌리는 요일에 따라 창이 이미 닫혀 있다
-    const { weekAnchor } = await import('@/server/slot-deadline');
-    const sinceAnchor = Math.floor((Date.now() - (await weekAnchor(await prisma.weekSlot.findUniqueOrThrow({ where: { isoKey } }))).getTime()) / 60_000);
-    await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { unitDueMinutes: sinceAnchor - 60, hqDueMinutes: sinceAnchor } });
-    try {
-      const r = await (await report()).POST(nx('/api/rollup/report', P.u5Lead, jsonInit('POST', { level: 'unit', isoKey, withoutApproval: true })));
-      expect(r.status).toBe(200);
-    } finally {
-      await prisma.orgRollupSetting.update({ where: { id: 'org' }, data: { unitDueMinutes: 60, hqDueMinutes: 120 } });
-    }
+    const r = await (await report()).POST(nx('/api/rollup/report', P.u5Lead, jsonInit('POST', { level: 'unit', isoKey, withoutApproval: true })));
+    expect(r.status).toBe(200);
     await settle();
     const esc = await prisma.reportSubmission.findFirstOrThrow({ where: { divisionId: tid.u5 }, orderBy: { submittedAt: 'desc' } });
     expect([esc.submittedBy, esc.basis, esc.cause]).toEqual([uid.u5Lead, 'unapproved', 'escape']);

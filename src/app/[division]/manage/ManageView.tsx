@@ -21,6 +21,7 @@ import { MergePanel, type MergeGroupView, type MergeStateView } from '@/componen
 import { HandoffCard } from '@/components/HandoffCard';
 import { handoffHint, unitHandoffView } from '@/server/rollup/state';
 import { rollupEnabled } from '@/server/rollup/schedule';
+import { readRepairUnit } from '@/server/rollup/auto';
 import { latestReview } from '@/server/merge/review';
 import { HELD_TEXT, latestEdits } from '@/server/merge/edits';
 import { activeMergeJob, jobView } from '@/server/merge/queue';
@@ -81,6 +82,8 @@ export async function ManageView({
 
   // RU-80 — 「위로」 상태. 내 부서 lead·head에게만 그린다 (TACP-21 v1.7 · TACP-9). 3단계가 꺼져 있거나 기여 단위가 아니면 null
   const rollupOn = await rollupEnabled();
+  // ADR-0021 D8 — 기한이 지났으면 그리기 전에 맞춘다(지금 판 → 「기한 지나 자동」). 스케줄러가 꺼진 테스트 서버에서도 기한이 돈다
+  if (handoff && rollupOn) await readRepairUnit(division.id, slot, now);
   const handoffView = handoff && rollupOn ? await unitHandoffView(division, slot, { trail: true, canEscape: handoff.escape, now }) : null;
   // RU-80 — 부서장의 [승인] 옆 「승인하면 바로 ○○에 올라갑니다」 — 승인이 곧 제출일 때만
   const handoffTo = rollupOn ? await handoffHint(division.id) : null;

@@ -401,7 +401,7 @@ v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노�
 
 | 경로 | 지금 | 예전 |
 |---|---|---|
-| `POST /api/rollup/report` | 비상구 「승인 없이 올리기」 전용 — `{level, isoKey, withoutApproval: true}`, lead만(`requireHandoffEscape`), 기한 15분 전부터 「본부 → 총괄」 기한 + 24시간까지(RU-77). 그 밖의 본문은 404 | lead·head의 [제출] |
+| `POST /api/rollup/report` | 비상구 「승인 없이 올리기」 전용 — `{level, isoKey, withoutApproval: true}`, lead만(`requireHandoffEscape`), 마감 뒤 병합본(본부본)이 있으면 바로(RU-92 — 2026-10-12) 「본부 → 총괄」 기한 + 24시간까지(RU-77). 그 밖의 본문은 404 | lead·head의 [제출] |
 | `DELETE /api/rollup/report` | 누구에게나 404 — 처리기는 남아 있다는 것도 알리지 않는다(TACP-5 · RU-T118) | [제출 취소] |
 | `POST /api/rollup/hq` · `POST /api/rollup/org` | 실패했을 때 [다시 시도] 전용 — 입력을 고르지 못하고, 마지막이 성공이고 입력 열쇠가 같으면 아무것도 하지 않는다(RU-76 · RU-T121) | [이어 붙이기] · [전사 취합본 만들기] |
 | `POST /api/rollup/hq/approve` | 본부장 승인 = 총괄로 제출. 화면이 그린 판(`runId`·`sha256`)에만 — 다르면 409(RU-55 · `requireHqReviewer`) | 「가장 최근 본부본」에 붙던 승인 |
