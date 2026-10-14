@@ -1524,17 +1524,19 @@ d('WS-19 주차 마감 예외 — 총괄이 정한다', () => {
     expect(list.every((s) => s.divisionId === null)).toBe(true);
     expect(list.map((s) => s.divisionName)).toEqual(DEFAULT_SECTIONS.map((s) => s.division));
 
-    // 가부서를 집계 대상으로 — 어느 섹션에도 안 닿으므로 「섹션 밖」 줄로 (빠지면 합계가 감사 문서와 갈라진다)
-    await prisma.division.update({ where: { slug: A.slug }, data: { boardStatus: 'confirmed' } });
+    // DM-15 개정(2026-10-14) — 켜진 부서가 집계 대상이다(취합게시판 이력이 아니다). 가부서·나부서는 켜져 있고 어느 섹션에도 안 닿으므로
+    // 「섹션 밖」 줄로 (빠지면 합계가 감사 문서와 갈라진다). 이력 값을 바꿔도 셈은 그대로다
+    await prisma.division.update({ where: { slug: A.slug }, data: { boardStatus: 'none' } });
     try {
       const board = await orgBoard(await rollupSlot(null), { progress: true, desk: false }, '');
       // RU-96 — 기본 13개의 부서가 이 DB에 없다(Tincase 밖) → 표에는 줄이 없고 이름만 한 줄. 「섹션 밖」 줄은 그대로(사람을 센다)
       expect(board.rows.map((r) => r.title)).toEqual(['섹션 밖']);
       expect(board.offline).toEqual(DEFAULT_SECTIONS.map((s) => s.title));
       const outside = board.rows.at(-1)!;
-      expect([outside.no, outside.final, outside.progress?.teams.map((t) => t.name)]).toEqual([null, null, ['가부서']]);
+      expect([outside.no, outside.final, outside.progress?.teams.map((t) => t.name)]).toEqual([null, null, ['가부서', '나부서']]);
       expect(board.totals).toMatchObject({ roster: outside.progress!.roster, submitted: outside.progress!.submitted });
-      expect(board.excludedNote).toEqual({ divisions: 1, people: expect.any(Number) }); // 나부서
+      // 집계에서 빠진 것 = 꺼진 부서
+      expect(board.excludedNote).toEqual({ divisions: await prisma.division.count({ where: { isActive: false } }), people: expect.any(Number) });
       // 취합 쪽 값은 계산하지도 내려보내지도 않는다 (PG-51e)
       expect([board.ready, board.run, board.editor]).toEqual([null, null, null]);
       expect(await prisma.orgSection.count()).toBe(0);

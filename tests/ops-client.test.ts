@@ -43,7 +43,7 @@ describe('[PG-T171] 부서 표 「알림」 (PG-91)', () => {
     const { OpsClient } = await import('@/app/ops/OpsClient');
     const html = renderToStaticMarkup(createElement(OpsClient));
     const heads = [...html.matchAll(/<th[^>]*>([^<]*)<\/th>/g)].map((m) => m[1]);
-    expect(heads).toEqual(['부서', '인원', '양식', '마감', '업무일지', '상태', '알림', '편집 · 인원']);
+    expect(heads).toEqual(['부서', '인원', '양식', '마감', '상태', '알림', '편집 · 인원']); // PG-95 — 「업무일지」(취합게시판 이력) 칸은 걷었다
     expect(html).toMatch(new RegExp(`colSpan="${heads.length}"`, 'i'));
   });
 
@@ -85,8 +85,11 @@ describe('PG-64 운영 화면 — 불러오는 중과 없음을 가른다', () =
     const html = renderToStaticMarkup(createElement(OpsClient));
     expect(html).toContain('불러오는 중…');
     expect(html).not.toContain('이 분류에 해당하는 부서가 없습니다');
-    // 탭 이름 뒤에 숫자 배지가 없다 (불러오기 전의 0은 「없다」로 읽힌다)
-    expect(html).not.toMatch(/제출 확인\s*(<!-- -->)?\s*<span[^>]*>\s*0\s*<\/span>/);
+    // 거르기 이름 뒤에 숫자 배지가 없다 (불러오기 전의 0은 「없다」로 읽힌다) — PG-95
+    expect(html).not.toMatch(/(전체|켜짐|꺼짐)\s*(<!-- -->)?\s*<span[^>]*>\s*0\s*<\/span>/);
+    // 예전 탭(취합게시판 제출 이력)은 없다
+    expect(html).not.toContain('이력 없음');
+    expect(html).not.toContain('업무일지</th>');
   });
 });
 
@@ -117,24 +120,83 @@ describe('[PG-T173] 부서 표 — 고치는 동안에도 [완료]·[열기]가 
     expect(edit).toContain('>열기</button>');
   });
 
-  it('고치는 줄은 「업무일지」 값이 바뀌어도 지금 탭에 남는다 · 다른 줄은 값대로 · 옛 값(unclear)은 「이력 없음」', async () => {
-    const { rowsInTab } = await import('@/app/ops/OpsClient');
-    const rows = [
-      { id: 'a', boardStatus: 'confirmed' },
-      { id: 'b', boardStatus: 'none' },
-      { id: 'c', boardStatus: 'unclear' },
-    ];
-    expect(rowsInTab(rows, 'confirmed', null).map((r) => r.id)).toEqual(['a']);
-    expect(rowsInTab(rows, 'none', null).map((r) => r.id)).toEqual(['b', 'c']);
-    // b를 고치다 「제출함」으로 바꿨다 → 「이력 없음」 탭에 그대로
-    const moved = rows.map((r) => (r.id === 'b' ? { ...r, boardStatus: 'confirmed' } : r));
-    expect(rowsInTab(moved, 'none', 'b').map((r) => r.id)).toEqual(['b', 'c']);
-    expect(rowsInTab(moved, 'none', null).map((r) => r.id)).toEqual(['c']); // [완료] 뒤에는 제 탭으로
-  });
-
   it('「저장됨」은 화면 아래에 떠 있다 — 표를 내려 본 채로도 보인다 · 고치는 줄에는 「바꾸면 바로 저장」', async () => {
     const src = readFileSync(path.join(__dirname, '../src/app/ops/OpsClient.tsx'), 'utf8');
     expect(src).toMatch(/aria-live="polite"\s+className="fixed bottom-6 [^"]*empty:hidden"/);
     expect(src).toContain('바꾸면 바로 저장돼요 · 끝나면 [완료]');
+  });
+});
+
+// PG-95 (2026-10-14) — 30개 부서를 조직도 모양으로. 운영자: 「찾고, 보기 편하게」 · 「이력 없음은 없애도 되겠네」
+describe('[PG-T174] 부서 표 — 본부별로 묶고 · 찾고 · 거른다 (PG-95)', () => {
+  const R = '한국환경연구원';
+  // 등록 순서 = ERP 순서 = 조직도 순서 (서버가 이 순서로 준다)
+  const rows = [
+    { id: 'exec', nameKo: '임원실', slug: 'Exec', parentKo: R, isActive: false, memberCount: 5 },
+    { id: 'pm', nameKo: '기획경영본부', slug: 'PM', parentKo: R, isActive: false, memberCount: 10 },
+    { id: 'pco', nameKo: '기획조정실', slug: 'PCO', parentKo: '기획경영본부', isActive: true, memberCount: 7 },
+    { id: 'ai', nameKo: 'AI홍보전략실', slug: 'AI', parentKo: '기획경영본부', isActive: true, memberCount: 13 },
+    { id: 'hr', nameKo: '인사관리실', slug: 'HR', parentKo: '기획경영본부', isActive: false, memberCount: 12 },
+    { id: 'land', nameKo: '국토환경연구본부', slug: 'Land', parentKo: R, isActive: false, memberCount: 2 },
+    { id: 'water', nameKo: '물관리연구실', slug: 'Water', parentKo: '국토환경연구본부', isActive: false, memberCount: 34 },
+    { id: 'sdc', nameKo: '국가지속가능발전연구센터', slug: 'SDC', parentKo: R, isActive: false, memberCount: 7 },
+  ];
+  const ids = (xs: { row: { id: string } }[]) => xs.map((x) => x.row.id);
+
+  it('최상위 단위마다 묶음 — 본부 줄이 머리, 산하 실은 한 칸 들여 · 순서는 받은 순서 · 산하 없는 단위는 머리 줄 하나', async () => {
+    const { arrangeDivisions } = await import('@/lib/division-groups');
+    const all = arrangeDivisions(rows, { q: '', show: 'all' }, null);
+    expect(ids(all)).toEqual(['exec', 'pm', 'pco', 'ai', 'hr', 'land', 'water', 'sdc']);
+    expect(all.map((x) => x.depth)).toEqual([0, 0, 1, 1, 1, 0, 1, 0]);
+    expect(all.filter((x) => x.head).map((x) => x.row.id)).toEqual(['pm', 'land']);
+    // 머리 줄의 요약 — 산하 수 · 켜진 수 · 묶음 인원(머리 포함)
+    expect(all.find((x) => x.row.id === 'pm')!.summary).toEqual({ units: 3, active: 2, members: 42 });
+    expect(all.find((x) => x.row.id === 'exec')!.summary).toBeUndefined();
+  });
+
+  it('켜짐만 — 산하 실만 켜져 있으면 본부 줄이 맥락으로(흐리게) 함께 · 꺼짐만도 같은 식', async () => {
+    const { arrangeDivisions } = await import('@/lib/division-groups');
+    const on = arrangeDivisions(rows, { q: '', show: 'on' }, null);
+    expect(ids(on)).toEqual(['pm', 'pco', 'ai']);
+    expect(on[0].context).toBe(true);
+    const off = arrangeDivisions(rows, { q: '', show: 'off' }, null);
+    expect(ids(off)).toEqual(['exec', 'pm', 'hr', 'land', 'water', 'sdc']);
+    expect(off.find((x) => x.row.id === 'pm')!.context).toBe(false); // 본부 자신도 꺼져 있다
+  });
+
+  it('찾기 — 이름 일부 · 띄어쓰기·대소문자 무시 · 실이 맞으면 그 본부 줄이 맥락 · 본부 이름이 맞으면 그 산하를 다 · 슬러그로도', async () => {
+    const { arrangeDivisions } = await import('@/lib/division-groups');
+    const water = arrangeDivisions(rows, { q: '물 관리', show: 'all' }, null);
+    expect(ids(water)).toEqual(['land', 'water']);
+    expect(water[0].context).toBe(true);
+    expect(ids(arrangeDivisions(rows, { q: '기획경영', show: 'all' }, null))).toEqual(['pm', 'pco', 'ai', 'hr']);
+    // 본부 이름으로 찾아도 거르기는 그대로 — 켜짐이면 켜진 실만
+    expect(ids(arrangeDivisions(rows, { q: '기획경영', show: 'on' }, null))).toEqual(['pm', 'pco', 'ai']);
+    expect(ids(arrangeDivisions(rows, { q: 'ai', show: 'all' }, null))).toEqual(['pm', 'ai']);
+    expect(ids(arrangeDivisions(rows, { q: '없는부서', show: 'all' }, null))).toEqual([]);
+  });
+
+  it('고치는 줄은 거르기·찾기와 상관없이 남는다 — 켜짐에서 끄는 순간 사라지지 않는다(PG-94)', async () => {
+    const { arrangeDivisions } = await import('@/lib/division-groups');
+    const turnedOff = rows.map((r) => (r.id === 'ai' ? { ...r, isActive: false } : r));
+    expect(ids(arrangeDivisions(turnedOff, { q: '', show: 'on' }, 'ai'))).toEqual(['pm', 'pco', 'ai']);
+    expect(ids(arrangeDivisions(turnedOff, { q: '', show: 'on' }, null))).toEqual(['pm', 'pco']); // [완료] 뒤에는 거르기대로
+    expect(ids(arrangeDivisions(rows, { q: '물관리', show: 'all' }, 'exec'))).toEqual(['exec', 'land', 'water']);
+  });
+
+  it('거르기 수 — 전체 · 켜짐 · 꺼짐', async () => {
+    const { showCounts } = await import('@/lib/division-groups');
+    expect(showCounts(rows)).toEqual({ all: 8, on: 2, off: 6 });
+  });
+
+  it('상위부서가 목록에 없거나 고리면 그 부서가 최상위 — 사라지지 않는다', async () => {
+    const { arrangeDivisions } = await import('@/lib/division-groups');
+    const odd = [
+      { id: 'x', nameKo: '새실', slug: 'X', parentKo: '아직없는본부', isActive: true, memberCount: 1 },
+      { id: 'a', nameKo: '가', slug: 'A', parentKo: '나', isActive: true, memberCount: 1 },
+      { id: 'b', nameKo: '나', slug: 'B', parentKo: '가', isActive: true, memberCount: 1 },
+    ];
+    const out = arrangeDivisions(odd, { q: '', show: 'all' }, null);
+    expect(new Set(ids(out))).toEqual(new Set(['x', 'a', 'b']));
   });
 });
