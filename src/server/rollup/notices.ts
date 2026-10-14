@@ -211,10 +211,17 @@ export function orgReadyMessage(
   uncovered: string[] = [],
 ) {
   const n = arrived.length + missing.length + offline.length;
+  // 「다 들어왔다」는 Tincase로 내는 곳의 셈이다 — Tincase 밖이 남아 있으면 「13곳이 다」라고 말하지 않는다(2026-10-14)
+  const all = offline.length ? `Tincase로 내는 ${arrived.length}곳` : `${n}곳`;
+  const subject = again
+    ? `[Tincase] ${slot.label} ${all}이 다 들어왔어요 — 전사본`
+    : missing.length === 0 && offline.length > 0
+      ? `[Tincase] ${slot.label} ${all}이 다 들어왔어요 — 전사본이 준비돼 있어요`
+      : `[Tincase] ${slot.label} ${arrived.length}/${n}곳 도착 — 전사본이 준비돼 있어요`;
   return {
-    subject: again ? `[Tincase] ${slot.label} ${n}곳이 다 들어왔어요 — 전사본` : `[Tincase] ${slot.label} ${arrived.length}/${n}곳 도착 — 전사본이 준비돼 있어요`,
+    subject,
     contents: [
-      again ? `${head(p)} ${slot.label} ${n}곳이 다 들어와 전사본을 다시 만들었어요.` : `${head(p)} ${slot.label} 전사본이 준비돼 있어요.`,
+      again ? `${head(p)} ${slot.label} ${all}이 다 들어와 전사본을 다시 만들었어요.` : `${head(p)} ${slot.label} 전사본이 준비돼 있어요.`,
       '',
       `도착 ${arrived.length}곳${arrived.length ? `: ${arrived.join('·')}` : ''}`,
       ...(missing.length ? [`아직 ${missing.length}곳: ${missing.join('·')}`] : []),
@@ -349,12 +356,15 @@ export async function noticeOrgBuilt(
   const out: RollupNoticeOutcome[] = [];
   const coords = await people({ isCoordinator: true });
   const { arrived, missing, offline } = orgArrivals(sources);
-  // ADR-0021 D6 — 들어온 곳이 하나도 없으면(섹션이 비었다) 「준비」가 아니다
-  if (arrived.length > 0 && missing.length === 0 && offline.length === 0) {
+  // ADR-0021 D6 — 들어온 곳이 하나도 없으면(섹션이 비었다) 「준비」가 아니다.
+  // 2026-10-14 — Tincase 밖 섹션(`offline`)은 기다리지 않는다: 총괄이 [올리기]로 넣을 곳이라 기다릴 것이 아니라 총괄의 일이다. Tincase로 내는
+  // 곳이 다 들어온 순간이 「다 모였다」다 — 3단계를 끈 동안의 「모두 승인」(NT-62)과 같은 때. 예전 셈은 Tincase 밖이 하나라도 있으면
+  // 이 갈래를 막아, 섹션 대부분이 Tincase 밖인 동안(2026-10 두 부서만 켬) 총괄 알림이 늘 기한(16:00)까지 밀렸다
+  if (arrived.length > 0 && missing.length === 0) {
     for (const c of coords) {
       let ready = await sentBefore(c.divisionId, slot.id, orgReadyKind(c.id));
       if (!ready) {
-        const r = await deliver(orgReadyKind(c.id), c.divisionId, slot, [c], (p) => orgReadyMessage(p, slot, arrived, missing), link('/org'), { complete: true });
+        const r = await deliver(orgReadyKind(c.id), c.divisionId, slot, [c], (p) => orgReadyMessage(p, slot, arrived, missing, false, offline), link('/org'), { complete: true });
         if (r) {
           out.push(r);
           continue;
@@ -363,7 +373,7 @@ export async function noticeOrgBuilt(
         ready = await sentBefore(c.divisionId, slot.id, orgReadyKind(c.id));
       }
       if (ready && !JSON.parse(ready.detail ?? '{}').complete) {
-        const r = await deliver(orgCompleteKind(c.id), c.divisionId, slot, [c], (p) => orgReadyMessage(p, slot, arrived, missing, true), link('/org'));
+        const r = await deliver(orgCompleteKind(c.id), c.divisionId, slot, [c], (p) => orgReadyMessage(p, slot, arrived, missing, true, offline), link('/org'));
         if (r) out.push(r);
       }
     }
@@ -535,8 +545,9 @@ export async function runDueRollupNotices(now = new Date()): Promise<RollupNotic
         for (const c of await people({ isCoordinator: true })) {
           // 총괄이 여럿이면 각자 — NotifyLog는 그 총괄의 부서에 남기고, 종류에 **사람**을 붙인다.
           // (부서·주차·종류)가 유일하므로 종류가 같으면 같은 부서의 둘째 총괄은 「이미 보냄」으로 건너뛰어진다
+          // 「다 왔다」는 Tincase로 내는 곳의 셈 — 조립 직후의 판정과 같다(Tincase 밖은 총괄의 일이라 기다리지 않는다, 2026-10-14)
           const r = await deliver(orgReadyKind(c.id), c.divisionId, slot, [c], (p) => orgReadyMessage(p, slot, arrived, missing, false, offline, uncovered), link('/org'), {
-            complete: missing.length === 0 && offline.length === 0,
+            complete: missing.length === 0,
           });
           if (r) out.push(r);
         }

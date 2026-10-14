@@ -756,4 +756,56 @@ describe('ADR-0021 — 기한이 곧 제출: 알림은 할 일이 생긴 사람�
     expect(r.map((x) => x.kind)).toEqual([`ru_org_changed:${old.id}:${userId.c2}`]);
     expect(to(take())).toEqual([P.c2.no]);
   });
+
+  it('[RU-T164] 총괄 — Tincase로 내는 곳이 다 들어온 순간 한 통 · Tincase 밖 섹션은 기다리지 않는다(2026-10-14) · 「다 들어왔어요」도 Tincase 셈', async () => {
+    const prisma = await db();
+    const { writeFileAtomic } = await import('@/server/storage');
+    const { noticeOrgBuilt, orgReadyKind, orgCompleteKind } = await import('@/server/rollup/notices');
+    const src = (title: string, kind: string, offline = false) => ({ section: { title }, kind, offline });
+    const mk = async (n: number) => {
+      const wk = await weekAhead(n);
+      const rel = `divisions/NT_SOLO/org/ahead-${n}.hwp`;
+      await writeFileAtomic(rel, Buffer.from(`전사본 ${n}주 뒤`));
+      const run = await prisma.rollupRun.create({ data: { level: 'org', weekSlotId: wk.id, status: 'succeeded', outputPath: rel, inputIds: '[]', createdBy: 'system' } });
+      return { wk, run };
+    };
+    const mine = () => take().filter((g) => g.to === P.c1.no || g.to === P.c2.no);
+
+    // ① 승인으로 다 들어온 순간 — 섹션 대부분이 Tincase 밖이어도(2026-10 두 부서만 켬) 기한(16:00)을 기다리지 않는다
+    {
+      const { wk, run } = await mk(5);
+      take();
+      expect(await noticeOrgBuilt(wk, run, [src('기조', 'tincase'), src('AI', 'none'), src('밖', 'none', true)], '')).toEqual([]);
+      const r = await noticeOrgBuilt(wk, run, [src('기조', 'tincase'), src('AI', 'tincase'), src('밖', 'none', true)], '');
+      expect(r.map((x) => x.kind).sort()).toEqual([orgReadyKind(userId.c1), orgReadyKind(userId.c2)].sort());
+      const got = mine();
+      expect(to(got)).toEqual([P.c1.no, P.c2.no]);
+      expect(got[0].subject).toContain('Tincase로 내는 2곳이 다 들어왔어요 — 전사본이 준비돼 있어요');
+      expect(got[0].contents).toContain('도착 2곳: 기조·AI');
+      expect(got[0].contents).toContain('Tincase 밖 1곳: 밖 — 「전사」의 [올리기]로 넣어 주세요');
+      expect(got[0].contents).not.toContain('아직');
+      // 또 만들어져도 · 총괄이 Tincase 밖을 올려 채워도 더 가지 않는다 — 한 통이고, 올린 것은 총괄 자신의 일이다
+      expect(await noticeOrgBuilt(wk, run, [src('기조', 'tincase'), src('AI', 'tincase'), src('밖', 'none', true)], '')).toEqual([]);
+      expect(await noticeOrgBuilt(wk, run, [src('기조', 'tincase'), src('AI', 'tincase'), src('밖', 'upload')], '섹션 파일이 바뀌어서', { causedBy: P.c1.email })).toEqual([]);
+      expect(mine()).toEqual([]);
+    }
+
+    // ② 기한에 일부로 갔다(Tincase 하나 아직) → 그 곳이 들어오면 「다 들어왔어요」 한 번 — Tincase 밖이 남아 있어도. 「3곳이 다」라고 말하지 않는다
+    {
+      const { wk, run } = await mk(6);
+      for (const c of [P.c1, P.c2]) {
+        const u = await prisma.user.findUniqueOrThrow({ where: { email: c.email }, select: { id: true, divisionId: true } });
+        await prisma.notifyLog.create({ data: { divisionId: u.divisionId, weekSlotId: wk.id, kind: orgReadyKind(u.id), recipients: '[]', detail: JSON.stringify({ complete: false }) } });
+      }
+      take();
+      const r = await noticeOrgBuilt(wk, run, [src('기조', 'tincase'), src('AI', 'tincase'), src('밖', 'none', true)], '');
+      expect(r.map((x) => x.kind).sort()).toEqual([orgCompleteKind(userId.c1), orgCompleteKind(userId.c2)].sort());
+      const got = mine();
+      expect(to(got)).toEqual([P.c1.no, P.c2.no]);
+      expect(got[0].subject).toContain('Tincase로 내는 2곳이 다 들어왔어요 — 전사본');
+      expect(got[0].subject).not.toContain('3곳');
+      expect(got[0].contents).toContain('Tincase 밖 1곳: 밖');
+      expect(await noticeOrgBuilt(wk, run, [src('기조', 'tincase'), src('AI', 'tincase'), src('밖', 'none', true)], '')).toEqual([]);
+    }
+  });
 });
