@@ -185,7 +185,7 @@ export async function onUnitVersionChanged(divisionId: string, slot: WeekSlot, o
       const t = await stageTimes(slot);
       if (!pastDue(unitDue(t, target), t, opts.now ?? new Date())) {
         const division = await prisma.division.findUniqueOrThrow({ where: { id: divisionId } });
-        await notifyReapprove(division, slot, targetLabel(target), opts.reason);
+        await notifyReapprove(division, slot, targetLabel(target), opts.reason, opts.reason.kind === 'append' ? opts.causedBy : null);
         return;
       }
     }

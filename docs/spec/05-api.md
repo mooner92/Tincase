@@ -159,6 +159,32 @@ v2: 부서 스코프 재편 — [ADR-0005](../adr/0005-multi-division-tenancy.md
 |---|---|
 | API-58 | **(2026-10-08 채택 · `feat/auto-flow` 합친 뒤 구현)** `GET` 응답의 `review`(승인자 이름·바뀐 줄)는 lead·head(내 부서)·readAll에게만 담는다 — 그 밖에는 `null`. TACP-17이 작성자를 보내지 않는 것과 같은 판정(`canSeeAuthors`)이다. `canApprove`는 처음부터 그 부서의 head에게만 참이다. 같은 이유로 3단계 「위로」 상태(`GET /api/rollup/report?level=unit`)의 `sent.by`(승인한 부서장·비상구로 올린 담당자의 이름)도 행방을 보는 사람(`canSeeHandoff` — 내 부서 lead·head)에게만 담고 member에게는 `null`이다(상태·시각은 그대로, TACP-21 「제출 상태 보기」). 응답이 줄어드는 쪽이라 TACP 표는 고치지 않는다. 부서원 홈의 읽기 전용 드로어(`variant="view"`, CP-114)는 받은 것과 상관없이 승인 띠를 그리지 않는다. 시험 API-T16 |
 
+### `POST /api/submissions/proxy` · `POST /api/division/merged/append` — 늦게 낸 사람 (2026-10-15 · [ADR-0023](../adr/0023-late-entry.md) · [15-late-entry](15-late-entry.md))
+
+```jsonc
+// POST /api/submissions/proxy — 담당자가 낸 적 없는 부서원의 표를 대신 채워 제출 (본문 표 = compose와 같은 DocInput)
+{ "userId": "c…", "isoKey": "2026-W42", "achievements": [ { "content": "…", "date": "10/14", "place": "", "attendee": "", "emphasis": false } ], "plans": [], "notes": [] }
+// 200 — 새 판 v1 (주인 = 그 사람, origin = lead_entry, editedById = 쓴 사람)
+{ "ok": true, "id": "c…", "version": 1, "rows": { "achievements": 1, "plans": 0, "notes": 0 } }
+// 409 { "error": "already_submitted" } — 이번 주에 이미 낸 판이 있다 (그 사람의 것은 [고치기])
+
+// POST /api/division/merged/append — 병합본에 들어가지 않은 최신 제출을 각 표 맨 뒤에 붙인다 (다시 병합하지 않는다)
+{ "isoKey": "2026-W42", "runId": "c…", "sha256": "…" }     // 화면이 본 판(GET merged/content가 준 그대로)
+// 200
+{ "ok": true, "appended": [ { "name": "…", "achievements": 2, "plans": 1, "notes": 0 } ], "skipped": [], "rowCounts": { "achievements": 9, "plans": 6, "notes": 2 }, "runId": "c…", "sha256": "…" }
+// 409 { "error": "nothing_to_append", "detail": { "revised": 1 } } — 붙일 사람이 없다 (고쳐 낸 사람은 [다시 병합])
+```
+
+| ID | 요구사항 |
+|---|---|
+| API-68 | **`POST /api/submissions/proxy`** — 문은 `requireProxyTarget(scope, userId)`(TACP-18 v1.17): 로그인 → 신원·부서 → **대상 사람이 같은 부서 · 활성 · 본인이 아니고, 요청자가 `isManager`**가 아니면 404(TACP-5 — 존재 여부를 알리지 않는다). 그 뒤 속도 제한 `proxy:<이메일>` 30회/분 → 본문 → 주차(`isoKey`, 없는 주차 404 · 없으면 422 `invalid_request`) → 양식(409 `no_template`) → `buildWorklogHwp`(WA-04·05와 같은 길 — 422 `empty_content` · `cell_too_long` · `too_many_rows`) → `proxySubmit`. 부서는 신원에서 나온다 — 본문에 부서 칸은 없고 읽지도 않는다(TACP-6) (LE-01~06) |
+| API-68a | `proxySubmit`: 파일 먼저(그 사람 기준 경로 · 꼬리 `p<8자>`), DB 나중 — 한 트랜잭션에서 **그 주차에 그 사람의 판이 하나라도 있으면 409 `already_submitted`**(동시 두 요청도 하나만). 실패하면 먼저 쓴 파일을 지운다. v1 · `origin='lead_entry'` · `editedById`=쓴 사람 · `editedAt`=`uploadedAt`=쓴 시각 · 감사 `submission_proxy`(actor = 쓴 사람). **마감은 보지 않는다.** 알림은 보내지 않는다 (LE-03·05·07~10) |
+| API-69 | **`POST /api/division/merged/append`** — 문은 `requireOwnManager`(병합본 수정 API-50과 같은 칸 · 새 권한 아님) → 속도 제한 `merged-append:<이메일>` 20회/분 → 본문(`isoKey` · `runId` · `sha256`, 422) → 병합본(없으면 404 `not_found` 「아직 병합본이 없습니다.」 — API-48과 같다). **인증·역할이 본문 검사보다 먼저**(API-50a). 부서는 신원에서(TACP-6). `withUnitLock` 안에서 최신 성공 실행을 다시 읽어 화면이 본 판인지 확인(409 `merged_changed`), 병합 작업이 줄에 있으면 409 `merging` (LE-20·28) |
+| API-69a | 붙일 사람 = 최신 제출 중 `MergeRun.sourceIds`에 없고 **그 사람의 어느 판도 `sourceIds`에 없는** 것(`splitLate`). 사람은 명단 순서, 각 표의 **끝**에, 구분 번호는 이어서. 네 칸이 같은 줄은 새로 만들지 않고 작성자만 더한다. 기존 행은 다시 읽어 **앞부분이 그대로인지 확인한 뒤에만** 쓴다(아니면 500 `append_failed` · 파일 안 바뀜). 읽을 수 없는 파일은 그 사람만 건너뛰고(`skipped`) `sourceIds`에 넣지 않는다. 붙일 사람이 없으면 409 `nothing_to_append`(고쳐 낸 사람이 있으면 `detail.revised`) (LE-21~27·31) |
+| API-69b | 기록: `MergeRun.sourceIds` ← 합집합(HM-34 늦은 제출 세기·NT-40/51/52·merge-batch·`sourceCount`가 같이 풀린다) · `rowCounts` · `outputSha` · `finishedAt` · `reviewJson.rowAuthors`·`missing`·`appended`·`edits` 한 줄(`places` = 붙인 행 수) · 감사 `merge` `detail.action='append'`. **승인이 아니다** — `MergeReview`를 만들지 않는다. 잠금 밖에서 `onUnitVersionChanged`(`reason: append`)로 승인한 판이 바뀐 것을 알린다 — NT-52, 붙인 사람 본인은 제외 (LE-27~30) |
+
+---
+
 ### `GET /api/template` — 부서 양식 다운로드
 
 | ID | 요구사항 |
@@ -431,6 +457,8 @@ v1 유지 + `/data` 마운트 쓰기 확인. **부서명·사용자 정보 노�
 | API-T25 | [지금 병합] → 202 `{ jobId, position, joined }` · `GET ?jobId=`로 끝까지 · 같은 순간 두 요청은 작업 하나(둘째 `joined`) · 남의 부서 작업 id · member → 404 (API-31a · API-65, HM-T165 · HM-T171) |
 | API-T26 | `PUT /api/ops/divisions`의 `notifyEnabled` — 운영자 200 · DB에 저장 · 감사 `changed`에 `notifyEnabled`와 바뀐 값 · 꺼진 부서에도 켜짐(`isActive`는 그대로) · 불리언이 아니면 422(바뀐 것 없음) · 담당·부서장·부서원·총괄 404 · 없는 id 404 · GET에 `notifyEnabled` (API-66, `tests/ops-notify.test.ts`) |
 | API-T30 | `PUT /api/division/merged/content` — 본문이 틀려도(`{}` · JSON 아님 · `tables: null`) 로그인 없음 401 · 부서원 404 · 총괄 404, 담당에게만 422 (API-50a, `tests/merged-content-auth.test.ts`) |
+| API-T35 | `POST /api/submissions/proxy` — 담당·부서장 200 → v1(주인 = 그 사람 · `origin=lead_entry` · `editedById`) · 부서원·총괄·타 부서·탈퇴자·없는 id·자기 자신 404 · 이미 낸 사람 409 `already_submitted` · 마감 뒤에도 200 · 본문에 `divisionId`를 붙여도 신원 부서만 · 본문이 틀려도 로그인 없음 401·권한 없음 404가 먼저 (API-68, `tests/late-entry.test.ts` LE-T02~T10) |
+| API-T36 | `POST /api/division/merged/append` — 담당 200(각 표 끝에 붙고 기존 행 그대로 · `sourceIds` 합집합 · `edits` 한 줄) · 부서원·타 부서 담당 404 · 본문이 틀려도 401·404가 먼저 · 읽은 뒤 바뀌었으면 409 `merged_changed` · 붙일 사람 없으면 409 `nothing_to_append` · 병합 줄이 있으면 409 `merging` (API-69, `tests/late-entry.test.ts` LE-T21~T31) |
 | API-T15 | 제출물 열람 — 빈 번호 줄은 `rows`에 없고 머리행은 남는다 · `rowsByTable`은 그대로 (API-57) |
 | API-T16 | 병합본 보기 — member는 `review`가 `null`(승인자 이름이 응답에 없다)·`canApprove` 거짓, lead는 `review`를 받는다 · 「위로」 상태의 `sent.by`는 member에게 `null`, lead에게는 이름 (API-58) |
 | API-T17 | 규칙 PUT — `categories`만 저장 · 옛 키(`ruleText`·`guideText`·`emptyWords`·`sort` …)는 열을 바꾸지 않는다 · `categories`가 없거나 500B 초과면 422 · member 404 · 쓰기는 신원의 부서 (API-59, `tests/sprint2.test.ts`) |

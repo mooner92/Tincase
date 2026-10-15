@@ -3,7 +3,7 @@
 import { cache } from 'react';
 import { headers } from 'next/headers';
 import { redirect } from 'next/navigation';
-import { requireScope, resolveTargetDivision, HttpError, type Scope } from './authz';
+import { requireScope, resolveTargetDivision, canWriteOwnUnit, HttpError, type Scope } from './authz';
 import { AuthError } from './auth';
 import { loginHref, PATH_HEADER } from '@/lib/next-path';
 import type { Division } from '@prisma/client';
@@ -88,6 +88,8 @@ export const getDivisionView = cache(async (slugParam: string): Promise<Division
       아예 렌더하지 않는다 (TACP-9).
     */
     canEditMerged: isOwn && ps.scope.isManager,
+    // LE-45 — 늦게 낸 사람을 병합본 맨 뒤에 붙인다. API(`POST /api/division/merged/append`)가 `requireOwnManager`라 같은 식(`canWriteOwnUnit`)
+    canAppendLate: isOwn && canWriteOwnUnit(ps.scope),
     /*
       TACP-17 — 병합본 **작성자** 열람. 부서장이 검토하다 잘못된 내용을 보면
       다음 행동은 «그 사람과 이야기하는 것»이라 누가 썼는지가 필요하다.
@@ -109,6 +111,8 @@ export interface DivisionView {
   canSubmit: boolean;
   /** TACP-15·16 — 병합본 수정 (lead·head + 내 부서). 열람과 다르다 */
   canEditMerged: boolean;
+  /** LE-45 — [맨 뒤에 붙이기] (`requireOwnManager`와 같은 식 + 내 부서) */
+  canAppendLate: boolean;
   /** TACP-17 — 병합본 각 행의 **작성자** 열람 (lead·head·readAll) */
   canSeeAuthors: boolean;
   /** TACP-14 — 남의 제출물 삭제 (operator 전용) */

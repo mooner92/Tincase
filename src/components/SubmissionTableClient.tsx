@@ -8,9 +8,12 @@
 // 2026-10-08 (PG-73 — 기능 정리) — 줄마다 [받기](R8)와 머리의 [전체 zip 받기](R1)를 지웠다. 제출물 다운로드는 운영자 3건,
 // zip은 0건이었다 — 받을 일이 있으면 [열기] 드로어의 [원본 다운로드] 하나다. 표 밑 「집계 제외: …」 각주(R7)도 지웠다 —
 // 명단 밖인데 낸 사람은 「추가 제출」 표가 따로 보이고, 안 낸 사람은 셀 것이 없다.
+//
+// 2026-10-15 (CP-131 · LE-40) — 미제출 행에 [대신 쓰기](서버가 내려준 `canProxy`). 누르면 `ProxyEntryDrawer`가 빈 표로 열린다.
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { FileDrawer, type DrawerMember } from './FileDrawer';
+import { ProxyEntryDrawer, type ProxyTarget } from './ProxyEntryDrawer';
 import { BellIcon } from './BellIcon';
 
 export interface MemberRow {
@@ -20,6 +23,21 @@ export interface MemberRow {
   versionCount: number;
   /** NT-31 — 이 주차에 마감 알림을 받은 시각 (KST "13:00") */
   notifiedAtKst?: string | null;
+  /** CP-131 — [대신 쓰기]를 그릴 행. 서버가 `canProxySubmit`으로 정한다 (TACP-9) — 화면이 다시 따지지 않는다 */
+  canProxy?: boolean;
+  /** LE-44 — 최신 판이 담당자가 대신 입력한 것이다 (`origin === 'lead_entry'`) */
+  proxied?: boolean;
+}
+
+/**
+ * CP-132 · WA-40 — 대신 쓸 주. `merged` = 병합본이 이미 있다 → 저장 뒤 안내가 「맨 뒤에 붙이기」로 달라진다 (WA-40f).
+ * `appendable` = 병합 카드가 지금 [맨 뒤에 붙이기]를 내놓고 있다 — 붙인 뒤에는 그 안내를 걷는다
+ */
+export interface ProxyWeek {
+  isoKey: string;
+  label: string;
+  merged: boolean;
+  appendable: boolean;
 }
 
 export function SubmissionTableClient({
@@ -27,6 +45,7 @@ export function SubmissionTableClient({
   caption,
   title,
   canDelete = false,
+  proxyWeek,
 }: {
   members: MemberRow[];
   caption: string;
@@ -34,8 +53,19 @@ export function SubmissionTableClient({
   title: string;
   /** TACP-14 — operator만. 담당자에게는 렌더하지 않는다 (TACP-9) */
   canDelete?: boolean;
+  /** 있으면 `canProxy`인 행에 [대신 쓰기]가 붙는다 */
+  proxyWeek?: ProxyWeek;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
+  const [proxyTarget, setProxyTarget] = useState<ProxyTarget | null>(null);
+  const [proxySaved, setProxySaved] = useState<string | null>(null);
+  const proxyNote =
+    proxySaved &&
+    (!proxyWeek?.merged
+      ? `${proxySaved}님 것을 저장했어요 · 병합할 때 함께 들어가요`
+      : proxyWeek.appendable
+        ? `${proxySaved}님 것을 저장했어요 · 병합본에는 위 병합 카드의 [맨 뒤에 붙이기]`
+        : `${proxySaved}님 것을 저장했어요`);
   const [busyId, setBusyId] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   const router = useRouter();
@@ -75,6 +105,8 @@ export function SubmissionTableClient({
       <span className="inline-flex items-center gap-1.5 font-medium whitespace-nowrap text-success">
         <span aria-hidden className="dot" />
         제출
+        {/* LE-44 — 담당자가 대신 입력한 판. 누가 썼는지는 열었을 때 드로어 머리에 있다 */}
+        {m.proxied && <span className="font-normal text-warning">· 대신 입력</span>}
       </span>
     ) : (
       <span className="inline-flex items-center gap-1.5 whitespace-nowrap text-muted">
@@ -89,9 +121,23 @@ export function SubmissionTableClient({
       </span>
     );
 
-  /** 열기·삭제 — 표와 줄 목록이 같은 것을 쓴다 (두 벌이면 갈라진다) */
+  /** 열기·삭제·대신 쓰기 — 표와 줄 목록이 같은 것을 쓴다 (두 벌이면 갈라진다) */
   const actions = (m: MemberRow) =>
-    m.latest && (
+    !m.latest ? (
+      m.canProxy &&
+      proxyWeek && (
+        <button
+          onClick={() => {
+            setProxySaved(null);
+            setProxyTarget({ userId: m.user.id, name: m.user.name });
+          }}
+          className="btn-ghost"
+          aria-label={`${m.user.name} 대신 쓰기`}
+        >
+          대신 쓰기
+        </button>
+      )
+    ) : (
       <span className="inline-flex items-center gap-0.5">
         <button onClick={() => setOpenId(m.latest!.id)} className="btn-ghost" aria-label={`${m.user.name} 제출물 열기`}>
           열기
@@ -147,7 +193,7 @@ export function SubmissionTableClient({
                 <th scope="col">버전</th>
                 <th scope="col">제출시각</th>
                 <th scope="col" className="text-right">
-                  {canDelete ? '열람 · 삭제' : '열람'}
+                  {['열람', members.some((m) => m.canProxy) && proxyWeek && '대신 쓰기', canDelete && '삭제'].filter(Boolean).join(' · ')}
                 </th>
               </tr>
             </thead>
@@ -165,9 +211,23 @@ export function SubmissionTableClient({
           </table>
         </div>
         {err && <p className="border-t border-hairline-soft px-5 py-3 text-sm text-error sm:px-6">{err}</p>}
+        {proxyNote && <p className="border-t border-hairline-soft px-5 py-3 text-sm font-medium text-success sm:px-6">{proxyNote}</p>}
       </section>
 
       <FileDrawer openId={openId} members={drawerMembers} onClose={() => setOpenId(null)} onNavigate={setOpenId} />
+      {proxyWeek && (
+        <ProxyEntryDrawer
+          target={proxyTarget}
+          isoKey={proxyWeek.isoKey}
+          weekLabel={proxyWeek.label}
+          onClose={() => setProxyTarget(null)}
+          onSaved={(t) => {
+            setProxyTarget(null);
+            setProxySaved(t.name); // WA-40f — 안내 글은 그리는 때 정한다(병합본이 있으면 [다시 병합]이 아니라 [맨 뒤에 붙이기])
+            router.refresh();
+          }}
+        />
+      )}
     </>
   );
 }

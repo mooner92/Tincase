@@ -27,7 +27,7 @@ export interface ThisWeekCardProps {
   /** PG-67d — 보이지 않는 새로 고침 */
   refresh: { atMs: number; serverNowMs: number } | null;
   /** version은 취소 확인 문구에만 쓴다. 고친 사람은 싣지 않는다 — 「고침」 여부만(PG-66e) */
-  mine: { id: string; at: string; version: number; edited: boolean } | null;
+  mine: { id: string; at: string; version: number; edited: boolean; proxied: boolean } | null;
   /** user.onRoster — 집계 제외(부서장·휴직)에게는 「미제출」이 없다 (D17) */
   showMissing: boolean;
   /** 마감 전(또는 열림)이고 부서 양식이 있다 */
@@ -114,14 +114,15 @@ export function ThisWeekCard({
     try {
       const r = await fetch(`/api/submissions/${mine.id}/preview`);
       const b = r.ok
-        ? ((await r.json()) as { rowsByTable?: Rows; submission?: { editedBy?: string | null; editedAt?: string | null } })
+        ? ((await r.json()) as { rowsByTable?: Rows; submission?: { editedBy?: string | null; editedAt?: string | null; proxied?: boolean } })
         : null;
       const by = b?.submission?.editedBy;
       const at = b?.submission?.editedAt;
       setComposing({
         initial: b?.rowsByTable ?? null,
         failed: !b?.rowsByTable,
-        editedNote: by ? `${by} 고침${at ? ` · ${at.slice(5, 16).replace('T', ' ')}` : ''}` : null,
+        // LE-44 — 담당자가 대신 입력한 판이면 「○○ 입력」
+        editedNote: by ? `${by} ${b?.submission?.proxied ? '입력' : '고침'}${at ? ` · ${at.slice(5, 16).replace('T', ' ')}` : ''}` : null,
       });
     } catch {
       setComposing({ initial: null, failed: true, editedNote: null });
@@ -202,7 +203,7 @@ export function ThisWeekCard({
           <p className="text-[13px] leading-5 text-muted tabular-nums">
             {mine.at} 제출
             {/* TACP-22 — 담당자가 고친 판. 이름은 열었을 때(작성 화면·제출물 드로어 머리) 보인다 */}
-            {mine.edited && <span className="text-warning"> · 고침</span>}
+            {mine.proxied ? <span className="text-warning"> · 대신 입력</span> : mine.edited && <span className="text-warning"> · 고침</span>}
           </p>
         )}
 

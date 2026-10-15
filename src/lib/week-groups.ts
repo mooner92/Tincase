@@ -21,6 +21,8 @@ export interface MineLite {
   version: number;
   uploadedAt: Date;
   editedById: string | null;
+  /** LE-44 — `lead_entry`면 담당자가 대신 입력한 판 */
+  origin: string;
 }
 
 export interface PastWeek {
@@ -32,8 +34,8 @@ export interface PastWeek {
   weekOfMonth: number;
   /** WS-14 — 그 달 마지막 주(월간 업무일지) */
   monthly: boolean;
-  /** 내 최신 판. 고친 사람의 id는 싣지 않는다 — 「고침」 여부만 (PG-66e) */
-  mine: { id: string; edited: boolean } | null;
+  /** 내 최신 판. 고친 사람의 id는 싣지 않는다 — 「고침」 · 「대신 입력」 여부만 (PG-66e · LE-44) */
+  mine: { id: string; edited: boolean; proxied: boolean } | null;
   /** 이 부서의 병합본을 열 수 있는 주 (§5.1) */
   doc: boolean;
 }
@@ -82,7 +84,7 @@ export function pickPastWeeks(i: {
       month: s.month,
       weekOfMonth: s.weekOfMonth,
       monthly: slotKind(s) === 'monthly',
-      mine: m && { id: m.id, edited: m.editedById !== null },
+      mine: m && { id: m.id, edited: m.editedById !== null, proxied: m.origin === 'lead_entry' },
       doc,
     });
   }

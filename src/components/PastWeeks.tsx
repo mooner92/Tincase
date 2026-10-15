@@ -74,7 +74,7 @@ export function PastWeeks({
             <span aria-hidden className="dot text-success" />
             제출
             {/* TACP-22 — 담당자가 고친 판. 누가 고쳤는지는 열면 드로어 머리에 있다(PG-66e — 홈에 남의 이름이 없다) */}
-            {w.mine.edited && <span className="text-warning">· 고침</span>}
+            {w.mine.proxied ? <span className="text-warning">· 대신 입력</span> : w.mine.edited && <span className="text-warning">· 고침</span>}
           </span>
         ) : showMissing ? (
           <span className="inline-flex items-center gap-1.5 text-muted">

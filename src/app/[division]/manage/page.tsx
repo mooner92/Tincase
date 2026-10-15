@@ -23,6 +23,8 @@ export default async function ManagePage({ params }: { params: Promise<{ divisio
       canDownloadMerged={view.canManage}
       canDeleteAny={view.canDeleteAny}
       canEditMerged={view.canEditMerged}
+      canAppend={view.canAppendLate}
+      proxyScope={view.isOwn ? view.scope : null}
       canApprove={view.isOwn && isReviewer(view.scope)}
       handoff={view.isOwn && canSeeHandoff(view.scope) ? { escape: canUseHandoffEscape(view.scope) } : null}
     />;

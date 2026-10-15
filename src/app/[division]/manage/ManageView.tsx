@@ -26,6 +26,9 @@ import { latestReview } from '@/server/merge/review';
 import { HELD_TEXT, latestEdits } from '@/server/merge/edits';
 import { activeMergeJob, jobView } from '@/server/merge/queue';
 import { readStoredFile, sha256 } from '@/server/storage';
+import { canProxySubmit, type Scope } from '@/server/authz';
+import { orderPeople } from '@/server/merge/rules';
+import { splitLate } from '@/lib/late';
 import { boardTitle } from '@/lib/docname';
 import { differingGroups } from '@/lib/merge-rows';
 import { notFound } from 'next/navigation';
@@ -46,6 +49,8 @@ export async function ManageView({
   canDeleteAny,
   canEditMerged,
   canApprove = false,
+  canAppend = false,
+  proxyScope = null,
   handoff = null,
 }: {
   division: Division; // ★ 해석된 부서. scope.division을 쓰면 타 부서 열람 시 어긋난다
@@ -60,6 +65,13 @@ export async function ManageView({
   canEditMerged: boolean;
   /** HM-47 — 승인 버튼. 내 부서의 head에게만 (TACP-16) */
   canApprove?: boolean;
+  /** LE-42·45 — 늦게 낸 사람을 병합본 맨 뒤에 붙이기. `requireOwnManager`와 같은 식 + 내 부서 (`canAppendLate`) */
+  canAppend?: boolean;
+  /**
+   * LE-40·45 — [대신 쓰기]를 그릴 수 있는 신원. 내 부서를 보는 중일 때만 넘긴다 — 줄마다 `canProxySubmit`으로 판정해
+   * 게이트(`requireProxyTarget`)와 같은 식이 된다(TACP-9). 없으면 [대신 쓰기]는 없다
+   */
+  proxyScope?: Pick<Scope, 'isManager' | 'user' | 'division'> | null;
   /**
    * RU-80 — 「위로」 상태 카드. 내 부서의 lead·head에게만(TACP-21 v1.7 `canSeeHandoff`) — 카드에 행방이 있다.
    * `escape` — 비상구 링크를 그릴 사람인가(`canUseHandoffEscape` — lead). 없으면 카드가 없다
@@ -144,6 +156,31 @@ export async function ManageView({
     held: held && lastRun?.status === 'succeeded',
   };
 
+  /*
+   * LE-21 — 병합본에 안 들어간 최신 제출을 둘로 가른다: 늦게 낸 사람(맨 뒤에 붙인다) · 고쳐 낸 사람(다시 병합).
+   * 서버(`appendLate`)와 같은 함수다. 이름은 붙일 수 있는 사람에게만 내려보낸다 (TACP-17 — 작성자 이름은 담당에게만).
+   * 붙일 판(`sha256`)이 없으면 안내하지 않는다 — 눌러 봐야 409다.
+   */
+  let late: string[] = [];
+  let revised: string[] = [];
+  if (canAppend && lastRun?.status === 'succeeded' && mergedSha) {
+    let used: string[] = [];
+    try {
+      used = (JSON.parse(lastRun.sourceIds) as unknown[]).filter((x): x is string => typeof x === 'string');
+    } catch {
+      used = [];
+    }
+    const subs = await prisma.submission.findMany({
+      where: { divisionId: division.id, weekSlotId: slot.id },
+      select: { id: true, userId: true, isLatest: true, user: { select: { name: true, sortOrder: true } } },
+    });
+    const split = splitLate(subs, new Set(used));
+    const names = (list: typeof subs) =>
+      orderPeople(list.map((s) => ({ name: s.user.name, sortOrder: s.user.sortOrder }))).map((p) => p.name);
+    late = names(split.candidates);
+    revised = names(split.revised);
+  }
+
   const deadline = effectiveDeadline(slot, division);
   const closed = isLocked(slot, division, now);
   // DM-20 — 담당자가 잠시 열어 두었는가
@@ -168,6 +205,10 @@ export async function ManageView({
     },
     versionCount: m.versionCount,
     notifiedAtKst: m.notifiedAtKst,
+    // CP-131 — 게이트(`requireProxyTarget`)와 같은 함수로 줄마다 판정한다. 낸 사람 행에는 없다(그쪽은 [열기]·[고치기])
+    canProxy:
+      m.status === 'missing' && !!proxyScope && canProxySubmit(proxyScope, { id: m.user.id, divisionId: division.id, isActive: true }),
+    proxied: m.latest?.origin === 'lead_entry', // LE-44
   });
 
   return (
@@ -285,6 +326,9 @@ export async function ManageView({
           canRun={canMerge}
           canEditMerged={canEditMerged}
           canApprove={canApprove}
+          canAppend={canAppend}
+          late={late}
+          revised={revised}
           handoffTo={handoffTo}
           canDownload={canDownloadMerged}
           submitted={collected}
@@ -299,6 +343,9 @@ export async function ManageView({
           title={`부서원 ${members.length}명`}
           members={members.map(toRow)}
           canDelete={canDeleteAny}
+          proxyWeek={
+            proxyScope ? { isoKey: slot.isoKey, label: slot.label, merged: lastRun?.status === 'succeeded', appendable: late.length > 0 } : undefined
+          }
         />
 
         {/* DM-17 — 명단 밖인데 낸 사람. 분모에는 없지만 병합에는 들어간다 */}

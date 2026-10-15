@@ -36,7 +36,7 @@ const base: ThisWeekCardProps = {
   emptyWordsRaw: '',
   layout: 'paired',
 };
-const mine = { id: 's1', at: '10-08 10:57', version: 2, edited: false };
+const mine = { id: 's1', at: '10-08 10:57', version: 2, edited: false, proxied: false };
 const card = (p: Partial<ThisWeekCardProps>) => renderToStaticMarkup(createElement(ThisWeekCard, { ...base, ...p }));
 /** 첫 그림에 있는 버튼 글자 — 주 버튼·[병합본]·제출 취소 */
 const buttons = (html: string) => [...html.matchAll(/<button[^>]*>([^<]*)<\/button>/g)].map((m) => m[1]);

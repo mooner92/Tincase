@@ -38,6 +38,7 @@ const ACTION_KO: Record<string, { label: string; tone: 'normal' | 'watch' | 'str
   rollup: { label: '본부본·전사본', tone: 'normal' },
   rollup_order: { label: '순서 변경', tone: 'watch' },
   submission_revise: { label: '제출물 고침', tone: 'watch' },
+  submission_proxy: { label: '제출물 대신 입력', tone: 'watch' },
   approve: { label: '승인', tone: 'normal' },
   edit: { label: '병합본 수정', tone: 'watch' },
   withdraw_upload: { label: '올린 파일 취소', tone: 'watch' },

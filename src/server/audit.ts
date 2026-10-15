@@ -37,7 +37,9 @@ export type AuditAction =
   /** RU-20 — 이어 붙이는 순서·메모를 바꿨다 */
   | 'rollup_order'
   /** TACP-22 — 담당자가 부서원 제출물을 새 판으로 고쳤다. 누구의 몇 판을 고쳤는지 남는다 */
-  | 'submission_revise';
+  | 'submission_revise'
+  /** TACP-18 v1.17 · LE-09 — 담당자가 낸 적 없는 부서원의 제출물을 대신 썼다. actor = 쓴 사람, 대상 사람·주차가 detail */
+  | 'submission_proxy';
 
 export async function audit(
   actor: string,

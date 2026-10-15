@@ -22,6 +22,8 @@ interface PreviewData {
     editedBy?: string | null;
     /** TACP-22 — 고친 시각 (KST ISO). `uploadedAt`은 부서원이 낸 시각 그대로다 */
     editedAt?: string | null;
+    /** LE-44 — 담당자가 대신 입력한 판 (`origin === 'lead_entry'`) */
+    proxied?: boolean;
   };
   tables: { title: string; columns: string[]; rows: string[][] }[];
   warnings: string[];
@@ -31,7 +33,8 @@ interface PreviewData {
 }
 
 /** TACP-22 — 「○○ 고침 · 14:30」. 제출 시각과 고친 시각을 섞지 않는다 */
-const editedLabel = (by: string, at?: string | null) => `${by} 고침${at ? ` · ${at.slice(11, 16)}` : ''}`;
+export const editedLabel = (by: string, at?: string | null, proxied = false) =>
+  `${by} ${proxied ? '입력' : '고침'}${at ? ` · ${at.slice(11, 16)}` : ''}`; // LE-44 — 대신 입력한 판은 「○○ 입력 · 시각」
 
 export function FileDrawer({
   openId,
@@ -167,7 +170,7 @@ export function FileDrawer({
                   {data.submission.userName}{' '}
                   <span className="font-normal text-muted">
                     · v{data.submission.version} · {data.submission.uploadedAt.slice(5, 16).replace('T', ' ')}
-                    {data.submission.editedBy && ` · ${editedLabel(data.submission.editedBy, data.submission.editedAt)}`}
+                    {data.submission.editedBy && ` · ${editedLabel(data.submission.editedBy, data.submission.editedAt, data.submission.proxied)}`}
                   </span>
                 </>
               ) : (
