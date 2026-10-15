@@ -119,6 +119,8 @@ model User {
   notifyEnabled Boolean  @default(true)
   sortOrder     Int      @default(100)
   createdAt     DateTime @default(now())
+  /// DM-26 · ADR-0022 D1 — Tincase 소속을 ERP와 다르게 고정했다(운영자가 /ops에서 옮기면 켜진다). 인원 최신화는 이 사람의 부서를 옮기지 않고 알리기만 한다
+  divisionPinned Boolean @default(false)
 
   // 사내망 직접 접속용 비밀번호 인증 (AU-20). 외부는 Cloudflare Access가 담당
   passwordHash       String? // scrypt. null이면 아직 발급 전

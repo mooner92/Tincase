@@ -20,11 +20,21 @@ export interface UserRow {
   mustChangePassword: boolean;
   lastLoginAt: string | null;
   locked: boolean;
+  /** DM-26 — Tincase 소속을 ERP와 다르게 고정했다(운영자가 옮겼다) */
+  divisionPinned?: boolean;
+}
+
+/** DM-26 — 드로어의 「소속」 고르기에 쓰는 부서 목록 */
+export interface DivisionOption {
+  id: string;
+  nameKo: string;
 }
 
 export function RosterDrawer({
   divisionName,
+  divisionId,
   users,
+  divisions = [],
   busy,
   onClose,
   onPatch,
@@ -32,7 +42,11 @@ export function RosterDrawer({
   onSendSetupLink,
 }: {
   divisionName: string | null;
+  /** 지금 연 부서 — 「소속」 고르기의 지금 값 */
+  divisionId?: string | null;
   users: UserRow[];
+  /** DM-26 — 소속 옮기기 (없으면 그 칸을 그리지 않는다) */
+  divisions?: DivisionOption[];
   busy: boolean;
   onClose: () => void;
   onPatch: (userId: string, patch: Record<string, unknown>) => void;
@@ -130,6 +144,7 @@ export function RosterDrawer({
                 <th className="px-4 py-2 font-medium whitespace-nowrap">이름</th>
                 <th className="px-4 py-2 font-medium whitespace-nowrap">이메일</th>
                 <th className="px-4 py-2 font-medium whitespace-nowrap">역할</th>
+                {divisions.length > 0 && <th className="px-4 py-2 font-medium whitespace-nowrap">소속</th>}
                 <th className="px-4 py-2 font-medium whitespace-nowrap">제출 대상</th>
                 <th className="px-4 py-2 font-medium whitespace-nowrap">사번</th>
                 <th className="px-4 py-2 font-medium whitespace-nowrap">알림</th>
@@ -163,6 +178,40 @@ export function RosterDrawer({
                       <option value="head">부서장 (검토)</option>
                     </select>
                   </td>
+                  {divisions.length > 0 && (
+                    <td className="px-4 py-2 whitespace-nowrap">
+                      {/* DM-26 — ERP와 다른 부서의 글을 맡는 사람. 옮기면 고정된다(인원 최신화가 되돌리지 않는다) */}
+                      <div className="flex items-center gap-1.5">
+                        <select
+                          aria-label={`${u.name} 소속`}
+                          value={divisionId ?? ''}
+                          disabled={busy}
+                          onChange={(e) => {
+                            const to = divisions.find((d) => d.id === e.target.value);
+                            if (to && confirm(`${u.name} 님의 Tincase 소속을 ${to.nameKo}(으)로 옮깁니다.\nERP 소속과 달라 고정됩니다 — 인원 최신화가 되돌리지 않습니다.`))
+                              onPatch(u.id, { divisionId: to.id });
+                          }}
+                          className="rounded border border-border-strong px-1 py-0.5 text-xs"
+                        >
+                          {divisions.map((d) => (
+                            <option key={d.id} value={d.id}>
+                              {d.nameKo}
+                            </option>
+                          ))}
+                        </select>
+                        {u.divisionPinned && (
+                          <button
+                            disabled={busy}
+                            onClick={() => onPatch(u.id, { divisionPinned: false })}
+                            title="고정 풀기 — 다음 인원 최신화가 ERP 부서로 옮깁니다"
+                            className="chip chip-warn px-1.5 py-0 text-xs"
+                          >
+                            고정 · 풀기
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  )}
                   <td className="px-4 py-2 text-center">
                     <input
                       aria-label={`${u.name} 집계 대상`}
