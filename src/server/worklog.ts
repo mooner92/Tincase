@@ -1,5 +1,5 @@
 // 도메인 서비스 — 슬롯 보장(WS-11), 업로드(DM-05/12, ST-10), 현황(DM-08).
-import type { Division, Submission, User, WeekSlot } from '@prisma/client';
+import { Prisma, type Division, type Submission, type User, type WeekSlot } from '@prisma/client';
 import { prisma } from './db';
 import { audit } from './audit';
 import { logger } from './logger';
@@ -238,6 +238,81 @@ export async function reviseSubmission(input: {
     slot: target.weekSlot.isoKey,
     from: target.version,
     to: created.version,
+  });
+  return created;
+}
+
+/**
+ * TACP-18 v1.17 · LE-01~10 — 담당자가 **낸 적 없는** 부서원의 제출물을 대신 쓴다.
+ *
+ * 새 판 **v1의 주인은 그 사람**이다(「그 계정이 올린 것처럼」) — 현황·병합·감사 문서는 그 사람이 낸 것으로 읽는다.
+ * 쓴 사람은 같은 행의 `editedById`·`editedAt`·`origin='lead_entry'`에 남는다(`reviseSubmission`과 같은 방식).
+ * 마감은 보지 않는다 — 게이트(`requireProxyTarget`)가 이미 판정했다.
+ *
+ * **그 주차에 그 사람의 판이 하나라도 있으면 409** — 트랜잭션 안에서 본다(두 담당자가 동시에 눌러도 하나만 쓴다).
+ * 낸 판을 새로 만드는 길이 되면 [고치기]의 「남의 것만 · 최신 판만」(TACP-22)이 우회된다.
+ *
+ * 파일을 **먼저** 쓰고 DB를 커밋한다(`reviseSubmission`과 같은 이유) — 경로의 고유 꼬리로 동시 요청이 서로의 파일을 덮거나 지우지 않는다.
+ */
+export async function proxySubmit(input: {
+  editor: Pick<User, 'id' | 'email' | 'name'>;
+  owner: User;
+  division: Division;
+  slot: WeekSlot;
+  bytes: Buffer;
+  fileName: string;
+}, now = new Date()): Promise<Submission> {
+  const { editor, owner, division, slot, bytes } = input;
+  try {
+    validateHwpUpload(bytes);
+  } catch (e) {
+    if (e instanceof UploadValidationError) throw new HttpError(422, 'invalid_file', e.message);
+    throw e;
+  }
+  const hash = sha256(bytes);
+  const rel = submissionRelPath(division.slug, slot.year, slot.label, owner, 1, `p${randomUUID().slice(0, 8)}`); // ST-02a — 주인의 꼬리
+  try {
+    await writeFileAtomic(rel, bytes);
+  } catch (e) {
+    logger.error({ err: String(e), owner: owner.id, relPath: rel }, 'proxy: file write failed before DB commit');
+    throw new HttpError(500, 'internal', '파일 저장에 실패했습니다. 다시 시도해 주세요.');
+  }
+
+  const already = new HttpError(409, 'already_submitted', '이번 주에 이미 낸 제출물이 있어요. 낸 것은 [고치기]로 고쳐 주세요.');
+  let created: Submission;
+  try {
+    created = await prisma.$transaction(async (tx) => {
+      const any = await tx.submission.findFirst({ where: { userId: owner.id, weekSlotId: slot.id }, select: { id: true } });
+      if (any) throw already;
+      return tx.submission.create({
+        data: {
+          divisionId: division.id, // DM-12 — 신원의 부서 (게이트가 대상이 같은 부서임을 확인했다)
+          userId: owner.id,
+          weekSlotId: slot.id,
+          version: 1,
+          isLatest: true,
+          filePath: rel,
+          originalName: input.fileName,
+          byteSize: bytes.length,
+          sha256: hash,
+          origin: 'lead_entry',
+          // 「언제 냈나」는 쓴 시각 — 늦게 낸 것은 사실이다 (LE-07)
+          uploadedAt: now,
+          editedById: editor.id,
+          editedAt: now,
+        },
+      });
+    });
+  } catch (e) {
+    await unlink(resolveInRoot(rel)).catch(() => undefined); // 커밋되지 않았다 — 먼저 쓴 파일은 아무도 가리키지 않는다
+    // 동시에 낸 판이 유니크 제약(userId·주차·판)에 걸렸다 — 같은 뜻이다
+    if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') throw already;
+    throw e;
+  }
+  await audit(editor.email, 'submission_proxy', division.id, `submission:${created.id}`, {
+    owner: owner.name,
+    slot: slot.isoKey,
+    version: 1,
   });
   return created;
 }

@@ -13,17 +13,12 @@ export const dynamic = 'force-dynamic';
 export const GET = handler(async (req: NextRequest) => {
   const scope = await requireOperator(req.headers);
   void scope;
-  const rows = await prisma.division.findMany({
+  // PG-95 (2026-10-14) — **등록 순서 = ERP 인원 현황 순서 = 조직도 순서**로 준다. 화면이 상위부서로 묶는다(lib/division-groups).
+  // 예전에는 취합게시판 제출 이력(DM-15)으로 위아래를 갈랐다 — 연구 실도 본부 표로 내고 있어 모든 부서가 쓰게 됐다(운영자: 「이력 없음은 없애도 되겠네」)
+  const divisions = await prisma.division.findMany({
+    orderBy: [{ createdAt: 'asc' }, { nameKo: 'asc' }],
     include: { _count: { select: { users: { where: { isActive: true } } } } },
   });
-  // 제출 이력이 있는 부서를 위로 — 온보딩 우선순위가 곧 이 순서다
-  const rank = { confirmed: 0, none: 1 } as const;
-  const divisions = rows.sort(
-    (a, b) =>
-      (rank[a.boardStatus as keyof typeof rank] ?? 2) - (rank[b.boardStatus as keyof typeof rank] ?? 2) ||
-      Number(b.isActive) - Number(a.isActive) ||
-      a.nameKo.localeCompare(b.nameKo, 'ko'),
-  );
   // OPS-41 — **행이 아니라 파일까지** 본다. 행만 보면 「✓」가 거짓이 된다
   const tplState = await templateStates(divisions.map((d) => d.id));
   return json({
@@ -32,6 +27,8 @@ export const GET = handler(async (req: NextRequest) => {
       slug: d.slug,
       shortSlug: d.shortSlug,
       nameKo: d.nameKo,
+      /** PG-95 — ERP 「상위부서」. 화면이 본부별로 묶는다 */
+      parentKo: d.parentKo,
       isActive: d.isActive,
       /** API-66 · PG-91 — 부서 알림 스위치. 켜짐과 따로 보인다 — 꺼진 부서에 켜 둔 것도 운영자가 알아야 한다 */
       notifyEnabled: d.notifyEnabled,
@@ -41,8 +38,6 @@ export const GET = handler(async (req: NextRequest) => {
       hasTemplate: tplState.get(d.id) === 'ok',
       /** OPS-41 — 「없음」과 「파일이 사라짐」은 해야 할 일이 다르다 */
       templateState: tplState.get(d.id) ?? 'none',
-      boardStatus: d.boardStatus, // 취합게시판 제출 이력 (DM-15)
-      boardNote: d.boardNote,
     })),
   });
 });

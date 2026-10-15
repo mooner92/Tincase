@@ -653,6 +653,42 @@ d('PG-51 「전사」 한 화면 — 섹션 표', () => {
       await prisma.division.updateMany({ where: { id: { in: ids } }, data: { boardStatus: 'none' } });
     }
   });
+
+  it('[RU-T165] ★ RU-96 — 켜진 부서만 다룬다: Tincase 밖 섹션은 전사 판정·「전사」 표에서 빠지고(이름만 한 줄) 구성·편집기에는 남는다 · 그 부서를 켜면 들어온다', async () => {
+    const { prisma } = await import('@/server/db');
+    const { orgBoard } = await import('@/server/org-board');
+    const { resolveSections } = await import('@/server/rollup/sections');
+    const { rollupSlot } = await import('@/server/rollup/slot');
+    const slot = await rollupSlot(isoKey);
+    const off = await prisma.division.create({ data: { slug: 'RA_OFF', nameKo: '꺼진실', nameEn: 'RA_OFF', isActive: false, boardStatus: 'confirmed' } });
+    const max = await prisma.orgSection.aggregate({ _max: { sortOrder: true } });
+    const section = await prisma.orgSection.create({ data: { sortOrder: (max._max.sortOrder ?? 0) + 10, title: '꺼진실', divisionId: off.id } });
+    try {
+      // 판정 — 기본은 켜진 섹션만(전사본·총괄 알림·표가 이것을 쓴다). `all`이면 밖 섹션도 offline으로(섹션 목록 API)
+      expect((await resolveSections(slot)).map((s) => s.section.title)).not.toContain('꺼진실');
+      const all = await resolveSections(slot, undefined, { all: true });
+      expect(all.find((s) => s.section.title === '꺼진실')).toMatchObject({ kind: 'missing', offline: true });
+      // 표 — 줄은 없고 이름만 한 줄. 번호는 보이는 줄 순서(= 전사본 순서). 편집기에는 남는다(구성은 그대로)
+      const board = await orgBoard(slot, { progress: true, desk: true }, '');
+      expect(board.rows.map((r) => r.title)).not.toContain('꺼진실');
+      expect(board.offline).toEqual(['꺼진실']);
+      const numbered = board.rows.filter((r) => r.no !== null);
+      expect(numbered.map((r) => r.no)).toEqual(numbered.map((_, i) => i + 1));
+      expect(board.editor?.sections.map((x) => x.title)).toContain('꺼진실');
+      const read = await orgBoard(slot, { progress: true, desk: false }, '');
+      expect(read.rows.map((r) => r.title)).not.toContain('꺼진실');
+      expect(read.offline).toEqual(['꺼진실']);
+      // 편입 — 그 부서를 켜면 표와 판정에 들어온다(섹션을 손대지 않아도)
+      await prisma.division.update({ where: { id: off.id }, data: { isActive: true } });
+      expect((await resolveSections(slot)).map((s) => s.section.title)).toContain('꺼진실');
+      const after = await orgBoard(slot, { progress: true, desk: true }, '');
+      expect(after.rows.map((r) => r.title)).toContain('꺼진실');
+      expect(after.offline).toEqual([]);
+    } finally {
+      await prisma.orgSection.delete({ where: { id: section.id } });
+      await prisma.division.delete({ where: { id: off.id } });
+    }
+  });
 });
 
 d('RU-02 · RU-08 · HM-47 · RU-57 — 바뀜 판정 · 본부 스위치 · 승인 분리 · 도착 알림', () => {

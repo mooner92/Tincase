@@ -25,6 +25,7 @@ const mineOf = (slotId: string, extra: Partial<MineLite> = {}): MineLite => ({
   version: 1,
   uploadedAt: new Date(0),
   editedById: null,
+  origin: 'web',
   ...extra,
 });
 
@@ -80,7 +81,13 @@ describe('[PG-T92] pickPastWeeks — 줄이 되는 주 (PG-68a)', () => {
 
   it('⑦ 담당자가 고친 판이면 edited=true — 고친 사람의 id는 밖으로 나가지 않는다 (PG-66e)', () => {
     const r = pickPastWeeks({ ...base, mine: [mineOf('2026-W37', { editedById: 'lead-secret-id' })] });
-    expect(r[0].mine).toEqual({ id: 'sub-2026-W37', edited: true });
+    expect(r[0].mine).toEqual({ id: 'sub-2026-W37', edited: true, proxied: false });
+    expect(JSON.stringify(r)).not.toContain('lead-secret-id');
+  });
+
+  it('⑦b 담당자가 대신 입력한 판(origin=lead_entry)이면 proxied=true — 역시 고친 사람의 id는 나가지 않는다 (LE-44)', () => {
+    const r = pickPastWeeks({ ...base, mine: [mineOf('2026-W37', { editedById: 'lead-secret-id', origin: 'lead_entry' })] });
+    expect(r[0].mine).toEqual({ id: 'sub-2026-W37', edited: true, proxied: true });
     expect(JSON.stringify(r)).not.toContain('lead-secret-id');
   });
 

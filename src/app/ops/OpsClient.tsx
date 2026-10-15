@@ -3,16 +3,20 @@
 //
 // PG-55 (2026-10-07) — 부서 표는 **읽기가 기본**이다. 줄마다 요일·시각·업무일지 고르기와 활성 단추가 늘 열려 있어
 // 열네 줄이 입력칸 밭이었고, 지나가다 잘못 건드리면 그대로 저장됐다(바꾸는 즉시 저장한다). 이제 [편집]을 누른 줄만 열린다.
-// 부서를 취합게시판 제출 이력으로 탭 분리한다 — 온보딩 우선순위가 곧 그 순서다 (DM-15).
+// PG-95 (2026-10-14) — 부서는 **조직도 모양**(본부 → 산하 실)으로 묶고, 검색과 「켜짐 · 꺼짐」 거르기로 찾는다. 예전의 취합게시판
+// 제출 이력 탭(「제출 확인 · 이력 없음」, DM-15)은 걷었다 — 연구 실들도 본부 표로 내고 있어 모든 부서가 쓰게 됐다(운영자 「이력 없음은 없애도 되겠네」).
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { RosterDrawer, type UserRow } from './RosterDrawer';
 import { RosterSync } from './RosterSync';
 import { copyText } from '@/lib/clipboard';
+import { arrangeDivisions, showCounts, type ShowFilter } from '@/lib/division-groups';
 
 interface DivisionRow {
   id: string;
   slug: string;
   nameKo: string;
+  /** PG-95 — ERP 「상위부서」. 이것으로 본부별로 묶는다 */
+  parentKo: string;
   isActive: boolean;
   /** PG-91 · NT-61 — 부서 알림 스위치. 켜짐과 따로다 — 켜짐 **그리고** 이것일 때만 그 부서에 쪽지가 간다(NT-30) */
   notifyEnabled: boolean;
@@ -22,8 +26,6 @@ interface DivisionRow {
   hasTemplate: boolean;
   /** OPS-41 — `missing`은 「등록 기록만 있고 파일이 없다」 — 「없음」과 할 일이 다르다 */
   templateState?: 'ok' | 'missing' | 'none';
-  boardStatus: 'confirmed' | 'none';
-  boardNote: string;
 }
 
 /** 초기화 결과 — 평문은 화면에만, 한 번만 보인다 (AU-27) */
@@ -36,20 +38,12 @@ interface IssuedPassword {
 
 const DOW = ['', '월', '화', '수', '목', '금', '토', '일'];
 
-/*
- * 「확인 필요」 탭은 없앴다 (v1.23.0).
- *
- * 조사 단계(R-002)에서는 게시판만 보고 판단해야 해서 «담당자는 있는데 제출은 못 봤다»는
- * 중간 상태가 필요했다. 2026-08-26에 운영자가 게시판 답변일자로 **실제 담당자 11명**을
- * 확정하면서 그 모호함이 사라졌다 — 나머지는 연구부서라 업무일지를 아예 쓰지 않는다.
- *
- * 답이 나온 뒤에도 «확인 필요»를 남겨두면, 볼 때마다 이미 끝난 확인을 다시 하게 된다.
- */
-// 2026-10-08 (사용자: 주석 걷기) — 탭 아래 설명 한 줄(「온보딩 1순위」 등)은 걷었다. 탭 이름이 말한다
-const TABS = [
-  { key: 'confirmed', label: '제출 확인' },
-  { key: 'none', label: '이력 없음' },
-] as const;
+/** PG-95 — 거르기. 탭과 같은 잉크 밑줄(CP-100) — 숫자는 불러온 뒤에만(PG-64) */
+const SHOWS: { key: ShowFilter; label: string }[] = [
+  { key: 'all', label: '전체' },
+  { key: 'on', label: '켜짐' },
+  { key: 'off', label: '꺼짐' },
+];
 
 /**
  * PG-91 — 알림 칸 하나를 바꾼다. 누른 즉시 바뀐 값으로 그리고(`show`), 저장이 거절되거나 네트워크가 끊기면 원래 값으로 되돌린다.
@@ -93,15 +87,6 @@ export function NotifyCell({ name, on, editing, busy, onToggle }: { name: string
 }
 
 /**
- * 「제출 확인」·「이력 없음」 탭의 줄. 「이력 없음」은 «confirmed가 아닌 전부»다 — 옛 `unclear` 값이 남아 있어도 어느 탭에도 안 보이는
- * 부서가 생기지 않는다. PG-94 — 고치는 줄은 「업무일지」 값을 바꿔도 이 탭에 남는다. 예전에는 바꾸는 순간 다른 탭으로 옮겨 가
- * 줄이 사라졌다 — 저장이 안 된 것처럼 보였다. [완료]를 누르면 제 탭으로 간다
- */
-export function rowsInTab<T extends { id: string; boardStatus: string }>(rows: readonly T[], tab: 'confirmed' | 'none', editingId: string | null): T[] {
-  return rows.filter((d) => d.id === editingId || (tab === 'confirmed' ? d.boardStatus === 'confirmed' : d.boardStatus !== 'confirmed'));
-}
-
-/**
  * PG-94 — 줄 끝 「편집 · 인원」 칸. 표는 가로로 스크롤되는 상자 안에 있고 [편집]한 줄은 입력칸으로 넓어진다 — 그 순간 이 칸이
  * 화면 오른쪽 밖으로 밀려 [완료]도 [열기]도 안 보였다(운영자 2026-10-12: 「저장 버튼이 없다 · 새로 고침해야 인원을 연다」).
  * 그래서 이 칸은 **오른쪽에 붙는다**(sticky) — 표가 얼마나 넓어지든 늘 보인다. 바탕을 칠해야 밑으로 지나가는 칸이 비치지 않는다.
@@ -110,18 +95,21 @@ export function rowsInTab<T extends { id: string; boardStatus: string }>(rows: r
 export function RowActions({
   name,
   editing,
+  shaded = false,
   onEdit,
   onOpen,
 }: {
   name: string;
   editing: boolean;
+  /** PG-95 — 묶음 머리 줄처럼 줄 바탕이 칠해져 있으면 이 칸도 같은 색(붙은 칸만 흰색이면 줄이 끊겨 보인다) */
+  shaded?: boolean;
   onEdit: () => void;
   onOpen: () => void;
 }) {
   return (
     <td
       className={`sticky right-0 z-10 py-0 text-right whitespace-nowrap shadow-[-10px_0_10px_-10px_rgb(0_0_0_/_0.25)] ${
-        editing ? 'bg-surface-soft' : 'bg-canvas'
+        editing || shaded ? 'bg-surface-soft' : 'bg-canvas'
       }`}
     >
       <button
@@ -145,7 +133,9 @@ export function OpsClient() {
    */
   const [divisions, setDivisions] = useState<DivisionRow[] | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
-  const [tab, setTab] = useState<'confirmed' | 'none'>('confirmed');
+  /** PG-95 — 거르기와 검색. 고치는 줄은 둘과 상관없이 남는다(PG-94) */
+  const [show, setShow] = useState<ShowFilter>('all');
+  const [q, setQ] = useState('');
   const [selected, setSelected] = useState<string | null>(null);
   const [users, setUsers] = useState<UserRow[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
@@ -304,14 +294,8 @@ export function OpsClient() {
   const copyLabel = (key: string, idle: string) =>
     copied?.key === key ? (copied.ok ? '복사됨 ✓' : '복사 실패') : idle;
 
-  const counts = useMemo(
-    () => ({
-      confirmed: (divisions ?? []).filter((d) => d.boardStatus === 'confirmed').length,
-      none: (divisions ?? []).filter((d) => d.boardStatus !== 'confirmed').length,
-    }),
-    [divisions],
-  );
-  const shown = rowsInTab(divisions ?? [], tab, editingId);
+  const counts = useMemo(() => showCounts(divisions ?? []), [divisions]);
+  const shown = arrangeDivisions(divisions ?? [], { q, show }, editingId);
   const selectedName = divisions?.find((d) => d.id === selected)?.nameKo ?? null;
 
   return (
@@ -372,21 +356,33 @@ export function OpsClient() {
           <h2 id="divisions" className="card-title">
             부서
           </h2>
-          {/* 탭 — 취합게시판 제출 이력 기준. 페이지 탭은 잉크 밑줄 (CP-100) */}
-          <div className="mt-3 flex gap-5 border-b border-hairline-soft" role="tablist">
-            {TABS.map((t) => (
-              <button
-                key={t.key}
-                role="tab"
-                aria-selected={tab === t.key}
-                onClick={() => setTab(t.key)}
-                className={`tab-line ${tab === t.key ? 'tab-line-active' : ''}`}
-              >
-                {t.label}
-                {/* PG-64 — 숫자는 불러온 뒤에만. 불러오는 중의 0은 「없다」로 읽힌다 */}
-                {divisions && <span className="chip chip-muted px-2 py-0 text-xs">{counts[t.key]}</span>}
-              </button>
-            ))}
+          {/* PG-95 — 거르기(켜짐 · 꺼짐)와 검색. 좁은 화면에서는 검색이 아래 줄로 내려간다 */}
+          <div className="mt-3 flex flex-wrap items-end justify-between gap-x-6 gap-y-2 border-b border-hairline-soft">
+            <div className="flex gap-5" role="tablist" aria-label="부서 거르기">
+              {SHOWS.map((t) => (
+                <button
+                  key={t.key}
+                  role="tab"
+                  aria-selected={show === t.key}
+                  onClick={() => setShow(t.key)}
+                  className={`tab-line ${show === t.key ? 'tab-line-active' : ''}`}
+                >
+                  {t.label}
+                  {/* PG-64 — 숫자는 불러온 뒤에만. 불러오는 중의 0은 「없다」로 읽힌다 */}
+                  {divisions && <span className="chip chip-muted px-2 py-0 text-xs">{counts[t.key]}</span>}
+                </button>
+              ))}
+            </div>
+            <label className="mb-2 flex w-full items-center gap-2 sm:w-64">
+              <span className="sr-only">부서 찾기</span>
+              <input
+                type="search"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="부서 찾기 — 이름 일부"
+                className="input h-9 w-full"
+              />
+            </label>
           </div>
           <div className="h-3" aria-hidden />
           {/* PG-64 — 실패는 실패라고 말하고 다시 부를 길을 둔다. 이미 받은 목록이 있으면 그대로 두고 위에 알린다 */}
@@ -409,20 +405,39 @@ export function OpsClient() {
                 <th>인원</th>
                 <th>양식</th>
                 <th>마감</th>
-                <th>업무일지</th>
                 <th>상태</th>
                 <th>알림</th>
                 <th className="sticky right-0 z-10 text-right shadow-[-10px_0_10px_-10px_rgb(0_0_0_/_0.25)]">편집 · 인원</th>
               </tr>
             </thead>
             <tbody>
-              {shown.map((d) => {
+              {shown.map(({ row: d, depth, head, context, summary }, i) => {
                 const editing = editingId === d.id;
+                // PG-95 — 최상위 단위(본부·센터·본부 밖 단위)마다 위에 굵은 선 — 묶음이 눈에 들어온다. 첫 줄은 머리행 선이 대신한다
+                const groupTop = depth === 0 && i > 0 ? 'border-t-2 border-t-hairline' : '';
                 return (
-                  <tr key={d.id} className={editing ? 'bg-surface-soft' : ''}>
+                  <tr key={d.id} className={`${editing || head ? 'bg-surface-soft' : ''} ${groupTop}`}>
                     <td className="py-2">
-                      <span className={`font-medium ${d.isActive ? 'text-ink' : 'text-muted'}`}>{d.nameKo}</span>
-                      {d.boardNote && <p className="mt-0.5 max-w-md text-xs leading-4 text-muted">{d.boardNote}</p>}
+                      <div className={depth === 1 ? 'flex items-baseline gap-1.5 pl-5' : ''}>
+                        {depth === 1 && (
+                          <span aria-hidden className="text-hairline">
+                            └
+                          </span>
+                        )}
+                        <span
+                          className={`${depth === 0 ? 'font-semibold' : 'font-medium'} ${
+                            context ? 'text-muted' : d.isActive ? 'text-ink' : 'text-muted'
+                          }`}
+                        >
+                          {d.nameKo}
+                        </span>
+                      </div>
+                      {/* 묶음 머리 — 산하 몇 곳 중 몇 곳 켜짐 · 묶음 인원. 본부를 켤지 볼 때 한눈에 */}
+                      {summary && (
+                        <p className="mt-0.5 text-xs leading-4 text-muted">
+                          산하 {summary.units}곳 · 켜짐 {summary.active} · {summary.members}명
+                        </p>
+                      )}
                       {/* PG-94 — 저장 단추가 따로 없는 까닭. 바꾸는 즉시 저장되고 위에 「저장됨」이 뜬다 */}
                       {editing && <p className="mt-0.5 text-xs leading-4 text-muted">바꾸면 바로 저장돼요 · 끝나면 [완료]</p>}
                     </td>
@@ -479,24 +494,6 @@ export function OpsClient() {
                       )}
                     </td>
                     <td className="whitespace-nowrap">
-                      {/* 집계 대상 — 조사(R-002)가 초기값이지만 현실이 바뀌면 운영자가 고친다.
-                          코드에만 있으면 부서가 새로 시작해도 손댈 방법이 없다 */}
-                      {editing ? (
-                        <select
-                          aria-label={`${d.nameKo} 업무일지 제출 여부`}
-                          value={d.boardStatus}
-                          disabled={busy}
-                          onChange={(e) => patchDivision(d.id, { boardStatus: e.target.value })}
-                          className="select h-8 px-2"
-                        >
-                          <option value="confirmed">제출함 (집계)</option>
-                          <option value="none">안 냄</option>
-                        </select>
-                      ) : (
-                        <span className="text-body">{d.boardStatus === 'confirmed' ? '제출함 (집계)' : '안 냄'}</span>
-                      )}
-                    </td>
-                    <td className="whitespace-nowrap">
                       {editing ? (
                         <button
                           disabled={busy}
@@ -525,6 +522,7 @@ export function OpsClient() {
                     <RowActions
                       name={d.nameKo}
                       editing={editing}
+                      shaded={head}
                       onEdit={() => setEditingId(editing ? null : d.id)}
                       onOpen={() => openRoster(d.id)}
                     />
@@ -534,9 +532,11 @@ export function OpsClient() {
               {/* PG-64 — 「없습니다」는 불러온 뒤 정말 없을 때만 */}
               {shown.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="py-6 text-center text-sm text-muted">
+                  <td colSpan={7} className="py-6 text-center text-sm text-muted">
                     {divisions
-                      ? '이 분류에 해당하는 부서가 없습니다.'
+                      ? q.trim()
+                        ? `「${q.trim()}」에 맞는 부서가 없습니다.`
+                        : '이 분류에 해당하는 부서가 없습니다.'
                       : loadErr
                         ? '부서 목록을 불러오지 못했습니다.'
                         : '불러오는 중…'}

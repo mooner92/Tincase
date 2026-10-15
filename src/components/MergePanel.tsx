@@ -14,11 +14,15 @@
 //
 // 2026-10-08 (CP-130 · HM-59·60 — 병합 줄) — [지금 병합]은 줄에 넣고 바로 돌아온다(202). 버튼은 서버가 알려 주는 자리(「줄 n번째」 ·
 // 「병합 중…」)로 막는다 — 예전의 `busy`는 그 탭에만 있어서 다른 탭 · 다른 사람 · 스케줄러를 몰랐다. 끝날 때까지 2초마다 묻는다.
+//
+// 2026-10-15 (CP-134·135 · LE-42·43 — 늦게 낸 사람) — 병합 뒤에 낸 사람이 있으면 카드에 한 줄: [맨 뒤에 붙이기]. 다시 병합하지 않으니
+// 손본 순서·문장이 그대로다. 고쳐 낸 사람(앞선 판이 이미 들어감)은 붙이지 않고 「다시 병합해야 해요」만 말한다.
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { MergedDrawer } from './MergedDrawer';
 import { HELD_TEXT, MODEL_NOT_CONFIGURED } from '@/lib/merge-rows';
 import { copyText } from '@/lib/clipboard';
+import { appendedNote, nameList } from '@/lib/late';
 
 /** HM-26 — 실행 기록(`reviewJson.groups`)에 남는 합쳐진 묶음. 화면은 이제 그 수만 센다(`differingGroups`) */
 export interface MergeGroupView {
@@ -108,6 +112,9 @@ export function MergePanel({
   canDownload,
   canEditMerged,
   canApprove = false,
+  canAppend = false,
+  late = [],
+  revised = [],
   handoffTo = null,
   submitted,
 }: {
@@ -123,6 +130,14 @@ export function MergePanel({
   canEditMerged: boolean;
   /** HM-47 — [고칠 것 없음 · 승인]. 이 부서의 head에게만 (TACP-16) */
   canApprove?: boolean;
+  /**
+   * LE-42 — [맨 뒤에 붙이기]. 수합 관리 담당 + 내 부서 (`requireOwnManager`와 같은 식 — TACP-9).
+   * `late`·`revised`는 이 사람에게만 내려온다(작성자 이름은 담당에게만 — TACP-17). 이름이 비어 있으면 카드는 아무것도 더하지 않는다
+   */
+  canAppend?: boolean;
+  /** LE-21 — 병합본에 안 들어간 사람(맨 뒤에 붙일 수 있다) · 고쳐 낸 사람(다시 병합해야 한다). 이름, 명단 순 */
+  late?: string[];
+  revised?: string[];
   /**
    * RU-80 — 3단계에서 승인이 곧 위로 가는 제출이면 받는 곳(「기획경영본부」·「총괄」). 없으면 null.
    * 있으면 [제목 복사]를 그리지 않는다 — 승인한 판이 저절로 올라가 취합게시판에 올리는 동선이 없다(S5 · ADR-0015).
@@ -179,6 +194,36 @@ export function MergePanel({
         router.refresh();
       })
       .catch(() => setErr('네트워크 오류로 승인하지 못했습니다.'))
+      .finally(() => setBusy(false));
+  };
+
+  /*
+   * CP-134 — 붙이기는 승인도 병합도 아니다. 화면이 본 판(`runId`·`sha256`)을 그대로 보내므로 그 사이 판이 바뀌었으면 서버가 409(`merged_changed`)로
+   * 막고, 그 문구를 오류 자리에 그대로 보인다. 병합이 진행 중이면 409 `merging`.
+   */
+  const append = () => {
+    setBusy(true);
+    setErr(null);
+    setNote(null);
+    fetch('/api/division/merged/append', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ isoKey, runId: state.runId, sha256: state.sha256 }),
+    })
+      .then(async (r) => {
+        const b = (await r.json().catch(() => ({}))) as {
+          message?: string;
+          appended?: { name: string; achievements: number; plans: number; notes: number }[];
+          skipped?: unknown[];
+        };
+        if (!r.ok) {
+          setErr(b.message ?? '맨 뒤에 붙이지 못했습니다.');
+          return;
+        }
+        setNote(appendedNote({ appended: b.appended ?? [], skipped: b.skipped }));
+        router.refresh();
+      })
+      .catch(() => setErr('네트워크 오류로 붙이지 못했습니다.'))
       .finally(() => setBusy(false));
   };
 
@@ -275,6 +320,8 @@ export function MergePanel({
   // 이 서버에 모델이 원래 없다 — 매주 같은 ⚠를 되풀이하지 않는다. 이번 주에 **실패한** 경고만 남긴다
   const noModel = !state.modelUsed && state.modelReason === MODEL_NOT_CONFIGURED;
   const warnings = noModel ? state.warnings.filter((w) => !w.includes(MODEL_NOT_CONFIGURED)) : state.warnings;
+  const showLate = done && canAppend && late.length > 0;
+  const showRevised = done && canAppend && revised.length > 0;
 
   return (
     <section data-guide="merge-card" className="card" aria-labelledby="merge-panel">
@@ -419,6 +466,29 @@ export function MergePanel({
           </div>
         )}
       </div>
+
+      {/*
+        CP-134·135 — 병합 뒤에 낸 사람. 다시 병합하면 손본 곳이 사라지니 **맨 뒤에 붙인다**는 말이 먼저다.
+        고쳐 낸 사람은 붙이지 않는다(앞서 들어간 줄과 겹쳐 같은 일이 두 번 나온다) — 이 칸은 말만 하고 버튼은 [다시 병합] 하나(HM-49 확인 포함)
+      */}
+      {showLate && (
+        <div data-guide="merge-late" className="callout callout-info mt-4">
+          <p className="font-semibold text-ink">
+            병합 뒤에 낸 {late.length}명 <span className="font-normal text-body">· {nameList(late)}</span>
+          </p>
+          <p className="mt-1 text-body">다시 병합하면 손본 곳이 사라지니, 병합본 맨 뒤에 붙입니다. 앞의 내용·순서는 그대로예요.</p>
+          <div className="mt-2.5 flex flex-wrap items-center gap-2">
+            <button onClick={append} disabled={busy || !!job || !!ask} className="btn-secondary btn-sm">
+              {busy ? '붙이는 중…' : '맨 뒤에 붙이기'}
+            </button>
+          </div>
+        </div>
+      )}
+      {showRevised && (
+        <p data-guide="merge-revised" className="callout callout-warn mt-4">
+          고쳐 낸 {revised.length}명은 다시 병합해야 해요 <span className="text-body">· {nameList(revised)}</span>
+        </p>
+      )}
 
       {/* HM-61d — 병합하는 동안 고친 판을 지켜 쓰지 않았다. 카드는 고친 판을 그대로 그린다 — 실패가 아니라 한 줄 */}
       {state.held && !job && <p className="callout callout-warn mt-4">{HELD_TEXT}</p>}

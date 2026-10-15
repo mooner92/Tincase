@@ -203,7 +203,7 @@ export async function recordReview(opts: {
 export const reapproveKind = (reviewId: string) => `merge_reapprove:${reviewId}`;
 
 /** NT-52 — 무엇이 판을 바꿨나 */
-export type ReapproveReason = { kind: 'edit'; places: number } | { kind: 'merge'; late: number };
+export type ReapproveReason = { kind: 'edit'; places: number } | { kind: 'merge'; late: number } | { kind: 'append'; people: number };
 
 /** NT-52 — 부서장: 승인 뒤 병합본이 바뀌었다. 다시 승인하면 올라간다 */
 export function reapproveMessage(p: { name: string; employeeNo: string }, slot: WeekSlot, target: string, reason: ReapproveReason) {
@@ -211,7 +211,9 @@ export function reapproveMessage(p: { name: string; employeeNo: string }, slot: 
   const what =
     reason.kind === 'edit'
       ? `담당자가 승인 뒤 병합본을 ${reason.places}곳 고쳤어요.`
-      : `승인 뒤 병합본이 다시 병합됐어요${reason.late > 0 ? `(늦게 낸 ${reason.late}명 포함)` : ''}.`;
+      : reason.kind === 'append'
+        ? `승인 뒤 늦게 낸 ${reason.people}명이 병합본 맨 뒤에 붙었어요.`
+        : `승인 뒤 병합본이 다시 병합됐어요${reason.late > 0 ? `(늦게 낸 ${reason.late}명 포함)` : ''}.`;
   return {
     subject: `[Tincase] ${label} 병합본 — 다시 승인해 주세요`,
     contents: [
@@ -230,7 +232,14 @@ export function reapproveMessage(p: { name: string; employeeNo: string }, slot: 
  * 기록은 보내기 전에 잡는다(결정 f — 병합 뒤 맞추기와 저장 뒤 맞추기가 겹쳐도 한 번).
  * 부서 알림 스위치(NT-30)·3단계 스위치(RU-52)·메신저(RU-41)를 따른다. 보냈으면 나간 사람 수, 아니면 0.
  */
-export async function notifyReapprove(division: Division, slot: WeekSlot, target: string, reason: ReapproveReason): Promise<number> {
+export async function notifyReapprove(
+  division: Division,
+  slot: WeekSlot,
+  target: string,
+  reason: ReapproveReason,
+  /** LE-30 — 붙이기를 한 사람이 부서장이면 본인에게는 보내지 않는다(제 손으로 한 일). 이메일 */
+  except?: string | null,
+): Promise<number> {
   if (!messengerStatus().enabled || !division.notifyEnabled) return 0;
   const review = await prisma.mergeReview.findFirst({ where: { divisionId: division.id, weekSlotId: slot.id, ...UNIT_REVIEW }, orderBy: NEWEST_FIRST });
   if (!review) return 0; // 승인한 적이 없으면 「다시」가 아니다 — 마감 뒤 검토 요청(NT-40)이 맡는다
@@ -248,10 +257,12 @@ export async function notifyReapprove(division: Division, slot: WeekSlot, target
   if (sha === review.sha256) return 0; // 같은 판 — 승인이 그대로 유효하다
   const kind = reapproveKind(review.id);
   if (await prisma.notifyLog.findFirst({ where: { divisionId: division.id, weekSlotId: slot.id, kind } })) return 0;
-  const heads = await prisma.user.findMany({
-    where: { divisionId: division.id, isActive: true, divisionRole: 'head', notifyEnabled: true, employeeNo: { not: null } },
-    select: { name: true, employeeNo: true },
-  });
+  const heads = (
+    await prisma.user.findMany({
+      where: { divisionId: division.id, isActive: true, divisionRole: 'head', notifyEnabled: true, employeeNo: { not: null } },
+      select: { name: true, employeeNo: true, email: true },
+    })
+  ).filter((h) => !except || h.email !== except);
   if (heads.length === 0) return 0;
   const claim = await claimNotice(division.id, slot.id, kind, { reason, sha: sha.slice(0, 12) });
   if (!claim) return 0; // 다른 맞추기가 이 승인에 대해 이미 보냈거나 보내는 중

@@ -1287,24 +1287,23 @@ const L_REEDIT = '담당/승인 뒤 고쳐 저장 → 「승인 뒤 바뀜」 (�
 const L_REAPPROVE = '실장/[고칠 것 없음 · 승인] → 담당에게 알림';
 const noHandoff = async (p, where) => need(!(await p.locator('section[data-guide="report-unit"]').count()), `3단계가 꺼졌는데 ${where}에 「위로」 카드가 있다`);
 
-/** `/ops` 부서 표 — 분류 둘을 돌며 이름 → { 분류 · 상태 · 알림 } (줄은 불러온 뒤에 생긴다 — PG-64) */
+/** `/ops` 부서 표 — 「전체」에서 이름 → { 상태 · 알림 } (줄은 불러온 뒤에 생긴다 — PG-64). PG-95(2026-10-14) — 이력 탭이 없어지고
+ *  본부별로 묶였다: 산하 실 줄은 첫 칸에 「└」가 먼저 있어 이름은 화면 읽기에서 숨기지 않은 글자다. 칸은 부서 · 인원 · 양식 · 마감 · 상태 · 알림 · 편집 */
 async function opsDivisionTable(p) {
   const sec = p.locator('section[aria-labelledby="divisions"]');
   const out = {};
-  for (const tab of ['제출 확인', '이력 없음']) {
-    await sec.getByRole('tab', { name: new RegExp(`^${tab}`) }).click();
-    await p.waitForFunction(() => {
-      const t = document.querySelector('section[aria-labelledby="divisions"] tbody');
-      return !!t && !t.textContent.includes('불러오는 중');
-    }, null, { timeout: UI });
-    const rows = sec.locator('tbody tr');
-    const n = await rows.count();
-    for (let i = 0; i < n; i++) {
-      const tds = rows.nth(i).locator('td');
-      if ((await tds.count()) < 8) continue; // 「이 분류에 해당하는 부서가 없습니다」
-      const name = (await tds.nth(0).locator('span').first().innerText()).trim();
-      out[name] = { tab, active: (await tds.nth(5).innerText()).trim(), notify: (await tds.nth(6).innerText()).trim() };
-    }
+  await sec.getByRole('tab', { name: /^전체/ }).click();
+  await p.waitForFunction(() => {
+    const t = document.querySelector('section[aria-labelledby="divisions"] tbody');
+    return !!t && !t.textContent.includes('불러오는 중');
+  }, null, { timeout: UI });
+  const rows = sec.locator('tbody tr');
+  const n = await rows.count();
+  for (let i = 0; i < n; i++) {
+    const tds = rows.nth(i).locator('td');
+    if ((await tds.count()) < 7) continue; // 「이 분류에 해당하는 부서가 없습니다」
+    const name = (await tds.nth(0).locator('span:not([aria-hidden])').first().innerText()).trim();
+    out[name] = { active: (await tds.nth(4).innerText()).trim(), notify: (await tds.nth(5).innerText()).trim() };
   }
   return out;
 }
@@ -1323,7 +1322,6 @@ async function launchOperatorBefore({ base, seed, ctx }) {
     need(Object.keys(before).length >= 10, `부서 표가 ${Object.keys(before).length}줄`);
     need(sameSet(act(before), L.active), `활성: ${act(before).join(', ')}`);
     need(sameSet(on(before), [...L.active, L.leftover]), `알림 켬(처음): ${on(before).join(', ')}`);
-    await p.locator('section[aria-labelledby="divisions"]').getByRole('tab', { name: new RegExp(`^${before[L.leftover].tab}`) }).click();
     const row = divisionRow(p, L.leftover);
     await row.getByRole('button', { name: '편집' }).click();
     const [res] = await Promise.all([

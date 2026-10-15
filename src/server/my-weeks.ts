@@ -29,7 +29,7 @@ export async function myWeeks(p: { userId: string; divisionId: string; upTo: Dat
     }),
     prisma.submission.findMany({
       where: { userId: p.userId, isLatest: true },
-      select: { id: true, weekSlotId: true, divisionId: true, version: true, uploadedAt: true, editedById: true },
+      select: { id: true, weekSlotId: true, divisionId: true, version: true, uploadedAt: true, editedById: true, origin: true },
     }),
     prisma.submission.groupBy({
       by: ['weekSlotId'],
@@ -108,6 +108,8 @@ export async function loadMemberHome(view: DivisionView, now: Date): Promise<Mem
         at: toKstIso(mineNow.uploadedAt).slice(5, 16).replace('T', ' '),
         version: mineNow.version,
         edited: mineNow.editedById !== null,
+        // LE-44 — 담당자가 대신 입력한 판. 「고침」 대신 「대신 입력」을 말한다 (판의 `origin` 하나가 근거)
+        proxied: mineNow.origin === 'lead_entry',
       },
       showMissing: me.onRoster,
       canCompose: phase !== 'locked' && hasTemplate,

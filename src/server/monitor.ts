@@ -33,9 +33,10 @@ export async function progressNodes(slot: Pick<WeekSlot, 'id'>, now = new Date()
     slug: d.slug,
     parent: d.parentKo,
     isActive: d.isActive,
-    // R-002 실측 — 취합게시판 제출 이력이 있는 부서만 집계한다.
-    // 연구부서 17개(232명)는 애초에 주간 업무일지를 내지 않는다.
-    counted: d.boardStatus === 'confirmed',
+    // DM-15 개정(2026-10-14) — **켜진 부서를 센다.** 예전에는 취합게시판 제출 이력(R-002)으로 셌는데, 「안 낸다」던 연구 실들도
+    // 본부 표로 내고 있었다(한 실이 본부 안 다른 실 것까지 모아 낸다). 모든 부서가 쓰게 되므로 이력은 기준이 아니다 —
+    // 켜면 그날부터 집계에 든다(RU-96 「켜진 부서만 다룬다」와 같은 기준). 이력으로 두면 연구 실을 켜도 집계에서 빠졌다
+    counted: d.isActive,
     people: d.users.map((u) => {
       const at = byUser.get(u.id);
       return {

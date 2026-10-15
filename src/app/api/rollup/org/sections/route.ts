@@ -17,7 +17,7 @@ export const GET = handler(async (req: NextRequest) => {
   await requireOrgRollup(req.headers);
   const slot = await rollupSlot(req.nextUrl.searchParams.get('isoKey'));
   const [sources, divisions] = await Promise.all([
-    resolveSections(slot),
+    resolveSections(slot, undefined, { all: true }), // 구성 전체 — Tincase 밖 섹션도 `offline`으로 (RU-96)
     prisma.division.findMany({ orderBy: { createdAt: 'asc' }, select: { id: true, nameKo: true, isActive: true } }),
   ]);
   return json({

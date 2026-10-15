@@ -4,6 +4,8 @@
 // 표 모양은 웹 작성(WebComposer)과 같다 — 구분은 시스템이 다시 매기므로 번호 표시만 둔다(ABS-5).
 // 원래 판은 그대로 남는다 — 저장 버튼이 「고쳐서 저장 (vN)」으로 새 판 번호를 말한다.
 // 2026-10-08 (사용자: 주석 걷기) — 위의 설명 callout과 버튼 옆 [다시 병합] 안내를 걷었다. 저장 뒤 한 줄(FileDrawer)이 말한다.
+// 2026-10-15 (CP-133 · LE-41) — `proxy` 모드: 낸 적 없는 사람의 표를 **빈 표에서** 채워 대신 제출한다. 칸·검증은 한 부품이다 —
+// 다른 것은 저장 주소(`POST /api/submissions/proxy`)와 단추 문구뿐이다.
 import { useLayoutEffect, useRef, useState } from 'react';
 import { fitTextarea, fitTextareas } from '@/lib/fit-textarea';
 
@@ -32,14 +34,18 @@ const fit = fitTextarea;
 
 export function SubmissionEditor({
   submissionId,
-  version,
+  version = 0,
+  proxy,
   initial,
   onSaved,
   onCancel,
   onDirtyChange,
 }: {
-  submissionId: string;
-  version: number;
+  /** 고칠 판. `proxy`가 있으면 쓰지 않는다 */
+  submissionId?: string;
+  version?: number;
+  /** CP-133 — 대신 쓰기. 있으면 저장은 POST `/api/submissions/proxy`, 단추는 [대신 입력 저장] */
+  proxy?: { userId: string; isoKey: string };
   initial: Record<Bucket, EditRow[]>;
   onSaved: (newId: string, newVersion: number) => void;
   onCancel: () => void;
@@ -84,11 +90,17 @@ export function SubmissionEditor({
     setBusy(true);
     setErr(null);
     try {
-      const r = await fetch(`/api/submissions/${submissionId}/content`, {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(data),
-      });
+      const r = proxy
+        ? await fetch('/api/submissions/proxy', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ ...data, userId: proxy.userId, isoKey: proxy.isoKey }),
+          })
+        : await fetch(`/api/submissions/${submissionId}/content`, {
+            method: 'PUT',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify(data),
+          });
       const b = (await r.json().catch(() => ({}))) as { message?: string; id?: string; version?: number };
       if (!r.ok || !b.id) setErr(b.message ?? '저장하지 못했습니다.');
       else {
@@ -173,7 +185,7 @@ export function SubmissionEditor({
       {err && <p className="callout callout-error">{err}</p>}
       <div className="sticky bottom-0 flex items-center gap-2 border-t border-hairline bg-canvas py-3">
         <button onClick={save} disabled={busy} className="btn-primary btn-sm">
-          {busy ? '저장 중…' : `고쳐서 저장 (v${version + 1})`}
+          {busy ? '저장 중…' : proxy ? '대신 입력 저장' : `고쳐서 저장 (v${version + 1})`}
         </button>
         <button onClick={onCancel} disabled={busy} className="btn-secondary btn-sm">
           취소

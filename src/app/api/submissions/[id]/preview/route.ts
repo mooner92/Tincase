@@ -45,6 +45,8 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
       editedBy: editor?.name ?? null,
       // TACP-22 — 고친 시각. `uploadedAt`은 부서원이 낸 시각 그대로다 (현황이 고친 시각을 제출 시각으로 보이지 않게)
       editedAt: sub.editedAt ? toKstIso(sub.editedAt) : null,
+      // LE-44 — 담당자가 대신 입력한 판이면 머리가 「고침」 대신 「입력」이라 말한다
+      proxied: sub.origin === 'lead_entry',
     },
     // WA-20 — [고치기]는 내 부서 lead·head에게, 남의 것·최신 판일 때만 (TACP-22). 게이트와 같은 식이다
     canRevise: sub.isLatest && canReviseSubmission(scope, sub),

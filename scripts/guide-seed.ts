@@ -171,6 +171,7 @@ async function seed() {
   await settleLater();
   // 아직 Tincase를 안 쓰는 섹션 하나는 총괄이 게시판으로 받은 파일을 올려 두었다 — 「최종본에」 열에 「올린 파일」이 보이게.
   // RU-60a — hwp 스위치가 꺼졌으면(찍기는 off로 띄운다 — 2026-10-12부터 전 섹션 Tincase) 만들지 않는다: 꺼진 서버에는 올린 파일이 없다
+  // RU-96 (2026-10-14) — 켜진 부서만 다룬다: 국토환경연구본부가 꺼져 있는 동안 이 파일은 「전사」 표·전사본에 나오지 않는다(부서를 켜면 그때)
   if (hwpUploadOpen()) {
     try {
       const sec = await prisma.orgSection.findFirst({ where: { title: '국토환경연구본부' } });

@@ -120,8 +120,13 @@ export async function requireManager(headers: Headers): Promise<Scope> {
  */
 export async function requireOwnManager(headers: Headers): Promise<Scope> {
   const scope = await requireScope(headers);
-  if (!scope.isManager && !scope.user.isOperator) throw notFound();
+  if (!canWriteOwnUnit(scope)) throw notFound();
   return scope;
+}
+
+/** TACP-9 — `requireOwnManager`와 **같은 식**. 화면의 [맨 뒤에 붙이기]가 이걸 쓴다(보이는데 404인 버튼이 없게) */
+export function canWriteOwnUnit(scope: Pick<Scope, 'isManager' | 'user'>): boolean {
+  return scope.isManager || scope.user.isOperator;
 }
 
 /**
@@ -373,6 +378,33 @@ export async function requireRevisableSubmission(scope: Scope, submissionId: str
     throw new HttpError(409, 'not_latest', '가장 최근 판만 고칠 수 있습니다. 최신 판을 열어 고쳐 주세요.');
   }
   return sub;
+}
+
+/**
+ * TACP-18 v1.17 · LE-01·02 — **이 사람을 대신 쓸 수 있나** (낸 적 있는지는 따로 — 트랜잭션 안에서 본다, LE-03).
+ *
+ *   내 부서의 lead·head, **같은 부서 · 활성 · 본인이 아닌** 사람  → 허용
+ *   그 외(member·coordinator·타 부서·탈퇴자·자기 자신·부서장이 아닌 운영자)  → 404
+ *
+ * 자기 자신은 막는다 — 대신 쓰기는 마감을 보지 않으므로, 열어 두면 담당자만 마감 뒤에 자기 것을 내는 길이 된다(TACP-22와 같다).
+ * 게이트와 현황 화면의 [대신 쓰기]가 같은 식을 쓴다 (TACP-9·12).
+ */
+export function canProxySubmit(
+  scope: Pick<Scope, 'isManager' | 'user' | 'division'>,
+  target: { id: string; divisionId: string; isActive: boolean },
+): boolean {
+  // TACP-6 — 쓰기는 신원의 부서에만. readAll은 읽기만이다 (TACP-8)
+  return (
+    scope.isManager && target.isActive && target.divisionId === scope.division.id && target.id !== scope.user.id
+  );
+}
+
+export async function requireProxyTarget(scope: Scope, userId: unknown) {
+  if (!scope.isManager) throw notFound(); // 권한 없음은 본문이 무엇이든 404 — 본문 검사보다 먼저 (API-50a와 같다)
+  if (typeof userId !== 'string' || !userId) throw new HttpError(422, 'invalid_request', '대신 쓸 사람을 정해 주세요.');
+  const target = await prisma.user.findUnique({ where: { id: userId } });
+  if (!target || !canProxySubmit(scope, target)) throw notFound();
+  return target;
 }
 
 /**
