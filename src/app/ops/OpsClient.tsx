@@ -297,6 +297,8 @@ export function OpsClient() {
   const counts = useMemo(() => showCounts(divisions ?? []), [divisions]);
   const shown = arrangeDivisions(divisions ?? [], { q, show }, editingId);
   const selectedName = divisions?.find((d) => d.id === selected)?.nameKo ?? null;
+  // DM-26 — 드로어의 「소속」 고르기(조직도 순서 그대로)
+  const divisionOptions = useMemo(() => (divisions ?? []).map((d) => ({ id: d.id, nameKo: d.nameKo })), [divisions]);
 
   return (
     <div className="space-y-4 lg:space-y-6">
@@ -551,6 +553,8 @@ export function OpsClient() {
       {/* 스크롤 없이 바로 보이도록 드로어로 (기존엔 표 아래에 펼쳐져 스크롤이 필요했다) */}
       <RosterDrawer
         divisionName={selectedName}
+        divisionId={selected}
+        divisions={divisionOptions}
         users={users}
         busy={busy}
         onClose={() => setSelected(null)}

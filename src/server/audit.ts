@@ -39,7 +39,10 @@ export type AuditAction =
   /** TACP-22 — 담당자가 부서원 제출물을 새 판으로 고쳤다. 누구의 몇 판을 고쳤는지 남는다 */
   | 'submission_revise'
   /** TACP-18 v1.17 · LE-09 — 담당자가 낸 적 없는 부서원의 제출물을 대신 썼다. actor = 쓴 사람, 대상 사람·주차가 detail */
-  | 'submission_proxy';
+  | 'submission_proxy'
+  /** DM-26 · API-67 — 운영자가 한 사람의 Tincase 소속을 옮겼다(고정) · 고정을 풀었다. 권한이 바뀌는 일이라 사람마다 남긴다 */
+  | 'roster_move'
+  | 'roster_unpin';
 
 export async function audit(
   actor: string,

@@ -32,6 +32,7 @@ export const GET = handler(async (req: NextRequest) => {
       mustChangePassword: true,
       lastLoginAt: true,
       lockedUntil: true,
+      divisionPinned: true, // DM-26
     },
   });
   const now = new Date();
@@ -56,6 +57,10 @@ interface RosterUpdate {
   sortOrder?: number;
   divisionRole?: 'member' | 'lead' | 'head';
   isActive?: boolean;
+  /** API-67 · DM-26 — Tincase 소속 옮기기. 옮기면 고정된다(인원 최신화가 ERP 부서로 되돌리지 않는다) */
+  divisionId?: string;
+  /** API-67 — `false`면 고정을 푼다 — 다음 인원 최신화가 ERP 부서로 옮긴다. `true`는 받지 않는다(고정은 옮기면 생긴다) */
+  divisionPinned?: false;
 }
 
 export const PUT = handler(async (req: NextRequest) => {
@@ -79,6 +84,14 @@ export const PUT = handler(async (req: NextRequest) => {
     if (u.sortOrder !== undefined && (!Number.isInteger(u.sortOrder) || u.sortOrder < 0)) {
       throw new HttpError(422, 'invalid_request', 'sortOrder는 0 이상 정수여야 합니다.');
     }
+    if (u.divisionPinned !== undefined && u.divisionPinned !== false) {
+      throw new HttpError(422, 'invalid_request', 'divisionPinned는 false(고정 풀기)만 받습니다 — 고정은 소속을 옮기면 생깁니다.');
+    }
+  }
+  const moveTo = [...new Set(body.updates.flatMap((u) => (u.divisionId !== undefined ? [u.divisionId] : [])))];
+  if (moveTo.length > 0) {
+    const known = await prisma.division.count({ where: { id: { in: moveTo.filter((id) => typeof id === 'string') } } });
+    if (known !== moveTo.length) throw new HttpError(422, 'invalid_request', '옮길 부서를 찾지 못했습니다.');
   }
 
   const updates = body.updates;
@@ -104,6 +117,9 @@ export const PUT = handler(async (req: NextRequest) => {
         ...(u.divisionRole !== undefined && { divisionRole: u.divisionRole }),
         // 켜는 것은 여기서. 끄는 것은 위 offboardUser가 이미 했다
         ...(u.isActive === true && { isActive: true }),
+        // DM-26 — 손으로 옮기면 고정. ERP와 다르게 둔 것을 인원 최신화가 되돌리면 그 사람이 맡은 부서가 빈다
+        ...(u.divisionId !== undefined && { divisionId: u.divisionId, divisionPinned: true }),
+        ...(u.divisionPinned === false && u.divisionId === undefined && { divisionPinned: false }),
       };
       if (Object.keys(data).length > 0) {
         await tx.user.update({ where: { id: u.userId }, data });
@@ -112,5 +128,10 @@ export const PUT = handler(async (req: NextRequest) => {
   });
 
   await audit(scope.user.email, 'rule_update', null, 'ops:roster', { count: body.updates.length });
+  // API-67 — 소속을 옮기는 것은 권한이 바뀌는 일이다 — 일괄 기록과 따로 사람마다 남긴다(누가 · 누구를 · 어디로)
+  for (const u of updates) {
+    if (u.divisionId !== undefined) await audit(scope.user.email, 'roster_move', u.divisionId, `user:${u.userId}`, { pinned: true });
+    else if (u.divisionPinned === false) await audit(scope.user.email, 'roster_unpin', null, `user:${u.userId}`, {});
+  }
   return json({ ok: true, updated: body.updates.length });
 });
