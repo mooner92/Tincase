@@ -1,6 +1,6 @@
 # Changelog
 
-## 미출시 — 늦게 낸 사람 (2026-10-15, `feat/late-release` ← v2.1.1)
+## v2.1.2 — 늦게 낸 사람 (2026-10-15 운영 반영, `feat/late-release` ← v2.1.1)
 
 운영자: 「늦게 내는 분들 내용을 담당자들이 임의로 추가할 수 있게 — 그 사람 계정이 올린 것처럼. 병합이 끝났을 때는 병합본 **맨 뒤에** 붙여서 다시 병합하지 않게 —
 조정해 놓은 것이 흐트러지니까」. 결정 [ADR-0023](docs/adr/0023-late-entry.md) · TACP v1.17(TACP-18) · [15-late-entry](docs/spec/15-late-entry.md). **스키마 변경 없음**(`origin`은 문자열).
