@@ -80,11 +80,16 @@ async function hqLeads(nodeId: string): Promise<Person[]> {
 }
 
 /** 본부장 + 본부 담당 — 본부본 준비·다 모였어요를 받는 사람(ADR-0021 · ADR-0022 D2) */
-async function hqDeciders(nodeId: string): Promise<Person[]> {
+export async function hqDeciders(nodeId: string): Promise<Person[]> {
   return uniqPeople([...(await people({ divisionId: nodeId, divisionRole: 'head' })), ...(await hqLeads(nodeId))]);
 }
 
-const uniqPeople = (ps: Person[]) => [...new Map(ps.map((p) => [p.id, p])).values()];
+/** 같은 사람은 **먼저 나온 것**을 남긴다 — 본부장이 자기 본부의 담당으로도 지정됐을 때 본부장 문구(승인 단추)를 지킨다 */
+function uniqPeople(ps: Person[]): Person[] {
+  const seen = new Map<string, Person>();
+  for (const p of ps) if (!seen.has(p.id)) seen.set(p.id, p);
+  return [...seen.values()];
+}
 
 /** 본부 화면 링크 — 그 본부를 고른다(본부를 여럿 맡은 담당도 바로 그 본부로, ADR-0022 D2) */
 const hqLink = (node: RollupNode) => link(`/hq?node=${encodeURIComponent(node.node.slug)}`);

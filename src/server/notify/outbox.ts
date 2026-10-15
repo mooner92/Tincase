@@ -51,15 +51,27 @@ export async function sendOrQueue(input: AlertInput, now = new Date()): Promise<
   return result;
 }
 
-/** 창이 지난 뒤 한 번 비운다 — 이미 타이머가 있으면 그것이 함께 가져간다 */
-function kick(windowMs: number): void {
+/** `delayMs` 뒤에 한 번 비운다 — 이미 타이머가 있으면 그것이 함께 가져간다(남은 사람은 비운 뒤 다시 건다) */
+function kick(delayMs: number): void {
   if (state.timer) return;
   state.timer = setTimeout(() => {
     state.timer = null;
     void flushOutbox().catch((e) => logger.error({ err: (e as Error).message }, '[알림] 보낼 함 비우기 실패'));
-  }, windowMs + 500);
+  }, delayMs + 500);
   // 프로세스가 끝나는 것을 이 타이머가 붙잡지 않는다(시험·스크립트) — 남은 것은 다음 기동의 스케줄러가 비운다
   (state.timer as { unref?: () => void }).unref?.();
+}
+
+/** 아직 창이 안 지난 새 줄(실패한 줄 제외)을 세고, 있으면 가장 이른 줄의 창이 끝나는 때에 다시 건다 */
+async function rearm(now: Date, windowMs: number): Promise<number> {
+  if (windowMs === 0) return 0;
+  const left = await prisma.notifyOutbox.findMany({
+    where: { sentAt: null, attempts: 0, createdAt: { gt: new Date(now.getTime() - windowMs) } },
+    orderBy: { createdAt: 'asc' },
+    select: { createdAt: true },
+  });
+  if (left.length) kick(Math.max(0, left[0].createdAt.getTime() + windowMs - now.getTime()));
+  return left.length;
 }
 
 /** 여러 건을 한 통으로 — 둘 이상일 때만 부른다. 제목은 건수와 첫 제목, 본문은 건마다 제목 한 줄 + 내용, 링크는 첫 건 */
@@ -73,19 +85,26 @@ export function combineAlerts(items: readonly { subject: string; contents: strin
 }
 
 /**
- * 보낼 함 비우기 — 창(`NOTIFY_BATCH_MS`)이 지난 줄을 사람마다 모아 한 통씩. 같은 꼴이 된 쪽지는 받는 사람을 묶어 한 번에 보낸다
- * (마감 독촉처럼 수십 명에게 같은 글이 가는 경우 — 메신저 요청 수를 늘리지 않는다).
+ * 보낼 함 비우기 — 창(`NOTIFY_BATCH_MS`)은 **사람의 첫 줄**부터 센다: 그 사람의 가장 오래된 줄이 창을 넘었으면 그 사람의 모든 줄(몇 초 뒤에 들어온
+ * 것 포함)을 한 통으로 보낸다. 줄마다 따로 세면 승인 직후처럼 몇 초 간격으로 들어온 둘 중 첫 줄만 나가고 둘째가 다음 tick 에 따로 간다.
+ * 같은 꼴이 된 쪽지는 받는 사람을 묶어 한 번에 보낸다(마감 독촉처럼 수십 명에게 같은 글이 가는 경우 — 메신저 요청 수를 늘리지 않는다).
+ * `waiting` = 아직 창이 안 지나 남겨 둔 줄 수 — 있으면 가장 이른 줄의 창이 끝나는 때에 다시 걸어 둔다(스케줄러 tick 을 기다리지 않는다).
  */
-export async function flushOutbox(now = new Date()): Promise<{ batches: number; sent: number; failed: number }> {
+export async function flushOutbox(now = new Date()): Promise<{ batches: number; sent: number; failed: number; waiting: number }> {
   if (state.flushing) await state.flushing; // 앞의 비우기가 끝나기를 기다렸다가 남은 것을 본다
   const run = (async () => {
     const windowMs = batchWindowMs();
     const due = new Date(now.getTime() - windowMs);
-    const rows = await prisma.notifyOutbox.findMany({
-      where: { sentAt: null, attempts: { lt: MAX_ATTEMPTS }, createdAt: { lte: due } },
-      orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
-    });
-    if (rows.length === 0) return { batches: 0, sent: 0, failed: 0 };
+    const pending = { sentAt: null, attempts: { lt: MAX_ATTEMPTS } };
+    const ripe = await prisma.notifyOutbox.findMany({ where: { ...pending, createdAt: { lte: due } }, select: { recvId: true }, distinct: ['recvId'] });
+    const rows = ripe.length
+      ? await prisma.notifyOutbox.findMany({
+          where: { ...pending, recvId: { in: ripe.map((r) => r.recvId) } },
+          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        })
+      : [];
+    const waiting = () => rearm(now, windowMs);
+    if (rows.length === 0) return { batches: 0, sent: 0, failed: 0, waiting: await waiting() };
     // 사람마다 한 통
     const byPerson = new Map<string, typeof rows>();
     for (const r of rows) byPerson.set(r.recvId, [...(byPerson.get(r.recvId) ?? []), r]);
@@ -122,7 +141,7 @@ export async function flushOutbox(now = new Date()): Promise<{ batches: number; 
       failed += badRows.length;
     }
     if (failed) logger.warn({ failed }, '[알림] 보낼 함 — 못 보낸 줄(다음 비움에 다시)');
-    return { batches: groups.size, sent, failed };
+    return { batches: groups.size, sent, failed, waiting: await waiting() };
   })();
   state.flushing = run;
   try {

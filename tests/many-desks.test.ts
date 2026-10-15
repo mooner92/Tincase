@@ -218,6 +218,21 @@ describe('ADR-0022 D2 — 본부 담당 지정 (TACP-21 개정)', () => {
   });
 });
 
+describe('ADR-0022 D2 — 같은 사람이 본부장이면서 담당', () => {
+  it('[RU-T173] 본부장이 자기 본부의 담당으로도 지정되면 받는 사람은 한 번 · 본부장 문구(담당 문구로 덮이지 않는다)', async () => {
+    const { PUT } = await import('@/app/api/ops/roster/route');
+    const set = (hq: string | null) => PUT(nx('/api/ops/roster', P.op.email, jsonInit('PUT', { updates: [{ userId: userId.hqHead, hqDesk: hq }] })));
+    const { hqDeciders } = await import('@/server/rollup/notices');
+    expect((await set(divId.hq)).status).toBe(200);
+    try {
+      const mine = (await hqDeciders(divId.hq)).filter((p) => p.id === userId.hqHead);
+      expect(mine.map((p) => p.divisionRole)).toEqual(['head']);
+    } finally {
+      expect((await set(null)).status).toBe(200);
+    }
+  });
+});
+
 describe('ADR-0022 D4 — 알림 묶기', () => {
   const send = async (no: string, subject: string, kind: string, url?: string) => {
     const { sendOrQueue } = await import('@/server/notify/outbox');
@@ -259,6 +274,34 @@ describe('ADR-0022 D4 — 알림 묶기', () => {
       expect(one[0].contents).toContain('■ 2. 본부가 본부본이 준비됐어요');
       expect(got.filter((g) => g.subject === '[Tincase] 마감 1시간 전').map((g) => g.to).sort()).toEqual(['9102', '9103']);
       expect(await prisma.notifyOutbox.count({ where: { sentAt: null } })).toBe(0);
+    } finally {
+      delete process.env.NOTIFY_BATCH_MS;
+    }
+  });
+
+  it('[NT-T98] 몇 초 뒤에 들어온 줄도 먼저 들어온 줄과 한 통으로 — 창은 「사람의 첫 줄」부터 센다 · 아직 안 된 사람은 남겨 두고 다시 건다', async () => {
+    process.env.NOTIFY_BATCH_MS = '60000';
+    try {
+      const prisma = await db();
+      const { sendOrQueue, flushOutbox } = await import('@/server/notify/outbox');
+      take();
+      const t0 = new Date();
+      const at = (s: number) => new Date(t0.getTime() + s * 1000);
+      const put = (no: string, subject: string, s: number) =>
+        sendOrQueue({ recvIds: [no], subject, contents: `${subject} 본문`, kind: 'ru_hq_ready' }, at(s));
+      await put('9401', '[Tincase] 실하나 승인 완료', 0); // 첫 줄
+      await put('9401', '[Tincase] 본부가 본부본이 준비됐어요', 3); // 몇 초 뒤 — 같은 사람
+      await put('9402', '[Tincase] 늦게 시작한 사람', 30); // 이 사람은 아직 창이 안 지난다
+      const f = await flushOutbox(at(60.5));
+      expect([f.batches, f.sent, f.failed]).toEqual([1, 2, 0]);
+      expect(f.waiting).toBe(1);
+      const got = take();
+      expect(got.map((g) => g.to)).toEqual(['9401']); // 두 줄이 한 통
+      expect(got[0].subject).toBe('[Tincase] 알림 2건 — 실하나 승인 완료');
+      expect(await prisma.notifyOutbox.count({ where: { recvId: '9402', sentAt: null } })).toBe(1);
+      const f2 = await flushOutbox(at(91));
+      expect([f2.sent, f2.waiting]).toEqual([1, 0]);
+      expect(take().map((g) => g.to)).toEqual(['9402']);
     } finally {
       delete process.env.NOTIFY_BATCH_MS;
     }
