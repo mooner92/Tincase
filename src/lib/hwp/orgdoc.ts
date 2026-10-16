@@ -172,7 +172,7 @@ export function extractSectionBody(bytes: Buffer): { body: HwpRecord[]; docInfo:
 }
 
 /** 표 인스턴스 ID를 문서 안에서 겹치지 않게 — 같은 양식에서 나온 원본들은 같은 값을 들고 온다 */
-function renumberTables(recs: HwpRecord[]) {
+export function renumberTables(recs: HwpRecord[]) {
   const idx = recs.map((r, i) => (r.tag === TAG.CTRL_HEADER && ctrlName(r.data) === 'tbl ' && r.data.length >= TBL_INSTANCE_ID + 4 ? i : -1)).filter((i) => i >= 0);
   const seen = new Set<number>();
   let next = Math.max(1, ...idx.map((i) => recs[i].data.readUInt32LE(TBL_INSTANCE_ID))) + 1;
@@ -189,7 +189,7 @@ function renumberTables(recs: HwpRecord[]) {
 }
 
 /** 「목록의 마지막 문단」 표시는 최상위 마지막 문단에만 (리뷰 #25와 같은 규칙) */
-function fixLastFlags(recs: HwpRecord[]) {
+export function fixLastFlags(recs: HwpRecord[]) {
   const tops = recs.map((r, i) => (r.tag === TAG.PARA_HEADER && r.level === 0 ? i : -1)).filter((i) => i >= 0);
   tops.forEach((i, n) => {
     const d = Buffer.from(recs[i].data);

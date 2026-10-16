@@ -11,6 +11,7 @@
 | `sample-filled-w1.hwp` | 표1 14행 · 표2 14행 · **표3 없음** | 실제 취합본. 다행(多行) 케이스 |
 | `sample-filled-w2.hwp` | 표1 10행 · 표2 9행 · **표3 없음** | 실제 취합본. **표3 삭제 "정답" 파일** |
 | `verify-write-test.hwp` | — | 조사 중 셀을 수정해 재생성한 파일. [Q-01](../OPEN-QUESTIONS.md) 확인용 |
+| `hq-source-2026-09-4.hwp` | 섹션 12개 · 표 46개 | 2026년 9월 4주차 **전사 취합본**(부서 제출본을 이어 붙인 것). 연구 본부 양식을 떼어 만드는 원본(RH-30) — `tests/hq-form.test.ts` |
 
 `sample-filled-w2.hwp`는 사람이 한글에서 3번 표를 삭제한 결과물이라,
 병합 엔진의 표 삭제 로직을 추측 없이 **정답 대조**로 맞출 수 있다 ([HM-24](../docs/spec/08-hwp-merge-engine.md)).

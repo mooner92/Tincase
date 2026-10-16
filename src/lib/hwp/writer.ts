@@ -37,7 +37,7 @@ export class HwpWriteError extends Error {
 }
 
 /** 한 셀이 차지하는 레코드 구간 [start, end) — start는 LIST_HEADER */
-interface CellSpan {
+export interface CellSpan {
   row: number;
   col: number;
   start: number;
@@ -320,7 +320,7 @@ export function plainShapeIdOf(recs: readonly HwpRecord[], tableOrdinal: number)
 }
 
 /** 그 셀의 모든 글자 구간을 한 가지 서식으로 통일한다 (기울임·굵게가 섞여 들어오지 않게) */
-function normalizeCharShape(recs: HwpRecord[], cell: CellSpan, shapeId: number): void {
+export function normalizeCharShape(recs: HwpRecord[], cell: CellSpan, shapeId: number): void {
   for (let k = cell.start; k < cell.end && k < recs.length; k++) {
     if (recs[k].tag !== TAG.PARA_CHAR_SHAPE) continue;
     const d = Buffer.from(recs[k].data);
@@ -340,7 +340,7 @@ function normalizeCharShape(recs: HwpRecord[], cell: CellSpan, shapeId: number):
  */
 const CELL_SHRINK_TO_FIT = 0x04000000;
 
-function clearShrinkToFit(recs: HwpRecord[], headerIdx: number): void {
+export function clearShrinkToFit(recs: HwpRecord[], headerIdx: number): void {
   const r = recs[headerIdx];
   if (r.tag !== TAG.LIST_HEADER || r.data.length < 8) return;
   const attr = r.data.readUInt32LE(4);
