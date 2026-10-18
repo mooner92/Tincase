@@ -7,6 +7,7 @@ import { openHwp } from './ole';
 import { parseRecords, serializeRecords, type HwpRecord } from './record';
 import { HwpWriteError, locateTables, normalizeCharShape, ownControls, ownText, packHwp, setParagraphText, stripCfbSentinel, topParagraphs, type TableSpan } from './writer';
 import { TAG } from './record';
+import { BLUE, charShapeColors, ensureColorShape, isEmphasis } from './charshape';
 import { fixLastFlags, renumberTables } from './orgdoc';
 import { cellText, fitHeaderRow, rebuildRows, setCellsAt, type ProtoRow } from './proto-rows';
 
@@ -136,7 +137,19 @@ function emptyCells(recs: readonly HwpRecord[], t: TableSpan): string[] {
 
 export interface FillHqOptions {
   empty?: string;
-  emphasisShapeId?: number | null;
+  /** 강조 항목의 글자색 — 기본 파랑(HM-37과 같은 규칙). 원래 서식을 복제해 색만 바꾼다 */
+  emphasisColor?: number;
+}
+
+/** 그 표 (줄, 칸)의 첫 글자 서식 번호 */
+function shapeIdAt(recs: readonly HwpRecord[], ord: number, row: number, col: number): number | null {
+  const t = locateTables(recs)[ord];
+  const cell = t?.cells.find((c) => c.row === row && c.col === col);
+  if (!cell) return null;
+  for (let k = cell.start; k < cell.end; k++) {
+    if (recs[k].tag === TAG.PARA_CHAR_SHAPE && recs[k].data.length >= 8) return recs[k].data.readUInt32LE(4);
+  }
+  return null;
 }
 
 /** 본부 양식에 데이터를 써서 hwp 한 벌을 돌려준다 */
@@ -149,10 +162,24 @@ export function fillHqForm(template: Buffer, data: HqFormData, opts: FillHqOptio
     if (at[k] === undefined) throw new HwpWriteError(`양식에 「${k}」 표가 없습니다`);
   }
 
+  // HM-37 — 강조 항목이 있을 때만 DocInfo에 색 서식을 만든다(바꿀 이유가 없으면 건드리지 않는다). 내용 칸의 원래 서식을 복제한다
+  const anyEmph = [...data.results, ...data.plans].some((t) => t.items.some((i) => i.emphasis)) || data.notes.some((i) => i.emphasis);
+  let docInfoOut: Buffer | undefined;
+  const emph = { project: null as number | null, notes: null as number | null };
+  if (anyEmph) {
+    const di = parseRecords(file.docInfo);
+    const color = opts.emphasisColor ?? BLUE;
+    const pBase = shapeIdAt(recs, at.results!, PROJECT_PROTO.item, 2);
+    const nBase = shapeIdAt(recs, at.notes!, PLAIN_PROTO.middle, 1);
+    emph.project = pBase === null ? null : ensureColorShape(di, pBase, color);
+    emph.notes = nBase === null ? null : ensureColorShape(di, nBase, color);
+    docInfoOut = serializeRecords(di);
+  }
+
   // 순번이 바뀌지 않으므로(표 수는 그대로) 어느 순서로 고쳐도 된다 — 뒤 표부터
-  rebuildRows(recs, at.notes!, noteRows(data.notes, empty), { ...opts, fitCols: NOTE_FIT });
-  rebuildRows(recs, at.plans!, projectRows(data.plans, 2, empty), { ...opts, fitCols: PROJECT_FIT });
-  rebuildRows(recs, at.results!, projectRows(data.results, 1, empty), { ...opts, fitCols: PROJECT_FIT });
+  rebuildRows(recs, at.notes!, noteRows(data.notes, empty), { emphasisShapeId: emph.notes, fitCols: NOTE_FIT });
+  rebuildRows(recs, at.plans!, projectRows(data.plans, 2, empty), { emphasisShapeId: emph.project, fitCols: PROJECT_FIT });
+  rebuildRows(recs, at.results!, projectRows(data.results, 1, empty), { emphasisShapeId: emph.project, fitCols: PROJECT_FIT });
 
   if (at.evaluation !== undefined) {
     const t = locateTables(recs)[at.evaluation];
@@ -175,7 +202,7 @@ export function fillHqForm(template: Buffer, data: HqFormData, opts: FillHqOptio
   }
 
   if (has(data.title)) setParagraphText(recs, topParagraphs(recs)[0], data.title!);
-  return packHwp(template, [serializeRecords(recs)]);
+  return packHwp(template, [serializeRecords(recs)], docInfoOut);
 }
 
 // ── RH-36 다시 읽기 ───────────────────────────────────
@@ -195,6 +222,74 @@ export function readHqTables(bytes: Buffer): Partial<Record<HqTableKind, [number
     out[k] = rows;
   }
   return out;
+}
+
+// ── RH-70 · RH-76 판정과 되읽기 ───────────────────────
+
+/** RH-70 — 연구 본부 양식인가: `1. 주요 업무실적` 표가 6칸(두 층)이다 */
+export function isProjectForm(bytes: Buffer): boolean {
+  try {
+    const recs = parseRecords(openHwp(bytes).sections[0]);
+    const at = locateTitledTables(recs);
+    return at.results !== undefined && locateTables(recs)[at.results].cols === 6;
+  } catch {
+    return false;
+  }
+}
+
+const isBlank = (v: string) => v.trim() === '' || v.trim() === '-';
+
+/** RH-76 — 만든 hwp(또는 같은 모양의 양식)를 과제·항목으로 되돌린다. 빈 표기(`-`)만 있는 줄은 버린다. 강조는 내용 칸의 글자색으로 안다 */
+export function parseHqForm(bytes: Buffer): HqFormData {
+  const file = openHwp(bytes);
+  const recs = parseRecords(file.sections[0]);
+  let colors: number[] = [];
+  try {
+    colors = charShapeColors(parseRecords(file.docInfo));
+  } catch {
+    colors = [];
+  }
+  const at = locateTitledTables(recs);
+  const emphasized = (ord: number | undefined, col: number) => {
+    const out = new Set<number>();
+    if (ord === undefined) return out;
+    for (const c of locateTables(recs)[ord].cells) {
+      if (c.col !== col || c.row === 0) continue;
+      const id = shapeIdAt(recs, ord, c.row, c.col);
+      if (id !== null && isEmphasis(colors[id] ?? 0)) out.add(c.row);
+    }
+    return out;
+  };
+  const emphRows = { results: emphasized(at.results, 2), plans: emphasized(at.plans, 2), notes: emphasized(at.notes, 1) };
+  const back = readHqTables(bytes);
+  const text = (row: [number, string][], col: number) => row.find(([c]) => c === col)?.[1] ?? '';
+  const project = (rows: [number, string][][] | undefined, emph: Set<number>): HqTask[] => {
+    const tasks: HqTask[] = [];
+    let unit = '';
+    for (const [r, row] of (rows ?? []).entries()) {
+      if (r === 0) continue;
+      if (row.length === 4) {
+        if (text(row, 0).trim()) unit = text(row, 0).trim();
+        tasks.push({ unit, type: text(row, 1), title: text(row, 2), owner: text(row, 5), items: [] });
+      } else if (row.length >= 6) {
+        const it: HqItem = { content: text(row, 2), date: text(row, 3), place: text(row, 4), people: text(row, 5) };
+        if ([it.content, it.date, it.place, it.people].every(isBlank)) continue;
+        if (emph.has(r)) it.emphasis = true;
+        if (tasks.length === 0) tasks.push({ unit, type: '', title: '', owner: '', items: [] });
+        tasks[tasks.length - 1].items.push(it);
+      }
+    }
+    return tasks;
+  };
+  const notes: HqItem[] = [];
+  for (const [r, row] of (back.notes ?? []).entries()) {
+    if (r === 0) continue;
+    const it: HqItem = { content: text(row, 1), date: text(row, 2), place: text(row, 3), people: text(row, 4) };
+    if ([it.content, it.date, it.place, it.people].every(isBlank)) continue;
+    if (emphRows.notes.has(r)) it.emphasis = true;
+    notes.push(it);
+  }
+  return { results: project(back.results, emphRows.results), plans: project(back.plans, emphRows.plans), notes };
 }
 
 // ── RH-30 양식 만들기 ─────────────────────────────────

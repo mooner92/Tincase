@@ -10,6 +10,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { WebComposer, type ComposerRow } from './WebComposer';
+import { ProjectComposer, type PData } from './ProjectComposer';
 import { FileDrawer } from './FileDrawer';
 import { MergedDrawer } from './MergedDrawer';
 
@@ -36,6 +37,8 @@ export interface ThisWeekCardProps {
   canCancel: boolean;
   /** PG-09 — 잠기지 않았는데 부서 양식이 없다 */
   noTemplate: boolean;
+  /** RH-70 — 부서 양식이 연구실(6칸 두 층) 것이면 'project' — 작성 화면이 과제 카드다 */
+  form?: 'unit' | 'project';
   /** PG-67c — 잠긴 뒤 마감 이벤트 뒤에 만든 성공 병합본이 있다 */
   doc: boolean;
   divisionSlug: string;
@@ -62,10 +65,11 @@ export function ThisWeekCard({
   divisionSlug,
   me,
   emptyWordsRaw,
+  form = 'unit',
   layout,
 }: ThisWeekCardProps) {
   const router = useRouter();
-  const [composing, setComposing] = useState<{ initial: Rows | null; failed: boolean; editedNote: string | null } | null>(null);
+  const [composing, setComposing] = useState<{ initial: Rows | null; project?: PData | null; failed: boolean; editedNote: string | null } | null>(null);
   const [loading, setLoading] = useState(false);
   const [viewId, setViewId] = useState<string | null>(null);
   const [docOpen, setDocOpen] = useState(false);
@@ -114,13 +118,19 @@ export function ThisWeekCard({
     try {
       const r = await fetch(`/api/submissions/${mine.id}/preview`);
       const b = r.ok
-        ? ((await r.json()) as { rowsByTable?: Rows; submission?: { editedBy?: string | null; editedAt?: string | null; proxied?: boolean } })
+        ? ((await r.json()) as {
+            rowsByTable?: Rows;
+            project?: PData | null;
+            submission?: { editedBy?: string | null; editedAt?: string | null; proxied?: boolean };
+          })
         : null;
       const by = b?.submission?.editedBy;
       const at = b?.submission?.editedAt;
       setComposing({
         initial: b?.rowsByTable ?? null,
-        failed: !b?.rowsByTable,
+        project: b?.project ?? null,
+        // RH-76 — 연구실 화면은 낸 판의 과제·항목(`project`)으로 연다
+        failed: form === 'project' ? !b?.project : !b?.rowsByTable,
         // LE-44 — 담당자가 대신 입력한 판이면 「○○ 입력」
         editedNote: by ? `${by} ${b?.submission?.proxied ? '입력' : '고침'}${at ? ` · ${at.slice(5, 16).replace('T', ' ')}` : ''}` : null,
       });
@@ -245,7 +255,23 @@ export function ThisWeekCard({
         드로어는 카드 **밖**에 둔다. 카드는 넓은 화면에서 sticky라 제 쌓임 맥락을 만들고, 그 안의 fixed 드로어는
         z-40이어도 머리(z-30) 밑에 깔린다. 드로어는 fixed라 격자의 칸을 차지하지 않는다
       */}
-      {composing && (
+      {composing && form === 'project' && (
+        <ProjectComposer
+          userId={me.id}
+          isoKey={week.isoKey}
+          title={title}
+          editedNote={composing.editedNote}
+          initial={composing.project ?? null}
+          initialVersion={mine?.version}
+          initialFailed={composing.failed}
+          weekStartMs={week.weekStartMs}
+          onClose={() => {
+            setComposing(null);
+            mainRef.current?.focus();
+          }}
+        />
+      )}
+      {composing && form !== 'project' && (
         <WebComposer
           userId={me.id}
           isoKey={week.isoKey}

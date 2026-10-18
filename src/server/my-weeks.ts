@@ -11,6 +11,7 @@ import { isSubmissionLocked, mergeGate, homeRefreshAt } from '@/lib/deadline';
 import { formatDeadlineNearKo, isLocked, mondayOf, slotKind, toKstIso } from '@/lib/week';
 import { groupPast, pickPastWeeks, type PastGroups } from '@/lib/week-groups';
 import type { ThisWeekCardProps } from '@/components/ThisWeekCard';
+import { divisionFormOf } from '@/server/project-form';
 
 /**
  * 질의 넷 — 모두 인덱스를 탄다. N+1은 없다.
@@ -61,10 +62,11 @@ export async function loadMemberHome(view: DivisionView, now: Date): Promise<Mem
   const me = scope.user; // TACP-1 — 사람은 신원에서만
   const slot = await ensureCurrentSlot(now); // WS-11
   const deadline = effectiveDeadline(slot, division); // WS-18 포함
-  const [opening, templates, w] = await Promise.all([
+  const [opening, templates, w, form] = await Promise.all([
     openingOf(division.id, slot.id),
     prisma.template.count({ where: { divisionId: division.id, isActive: true } }),
     myWeeks({ userId: me.id, divisionId: division.id, upTo: slot.opensAt }),
+    divisionFormOf(division.id), // RH-70 — 양식이 연구실 것이면 작성 화면도 연구실 것
   ]);
 
   const locked = isSubmissionLocked(slot, division, opening, now);
@@ -119,6 +121,7 @@ export async function loadMemberHome(view: DivisionView, now: Date): Promise<Mem
       divisionSlug: division.slug,
       me: { id: me.id, name: me.name },
       emptyWordsRaw: division.emptyWords,
+      form,
     },
     groups: groupPast(past, { year: slot.year, month: slot.month }),
     showMissing: me.onRoster,

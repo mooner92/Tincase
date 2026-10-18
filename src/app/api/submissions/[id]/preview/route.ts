@@ -8,6 +8,7 @@ import { handler, json, rateLimit } from '@/server/http';
 import { audit } from '@/server/audit';
 import { logger } from '@/server/logger';
 import { readWorklog, TABLE_TITLES, TABLE_COLUMNS } from '@/lib/hwp/reader';
+import { isProjectForm, parseHqForm, type HqFormData } from '@/lib/hwp/hq-form';
 import { tableGrid } from '@/lib/hwp/model';
 import { toKstIso } from '@/lib/week';
 
@@ -20,9 +21,12 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
   const sub = await findAccessibleSubmission(scope, id); // 본인·lead·head(자기 부서)·readAll — 그 외 404
 
   let parsed;
+  // RH-76 — 연구실 양식으로 낸 판이면 과제·항목으로도 돌려준다(작성 화면이 [열기]로 이어 쓴다)
+  let project: HqFormData | null = null;
   try {
     const bytes = await readStoredFile(sub.filePath);
     parsed = readWorklog(bytes); // 업로드 시 이미 검증됨 — 실패는 정합성 이탈 (API-22)
+    if (isProjectForm(bytes)) project = parseHqForm(bytes);
   } catch (e) {
     logger.error({ submissionId: sub.id, err: String(e) }, 'CRITICAL: preview parse failed for validated file');
     throw new HttpError(500, 'internal', '파일을 읽을 수 없습니다. 원본 다운로드로 확인해 주세요.');
@@ -75,5 +79,6 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
       };
     }),
     warnings: parsed.warnings,
+    project,
   });
 });
