@@ -21,13 +21,18 @@ export interface ProtoRow {
 
 export interface RebuildOptions {
   emphasisShapeId?: number | null;
-  /** 짧은 이름 칸(구분 · 줄 이름) — 「칸에 맞춰 글자 줄이기」를 켠다. 긴 내용 칸은 끈다(HM-30) */
+  /** 짧은 이름 칸(구분 · 줄 이름) — 「한 줄 유지(자간 조절)」를 켠다. 긴 내용 칸은 보통 줄바꿈 그대로 */
   fitCols?: readonly number[];
 }
 
 /** 확장 컨트롤 문자(8칸, CTRL_HEADER가 딸린다) — 한글 문서 형식 표 6 */
 const EXTENDED = new Set([1, 2, 3, 11, 12, 14, 15, 16, 17, 18, 21, 22, 23]);
-const CELL_SHRINK_TO_FIT = 0x04000000;
+/**
+ * 셀 문단 목록 속성의 줄바꿈 방법(비트 3–4) — 0 보통 · **1 자간을 줄여 한 줄 유지** · 2 폭이 늘어남(한글 문서 형식 「문단 리스트 헤더」).
+ * 원본 적응센터 자문회의의 「국가기후위기적응센터」 칸이 0x28(=1)이라 한 줄에 들어갔다(2026-10-17 실측). 0x04000000(writer HM-30)을 켜도 한글은 꺾었다
+ */
+const WRAP_MASK = 0x18;
+const WRAP_SINGLE_LINE = 0x08;
 const PARA_CS_COUNT = 12;
 
 /**
@@ -92,12 +97,12 @@ function tidyRuns(recs: HwpRecord[], cell: CellSpan): void {
   }
 }
 
-/** 「칸에 맞춰 글자 줄이기」 켜기 */
-export function setShrinkToFit(recs: HwpRecord[], headerIdx: number): void {
+/** 「한 줄 유지(자간 조절)」 켜기 */
+export function setSingleLine(recs: HwpRecord[], headerIdx: number): void {
   const r = recs[headerIdx];
   if (r.tag !== TAG.LIST_HEADER || r.data.length < 8) return;
   const d = Buffer.from(r.data);
-  d.writeUInt32LE((d.readUInt32LE(4) | CELL_SHRINK_TO_FIT) >>> 0, 4);
+  d.writeUInt32LE(((d.readUInt32LE(4) & ~WRAP_MASK) | WRAP_SINGLE_LINE) >>> 0, 4);
   recs[headerIdx] = { ...r, data: d };
 }
 
@@ -105,8 +110,8 @@ export function setShrinkToFit(recs: HwpRecord[], headerIdx: number): void {
 function writeCell(recs: HwpRecord[], cell: CellSpan, text: string, shape: number | null, fit: boolean): void {
   stripCellControls(recs, cell);
   const again = { ...cell, end: nextCellEnd(recs, cell) };
-  if (fit) setShrinkToFit(recs, again.start);
-  else clearShrinkToFit(recs, again.start);
+  clearShrinkToFit(recs, again.start);
+  if (fit) setSingleLine(recs, again.start);
   if (shape !== null) normalizeCharShape(recs, again, shape);
   const delta = setCellText(recs, again, text);
   tidyRuns(recs, { ...again, end: again.end + delta });
@@ -215,9 +220,9 @@ export function cellText(recs: readonly HwpRecord[], cell: CellSpan): string {
   return parts.join('\n');
 }
 
-/** 머리줄 칸 모두에 「칸에 맞춰 글자 줄이기」 — 「구분」처럼 좁은 칸의 굵은 머리 글자가 두 줄로 꺾이지 않게(2026-10-17 한글에서 확인) */
+/** 머리줄 칸 모두에 「한 줄 유지」 — 「구분」처럼 좁은 칸의 굵은 머리 글자가 두 줄로 꺾이지 않게(2026-10-17 한글에서 확인) */
 export function fitHeaderRow(recs: HwpRecord[], tableOrdinal: number): void {
   const t = locateTables(recs)[tableOrdinal];
   if (!t) throw new HwpWriteError(`${tableOrdinal + 1}번째 표가 없습니다`);
-  for (const c of t.cells) if (c.row === 0) setShrinkToFit(recs, c.start);
+  for (const c of t.cells) if (c.row === 0) setSingleLine(recs, c.start);
 }
