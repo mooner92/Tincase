@@ -517,7 +517,7 @@ function DateChips({ value, chips, label, onChange }: { value: string; chips: Da
                 on ? 'border-ink bg-ink text-canvas' : 'border-border-strong bg-canvas text-body hover:border-ink'
               }`}
             >
-              <span className="text-[11px]">{c.dow}</span>
+              <span className="text-xs">{c.dow}</span>
               <span className="text-[12px] font-semibold tracking-tight tabular-nums sm:text-[13px]">{c.md}</span>
             </button>
           );
