@@ -8,7 +8,7 @@ import { parseRecords, serializeRecords, type HwpRecord } from './record';
 import { HwpWriteError, locateTables, normalizeCharShape, ownControls, ownText, packHwp, setParagraphText, stripCfbSentinel, topParagraphs, type TableSpan } from './writer';
 import { TAG } from './record';
 import { fixLastFlags, renumberTables } from './orgdoc';
-import { cellText, rebuildRows, setCellsAt, type ProtoRow } from './proto-rows';
+import { cellText, fitHeaderRow, rebuildRows, setCellsAt, type ProtoRow } from './proto-rows';
 
 export type HqTableKind = 'consult' | 'evaluation' | 'results' | 'plans' | 'notes';
 
@@ -76,6 +76,11 @@ export interface HqFormData {
 export const PROJECT_PROTO = { taskFirst: 1, taskCont: 2, item: 3, itemLast: 4 } as const;
 /** 양식의 특이사항·자문회의 표 데이터 줄 배치 */
 export const PLAIN_PROTO = { middle: 1, last: 2 } as const;
+
+/** 짧은 이름 칸 — 꺾이지 않게 줄여 넣는다. 6칸: 구분(실 약칭) · 유형/번호, 5칸: 번호, 자문회의: 줄 이름 */
+const PROJECT_FIT = [0, 1] as const;
+const NOTE_FIT = [0] as const;
+const CONSULT_FIT = [0] as const;
 
 const has = (s: string | undefined) => !!s && s.trim() !== '';
 const itemHasText = (i: HqItem) => has(i.content) || has(i.date) || has(i.place) || has(i.people);
@@ -145,9 +150,9 @@ export function fillHqForm(template: Buffer, data: HqFormData, opts: FillHqOptio
   }
 
   // 순번이 바뀌지 않으므로(표 수는 그대로) 어느 순서로 고쳐도 된다 — 뒤 표부터
-  rebuildRows(recs, at.notes!, noteRows(data.notes, empty), opts);
-  rebuildRows(recs, at.plans!, projectRows(data.plans, 2, empty), opts);
-  rebuildRows(recs, at.results!, projectRows(data.results, 1, empty), opts);
+  rebuildRows(recs, at.notes!, noteRows(data.notes, empty), { ...opts, fitCols: NOTE_FIT });
+  rebuildRows(recs, at.plans!, projectRows(data.plans, 2, empty), { ...opts, fitCols: PROJECT_FIT });
+  rebuildRows(recs, at.results!, projectRows(data.results, 1, empty), { ...opts, fitCols: PROJECT_FIT });
 
   if (at.evaluation !== undefined) {
     const t = locateTables(recs)[at.evaluation];
@@ -301,15 +306,21 @@ function unifyParaShapes(recs: HwpRecord[], ord: number, rows: readonly number[]
 }
 
 /**
- * 원형 줄들의 글자 서식을 하나로 — 원본은 분량을 맞추려고 줄마다 장평·크기를 손으로 줄여 두었다(§1-2).
- * 그대로 복제하면 과제마다 글자가 납작하거나 작아진다. `rows`의 모든 칸을 (from.row, from.col) 칸의 서식으로 맞춘다.
- * 기준 칸은 강조할 까닭이 없는 칸(번호 · 유형)을 고른다 — writer `plainCharShapeOf`와 같은 생각이다(HM-29).
+ * 원형 줄들의 글자 서식을 **칸(열)마다** 기준 줄의 것으로 — 원본은 분량을 맞추려고 줄마다 장평·크기를 손으로 줄여 두었다(§1-2).
+ * 그대로 복제하면 과제마다 글자가 납작하거나 작아진다. 한 줄의 서식 하나로 몰면 칸마다 다른 원래 모양(구분 칸은 좁게, 과제명은 크게)이
+ * 무너져 「순환실」이 두 줄로 꺾이고 항목 글자가 벌어졌다(2026-10-17 한글에서 확인) — 그래서 열마다 맞춘다.
  */
-function unifyShapes(recs: HwpRecord[], ord: number, rows: readonly number[], from: { row: number; col: number }): void {
+function unifyShapes(recs: HwpRecord[], ord: number, rows: readonly number[], fromRow: number): void {
   const t = locateTables(recs)[ord];
-  const shape = shapeAt(recs, t, from.row, from.col);
-  if (shape === null) return;
-  for (const cell of t.cells) if (rows.includes(cell.row)) normalizeCharShape(recs, cell, shape);
+  const ref = new Map<number, number>();
+  for (const c of t.cells.filter((x) => x.row === fromRow)) {
+    const sh = shapeAt(recs, t, fromRow, c.col);
+    if (sh !== null) ref.set(c.col, sh);
+  }
+  for (const cell of t.cells) {
+    if (!rows.includes(cell.row) || !ref.has(cell.col)) continue;
+    normalizeCharShape(recs, cell, ref.get(cell.col)!);
+  }
 }
 
 /**
@@ -348,14 +359,14 @@ export function buildHqTemplate(source: Buffer, spec: HqTemplateSpec, summaryDon
   const { taskFirst, taskCont, item, itemLast } = PROJECT_PROTO;
   for (const ord of [at.results!, at.plans!]) {
     rebuildRows(out, ord, projectProtos(out, tables()[ord]).map(blankRow));
-    unifyShapes(out, ord, [taskFirst, taskCont], { row: taskFirst, col: 1 }); // 과제 줄 — 유형 칸 서식
-    unifyShapes(out, ord, [item, itemLast], { row: item, col: 1 }); // 항목 줄 — 번호 칸 서식
+    unifyShapes(out, ord, [taskFirst, taskCont], taskFirst);
+    unifyShapes(out, ord, [item, itemLast], item);
     unifyParaShapes(out, ord, [taskCont], taskFirst);
     unifyParaShapes(out, ord, [item], itemLast); // 원본 마지막 줄이 일자·장소·참석자 가운데 정렬(제출본의 대다수 모양)
   }
   const nt = tables()[at.notes!];
   rebuildRows(out, at.notes!, [blankRow(1), blankRow(nt.rows - 1)]);
-  unifyShapes(out, at.notes!, [PLAIN_PROTO.middle, PLAIN_PROTO.last], { row: PLAIN_PROTO.middle, col: 0 });
+  unifyShapes(out, at.notes!, [PLAIN_PROTO.middle, PLAIN_PROTO.last], PLAIN_PROTO.middle);
   unifyParaShapes(out, at.notes!, [PLAIN_PROTO.middle], PLAIN_PROTO.last);
 
   // 자문회의 — 본부 줄은 원본의 첫 줄, 실 줄은 원본의 가운데 줄(정렬이 본부 줄과 다르다), 끝 줄은 마지막 줄을 원형으로
@@ -366,7 +377,9 @@ export function buildHqTemplate(source: Buffer, spec: HqTemplateSpec, summaryDon
     out,
     at.consult!,
     labels.map((label, i) => ({ proto: i === 0 ? 1 : i === labels.length - 1 ? ct.rows - 1 : middle, texts: { 0: label } })),
+    { fitCols: CONSULT_FIT },
   );
+  for (const k of ['consult', 'results', 'plans', 'notes'] as const) fitHeaderRow(out, at[k]!);
 
   if (at.evaluation !== undefined) {
     const et = tables()[at.evaluation];

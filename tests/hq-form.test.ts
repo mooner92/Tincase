@@ -16,6 +16,8 @@ import {
   type HqTask,
 } from '@/lib/hwp/hq-form';
 import { openHwp } from '@/lib/hwp/ole';
+import { stripCellControls } from '@/lib/hwp/proto-rows';
+import { TAG, paraText, type HwpRecord } from '@/lib/hwp/record';
 
 const item = (content: string, date = '10/16', place = '본관', people = '가나다') => ({ content, date, place, people });
 
@@ -78,6 +80,33 @@ describe('RH-32 · RH-33 — 과제·항목을 표 줄로', () => {
     expect(tableKindOf('2.주요 업무계획')).toBe('plans');
     expect(tableKindOf('3. 기타 특이사항')).toBe('notes');
     expect(tableKindOf('국토환경연구본부')).toBeNull();
+  });
+});
+
+describe('RH-36 — 칸 속 숨은 컨트롤', () => {
+  it('[RH-T05] 칸 문단에 딸린 컨트롤은 본체와 글자 속 자리 표시째 걷힌다 — 한쪽만 지우면 한글이 파일을 거부한다', () => {
+    // 원본 평가 실적 「2건」 칸처럼: 글자 맨 앞에 단 정의(cold) 8칸 + CTRL_HEADER
+    const ctrl = Buffer.alloc(16);
+    ctrl.writeUInt16LE(2, 0);
+    ctrl.writeUInt16LE(2, 14);
+    const text = Buffer.concat([ctrl, Buffer.from('2건\r', 'ucs2')]);
+    const head = Buffer.alloc(22);
+    head.writeUInt32LE(text.length / 2, 0);
+    head.writeUInt16LE(1, 12);
+    const rec = (tag: number, level: number, data: Buffer): HwpRecord => ({ tag, level, data, extended: false });
+    const recs: HwpRecord[] = [
+      rec(TAG.LIST_HEADER, 2, Buffer.alloc(34)),
+      rec(TAG.PARA_HEADER, 2, head),
+      rec(TAG.PARA_TEXT, 3, text),
+      rec(TAG.PARA_CHAR_SHAPE, 3, Buffer.alloc(8)),
+      rec(TAG.CTRL_HEADER, 3, Buffer.from('dloc', 'latin1')),
+      rec(TAG.CTRL_HEADER + 100, 4, Buffer.alloc(4)), // 컨트롤 안쪽 레코드도 같이 간다
+      rec(TAG.LIST_HEADER, 2, Buffer.alloc(34)),
+    ];
+    stripCellControls(recs, { row: 0, col: 0, start: 0, end: 6 });
+    expect(recs.map((r) => r.tag)).toEqual([TAG.LIST_HEADER, TAG.PARA_HEADER, TAG.PARA_TEXT, TAG.PARA_CHAR_SHAPE, TAG.LIST_HEADER]);
+    expect(paraText(recs[2].data)).toBe('2건');
+    expect(recs[2].data.length / 2).toBe(3);
   });
 });
 
