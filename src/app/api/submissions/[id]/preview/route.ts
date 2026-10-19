@@ -63,7 +63,8 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
       proxied: sub.origin === 'lead_entry',
     },
     // WA-20 — [고치기]는 내 부서 lead·head에게, 남의 것·최신 판일 때만 (TACP-22). 게이트와 같은 식이다
-    canRevise: sub.isLatest && canReviseSubmission(scope, sub),
+    // RH-86 — 연구실 판은 담당·부서장 고치기(실형 편집기)를 아직 쓰지 않는다 — 낸 사람이 고쳐 다시 내거나 병합 뒤 본다
+    canRevise: sub.isLatest && !projectView && canReviseSubmission(scope, sub),
     // HM-37 — 행별 「공유」 표시. 고칠 때 잃지 않게 같이 보낸다 (빈 행을 뺀 순서 = 격자의 빈 행 뺀 순서)
     emphasis: {
       achievements: parsed.worklog.achievements.map((r) => r.emphasis === true),
