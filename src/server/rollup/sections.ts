@@ -16,6 +16,7 @@ import { readStoredFile, sanitizeSegment, sha256, writeFileAtomic } from '../sto
 import { extractSectionBody } from '@/lib/hwp/orgdoc';
 import { currentReport } from './report';
 import { loadTree, parseOrder, type OrgTree } from './tree';
+import { isProjectForm } from '@/lib/hwp/hq-form';
 
 /**
  * 9월 4주차 최종본의 실제 순서(분석 §6.1) + 제목 통일안(§6.3 — AI홍보전략실에도 `기획경영본부(…)`).
@@ -219,6 +220,24 @@ export function sectionNode(tree: OrgTree, divisionId: string | null) {
  * Tincase 밖 섹션은 전사본(「미제출」 자리)·총괄 알림의 셈·「전사」 표에서 빠진다. 섹션 구성(순서·제목·부서)은 그대로라 그 부서를 켜면
  * 다음 맞추기에 저절로 들어온다. `all: true` — 밖 섹션도(`offline`) 함께: 섹션 목록 API처럼 구성 전체를 보여야 하는 곳만
  */
+/**
+ * RH-86 — 본부가 낸 판이 연구 본부 양식(표 안에서 합친 본부본)인가. 그 판은 실 사본을 이어 붙인 것이 아니라 한 표라,
+ * 최종본은 사본을 다시 이어 붙이지 않고 본부본을 그대로 한 섹션으로 쓴다. 판(sha)마다 한 번만 읽는다
+ */
+const projectReportCache = new Map<string, boolean>();
+async function isProjectReport(r: { filePath: string; sha256: string }): Promise<boolean> {
+  const hit = projectReportCache.get(r.sha256);
+  if (hit !== undefined) return hit;
+  let v = false;
+  try {
+    v = isProjectForm(await readStoredFile(r.filePath));
+  } catch {
+    v = false;
+  }
+  projectReportCache.set(r.sha256, v);
+  return v;
+}
+
 export async function resolveSections(slot: WeekSlot, tree?: OrgTree, opts: { create?: boolean; all?: boolean } = {}): Promise<SectionSource[]> {
   const sections = (await loadSections(opts)).filter((s) => s.isActive);
   const t = tree ?? (await loadTree());
@@ -265,6 +284,11 @@ export async function resolveSections(slot: WeekSlot, tree?: OrgTree, opts: { cr
             hq.basis === 'unapproved' ? 'unapproved' : hq.basis === 'due' ? 'due' : (await outdated(mine)) ? 'reapprove' : undefined;
           if (!own) {
             out.push({ section, kind: 'tincase', filePath: mine[0].filePath, refId: mine[0].id, offline: false, label: at, flag });
+            continue;
+          }
+          // RH-86 — 연구 본부: 본부장이 승인한 **본부본 한 벌**이 곧 이 섹션이다(실 사본을 다시 잇지 않는다)
+          if (await isProjectReport(hq)) {
+            out.push({ section, kind: 'tincase', filePath: hq.filePath, refId: hq.id, offline: false, label: `${at} · ${mine.length}개 단위`, flag });
             continue;
           }
           // 사본마다 본부본에 붙어 있던 제목 그대로 — 본부장이 검토한 꼴이 최종본의 꼴이다 (RU-11)
