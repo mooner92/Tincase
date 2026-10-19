@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { existsSync, readFileSync } from 'node:fs';
 import { formatDays, parseDays, weekDayChips } from '@/lib/project-dates';
 import { unitAbbr } from '@/lib/unit-abbr';
+import { evaluationTotal, normalizeEvaluation } from '@/lib/evaluation';
 
 const MON_1012 = Date.UTC(2026, 9, 11, 15, 0); // 2026-10-12(월) 00:00 KST
 const MON_0928 = Date.UTC(2026, 8, 27, 15, 0); // 2026-09-28(월) 00:00 KST
@@ -54,6 +55,19 @@ const SOURCE = 'fixtures/hq-source-2026-09-4.hwp';
 const DONOR = 'fixtures/master-template.hwp';
 const hasFix = existsSync(SOURCE) && existsSync(DONOR);
 const t = hasFix ? it : it.skip;
+
+describe('RH-89 — 평가 실적 칸 모양', () => {
+  const EVAL = ['전략평가', '기후평가', '환경평가', '사후조사', '소규모평가', '기타 자문', '총 검토건수'];
+
+  it('[RH-T27] 숫자만 적으면 「건」 · 총 검토건수를 비워 두면 나머지 합 · 적어 둔 합계와 글자는 그대로 · 모르는 값이 섞이면 더하지 않는다', () => {
+    expect(normalizeEvaluation(EVAL, ['8', '3건', '10', '8', '10', '3', ''])).toEqual(['8건', '3건', '10건', '8건', '10건', '3건', '42건']);
+    expect(normalizeEvaluation(EVAL, ['8', '-', '', '', '', '', '-'])).toEqual(['8건', '-', '', '', '', '', '8건']);
+    expect(normalizeEvaluation(EVAL, ['8', '3', '', '', '', '', '40건'])[6]).toBe('40건');
+    expect(normalizeEvaluation(EVAL, ['8', '검토 중', '', '', '', '', ''])).toEqual(['8건', '검토 중', '', '', '', '', '']);
+    expect(evaluationTotal(EVAL, ['-', '', '', '', '', '', ''])).toBeNull();
+    expect(normalizeEvaluation(['기후변화영향평가서(적응 부문) 등 검토'], ['2'])).toEqual(['2건']); // 합계 칸 없는 표(적응센터)
+  });
+});
 
 describe('RH-75 · RH-77 — 입력 검사와 hwp 만들기 (비공개 원본)', () => {
   const template = async () => {

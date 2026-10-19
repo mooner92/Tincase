@@ -4,6 +4,7 @@ import { HttpError } from '@/server/authz';
 import { readStoredFile } from '@/server/storage';
 import { logger } from '@/server/logger';
 import { cleanCell } from '@/server/worklog-doc';
+import { normalizeEvaluation } from '@/lib/evaluation';
 import { evaluationLabels, fillHqForm, isProjectForm, parseHqForm, type HqFormData, type HqItem, type HqTask } from '@/lib/hwp/hq-form';
 import { unitAbbr } from '@/lib/unit-abbr';
 
@@ -131,7 +132,8 @@ export function buildProjectHwp(
   const consult = opts.counts ? cleanCounts(body.consult, 4, '자문회의 실적') : undefined;
   const evaluation = opts.counts ? cleanCounts(body.evaluation, null, '평가 실적') : undefined;
   if (consult) data.consult = [{ label: divisionNameKo, values: consult }];
-  if (evaluation) data.evaluation = evaluation;
+  // RH-89 — 「8」 → 「8건」 · 비워 둔 총 검토건수는 합으로(양식의 이름 칸 순서)
+  if (evaluation) data.evaluation = normalizeEvaluation(evaluationLabels(templateBytes), evaluation);
   const items = (ts: HqTask[]) => ts.reduce((a, t) => a + t.items.length, 0);
   if (items(data.results) + items(data.plans) + data.notes.length === 0 && !consult && !evaluation) {
     throw new HttpError(422, 'empty_content', '항목을 하나 이상 적어 주세요.');

@@ -4,6 +4,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { composerDraftKey } from '@/lib/composer';
+import { evaluationTotal, totalIndex } from '@/lib/evaluation';
 import { formatDays, parseDays, weekDayChips, type DayChip } from '@/lib/project-dates';
 
 export interface PItem {
@@ -316,6 +317,9 @@ export function ProjectComposer({
       vals[i] = v;
       return { ...d, evaluation: vals };
     });
+  // RH-89 — 합계 칸은 비워 두면 서버가 같은 식으로 채운다. 화면에는 그 값을 흐리게 미리 보인다
+  const evalTotalAt = desk ? totalIndex(desk.evaluationLabels) : -1;
+  const evalAuto = desk ? evaluationTotal(desk.evaluationLabels, evalVals) : null;
   const countsFilled = consultVals.some((v) => v.trim() && v.trim() !== '-') || evalVals.some((v) => v.trim() && v.trim() !== '-');
 
   const blocked = busy || done || (total === 0 && !countsFilled) || (start.from !== 'draft' && unchanged);
@@ -383,11 +387,12 @@ export function ProjectComposer({
               {desk.evaluationLabels.length > 0 && (
                 <>
                   <h3 className="mt-4 text-[15px] font-semibold text-ink">※ 평가 실적</h3>
+                  <p className="mt-0.5 text-xs text-muted">숫자만 적으면 「건」이 붙어요{evalTotalAt >= 0 ? ` · ${desk.evaluationLabels[evalTotalAt]}는 비워 두면 합계로 들어가요` : ''}</p>
                   <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {desk.evaluationLabels.map((l, i) => (
                       <label key={l} className="text-xs text-muted">
                         {l}
-                        <input value={evalVals[i] ?? ''} onChange={(e) => setEval(i, e.target.value)} placeholder="-" maxLength={20} aria-label={`평가 실적 ${l}`} className={`${input} mt-1`} />
+                        <input value={evalVals[i] ?? ''} onChange={(e) => setEval(i, e.target.value)} placeholder={i === evalTotalAt && evalAuto ? `${evalAuto} (합계)` : '-'} maxLength={20} aria-label={`평가 실적 ${l}`} className={`${input} mt-1`} />
                       </label>
                     ))}
                   </div>
