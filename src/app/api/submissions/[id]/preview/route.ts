@@ -88,7 +88,8 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
         rows: [full[0] ?? [], ...full.slice(1).filter((r) => r.slice(1).some((c) => c.trim()))],
       };
     }),
-    warnings: parsed.warnings,
+    // RH-88 — 표 수·열 경고는 실형 양식 기준이라 연구실 판에는 맞지 않는다(「표가 4개입니다」)
+    warnings: projectView ? [] : parsed.warnings,
     project,
   });
 });

@@ -32,6 +32,7 @@ import { splitLate } from '@/lib/late';
 import { boardTitle } from '@/lib/docname';
 import { differingGroups } from '@/lib/merge-rows';
 import { notFound } from 'next/navigation';
+import { divisionFormOf } from '@/server/project-form';
 
 /** 실행 기록(`MergeRun.reviewJson`)에서 이 화면이 읽는 것만 (HM-26). `missing`·`categories`도 기록에는 남는다 */
 interface ReviewPayload {
@@ -49,8 +50,8 @@ export async function ManageView({
   canDeleteAny,
   canEditMerged,
   canApprove = false,
-  canAppend = false,
-  proxyScope = null,
+  canAppend: canAppendProp = false,
+  proxyScope: proxyScopeProp = null,
   handoff = null,
 }: {
   division: Division; // ★ 해석된 부서. scope.division을 쓰면 타 부서 열람 시 어긋난다
@@ -80,6 +81,10 @@ export async function ManageView({
 }) {
   const now = new Date();
   await ensureCurrentSlot(now);
+  // RH-86 — 연구실 양식 부서에는 [대신 쓰기]·[맨 뒤에 붙이기]가 없다(둘 다 실형 표를 쓴다 — 누르면 다른 양식이 열린다)
+  const projectForm = (proxyScopeProp || canAppendProp) && (await divisionFormOf(division.id)) === 'project';
+  const proxyScope = projectForm ? null : proxyScopeProp;
+  const canAppend = projectForm ? false : canAppendProp;
   const currentKey = currentWeek(now).isoKey;
 
   const slot = isoKey
