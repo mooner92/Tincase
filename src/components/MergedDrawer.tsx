@@ -60,6 +60,8 @@ interface Content {
   handoffTo?: string | null;
   /** ADR-0021 — 기한이 지나 담당자의 저장이 곧 위로 간다 */
   handoffAuto?: boolean;
+  /** RH-85 — 연구실 병합본: 보기·승인만(고치기는 다음 단계). 서버가 정한다 */
+  readOnly?: boolean;
 }
 
 /** 헤더 행을 뺀 본문만. 서버가 준 격자는 첫 줄이 열 이름이다 */
@@ -98,7 +100,7 @@ export function MergedDrawer({
 }) {
   const [data, setData] = useState<Content | null>(null);
   // CP-114 — 무엇을 그릴지는 순수 함수 하나가 정한다(CP-T100). view면 canEdit을 무시한다
-  const ctl = drawerControls(variant, canEditProp, data);
+  const ctl = drawerControls(variant, canEditProp && !data?.readOnly, data);
   const canEdit = ctl.edit;
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);

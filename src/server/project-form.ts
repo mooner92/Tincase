@@ -4,7 +4,7 @@ import { HttpError } from '@/server/authz';
 import { readStoredFile } from '@/server/storage';
 import { logger } from '@/server/logger';
 import { cleanCell } from '@/server/worklog-doc';
-import { fillHqForm, isProjectForm, parseHqForm, type HqFormData, type HqItem, type HqTask } from '@/lib/hwp/hq-form';
+import { evaluationLabels, fillHqForm, isProjectForm, parseHqForm, type HqFormData, type HqItem, type HqTask } from '@/lib/hwp/hq-form';
 import { unitAbbr } from '@/lib/unit-abbr';
 
 export type FormKind = 'unit' | 'project';
@@ -52,6 +52,22 @@ export interface ProjectBody {
   results?: unknown;
   plans?: unknown;
   notes?: unknown;
+  /** RH-82 — 이 실의 자문회의 실적 넷(자문회의 · 전문가 세미나 · 포럼·워크샵 · 기타 회의). 담당·부서장 것만 받는다 */
+  consult?: unknown;
+  /** RH-82 — 평가 실적 값(양식의 값 칸 순서). 본부·센터의 담당·부서장 것만 받는다 */
+  evaluation?: unknown;
+}
+
+const COUNT_MAX = 20;
+function cleanCounts(raw: unknown, n: number | null, what: string): string[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  if (!Array.isArray(raw) || (n !== null && raw.length !== n) || raw.length > 20) throw new HttpError(422, 'invalid_request', `${what} 형식이 올바르지 않습니다.`);
+  const vals = raw.map((v, i) => {
+    const c = cleanCell(v, `${what} ${i + 1}번째 칸`);
+    if (c.length > COUNT_MAX) throw new HttpError(422, 'cell_too_long', `${what}은 칸마다 ${COUNT_MAX}자까지입니다.`);
+    return c;
+  });
+  return vals.some((v) => v && v !== '-') ? vals : undefined;
 }
 
 const SECTION_KO = { results: '실적', plans: '계획', notes: '특이사항' } as const;
@@ -93,8 +109,16 @@ function cleanTasks(raw: unknown, key: 'results' | 'plans', unit: string): HqTas
   return out;
 }
 
-/** RH-75 — 본문을 검사해 본부 양식에 채운 hwp를 만든다. 실 약칭은 부서에서(쓰는 사람이 고르지 않는다) */
-export function buildProjectHwp(templateBytes: Buffer, body: ProjectBody, divisionNameKo: string): { bytes: Buffer; data: HqFormData } {
+/**
+ * RH-75 — 본문을 검사해 본부 양식에 채운 hwp를 만든다. 실 약칭은 부서에서(쓰는 사람이 고르지 않는다).
+ * RH-82 — `counts`(담당·부서장)일 때만 자문회의 줄·평가 실적을 싣는다 — 부서원이 보낸 값은 버린다(화면도 그리지 않는다)
+ */
+export function buildProjectHwp(
+  templateBytes: Buffer,
+  body: ProjectBody,
+  divisionNameKo: string,
+  opts: { counts?: boolean } = {},
+): { bytes: Buffer; data: HqFormData } {
   const unit = unitAbbr(divisionNameKo);
   const notesRaw = body.notes ?? [];
   if (!Array.isArray(notesRaw)) throw new HttpError(422, 'invalid_request', '특이사항 형식이 올바르지 않습니다.');
@@ -104,8 +128,12 @@ export function buildProjectHwp(templateBytes: Buffer, body: ProjectBody, divisi
     plans: cleanTasks(body.plans, 'plans', unit),
     notes: (notesRaw as ItemIn[]).map((n, i) => cleanItem(n ?? {}, `특이사항 ${i + 1}번`)).filter(hasText),
   };
+  const consult = opts.counts ? cleanCounts(body.consult, 4, '자문회의 실적') : undefined;
+  const evaluation = opts.counts ? cleanCounts(body.evaluation, null, '평가 실적') : undefined;
+  if (consult) data.consult = [{ label: divisionNameKo, values: consult }];
+  if (evaluation) data.evaluation = evaluation;
   const items = (ts: HqTask[]) => ts.reduce((a, t) => a + t.items.length, 0);
-  if (items(data.results) + items(data.plans) + data.notes.length === 0) {
+  if (items(data.results) + items(data.plans) + data.notes.length === 0 && !consult && !evaluation) {
     throw new HttpError(422, 'empty_content', '항목을 하나 이상 적어 주세요.');
   }
   if (!isProjectForm(templateBytes)) {
@@ -202,4 +230,29 @@ export async function recentForDivision(divisionId: string, userId: string, curr
     people: top(people),
     lastWeekPlans,
   };
+}
+
+// ── RH-82 작성 화면이 그릴 칸 ────────────────────────
+
+export interface ProjectDesk {
+  /** 담당·부서장 — 자문회의(·평가) 칸을 그린다 */
+  canCount: boolean;
+  /** 자문회의 표에서 이 실의 줄 이름 */
+  consultLabel: string;
+  /** 평가 실적 이름 칸들 — 본부·센터 부서이고 양식에 평가 실적 표가 있을 때만(실은 쓰지 않는다) */
+  evaluationLabels: string[];
+}
+
+export async function projectDesk(division: { id: string; nameKo: string }, canCount: boolean): Promise<ProjectDesk> {
+  const isHq = (await prisma.division.count({ where: { parentKo: division.nameKo } })) > 0;
+  let labels: string[] = [];
+  if (canCount && isHq) {
+    const t = await prisma.template.findFirst({ where: { divisionId: division.id, isActive: true }, select: { filePath: true } });
+    try {
+      labels = t ? evaluationLabels(await readStoredFile(t.filePath)) : [];
+    } catch {
+      labels = [];
+    }
+  }
+  return { canCount, consultLabel: division.nameKo, evaluationLabels: labels };
 }

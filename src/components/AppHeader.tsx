@@ -142,7 +142,10 @@ export function AppHeader({
             <Nav />
           </nav>
 
-          <UserMenu />
+          <div className="flex shrink-0 items-center gap-2">
+            {tour && tour.chapters.length > 0 && <TourButton />}
+            <UserMenu />
+          </div>
         </div>
 
         {/* 좁은 화면 — 메뉴를 아랫줄에 펼친다. 스크롤 없이 전부 보인다 */}
@@ -198,6 +201,38 @@ export function AppHeader({
             );
       })}
       </>
+    );
+  }
+
+  /**
+   * PG-84e (2026-10-19) — 「화면 둘러보기」를 사용자 메뉴 밖, 이름 바로 왼쪽의 버튼으로. 메뉴 안에 있을 때는 아무도 몰랐다(운영자:
+   * 「숨어 있어서 안 눌러볼 것 같다」). 올리면(초점이어도) 무엇을 하는 버튼인지 한 줄이 뜬다 — 「둘러보기」만으로는 무엇을 둘러보는지 모른다.
+   * 메뉴 항목도 그대로 둔다(e2e·guide-check가 누르는 자리). 좁은 화면은 「?」 동그라미만 — 글자는 화면 낭독기에 남긴다
+   */
+  function TourButton() {
+    return (
+      <div className="group relative">
+        <button
+          onClick={() => setTourAsk((n) => n + 1)}
+          aria-label="화면 둘러보기"
+          aria-describedby="tour-tip"
+          className="flex h-9 items-center gap-1.5 rounded-full border border-hairline bg-canvas px-2 text-sm font-medium text-body transition-colors hover:bg-surface-soft hover:text-ink sm:px-3"
+        >
+          <span aria-hidden className="flex h-5 w-5 items-center justify-center rounded-full border-[1.5px] border-current text-xs font-bold">
+            ?
+          </span>
+          <span aria-hidden className="hidden sm:inline">
+            화면 둘러보기
+          </span>
+        </button>
+        <span
+          id="tour-tip"
+          role="tooltip"
+          className="pointer-events-none absolute top-full right-0 z-40 mt-2 w-60 rounded-lg bg-ink px-3 py-2 text-xs leading-5 text-canvas opacity-0 shadow-[0_8px_24px_rgba(10,10,10,0.16)] transition-opacity group-focus-within:opacity-100 group-hover:opacity-100"
+        >
+          지금 보고 있는 화면의 각 부분을 하나씩 짚어 설명해요
+        </span>
+      </div>
     );
   }
 

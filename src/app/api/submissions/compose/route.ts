@@ -5,7 +5,7 @@
 // 문서 만들기는 담당자 첨삭(WA-20)과 같은 길이다 — `buildWorklogHwp`.
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
-import { requireSubmitter, HttpError } from '@/server/authz';
+import { requireSubmitter, HttpError, isDocumentManager } from '@/server/authz';
 import { submissionName } from '@/lib/docname';
 import { handler, json } from '@/server/http';
 import { readStoredFile } from '@/server/storage';
@@ -38,7 +38,7 @@ export const POST = handler(async (req: NextRequest) => {
   const templateBytes = await readStoredFile(template.filePath);
   const built =
     form === 'project'
-      ? { ...buildProjectHwp(templateBytes, body as unknown as ProjectBody, scope.division.nameKo), rows: undefined }
+      ? { ...buildProjectHwp(templateBytes, body as unknown as ProjectBody, scope.division.nameKo, { counts: isDocumentManager(scope.user) }), rows: undefined }
       : buildWorklogHwp(templateBytes, body, { division: scope.division.nameKo });
 
   const slot = await ensureCurrentSlot();

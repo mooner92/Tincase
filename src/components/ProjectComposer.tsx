@@ -23,6 +23,10 @@ export interface PData {
   results: PTask[];
   plans: PTask[];
   notes: PItem[];
+  /** RH-82 — 이 실의 자문회의 줄(담당·부서장만 적는다) */
+  consult?: { label: string; values: string[] }[];
+  /** RH-82 — 평가 실적 값(본부·센터 담당만) */
+  evaluation?: string[];
 }
 interface RecentTask {
   type: string;
@@ -37,7 +41,11 @@ interface Recent {
   places: string[];
   people: string[];
   lastWeekPlans: PTask[];
+  desk?: { canCount: boolean; consultLabel: string; evaluationLabels: string[] };
 }
+
+/** RH-82 — 자문회의 표의 넷(양식 머리 그대로) */
+const CONSULT_HEADS = ['자문회의', '전문가 세미나', '포럼·워크샵 등', '기타 회의'];
 
 type TaskSection = 'results' | 'plans';
 
@@ -56,7 +64,14 @@ function normalize(d: PData) {
     ts
       .map((t) => ({ y: t.type.trim(), t: t.title.trim(), o: t.owner.trim(), i: t.items.filter(itemHas).map(it) }))
       .filter((t) => t.i.length > 0);
-  return JSON.stringify({ r: tasks(d.results), p: tasks(d.plans), n: d.notes.filter(itemHas).map(it) });
+  const counts = (v: string[] | undefined) => (v ?? []).map((x) => x.trim()).filter((x, _i, a) => a.some((y) => y && y !== '-')).join('|');
+  return JSON.stringify({
+    r: tasks(d.results),
+    p: tasks(d.plans),
+    n: d.notes.filter(itemHas).map(it),
+    c: counts(d.consult?.[0]?.values),
+    e: counts(d.evaluation),
+  });
 }
 
 function readDraft(key: string): PData | null {
@@ -261,7 +276,13 @@ export function ProjectComposer({
     fetch('/api/submissions/compose', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ kind: 'project', ...data }),
+      body: JSON.stringify({
+        kind: 'project',
+        results: data.results,
+        plans: data.plans,
+        notes: data.notes,
+        ...(desk?.canCount ? { consult: consultVals, ...(desk.evaluationLabels.length ? { evaluation: evalVals } : {}) } : {}),
+      }),
     })
       .then(async (r) => {
         const body = (await r.json()) as { message?: string; version?: number };
@@ -279,7 +300,25 @@ export function ProjectComposer({
       .finally(() => setBusy(false));
   };
 
-  const blocked = busy || done || total === 0 || (start.from !== 'draft' && unchanged);
+  // RH-82 — 자문회의·평가 칸(담당·부서장). 이 실의 줄 하나만 들고 다닌다
+  const desk = recent?.desk;
+  const consultVals = data.consult?.[0]?.values ?? ['', '', '', ''];
+  const setConsult = (i: number, v: string) =>
+    setData((d) => {
+      const vals = [...(d.consult?.[0]?.values ?? ['', '', '', ''])];
+      vals[i] = v;
+      return { ...d, consult: [{ label: desk?.consultLabel ?? d.consult?.[0]?.label ?? '', values: vals }] };
+    });
+  const evalVals = desk ? desk.evaluationLabels.map((_, i) => data.evaluation?.[i] ?? '') : [];
+  const setEval = (i: number, v: string) =>
+    setData((d) => {
+      const vals = desk!.evaluationLabels.map((_, k) => d.evaluation?.[k] ?? '');
+      vals[i] = v;
+      return { ...d, evaluation: vals };
+    });
+  const countsFilled = consultVals.some((v) => v.trim() && v.trim() !== '-') || evalVals.some((v) => v.trim() && v.trim() !== '-');
+
+  const blocked = busy || done || (total === 0 && !countsFilled) || (start.from !== 'draft' && unchanged);
 
   return (
     <div className="fixed inset-0 z-40 h-screen">
@@ -326,6 +365,36 @@ export function ProjectComposer({
             </p>
           )}
           {start.from === 'blank' && initialFailed && <p className="mb-3 text-sm text-warning">지금 낸 판을 불러오지 못해 빈 화면으로 시작합니다.</p>}
+
+          {desk?.canCount && (
+            <section className="mb-7 rounded-lg border border-hairline p-3" aria-labelledby="pc-h-counts">
+              <h3 id="pc-h-counts" className="text-[15px] font-semibold text-ink">
+                ※ 자문회의 실적 <span className="text-xs font-normal text-muted">· {desk.consultLabel} 줄 · 담당만 적어요</span>
+              </h3>
+              <p className="mt-0.5 text-xs text-muted">보이는 그대로 — 「1」 · 「2건(1건)」 · 없으면 비워 두세요(「-」로 나가요)</p>
+              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {CONSULT_HEADS.map((h, i) => (
+                  <label key={h} className="text-xs text-muted">
+                    {h}
+                    <input value={consultVals[i] ?? ''} onChange={(e) => setConsult(i, e.target.value)} placeholder="-" maxLength={20} aria-label={`자문회의 실적 ${h}`} className={`${input} mt-1`} />
+                  </label>
+                ))}
+              </div>
+              {desk.evaluationLabels.length > 0 && (
+                <>
+                  <h3 className="mt-4 text-[15px] font-semibold text-ink">※ 평가 실적</h3>
+                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                    {desk.evaluationLabels.map((l, i) => (
+                      <label key={l} className="text-xs text-muted">
+                        {l}
+                        <input value={evalVals[i] ?? ''} onChange={(e) => setEval(i, e.target.value)} placeholder="-" maxLength={20} aria-label={`평가 실적 ${l}`} className={`${input} mt-1`} />
+                      </label>
+                    ))}
+                  </div>
+                </>
+              )}
+            </section>
+          )}
 
           {(['results', 'plans'] as const).map((s, si) => (
             <section key={s} className="mb-7" aria-labelledby={`pc-h-${s}`}>

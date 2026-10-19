@@ -21,6 +21,8 @@ import type { HqStateCode } from '@/lib/hq-state';
 import { currentReport, fileSha } from './report';
 import { sectionTitles } from './sections';
 import { type RollupNode, type TreeDivision } from './tree';
+import { fillHqForm, isProjectForm, parseHqForm } from '@/lib/hwp/hq-form';
+import { combineHqDocs, itemCounts } from '@/lib/hwp/hq-merge';
 
 /** RU-78 — 자동(`system`)이 한 일의 기록 — 일으킨 사건과 사람 (handoff.ts와 같은 모양, 고리를 피해 여기 다시 적는다) */
 export interface BuildCause {
@@ -67,6 +69,17 @@ export async function hqInputs(node: RollupNode, slot: WeekSlot): Promise<HqInpu
 function summarize(input: Input): RolledUnit {
   const rows = { achievements: 0, plans: 0, notes: 0 };
   let emphasis = 0;
+  // RH-84 — 연구실 병합본은 과제·항목으로 센다
+  if (isProjectForm(input.bytes)) {
+    try {
+      const d = parseHqForm(input.bytes);
+      Object.assign(rows, itemCounts(d));
+      emphasis = [...d.results, ...d.plans].reduce((a, t) => a + t.items.filter((i) => i.emphasis).length, 0) + d.notes.filter((n) => n.emphasis).length;
+    } catch {
+      /* 아래 실패와 같다 */
+    }
+    return { name: input.title, divisionId: input.division.id, submissionId: input.report.id, rows, emphasis };
+  }
   try {
     for (const u of readUnits(input.bytes, input.division.nameKo).units) {
       for (const b of BUCKETS) {
@@ -180,12 +193,32 @@ export async function composeHq(node: RollupNode, slot: WeekSlot, inputs: readon
     for (const s of submitted) {
       parts.push({ division: s.division, report: s.report, title: titles.get(s.division.id) ?? s.division.nameKo, bytes: await readStoredFile(s.report.filePath) });
     }
-    // RU-10 — 사본 하나 = 섹션 하나. 원래 꼴 그대로(RU-62), 정규화(RU-63)도 전사와 같다 — 본부장이 본 것이 최종본에 들어간다
-    const out = composeOrgDocument(
-      template,
-      parts.map((i) => ({ title: i.title, source: i.bytes })),
-      { pageBreak: node.node.rollupPageBreak },
-    );
+    /*
+     * RH-84 — 연구 본부 양식이면 **표 안에서 합친다**: 실 병합본을 과제·항목으로 읽어 정한 순서대로 본부 양식 한 벌에 쓴다.
+     * 섹션 이어 붙이기(아래)는 실형 본부의 길이다 — 본부 양식이 정한다(RH-02).
+     */
+    let out: { bytes: Buffer; outcomes: OrgSectionOutcome[]; warnings: string[] };
+    if (isProjectForm(template)) {
+      const units = [];
+      const outcomes: OrgSectionOutcome[] = [];
+      for (const p of parts) {
+        try {
+          units.push({ nameKo: p.division.nameKo, data: parseHqForm(p.bytes) });
+          outcomes.push({ title: p.title, status: 'copied', dropped: [], fixed: [] });
+        } catch (e) {
+          // 사본 하나를 못 읽어도 나머지로 만든다(HM-21) — outcomeLines가 「옮기지 못했습니다」를 맨 앞에 적는다
+          outcomes.push({ title: p.title, status: 'failed', dropped: [], error: (e as Error).message });
+        }
+      }
+      out = { bytes: fillHqForm(template, combineHqDocs(units, node.node.nameKo)), outcomes, warnings: [] };
+    } else {
+      // RU-10 — 사본 하나 = 섹션 하나. 원래 꼴 그대로(RU-62), 정규화(RU-63)도 전사와 같다 — 본부장이 본 것이 최종본에 들어간다
+      out = composeOrgDocument(
+        template,
+        parts.map((i) => ({ title: i.title, source: i.bytes })),
+        { pageBreak: node.node.rollupPageBreak },
+      );
+    }
     // 못 옮긴 섹션을 맨 앞에 — 결과 카드는 「준비됨」이라도 이 줄을 먼저 읽어야 한다
     const failedFirst = out.outcomes.map((o, k) => ({ o, k })).sort((a, b) => Number(b.o.status === 'failed') - Number(a.o.status === 'failed'));
     const warnings = [...failedFirst.flatMap(({ o, k }) => outcomeLines(o, parts[k])), ...out.warnings];

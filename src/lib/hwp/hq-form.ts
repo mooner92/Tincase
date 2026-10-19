@@ -289,7 +289,22 @@ export function parseHqForm(bytes: Buffer): HqFormData {
     if (emphRows.notes.has(r)) it.emphasis = true;
     notes.push(it);
   }
-  return { results: project(back.results, emphRows.results), plans: project(back.plans, emphRows.plans), notes };
+  // 자문회의 — 줄 이름(0칸) · 값 넷. 평가 실적 — 값 칸(숫자이거나 「-」)만, 줄 우선 순서 — 이름 칸에는 숫자가 없다(양식 실측)
+  const consult = (back.consult ?? []).slice(1).map((row) => ({ label: text(row, 0).trim(), values: [1, 2, 3, 4].map((c) => text(row, c).trim()) }));
+  const evaluation = (back.evaluation ?? []).flatMap((row) => row.map(([, v]) => v.trim()).filter((v) => /\d|^-$/.test(v)));
+  return {
+    results: project(back.results, emphRows.results),
+    plans: project(back.plans, emphRows.plans),
+    notes,
+    ...(consult.length ? { consult } : {}),
+    ...(evaluation.length ? { evaluation } : {}),
+  };
+}
+
+/** 평가 실적 표의 이름 칸(값 칸이 아닌 칸, 줄 우선) — 작성 화면이 값 칸 옆에 붙일 이름 */
+export function evaluationLabels(bytes: Buffer): string[] {
+  const back = readHqTables(bytes);
+  return (back.evaluation ?? []).flatMap((row) => row.map(([, v]) => v.trim()).filter((v) => v !== '' && !/\d|^-$/.test(v)));
 }
 
 // ── RH-30 양식 만들기 ─────────────────────────────────

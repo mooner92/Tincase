@@ -26,7 +26,13 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
   try {
     const bytes = await readStoredFile(sub.filePath);
     parsed = readWorklog(bytes); // 업로드 시 이미 검증됨 — 실패는 정합성 이탈 (API-22)
-    if (isProjectForm(bytes)) project = parseHqForm(bytes);
+    if (isProjectForm(bytes)) {
+      // RH-76 · RH-82 — 이 실의 자문회의 줄만 작성 화면에 되돌린다(표의 다른 줄은 이 사람이 적은 것이 아니다)
+      const d = parseHqForm(bytes);
+      const own = await prisma.division.findUnique({ where: { id: sub.divisionId }, select: { nameKo: true } });
+      const mine = d.consult?.find((c) => c.label.replace(/\s+/g, '') === (own?.nameKo ?? '').replace(/\s+/g, ''))?.values;
+      project = { ...d, consult: mine ? [{ label: own!.nameKo, values: mine }] : [] };
+    }
   } catch (e) {
     logger.error({ submissionId: sub.id, err: String(e) }, 'CRITICAL: preview parse failed for validated file');
     throw new HttpError(500, 'internal', '파일을 읽을 수 없습니다. 원본 다운로드로 확인해 주세요.');

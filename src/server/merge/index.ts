@@ -21,6 +21,9 @@ import { DEFAULT_EMPHASIS_WORDS, stripEmphasisMarker } from '@/lib/emphasis-mark
 import { mergeRowCells, pickRepresentative } from '@/lib/merge-rows';
 export { mergedName as mergedFileName } from '@/lib/docname';
 import type { WorklogRow } from '@/lib/hwp/reader';
+import { fillHqForm, isProjectForm, parseHqForm } from '@/lib/hwp/hq-form';
+import { itemCounts, mergeProjectDocs } from '@/lib/hwp/hq-merge';
+import { isDocumentManager } from '../authz';
 
 export interface MergedGroup {
   /** 대표 행 (묶음의 첫 행) */
@@ -249,6 +252,10 @@ export async function runMerge(
   // 제출자 순서 — 명단은 운영자 소관이므로 sortOrder를 그대로 따른다 (TACP-3)
   const ordered = orderPeople(submissions.map((s) => ({ ...s, name: s.user.name, sortOrder: s.user.sortOrder })));
 
+  // RH-80 — 연구실 양식(6칸 두 층)이면 과제로 모은다. 모델은 쓰지 않는다(RH-40)
+  const templateBytes = await readStoredFile(template.filePath);
+  if (isProjectForm(templateBytes)) return runProjectMerge(division, slot, templateBytes, ordered, submissions);
+
   /*
    * HM-38b · HM-51 — 강조 표시 낱말은 「하이라이트」 고정이다. 부서 칸(`emphasisWords`)은 바꾼 곳이 없었고(2026-10-08 실측),
    * 이건 한글로 적어 올리던 사람이 괄호로 쓰던 습관을 받는 자리다 — 웹 작성에는 [공유]가 있다
@@ -387,7 +394,7 @@ export async function runMerge(
   }
 
   // ── 3. 조립 — 글자는 전부 원문 그대로 ──
-  const src = await readStoredFile(template.filePath);
+  const src = templateBytes;
 
   const tableRows: Record<Bucket, string[][]> = { achievements: [], plans: [], notes: [] };
   const rowEmphasis: Record<Bucket, boolean[]> = { achievements: [], plans: [], notes: [] };
@@ -453,6 +460,56 @@ export async function runMerge(
       tables: modelTables,
     },
     categories: categoryInfo,
+    sourceIds: usedIds,
+    missing: roster.filter((u) => !submitted.has(u.id)).map((u) => u.name),
+  };
+}
+
+/** RH-80~83 — 연구실 병합. 결과의 모양(MergeOutcome)은 실형과 같다 — 기록·승인·위로 올리기가 그대로 쓴다 */
+async function runProjectMerge(
+  division: { id: string; slug: string; nameKo: string },
+  slot: { year: number; label: string },
+  templateBytes: Buffer,
+  ordered: { id: string; filePath: string; user: { name: string; divisionRole: string } }[],
+  submissions: { userId: string }[],
+): Promise<MergeOutcome> {
+  const warnings: string[] = [];
+  const people = [];
+  const usedIds: string[] = [];
+  for (const sub of ordered) {
+    try {
+      people.push({ name: sub.user.name, isManager: isDocumentManager(sub.user), data: parseHqForm(await readStoredFile(sub.filePath)) });
+      usedIds.push(sub.id);
+    } catch (e) {
+      warnings.push(`${sub.user.name}: 파일을 읽지 못해 제외했습니다 (${(e as Error).message})`);
+    }
+  }
+  const m = mergeProjectDocs(people, division.nameKo);
+  const counts = itemCounts(m.data);
+  if (counts.achievements + counts.plans + counts.notes === 0) throw new MergeUnavailable('제출물에서 항목을 찾지 못했습니다.');
+  warnings.push(...m.warnings);
+
+  const out = fillHqForm(templateBytes, m.data);
+  // RH-36 — 다시 읽어 넣은 수와 같은지(HM-22와 같은 원칙)
+  const got = itemCounts(parseHqForm(out));
+  if (got.achievements !== counts.achievements || got.plans !== counts.plans || got.notes !== counts.notes) {
+    throw new MergeFailed(`결과 검증 실패 — 항목 수가 다릅니다 (실적 ${got.achievements}/${counts.achievements} · 계획 ${got.plans}/${counts.plans} · 특이사항 ${got.notes}/${counts.notes})`);
+  }
+
+  const roster = await prisma.user.findMany({ where: { divisionId: division.id, isActive: true, onRoster: true }, select: { id: true, name: true } });
+  const submitted = new Set(submissions.map((s) => s.userId));
+  const authored = (xs: { content: string; authors: string[] }[]) => xs.map((x) => ({ c: x.content, a: x.authors }));
+  return {
+    outputRelPath: mergedRelPath(division.slug, slot.year, slot.label),
+    output: out,
+    bytes: out.length,
+    rowCounts: counts,
+    mergedGroups: [],
+    flagged: [],
+    rowAuthors: { achievements: authored(m.authors.results), plans: authored(m.authors.plans), notes: authored(m.authors.notes) },
+    warnings,
+    model: { used: false, reason: null, elapsedMs: 0, name: '', tables: [] },
+    categories: null,
     sourceIds: usedIds,
     missing: roster.filter((u) => !submitted.has(u.id)).map((u) => u.name),
   };
