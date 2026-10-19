@@ -25,7 +25,8 @@ interface PreviewData {
     /** LE-44 — 담당자가 대신 입력한 판 (`origin === 'lead_entry'`) */
     proxied?: boolean;
   };
-  tables: { title: string; columns: string[]; rows: string[][] }[];
+  /** RH-88 — 연구실 판은 과제 줄(taskRows)을 굵게 · 강조(emphasis)를 파랗게 */
+  tables: { title: string; columns: string[]; rows: string[][]; taskRows?: boolean[]; emphasis?: boolean[] }[];
   warnings: string[];
   /** WA-20 — 이 사람이 이 판을 고칠 수 있나 (내 부서 lead·head, 최신 판) */
   canRevise?: boolean;
@@ -280,9 +281,17 @@ export function FileDrawer({
                         </thead>
                         <tbody>
                           {t.rows.slice(1).map((row, ri) => (
-                            <tr key={ri} className="border-b border-hairline-soft last:border-0">
+                            <tr
+                              key={ri}
+                              className={`border-b border-hairline-soft last:border-0 ${t.taskRows?.[ri] ? 'bg-surface-soft font-semibold' : ''}`}
+                            >
                               {row.map((cell, ci) => (
-                                <td key={ci} className="whitespace-pre-line px-2.5 py-1.5 align-top text-ink">
+                                <td
+                                  key={ci}
+                                  className={`whitespace-pre-line px-2.5 py-1.5 align-top ${
+                                    ci === 2 && t.emphasis?.[ri] ? 'font-medium text-emphasis' : 'text-ink'
+                                  }`}
+                                >
                                   {cell}
                                 </td>
                               ))}

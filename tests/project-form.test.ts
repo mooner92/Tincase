@@ -85,6 +85,32 @@ describe('RH-75 · RH-77 — 입력 검사와 hwp 만들기 (비공개 원본)',
     expect(back.notes.map((n) => n.content)).toEqual(['발표']);
   });
 
+  t('[RH-T26] 보기 격자(RH-88) — 과제 줄과 항목 줄을 번갈아 · 과제 줄 표시 · 번호는 표마다 · 강조는 내용 칸 · 자문회의는 이 실의 줄만', async () => {
+    const { buildProjectHwp } = await import('@/server/project-form');
+    const { projectTables } = await import('@/lib/hwp/hq-view');
+    const { bytes } = buildProjectHwp(
+      await template(),
+      {
+        kind: 'project',
+        results: [{ type: '수탁', title: '과제 하나', owner: '갑', items: [item('회의 A'), item('회의 B', { emphasis: true })] }],
+        plans: [{ type: 'R&D', title: '과제 둘', owner: '병', items: [item('착수 회의')] }],
+        notes: [],
+      },
+      '물관리연구실',
+    );
+    const tables = projectTables(bytes, { onlyConsultOf: '물관리연구실' });
+    const ach = tables.find((x) => x.key === 'achievements')!;
+    expect(ach.rows.slice(1).map((r) => [r[0], r[1], r[2]])).toEqual([
+      ['물실', '수탁', '과제 하나'],
+      ['', '1-1', '회의 A'],
+      ['', '1-2', '회의 B'],
+    ]);
+    expect(ach.taskRows).toEqual([true, false, false]);
+    expect(ach.emphasis).toEqual([false, false, true]);
+    expect(tables.find((x) => x.key === 'plans')!.rows[2][1]).toBe('2-1');
+    expect(tables.some((x) => x.key === 'consult')).toBe(false); // 이 실 줄이 비었으면 보기에서 뺀다
+  });
+
   t('[RH-T25] 거절 — 비었으면 · 과제명 없이 항목만 · 한도를 넘으면 · 연구실 양식이 아니면', async () => {
     const { buildProjectHwp } = await import('@/server/project-form');
     const tpl = await template();

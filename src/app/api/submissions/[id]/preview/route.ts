@@ -9,6 +9,7 @@ import { audit } from '@/server/audit';
 import { logger } from '@/server/logger';
 import { readWorklog, TABLE_TITLES, TABLE_COLUMNS } from '@/lib/hwp/reader';
 import { isProjectForm, parseHqForm, type HqFormData } from '@/lib/hwp/hq-form';
+import { projectTables, type ViewTable } from '@/lib/hwp/hq-view';
 import { tableGrid } from '@/lib/hwp/model';
 import { toKstIso } from '@/lib/week';
 
@@ -23,6 +24,7 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
   let parsed;
   // RH-76 — 연구실 양식으로 낸 판이면 과제·항목으로도 돌려준다(작성 화면이 [열기]로 이어 쓴다)
   let project: HqFormData | null = null;
+  let projectView: ViewTable[] | null = null;
   try {
     const bytes = await readStoredFile(sub.filePath);
     parsed = readWorklog(bytes); // 업로드 시 이미 검증됨 — 실패는 정합성 이탈 (API-22)
@@ -32,6 +34,8 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
       const own = await prisma.division.findUnique({ where: { id: sub.divisionId }, select: { nameKo: true } });
       const mine = d.consult?.find((c) => c.label.replace(/\s+/g, '') === (own?.nameKo ?? '').replace(/\s+/g, ''))?.values;
       project = { ...d, consult: mine ? [{ label: own!.nameKo, values: mine }] : [] };
+      // RH-88 — 열람 드로어도 두 층 표 그대로(실형 5칸으로 읽으면 칸이 엇갈린다). 자문회의는 이 실의 줄만
+      projectView = projectTables(bytes, { onlyConsultOf: own?.nameKo ?? '' });
     }
   } catch (e) {
     logger.error({ submissionId: sub.id, err: String(e) }, 'CRITICAL: preview parse failed for validated file');
@@ -71,7 +75,7 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
       plans: parsed.worklog.plans,
       notes: parsed.worklog.notes,
     },
-    tables: parsed.tables.slice(0, 3).map((t, i) => {
+    tables: projectView ?? parsed.tables.slice(0, 3).map((t, i) => {
       /*
        * API-57 — 본문 칸이 모두 빈 행(양식의 빈 번호 줄 3-1~3-4)은 뺀다. 병합본 보기(UX-03)와 같은 조건이다.
        * 거르지 않으면 부서원이 「빈 번호가 생겼네, 잘못 냈나?」 하고 묻는다. 글자는 건드리지 않는다(API-25).

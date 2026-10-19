@@ -10,7 +10,8 @@ import { handler, json, rateLimit } from '@/server/http';
 import { audit } from '@/server/audit';
 import { readStoredFile, sha256, writeFileAtomic } from '@/server/storage';
 import { readWorklog, TABLE_TITLES, TABLE_COLUMNS } from '@/lib/hwp/reader';
-import { evaluationLabels, isProjectForm, parseHqForm, type HqTask } from '@/lib/hwp/hq-form';
+import { isProjectForm } from '@/lib/hwp/hq-form';
+import { projectTables } from '@/lib/hwp/hq-view';
 import { tableGrid, columnWidths } from '@/lib/hwp/model';
 import { composeMergedHwp } from '@/server/merge';
 import { boardTitle } from '@/lib/docname';
@@ -121,49 +122,7 @@ export const GET = handler(async (req: NextRequest) => {
    * 항목 줄(번호·내용·일자·장소·참석자)을 한 격자에. 고치기(PUT)는 아직 없다 — 승인은 판(sha)으로 하므로 그대로 된다
    */
   if (isProjectForm(bytes)) {
-    const d = parseHqForm(bytes);
-    const grid = (tasks: HqTask[], prefix: number) => {
-      const rows: string[][] = [];
-      const emphasis: boolean[] = [];
-      let n = 0;
-      let prev: string | null = null;
-      for (const t of tasks) {
-        rows.push([t.unit !== prev ? t.unit : '', t.type, t.title, '', '', t.owner]);
-        emphasis.push(false);
-        prev = t.unit;
-        for (const it of t.items) {
-          n += 1;
-          rows.push(['', `${prefix}-${n}`, it.content, it.date, it.place, it.people]);
-          emphasis.push(it.emphasis === true);
-        }
-      }
-      return { rows, emphasis };
-    };
-    const projCols = ['구분', '유형 · 번호', '과제명 · 내용', '일자', '장소', '책임자 · 참석자'];
-    const r = grid(d.results, 1);
-    const p = grid(d.plans, 2);
-    const evalNames = evaluationLabels(bytes);
-    return json({
-      ...common,
-      readOnly: true,
-      tables: [
-        ...(d.consult?.length
-          ? [{ key: 'consult', title: '※ 자문회의 실적', columns: ['구분', '자문회의', '전문가 세미나', '포럼, 워크샵 등', '기타 회의'], rows: [['구분', '자문회의', '전문가 세미나', '포럼, 워크샵 등', '기타 회의'], ...d.consult.map((c) => [c.label, ...c.values])] }]
-          : []),
-        ...(evalNames.length
-          ? [{ key: 'evaluation', title: '※ 평가 실적', columns: ['항목', '건수'], rows: [['항목', '건수'], ...evalNames.map((n, i) => [n, d.evaluation?.[i] ?? '-'])] }]
-          : []),
-        { key: 'achievements', title: '1. 주요 업무실적', columns: projCols, rows: [projCols, ...r.rows], emphasis: r.emphasis },
-        { key: 'plans', title: '2. 주요 업무계획', columns: projCols, rows: [projCols, ...p.rows], emphasis: p.emphasis },
-        {
-          key: 'notes',
-          title: '3. 기타 특이사항',
-          columns: ['구분', '업무실적 내용', '일자', '장소', '참석자'],
-          rows: [['구분', '업무실적 내용', '일자', '장소', '참석자'], ...d.notes.map((n, i) => [`3-${i + 1}`, n.content, n.date, n.place, n.people])],
-          emphasis: d.notes.map((n) => n.emphasis === true),
-        },
-      ],
-    });
+    return json({ ...common, readOnly: true, tables: projectTables(bytes) });
   }
   const parsed = readWorklog(bytes);
 

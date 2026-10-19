@@ -42,6 +42,8 @@ interface TableView {
    * 잃은 경우를 **제출 직전에** 고칠 수 있는 유일한 자리가 여기다.
    */
   emphasis?: boolean[];
+  /** RH-88 — 연구실 두 층 표의 과제 줄. 굵게 그린다 */
+  taskRows?: boolean[];
 }
 interface Content {
   title: string;
@@ -578,8 +580,11 @@ export function MergedDrawer({
                                   />
                                 ) : (
                                   <span
-                                    className={`block px-2 py-1.5 whitespace-nowrap tabular-nums ${
-                                      ci === 1 && t.emphasis?.[ri] ? 'font-medium text-emphasis' : 'text-body'
+                                    // RH-88 — 읽기 전용(연구실)은 긴 내용이 줄을 바꾼다 · 과제 줄은 굵게
+                                    className={`block px-2 py-1.5 tabular-nums ${
+                                      data.readOnly && ci > 0 ? 'whitespace-pre-line' : 'whitespace-nowrap'
+                                    } ${t.taskRows?.[ri] ? 'font-semibold text-ink' : ''} ${
+                                      (data.readOnly ? ci === 2 : ci === 1) && t.emphasis?.[ri] ? 'font-medium text-emphasis' : 'text-body'
                                     }`}
                                   >
                                     {/*
