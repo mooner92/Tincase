@@ -153,3 +153,53 @@ export function declaredCharShapeCount(records: readonly HwpRecord[]): number | 
   if (!idm || idm.data.length < slot + 4) return null;
   return idm.data.readUInt32LE(slot);
 }
+
+// ── RH-39 — 자간만 다른 서식 (긴 항목을 한 줄 덜 쓰게) ──────────────
+
+const SPACING_OFFSET = 21; // 언어 7개의 자간(i8, %)
+const RATIO_OFFSET = 14; // 장평(u8, %)
+const REL_SIZE_OFFSET = 28; // 상대 크기(u8, %)
+const BASE_SIZE_OFFSET = 42; // 기준 크기(i32, 1/100pt = HWPUNIT)
+
+export interface ShapeMetrics {
+  /** 기준 크기 HWPUNIT(= 1/100pt) */
+  size: number;
+  ratio: number;
+  relSize: number;
+  spacing: number;
+}
+
+/** 서식의 크기·장평·자간(한글 기준) — 칸 폭에 몇 줄로 들어갈지 어림하는 데 쓴다 */
+export function shapeMetrics(records: readonly HwpRecord[], shapeId: number): ShapeMetrics | null {
+  const shapes = records.filter((r) => r.tag === DI_TAG.CHAR_SHAPE);
+  const d = shapes[shapeId]?.data;
+  if (!d || d.length < MIN_LEN) return null;
+  return { size: d.readInt32LE(BASE_SIZE_OFFSET), ratio: d[RATIO_OFFSET], relSize: d[REL_SIZE_OFFSET], spacing: d.readInt8(SPACING_OFFSET) };
+}
+
+/**
+ * RH-39 — `baseShapeId`와 **자간만 다른** 서식을 찾거나 만든다(언어 일곱 칸 모두 같은 자간). 색 서식과 같은 규칙 —
+ * 복제해서 한 필드만 바꾸고, 이미 있으면 다시 쓰고, 마지막 서식 뒤에 넣는다(번호가 밀리지 않게).
+ */
+export function ensureSpacingShape(records: HwpRecord[], baseShapeId: number, spacing: number): number | null {
+  const shapeIdx: number[] = [];
+  records.forEach((r, i) => {
+    if (r.tag === DI_TAG.CHAR_SHAPE) shapeIdx.push(i);
+  });
+  const base = shapeIdx[baseShapeId];
+  if (base === undefined || records[base].data.length < MIN_LEN) return null;
+  const want = Buffer.from(records[base].data);
+  for (let k = 0; k < 7; k++) want.writeInt8(Math.max(-50, Math.min(50, Math.round(spacing))), SPACING_OFFSET + k);
+  const found = shapeIdx.findIndex((i) => records[i].data.equals(want));
+  if (found >= 0) return found;
+  const last = shapeIdx[shapeIdx.length - 1];
+  records.splice(last + 1, 0, { ...records[base], data: want });
+  const idm = records.findIndex((r) => r.tag === DI_TAG.ID_MAPPINGS);
+  if (idm < 0) return null;
+  const slot = CHAR_SHAPE_COUNT_SLOT * 4;
+  if (records[idm].data.length < slot + 4) return null;
+  const d = Buffer.from(records[idm].data);
+  d.writeUInt32LE(shapeIdx.length + 1, slot);
+  records[idm] = { ...records[idm], data: d };
+  return shapeIdx.length;
+}

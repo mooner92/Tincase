@@ -17,6 +17,8 @@ export interface ProtoRow {
   texts: Readonly<Record<number, string>>;
   /** 이 줄의 강조 칸 — `emphasisShapeId`가 있을 때만 */
   emphasisCol?: number;
+  /** RH-39 — 칸별로 쓸 서식(자간을 줄인 것 등). 있으면 강조·원형 서식보다 먼저 */
+  shapes?: Readonly<Record<number, number>>;
 }
 
 export interface RebuildOptions {
@@ -196,7 +198,7 @@ export function rebuildRows(recs: HwpRecord[], tableOrdinal: number, rows: reado
   for (const cell of ordered) {
     const row = rows[cell.row - 1];
     const emph = row.emphasisCol === cell.col && opts.emphasisShapeId != null;
-    const shape = emph ? opts.emphasisShapeId! : firstCharShape(recs, cell);
+    const shape = row.shapes?.[cell.col] ?? (emph ? opts.emphasisShapeId! : firstCharShape(recs, cell));
     writeCell(recs, cell, row.texts[cell.col] ?? '', shape, opts.fitCols?.includes(cell.col) ?? false);
   }
 }
@@ -225,4 +227,37 @@ export function fitHeaderRow(recs: HwpRecord[], tableOrdinal: number): void {
   const t = locateTables(recs)[tableOrdinal];
   if (!t) throw new HwpWriteError(`${tableOrdinal + 1}번째 표가 없습니다`);
   for (const c of t.cells) if (c.row === 0) setSingleLine(recs, c.start);
+}
+
+/** RH-39 — 표의 (줄, 칸) 셀의 쓸 수 있는 폭(칸 폭 − 왼쪽·오른쪽 안 여백, HWPUNIT)과 첫 글자 서식 */
+export function cellBox(recs: readonly HwpRecord[], tableOrdinal: number, row: number, col: number): { avail: number; shape: number | null } | null {
+  const t = locateTables(recs)[tableOrdinal];
+  const cell = t?.cells.find((c) => c.row === row && c.col === col);
+  if (!cell) return null;
+  const d = recs[cell.start].data;
+  if (d.length < 28) return null;
+  return { avail: d.readUInt32LE(16) - d.readUInt16LE(24) - d.readUInt16LE(26), shape: firstCharShape(recs, cell) };
+}
+
+/**
+ * RH-41 — 표의 칸 너비를 `widths`(열마다 HWPUNIT)로 다시 배분한다. 병합 칸은 걸친 열의 합. 표 컨트롤의 전체 너비도 맞춘다.
+ * 본부마다 마지막 제출본의 칸 배분을 입히는 데 쓴다 — 같은 내용도 칸 너비가 다르면 줄 수가 달라져 쪽이 넘어간다(2026-10-19 국토환경 실측)
+ */
+export function applyColumnWidths(recs: HwpRecord[], tableOrdinal: number, widths: readonly number[]): void {
+  const t = locateTables(recs)[tableOrdinal];
+  if (!t) throw new HwpWriteError(`${tableOrdinal + 1}번째 표가 없습니다`);
+  if (widths.length !== t.cols) throw new HwpWriteError(`칸 너비가 ${t.cols}개여야 합니다 — ${widths.length}개`);
+  for (const c of t.cells) {
+    const d = Buffer.from(recs[c.start].data);
+    const span = d.readUInt16LE(12) || 1;
+    d.writeUInt32LE(widths.slice(c.col, c.col + span).reduce((a, w) => a + w, 0) >>> 0, 16);
+    recs[c.start] = { ...recs[c.start], data: d };
+  }
+  let i = t.tableIdx;
+  while (i >= 0 && recs[i].tag !== TAG.CTRL_HEADER) i--;
+  if (i >= 0 && recs[i].data.length >= 20) {
+    const d = Buffer.from(recs[i].data);
+    d.writeUInt32LE(widths.reduce((a, w) => a + w, 0) >>> 0, 16);
+    recs[i] = { ...recs[i], data: d };
+  }
 }

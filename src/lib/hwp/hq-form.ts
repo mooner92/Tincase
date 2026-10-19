@@ -7,9 +7,10 @@ import { openHwp } from './ole';
 import { parseRecords, serializeRecords, type HwpRecord } from './record';
 import { HwpWriteError, locateTables, normalizeCharShape, ownControls, ownText, packHwp, setParagraphText, stripCfbSentinel, topParagraphs, type TableSpan } from './writer';
 import { TAG } from './record';
-import { BLUE, charShapeColors, ensureColorShape, isEmphasis } from './charshape';
+import { BLUE, charShapeColors, ensureColorShape, ensureSpacingShape, isEmphasis, shapeMetrics } from './charshape';
+import { fitSpacing } from './fit';
 import { fixLastFlags, renumberTables } from './orgdoc';
-import { cellText, fitHeaderRow, rebuildRows, setCellsAt, type ProtoRow } from './proto-rows';
+import { applyColumnWidths, cellBox, cellText, fitHeaderRow, rebuildRows, setCellsAt, type ProtoRow } from './proto-rows';
 
 export type HqTableKind = 'consult' | 'evaluation' | 'results' | 'plans' | 'notes';
 
@@ -163,23 +164,50 @@ export function fillHqForm(template: Buffer, data: HqFormData, opts: FillHqOptio
   }
 
   // HM-37 — 강조 항목이 있을 때만 DocInfo에 색 서식을 만든다(바꿀 이유가 없으면 건드리지 않는다). 내용 칸의 원래 서식을 복제한다
+  const di = parseRecords(file.docInfo);
+  let diChanged = false;
   const anyEmph = [...data.results, ...data.plans].some((t) => t.items.some((i) => i.emphasis)) || data.notes.some((i) => i.emphasis);
-  let docInfoOut: Buffer | undefined;
   const emph = { project: null as number | null, notes: null as number | null };
   if (anyEmph) {
-    const di = parseRecords(file.docInfo);
     const color = opts.emphasisColor ?? BLUE;
     const pBase = shapeIdAt(recs, at.results!, PROJECT_PROTO.item, 2);
     const nBase = shapeIdAt(recs, at.notes!, PLAIN_PROTO.middle, 1);
     emph.project = pBase === null ? null : ensureColorShape(di, pBase, color);
     emph.notes = nBase === null ? null : ensureColorShape(di, nBase, color);
-    docInfoOut = serializeRecords(di);
+    diChanged = true;
   }
 
+  /*
+   * RH-39 — 긴 내용 칸은 자간을 조금 줄여 한 줄을 아낀다(사람이 손으로 하던 일 — 원본 -17~-21). 원형 줄의 칸 폭·서식으로 어림하고,
+   * 아낄 수 있을 때만 바닥(-22)까지. 자간만 다른 서식을 복제해 그 칸에만 쓴다
+   */
+  const fit = (ord: number, rows: ProtoRow[], col: number, emphShape: number | null) => {
+    const boxes = new Map<number, ReturnType<typeof cellBox>>();
+    for (const row of rows) {
+      if (!boxes.has(row.proto)) boxes.set(row.proto, cellBox(recs, ord, row.proto, col));
+      const box = boxes.get(row.proto);
+      const text = row.texts[col] ?? '';
+      const base = row.emphasisCol === col && emphShape !== null ? emphShape : box?.shape ?? null;
+      if (!box || base === null || !text) continue;
+      const m = shapeMetrics(di, base);
+      const s = m ? fitSpacing(text, box.avail, m) : null;
+      if (s === null) continue;
+      const id = ensureSpacingShape(di, base, s);
+      if (id === null) continue;
+      row.shapes = { ...row.shapes, [col]: id };
+      diChanged = true;
+    }
+    return rows;
+  };
+  const noteRowsOut = fit(at.notes!, noteRows(data.notes, empty), 1, emph.notes);
+  const planRowsOut = fit(at.plans!, projectRows(data.plans, 2, empty), 2, emph.project);
+  const resultRowsOut = fit(at.results!, projectRows(data.results, 1, empty), 2, emph.project);
+  const docInfoOut = diChanged ? serializeRecords(di) : undefined;
+
   // 순번이 바뀌지 않으므로(표 수는 그대로) 어느 순서로 고쳐도 된다 — 뒤 표부터
-  rebuildRows(recs, at.notes!, noteRows(data.notes, empty), { emphasisShapeId: emph.notes, fitCols: NOTE_FIT });
-  rebuildRows(recs, at.plans!, projectRows(data.plans, 2, empty), { emphasisShapeId: emph.project, fitCols: PROJECT_FIT });
-  rebuildRows(recs, at.results!, projectRows(data.results, 1, empty), { emphasisShapeId: emph.project, fitCols: PROJECT_FIT });
+  rebuildRows(recs, at.notes!, noteRowsOut, { emphasisShapeId: emph.notes, fitCols: NOTE_FIT });
+  rebuildRows(recs, at.plans!, planRowsOut, { emphasisShapeId: emph.project, fitCols: PROJECT_FIT });
+  rebuildRows(recs, at.results!, resultRowsOut, { emphasisShapeId: emph.project, fitCols: PROJECT_FIT });
 
   if (at.evaluation !== undefined) {
     const t = locateTables(recs)[at.evaluation];
@@ -321,6 +349,8 @@ export interface HqTemplateSpec {
   consultFrom?: string;
   /** 평가 실적 표를 떼어 올 원본 섹션과 자리 */
   evaluation?: { from: string; place: 'beforeConsult' | 'afterConsult' };
+  /** RH-41 — 그 본부의 마지막 제출본 칸 배분(열마다 HWPUNIT). 없으면 원형 표 그대로 */
+  widths?: Partial<Record<'consult' | 'results' | 'plans' | 'notes', readonly number[]>>;
 }
 
 export interface HqTemplateSources {
@@ -458,6 +488,12 @@ export function buildHqTemplate(source: Buffer, spec: HqTemplateSpec, summaryDon
   const out: HwpRecord[] = [...copy(first)];
   for (const p of pieces) out.push(...copy(p));
   setParagraphText(out, topParagraphs(out)[0], spec.name);
+  // 맨 끝 빈 문단은 걷는다 — 표 아래 여백을 넘으면 빈 쪽이 하나 더 생긴다(2026-10-19 국토환경 실측)
+  for (let tail = topParagraphs(out); tail.length > 1; tail = topParagraphs(out)) {
+    const b = tail[tail.length - 1];
+    if (ownText(out, b).trim() !== '' || ownControls(out, b).length > 0) break;
+    out.splice(b.start, b.end - b.start);
+  }
   const resultHeads = topParagraphs(out).filter((b) => tableKindOf(ownText(out, b)) === 'results');
   setParagraphText(out, resultHeads[1], '2. 주요 업무계획');
   renumberTables(out);
@@ -489,7 +525,11 @@ export function buildHqTemplate(source: Buffer, spec: HqTemplateSpec, summaryDon
     labels.map((label, i) => ({ proto: i === 0 ? 1 : i === labels.length - 1 ? ct.rows - 1 : middle, texts: { 0: label } })),
     { fitCols: CONSULT_FIT },
   );
-  for (const k of ['consult', 'results', 'plans', 'notes'] as const) fitHeaderRow(out, at[k]!);
+  for (const k of ['consult', 'results', 'plans', 'notes'] as const) {
+    fitHeaderRow(out, at[k]!);
+    const w = spec.widths?.[k];
+    if (w) applyColumnWidths(out, at[k]!, w);
+  }
 
   if (at.evaluation !== undefined) {
     const et = tables()[at.evaluation];
