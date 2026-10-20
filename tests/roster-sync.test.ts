@@ -130,6 +130,23 @@ describe('안전장치 (RS-10·11)', () => {
     expect(plan.leadWarnings.join()).toContain('가부서');
   });
 
+  it('[RS-T42] 본부 담당(겸임)이 사라지거나 다른 부서로 옮기면 알린다 — 지정은 소속과 따로라 조용히 남는다(RS-18)', () => {
+    const db = [
+      person({ name: '겸임', divisionRole: 'lead', hqDesks: ['가본부'] }),
+      person({ name: '옮김', employeeNo: '10002', hqDesks: ['나본부'] }),
+      person({ name: '그대로', employeeNo: '10003' }),
+    ];
+    const plan = planRosterSync(
+      db,
+      [erp({ name: '옮김', employeeNo: '10002', divisionKo: '다부서' }), erp({ name: '그대로', employeeNo: '10003' })],
+      ['가부서', '다부서'],
+    );
+    const w = plan.leadWarnings.join('\n');
+    expect(w).toContain('가본부 본부 담당(겸임) 겸임 님이 엑셀에 없습니다');
+    expect(w).toContain('나본부 본부 담당(겸임) 옮김 님이 가부서 → 다부서로 옮깁니다');
+    expect(w).not.toContain('그대로 님');
+  });
+
   it('[RS-T12] 사번과 이메일이 다른 사람을 가리키면 **건너뛴다** — 남의 계정을 덮지 않는다', () => {
     const db = [
       person({ name: '갑', employeeNo: '10001', email: 'gap@kei.re.kr' }),

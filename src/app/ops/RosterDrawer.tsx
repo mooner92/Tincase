@@ -20,14 +20,25 @@ export interface UserRow {
   mustChangePassword: boolean;
   lastLoginAt: string | null;
   locked: boolean;
-  /** DM-26 — Tincase 소속을 ERP와 다르게 고정했다(운영자가 옮겼다) */
+  /** ADR-0022 D1 — Tincase 소속을 ERP와 다르게 고정했다(운영자가 옮겼다) */
   divisionPinned?: boolean;
+  /** ADR-0022 D2 — 소속과 따로 맡은 본부(부서 id) */
+  hqDeskIds?: string[];
 }
 
-/** DM-26 — 드로어의 「소속」 고르기에 쓰는 부서 목록 */
+/** ADR-0022 — 드로어의 「소속」·「본부 담당」 고르기에 쓰는 부서 목록 */
 export interface DivisionOption {
   id: string;
   nameKo: string;
+  /** 산하가 있는 부서(본부·센터) — 본부 담당으로 고를 수 있다 */
+  isHq: boolean;
+}
+
+/** ADR-0022 D2 — 이 부서(본부)를 소속과 따로 맡은 사람 — 본부 줄의 드로어 머리에 */
+export interface DeskHolder {
+  userId: string;
+  name: string;
+  divisionName: string;
 }
 
 export function RosterDrawer({
@@ -35,6 +46,7 @@ export function RosterDrawer({
   divisionId,
   users,
   divisions = [],
+  desks = [],
   busy,
   onClose,
   onPatch,
@@ -45,8 +57,10 @@ export function RosterDrawer({
   /** 지금 연 부서 — 「소속」 고르기의 지금 값 */
   divisionId?: string | null;
   users: UserRow[];
-  /** DM-26 — 소속 옮기기 (없으면 그 칸을 그리지 않는다) */
+  /** ADR-0022 — 소속 옮기기 · 본부 담당 고르기 (없으면 그 칸을 그리지 않는다) */
   divisions?: DivisionOption[];
+  /** ADR-0022 D2 — 이 부서를 소속과 따로 맡은 본부 담당 */
+  desks?: DeskHolder[];
   busy: boolean;
   onClose: () => void;
   onPatch: (userId: string, patch: Record<string, unknown>) => void;
@@ -101,6 +115,12 @@ export function RosterDrawer({
             <p className="mt-0.5 text-xs text-muted">
               전체 {users.length}명 · 제출 대상 {roster}명 · 비밀번호 발급 {issued}/{users.length}
             </p>
+            {/* ADR-0022 D2 — 소속 밖에서 이 본부를 맡은 사람. 해제는 그 사람의 소속 부서 드로어에서 */}
+            {desks.length > 0 && (
+              <p className="mt-0.5 text-xs text-body" data-testid="hq-desks">
+                본부 담당(겸임): {desks.map((d) => `${d.name}(${d.divisionName})`).join(' · ')}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             {/*
@@ -144,7 +164,7 @@ export function RosterDrawer({
                 <th className="px-4 py-2 font-medium whitespace-nowrap">이름</th>
                 <th className="px-4 py-2 font-medium whitespace-nowrap">이메일</th>
                 <th className="px-4 py-2 font-medium whitespace-nowrap">역할</th>
-                {divisions.length > 0 && <th className="px-4 py-2 font-medium whitespace-nowrap">소속</th>}
+                {divisions.length > 0 && <th className="px-4 py-2 font-medium whitespace-nowrap">소속 · 겸임</th>}
                 <th className="px-4 py-2 font-medium whitespace-nowrap">제출 대상</th>
                 <th className="px-4 py-2 font-medium whitespace-nowrap">사번</th>
                 <th className="px-4 py-2 font-medium whitespace-nowrap">알림</th>
@@ -210,6 +230,23 @@ export function RosterDrawer({
                           </button>
                         )}
                       </div>
+                      {/* ADR-0022 D2 — 소속과 따로 맡는 본부. 본부 화면을 담당 권한으로 열고 본부 알림을 받는다(승인은 없다) */}
+                      <select
+                        aria-label={`${u.name} 본부 담당`}
+                        value={u.hqDeskIds?.[0] ?? ''}
+                        disabled={busy}
+                        onChange={(e) => onPatch(u.id, { hqDesk: e.target.value || null })}
+                        className="mt-1 rounded border border-border-strong px-1 py-0.5 text-xs"
+                      >
+                        <option value="">본부 담당 — 없음</option>
+                        {divisions
+                          .filter((d) => d.isHq && d.id !== divisionId)
+                          .map((d) => (
+                            <option key={d.id} value={d.id}>
+                              본부 담당 — {d.nameKo}
+                            </option>
+                          ))}
+                      </select>
                     </td>
                   )}
                   <td className="px-4 py-2 text-center">

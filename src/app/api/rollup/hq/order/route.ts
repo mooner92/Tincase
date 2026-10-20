@@ -11,7 +11,7 @@ import { rollupSlot } from '@/server/rollup/slot';
 export const dynamic = 'force-dynamic';
 
 export const PUT = handler(async (req: NextRequest) => {
-  const { scope, node } = await requireHqManager(req.headers);
+  const { scope, node } = await requireHqManager(req.headers, req.nextUrl.searchParams.get('node')); // ADR-0022 D2 — 맡은 본부 중 고르기
   const parsed = orderInput.safeParse(await req.json().catch(() => null));
   if (!parsed.success) throw new HttpError(422, 'invalid_request', '요청 형식이 맞지 않습니다.');
   await setHqOrder(scope, node, parsed.data);

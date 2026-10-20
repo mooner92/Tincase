@@ -79,6 +79,18 @@ export function canReach(employeeNo: string): boolean {
   return all || ids.has(employeeNo.trim());
 }
 
+/**
+ * 보낼 수 있는 사번 가르기 — 주소가 없으면 아무도(`disabled`), 허용 목록 밖은 `blocked`. `sendAlert`와 보낼 함(ADR-0022 D4)이 같은 판정을 쓴다 —
+ * 함에 넣을 때 거르지 않으면 못 갈 사람이 「보냄」으로 기록된다
+ */
+export function reachable(recvIds: readonly string[]): { requested: number; targets: string[]; blocked: string[]; disabled: boolean } {
+  const ids = [...new Set(recvIds.map((s) => s.trim()).filter(Boolean))];
+  if (!env.MESSENGER_URL) return { requested: ids.length, targets: [], blocked: [], disabled: true };
+  const { all, ids: allowed } = allowlist();
+  const targets = all ? ids : ids.filter((id) => allowed.has(id));
+  return { requested: ids.length, targets, blocked: ids.filter((id) => !targets.includes(id)), disabled: targets.length === 0 && !all && allowed.size === 0 };
+}
+
 /** 문서 3장 — 텍스트 필드는 값과 인코딩을 **쌍으로** 보낸다. 빠지면 한글이 깨진다 */
 function appendEncoded(form: URLSearchParams, key: string, value: string): void {
   form.append(key, value);

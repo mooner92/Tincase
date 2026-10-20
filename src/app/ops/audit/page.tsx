@@ -54,6 +54,7 @@ const ACTION_KO: Record<string, { label: string; tone: 'normal' | 'watch' | 'str
   rule_update: { label: '설정 변경', tone: 'watch' },
   roster_move: { label: '소속 옮김 (고정)', tone: 'watch' },
   roster_unpin: { label: '소속 고정 풀기', tone: 'watch' },
+  hq_desk: { label: '본부 담당 지정', tone: 'watch' },
   template_update: { label: '양식 교체', tone: 'watch' },
   reject: { label: '반려', tone: 'watch' },
   cross_division_read: { label: '타 부서 열람', tone: 'strong' },

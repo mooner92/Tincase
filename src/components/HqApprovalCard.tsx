@@ -21,8 +21,11 @@ export function HqApprovalCard({
   hqReport,
   escape,
   hqDueKo,
+  node,
 }: {
   isoKey: string;
+  /** ADR-0022 D2 — 지정된 본부 담당이 연 본부(slug). 비상구가 이 본부로 간다 */
+  node?: string;
   state: HqStateView;
   /**
    * RU-55 (2026-10-08 결정 d) — 마지막으로 만든 본부본만 놓고 본 상태. 다시 이어 붙이기가 실패해도(Qf) 그 판이 승인 전이면 [승인]을 그린다 —
@@ -71,7 +74,7 @@ export function HqApprovalCard({
   const approve = () =>
     post('/api/rollup/hq/approve', { isoKey, ...viewed }, (b) => (b.unchanged ? '이미 승인한 판입니다' : '승인했어요 — 총괄로 갔어요'));
   const escapeNow = () =>
-    post('/api/rollup/report', { level: 'hq', isoKey, withoutApproval: true }, () => '본부장 승인 없이 총괄로 올렸어요 — 총괄에는 주황으로 보입니다');
+    post('/api/rollup/report', { level: 'hq', isoKey, withoutApproval: true, ...(node && { node }) }, () => '본부장 승인 없이 총괄로 올렸어요 — 총괄에는 주황으로 보입니다');
 
   // 결정 d — Qf면 「총괄」 구역과 [승인]은 마지막으로 만든 본부본의 상태로 그린다(실패 이유는 위 RunCard가 말한다)
   const shown = state === 'Qf' ? lastGood : state;

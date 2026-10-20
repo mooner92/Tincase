@@ -84,6 +84,8 @@ model Division {
   slotOpenings SlotOpening[]
   reportSubmissions ReportSubmission[]
   rollupRuns        RollupRun[]
+  /// ADR-0022 D2 — 이 본부를 맡은 본부 담당(소속과 따로 지정한 사람) — 관계 필드만
+  hqDesks         HqDesk[]
 }
 
 model User {
@@ -130,6 +132,8 @@ model User {
   lockedUntil        DateTime? // 무차별 대입 방어 (AU-23)
 
   division    Division     @relation(fields: [divisionId], references: [id])
+  /// ADR-0022 D2 — 이 사람이 소속과 따로 맡은 본부 (관계 필드만 — 열이 생기지 않는다)
+  hqDesks     HqDesk[]
   submissions Submission[]
   sessions    Session[]
   setupTokens SetupToken[]
@@ -586,4 +590,40 @@ model GuideTourSeen {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@id([userId, chapter])
+}
+
+/// ADR-0022 D2 — **본부 담당 지정.** 소속(실)과 따로, 이 사람이 그 본부의 본부 화면을 담당 권한으로 열고 본부 알림을 받는다.
+/// 본부 부서에 소속된 lead는 지정 없이도 본부 담당이다(지금처럼). 승인(본부장)은 지정으로 생기지 않는다(TACP-23). 운영자만 바꾼다
+model HqDesk {
+  id         String   @id @default(cuid())
+  userId     String
+  /// 본부 — 단위 나무의 최상위 단위(본부 단계가 있을 때 뜻이 있다)
+  divisionId String
+  createdAt  DateTime @default(now())
+  createdBy  String
+  user       User     @relation(fields: [userId], references: [id])
+  division   Division @relation(fields: [divisionId], references: [id])
+
+  @@unique([userId, divisionId])
+  @@index([divisionId])
+}
+
+/// ADR-0022 D4 — **사람별 보낼 함.** 짧은 사이에 같은 사람에게 가는 쪽지를 한 통으로 묶는다. 설정 링크·비밀번호 찾기는 여기를 지나지 않는다
+model NotifyOutbox {
+  id        String    @id @default(cuid())
+  /// 메신저 RecvId (사번)
+  recvId    String
+  subject   String
+  contents  String
+  url       String?
+  /// 알림 종류(NotifyLog.kind와 같은 말) — 묶은 쪽지의 기록·로그용
+  kind      String
+  createdAt DateTime  @default(now())
+  sentAt    DateTime?
+  attempts  Int       @default(0)
+  error     String?
+  /// 함께 묶여 나간 묶음 — 같은 값이면 한 통이었다
+  batchId   String?
+
+  @@index([sentAt, recvId])
 }

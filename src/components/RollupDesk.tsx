@@ -238,6 +238,7 @@ export function RunCard({
   arrived,
   canRetry,
   isoKey,
+  node,
   children,
 }: {
   /** 가장 최근 성공한 본부본 — 본부장이 보는 판 */
@@ -249,6 +250,8 @@ export function RunCard({
   /** [다시 시도] — 본부 lead·head, 실패일 때만 */
   canRetry: boolean;
   isoKey: string;
+  /** ADR-0022 D2 — 지정된 본부 담당이 연 본부면 그 본부(slug). 맡은 본부가 여럿이어도 이 본부에 [다시 시도] */
+  node?: string;
   /** 같은 카드의 아래 구역 — 본부장 승인 · 총괄로 간 것 (각자 `card-section`을 그린다) */
   children?: ReactNode;
 }) {
@@ -261,7 +264,7 @@ export function RunCard({
     setBusy(true);
     setErr(null);
     try {
-      const r = await fetch('/api/rollup/hq', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ isoKey }) });
+      const r = await fetch('/api/rollup/hq', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ isoKey, ...(node && { node }) }) });
       const b = await r.json().catch(() => ({}));
       if (!r.ok) setErr(b.message ?? '이어 붙이지 못했습니다.');
       router.refresh();

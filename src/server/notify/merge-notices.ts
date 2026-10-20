@@ -21,7 +21,9 @@
 import { prisma } from '../db';
 import { logger } from '../logger';
 import { env } from '../env';
-import { sendAlert, messengerStatus } from '../messenger';
+import { messengerStatus } from '../messenger';
+// ADR-0022 D4 — 알림은 보낼 함을 지난다(같은 사람에게 짧은 사이 여럿이면 한 통). 창이 0이면 바로 보낸다
+import { sendOrQueue } from './outbox';
 import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
 import { slotKind } from '@/lib/week';
 import { describeFlagged, type FlaggedRow } from '@/lib/empty-content';
@@ -347,7 +349,7 @@ async function deliver(
   const sent: string[] = [];
   const blocked: string[] = [];
   for (const p of people) {
-    const r = await sendAlert({ recvIds: [p.employeeNo], ...composeNotice(kind, p, slotLabel, monthly, facts), url, kind });
+    const r = await sendOrQueue({ recvIds: [p.employeeNo], ...composeNotice(kind, p, slotLabel, monthly, facts), url, kind });
     sent.push(...r.sent);
     blocked.push(...r.blocked);
   }
@@ -608,7 +610,7 @@ export async function noticeMergeHeld(opts: {
   const sent: string[] = [];
   const blocked: string[] = [];
   for (const p of people) {
-    const r = await sendAlert({ recvIds: [p.employeeNo], ...composeNotice('merge_held', p, slot.label, monthly, facts), url, kind: logKind });
+    const r = await sendOrQueue({ recvIds: [p.employeeNo], ...composeNotice('merge_held', p, slot.label, monthly, facts), url, kind: logKind });
     sent.push(...r.sent);
     blocked.push(...r.blocked);
   }

@@ -47,6 +47,8 @@ export interface DbPerson {
   isCoordinator: boolean;
   /** DM-26 — Tincase 소속을 ERP와 다르게 고정했다(운영자가 옮겼다). 없으면 거짓 */
   divisionPinned?: boolean;
+  /** RS-18 · DM-27 — 소속과 따로 맡은 본부(본부 담당 지정)의 이름. 없으면 빈 배열 */
+  hqDesks?: string[];
 }
 
 /**
@@ -263,6 +265,10 @@ export function planRosterSync(
       }
       continue;
     }
+    // RS-18 — 본부 담당(겸임)이 다른 부서로 옮긴다. 지정은 소속과 따로라 그대로 남는다 — 계속 맡는지 사람이 정해야 한다
+    if (apply.divisionKo && cur.hqDesks?.length) {
+      leadWarnings.push(`${cur.hqDesks.join(' · ')} 본부 담당(겸임) ${p.name} 님이 ${cur.divisionKo} → ${apply.divisionKo}로 옮깁니다 — 본부 담당 지정은 그대로 남습니다. 계속 맡는지 확인해 주세요`);
+    }
     changes.push({
       kind: apply.divisionKo ? 'move' : apply.jobTitle ? 'title' : apply.name ? 'rename' : 'employeeNo',
       userId: cur.id,
@@ -286,6 +292,10 @@ export function planRosterSync(
     // 겉으로는 정상으로 보이므로 **여기서 반드시 말해야** 한다
     if (u.divisionRole === 'lead') {
       leadWarnings.push(`${u.divisionKo} 담당자 ${u.name} 님이 엑셀에 없습니다 — 새 담당자를 지정해 주세요`);
+    }
+    // RS-18 — 본부 담당(겸임)이 사라지면 그 본부의 본부 화면·본부 알림을 받을 사람이 빈다
+    if (u.hqDesks?.length) {
+      leadWarnings.push(`${u.hqDesks.join(' · ')} 본부 담당(겸임) ${u.name} 님이 엑셀에 없습니다 — /ops 인원에서 본부 담당을 다시 지정해 주세요`);
     }
     if (u.isOperator || u.isCoordinator) {
       leadWarnings.push(

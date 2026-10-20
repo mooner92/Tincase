@@ -22,7 +22,9 @@
 import { prisma } from '../db';
 import { logger } from '../logger';
 import { env } from '../env';
-import { sendAlert, messengerStatus } from '../messenger';
+import { messengerStatus } from '../messenger';
+// ADR-0022 D4 — 알림은 보낼 함을 지난다(같은 사람에게 짧은 사이 여럿이면 한 통). 창이 0이면 바로 보낸다
+import { sendOrQueue } from './outbox';
 import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
 import { dayBeforeAt, formatDeadlineKo, slotKind } from '@/lib/week';
 
@@ -270,7 +272,7 @@ export async function runDueReminders(now = new Date()): Promise<ReminderOutcome
       const blocked: string[] = [];
       const errors: string[] = [];
       for (const u of withNo) {
-        const r = await sendAlert({
+        const r = await sendOrQueue({
           recvIds: [u.employeeNo!],
           ...buildMessage(
             stage.kind,

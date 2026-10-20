@@ -45,10 +45,10 @@ export const POST = handler(async (req: NextRequest) => {
     throw new HttpError(422, 'invalid_file', (e as Error).message);
   }
 
-  const users = await prisma.user.findMany({ include: { division: true } });
+  const users = await prisma.user.findMany({ include: { division: true, hqDesks: { include: { division: { select: { nameKo: true } } } } } });
   const divisions = await prisma.division.findMany({ select: { nameKo: true } });
   const plan = planRosterSync(
-    users.map((u) => ({ ...u, divisionKo: u.division.nameKo })),
+    users.map((u) => ({ ...u, divisionKo: u.division.nameKo, hqDesks: u.hqDesks.map((h) => h.division.nameKo) })), // RS-18
     erp,
     divisions.map((d) => d.nameKo),
   );

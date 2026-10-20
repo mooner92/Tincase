@@ -43,7 +43,9 @@ export type AuditAction =
   | 'submission_proxy'
   /** DM-26 · API-67 — 운영자가 한 사람의 Tincase 소속을 옮겼다(고정) · 고정을 풀었다. 권한이 바뀌는 일이라 사람마다 남긴다 */
   | 'roster_move'
-  | 'roster_unpin';
+  | 'roster_unpin'
+  /** ADR-0022 D2 · TACP-21 — 운영자가 본부 담당을 지정·해제했다 */
+  | 'hq_desk';
 
 export async function audit(
   actor: string,

@@ -6,7 +6,7 @@ import { prisma } from './db';
 import { audit } from './audit';
 import { openingOf } from './deadline';
 import { isSubmissionLocked } from '@/lib/deadline';
-import { hqNodeOf, loadOrgSetting, loadTree, submitTarget, type RollupNode } from './rollup/tree';
+import { hqNodeOf, loadOrgSetting, loadTree, submitTarget, type OrgTree, type RollupNode } from './rollup/tree';
 import type { GuideCap } from '@/lib/guide/deck';
 
 export class HttpError extends Error {
@@ -502,43 +502,82 @@ export function canUseHandoffEscape(scope: Pick<Scope, 'isLead'>): boolean {
  * RU-77 — 비상구 진입점. 3단계가 켜져 있고(RU-52) — `unit`: 내 부서가 기여 단위이고 lead · `hq`: 내 부서가 본부 단계가 있는 본부이고 lead.
  * 대상은 신원의 부서다(TACP-6). 그 외 404.
  */
-export async function requireHandoffEscape(headers: Headers, level: 'unit' | 'hq'): Promise<{ scope: Scope; node: RollupNode | null }> {
+export async function requireHandoffEscape(
+  headers: Headers,
+  level: 'unit' | 'hq',
+  /** ADR-0022 D2 — 본부를 여럿 맡았을 때 고르기(본부 화면이 보낸다) */
+  slug?: string | null,
+): Promise<{ scope: Scope; node: RollupNode | null }> {
   const scope = await requireScope(headers);
-  if (!canUseHandoffEscape(scope) || !(await rollupOn())) throw notFound();
+  if (!(await rollupOn())) throw notFound();
   const tree = await loadTree();
   if (level === 'hq') {
-    const node = hqNodeOf(tree, scope.division.id);
-    if (!node) throw notFound();
-    return { scope, node };
+    // 본부의 비상구는 본부 담당의 것 — 소속 본부의 lead, 또는 지정된 본부 담당(ADR-0022 D2). 본부장(head)은 [승인]이 있다
+    const cands = (await managedHqNodes(scope, tree)).filter((c) => c.via === 'desk' || canUseHandoffEscape(scope));
+    return { scope, node: pickHq(cands, slug).node };
   }
+  if (!canUseHandoffEscape(scope)) throw notFound();
   if (!submitTarget(tree, scope.division.id)) throw notFound();
   return { scope, node: null };
 }
 
 /**
- * TACP-21 — 본부 단계 **쓰기** 판정 (이미 인증한 scope). 내 부서가 본부 단계가 있는 본부(RU-07)이고 내가 lead·head일 때만.
- * 「어느 본부인가」는 신원의 부서가 정한다 — 요청 값이 정하지 않는다 (TACP-6).
+ * ADR-0022 D2 · TACP-21 개정 — 이 사람이 **담당 권한으로** 여는 본부들(본부 단계가 있는 것만, RU-07).
+ *   `own`  소속 부서가 그 본부이고 lead·head (지금까지의 규칙)
+ *   `desk` 운영자가 지정한 본부 담당(`HqDesk`) — 소속(실)과 따로. 승인(본부장)은 여기서 생기지 않는다(`requireHqReviewer`는 `own`만)
+ * 「어느 본부인가」는 신원이 정한다(TACP-6) — 요청 값은 이 목록 안에서 **고르기**일 뿐이다.
  */
-export async function hqNodeOfManager(scope: Scope): Promise<RollupNode> {
-  if (!scope.isManager || !(await rollupOn())) throw notFound();
-  const node = hqNodeOf(await loadTree(), scope.division.id);
-  if (!node) throw notFound();
-  return node;
+export async function managedHqNodes(scope: Scope, tree?: OrgTree): Promise<{ node: RollupNode; via: 'own' | 'desk' }[]> {
+  const t = tree ?? (await loadTree());
+  const out: { node: RollupNode; via: 'own' | 'desk' }[] = [];
+  const own = scope.isManager ? hqNodeOf(t, scope.division.id) : null;
+  if (own) out.push({ node: own, via: 'own' });
+  const desks = await prisma.hqDesk.findMany({ where: { userId: scope.user.id }, select: { divisionId: true } });
+  for (const d of desks) {
+    const n = hqNodeOf(t, d.divisionId);
+    if (n && !out.some((x) => x.node.node.id === n.node.id)) out.push({ node: n, via: 'desk' });
+  }
+  return out;
 }
 
-/** TACP-21 — 본부 단계 **쓰기** 진입점 — 순서·쪽 나누기·자기 문서 포함, 실패 때 [다시 시도] (TACP-23) */
-export async function requireHqManager(headers: Headers): Promise<{ scope: Scope; node: RollupNode }> {
-  const scope = await requireScope(headers);
-  return { scope, node: await hqNodeOfManager(scope) };
+/** ADR-0022 D2 — 목록에서 하나: 고른 것(slug)이 있으면 그것만, 없으면 소속 본부, 그것도 없으면 하나뿐일 때만. 그 외 404 */
+function pickHq<T extends { node: RollupNode }>(cands: readonly T[], slug?: string | null): T {
+  if (slug) {
+    const hit = cands.find((c) => c.node.node.slug === slug);
+    if (!hit) throw notFound();
+    return hit;
+  }
+  const own = cands.find((c) => (c as { via?: string }).via === 'own');
+  if (own) return own;
+  if (cands.length === 1) return cands[0];
+  throw notFound();
 }
 
 /**
- * RU-55 · TACP-23 — **본부본 승인 = 총괄로 제출** 진입점. `requireHqManager` + head(이면서 lead 아님) — HM-47과 같은 규칙:
+ * TACP-21 — 본부 단계 **쓰기** 판정 (이미 인증한 scope). 내 본부(소속 lead·head) 또는 지정된 본부 담당(ADR-0022 D2)일 때만.
+ * 「어느 본부인가」는 신원이 정한다 — 요청 값(`slug`)은 그 사람의 본부 중 고르기다 (TACP-6).
+ */
+export async function hqNodeOfManager(scope: Scope, slug?: string | null): Promise<RollupNode> {
+  if (!(await rollupOn())) throw notFound();
+  return pickHq(await managedHqNodes(scope), slug).node;
+}
+
+/** TACP-21 — 본부 단계 **쓰기** 진입점 — 순서·쪽 나누기·자기 문서 포함, 실패 때 [다시 시도] (TACP-23) */
+export async function requireHqManager(headers: Headers, slug?: string | null): Promise<{ scope: Scope; node: RollupNode }> {
+  const scope = await requireScope(headers);
+  return { scope, node: await hqNodeOfManager(scope, slug) };
+}
+
+/**
+ * RU-55 · TACP-23 — **본부본 승인 = 총괄로 제출** 진입점. **소속 본부**의 head(이면서 lead 아님) — HM-47과 같은 규칙:
  * 담당자는 자기가 만든 것을 승인하지 않는다. 라우트가 `isReviewer`를 따로 부르던 것을 대신한다 (TACP-12).
+ * ADR-0022 D2 — 본부 담당 지정(`desk`)으로는 승인이 생기지 않는다: 실장이 다른 본부의 담당으로 지정돼도 그 본부본을 승인하지 못한다
  */
 export async function requireHqReviewer(headers: Headers): Promise<{ scope: Scope; node: RollupNode }> {
-  const { scope, node } = await requireHqManager(headers);
-  if (!isReviewer(scope)) throw notFound();
+  const scope = await requireScope(headers);
+  if (!isReviewer(scope) || !(await rollupOn())) throw notFound();
+  const node = hqNodeOf(await loadTree(), scope.division.id);
+  if (!node) throw notFound();
   return { scope, node };
 }
 
@@ -549,11 +588,16 @@ export async function requireHqReviewer(headers: Headers): Promise<{ scope: Scop
 export async function resolveHqView(
   scope: Scope,
   slug?: string | null,
-): Promise<{ node: RollupNode; canWrite: boolean }> {
+): Promise<{ node: RollupNode; canWrite: boolean; via?: 'own' | 'desk' }> {
   if (!(await rollupOn()) && !scope.user.isOperator) throw notFound(); // RU-52
   const tree = await loadTree();
-  const own = scope.isManager ? hqNodeOf(tree, scope.division.id) : null;
-  if (own && (!slug || slug === own.node.slug)) return { node: own, canWrite: true };
+  // 내 본부 — 소속 본부(lead·head) 또는 지정된 본부 담당(ADR-0022 D2). 고른 것이 없으면 소속 본부, 없으면 하나뿐일 때
+  const mine = await managedHqNodes(scope, tree);
+  const hit = slug ? mine.find((c) => c.node.node.slug === slug) : (mine.find((c) => c.via === 'own') ?? (mine.length === 1 ? mine[0] : undefined));
+  if (hit) {
+    if (hit.via === 'desk') await audit(scope.user.email, 'cross_division_read', hit.node.node.id, `hq:${hit.node.node.slug}`);
+    return { node: hit.node, canWrite: true, via: hit.via };
+  }
   if (scope.readAll) {
     const other = slug ? tree.nodes.find((n) => n.node.slug === slug && n.hasHqStep) : null;
     if (other) {
@@ -621,7 +665,7 @@ export async function orgPageView(scope: Scope): Promise<{
 
 /** 메뉴용 — 이 사람에게 본부 취합 화면이 있는가 (TACP-9: 할 수 없는 곳으로 가는 길은 그리지 않는다) */
 export async function hasHqDesk(scope: Scope): Promise<boolean> {
-  return scope.isManager && (await rollupOn()) && hqNodeOf(await loadTree(), scope.division.id) !== null;
+  return (await rollupOn()) && (await managedHqNodes(scope)).length > 0;
 }
 
 /**
@@ -641,10 +685,12 @@ export async function findReadableReport(scope: Scope, reportId: string) {
   if (!r) throw notFound();
   // 내 부서가 보낸 것 — 실·팀 사본은 부서원 모두, 본부본은 본부의 lead·head만
   if (r.divisionId === scope.division.id && (r.level === 'unit' || scope.isManager)) return r;
-  if (r.level === 'unit' && scope.isManager) {
-    const node = hqNodeOf(await loadTree(), scope.division.id);
-    if (node?.contributors.some((c) => c.id === r.divisionId)) {
-      await audit(scope.user.email, 'cross_division_read', r.divisionId, `report:${r.id}`);
+  // 받는 본부(산하 단위가 보낸 사본) · 보낸 본부(본부본) — 내 본부: 소속 본부의 lead·head 또는 지정된 본부 담당(ADR-0022 D2)
+  for (const { node } of await managedHqNodes(scope)) {
+    const sentUp = r.level === 'unit' && node.contributors.some((c) => c.id === r.divisionId);
+    const ourHq = r.level === 'hq' && r.divisionId === node.node.id;
+    if (sentUp || ourHq) {
+      if (r.divisionId !== scope.division.id) await audit(scope.user.email, 'cross_division_read', r.divisionId, `report:${r.id}`);
       return r;
     }
   }
@@ -660,6 +706,11 @@ export async function findReadableRollup(scope: Scope, runId: string) {
   const run = await prisma.rollupRun.findUnique({ where: { id: runId }, include: { weekSlot: true, division: true } });
   if (!run) throw notFound();
   if (run.level === 'hq' && run.divisionId === scope.division.id && scope.isManager) return run;
+  // ADR-0022 D2 — 지정된 본부 담당은 그 본부의 본부본을 받는다(소속 밖이라 감사)
+  if (run.level === 'hq' && run.divisionId && (await managedHqNodes(scope)).some((c) => c.node.node.id === run.divisionId)) {
+    await audit(scope.user.email, 'cross_division_read', run.divisionId, `rollup:${run.id}`);
+    return run;
+  }
   if (scope.readAll) {
     if (run.divisionId && run.divisionId !== scope.division.id) {
       await audit(scope.user.email, 'cross_division_read', run.divisionId, `rollup:${run.id}`);

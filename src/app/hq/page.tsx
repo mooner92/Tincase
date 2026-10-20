@@ -34,19 +34,23 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
     if (e instanceof HttpError && e.status === 404) notFound();
     throw e;
   }
-  const { node, canWrite } = view;
+  const { node, canWrite, via } = view;
+  // ADR-0022 D2 — 지정된 본부 담당(소속 밖)이 연 본부. 요청마다 그 본부를 고른다(맡은 본부가 여럿일 수 있다)
+  const desk = via === 'desk';
   const slot = await rollupSlot(sp.isoKey ?? null);
   // RU-72 — 그리기 **전에** 맞춘다(읽기 수리). 스케줄러가 꺼진 테스트 서버에서도 본부장은 연 순간 지금까지 온 것이 이어 붙은 판을 본다
   await readRepairHq(node, slot);
   const [board, weeks, nav, stages, times] = await Promise.all([hqBoard(node, slot), weekOptions(slot), rollupNav(scope), stageLabels(slot), stageTimes(slot)]);
   const sent = board.units.filter((u) => u.report).length;
   const missing = board.units.filter((u) => !u.report).map((u) => u.division.nameKo);
-  const baseHref = canWrite ? '/hq' : `/hq?node=${encodeURIComponent(node.node.slug)}`;
-  // RU-55 — [검토 완료 · 승인]은 본부의 head에게만 (requireHqReviewer와 같은 판정 — TACP-9)
-  const canApprove = canWrite && isReviewer(scope);
+  const baseHref = canWrite && !desk ? '/hq' : `/hq?node=${encodeURIComponent(node.node.slug)}`;
+  // RU-55 — [검토 완료 · 승인]은 **소속 본부**의 head에게만 (requireHqReviewer와 같은 판정 — TACP-9). 본부 담당 지정으로는 생기지 않는다(ADR-0022 D2)
+  const canApprove = canWrite && via === 'own' && isReviewer(scope);
   // RU-77 — 본부 lead의 비상구. 본부본이 있으면 바로(ADR-0021 D3) 「본부 → 총괄」 기한 + 24시간까지만 그린다 (닫힌 뒤·지난 주차는 없음 — 결정 a)
   const now = new Date();
-  const escape = canWrite && canUseHandoffEscape(scope) && board.hasHead && now <= escapeClosesAt(times) ? { open: true } : null;
+  // ADR-0022 D2 — 지정된 본부 담당도 본부의 담당이다(비상구는 담당의 것). 소속 본부면 lead일 때만(지금처럼)
+  const escapeRole = desk || (via === 'own' && canUseHandoffEscape(scope));
+  const escape = canWrite && escapeRole && board.hasHead && now <= escapeClosesAt(times) ? { open: true } : null;
   const current = runView(board.current);
 
   return (
@@ -94,7 +98,7 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
             key={board.units.map((u) => u.division.id).join()}
             rows={board.units.map(unitRow)}
             canWrite={canWrite}
-            saveUrl="/api/rollup/hq/order"
+            saveUrl={desk ? `/api/rollup/hq/order?node=${encodeURIComponent(node.node.slug)}` : '/api/rollup/hq/order'}
             note={board.node.note}
             pageBreak={board.node.pageBreak}
             self={{ value: board.node.self, nodeId: node.node.id, nodeName: node.node.nameKo }}
@@ -107,6 +111,7 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
             arrived={{ n: sent, of: board.units.length, missing }}
             canRetry={canWrite}
             isoKey={slot.isoKey}
+            node={desk ? node.node.slug : undefined}
           >
             {current && (
               <HqApprovalCard
@@ -122,6 +127,7 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
                   board.hqReport && { atKst: kst(board.hqReport.submittedAt)!, basis: board.hqReport.basis, by: board.hqReport.submittedBy }
                 }
                 escape={escape}
+                node={desk ? node.node.slug : undefined}
                 // ADR-0021 — 「16:00에는 지금 본부본이 자동으로」는 기한 전에만 참이다
                 hqDueKo={now < times.hqDue ? stageCells(times.anchor, times).hqDueKo : undefined}
               />

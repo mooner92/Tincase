@@ -4,8 +4,8 @@
 > 코드·스펙·UI가 이 문서와 어긋나면 **문서가 아니라 코드가 틀린 것**이다.
 > 규칙을 바꾸려면 §10 절차를 따른다. 코드를 먼저 고치는 것은 위반이다.
 
-버전 1.17 · 2026-10-15 · 대상 코드 `feat/late-release`(v2.1.1 + 이 개정 — 번호 1.16은 `feat/many-desks`가 쓴다) — v1.15 위에 TACP-18 개정(낸 적 없는 사람은 담당자가 대신 쓴다 — ADR-0023)과 TACP-22 보정 하나
-관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md) · [ADR-0008](docs/adr/0008-head-principal.md) · [ADR-0012](docs/adr/0012-upward-submission.md) · [ADR-0015](docs/adr/0015-approval-is-handoff.md) · [ADR-0016](docs/adr/0016-division-status-visibility.md) · [ADR-0017](docs/adr/0017-foreign-read-chip.md) · [ADR-0018](docs/adr/0018-manage-settings-trim.md) · [ADR-0019](docs/adr/0019-merge-queue.md) · [ADR-0020](docs/adr/0020-public-password-paths.md) · [ADR-0023](docs/adr/0023-late-entry.md)
+버전 1.18 · 2026-10-20 · 대상 코드 `feat/research-forms`(v2.1.3 + 연구 본부 + `feat/many-desks` 합침 — 운영 미출시) — v1.17 위에 TACP-21 개정(본부 담당 지정 — ADR-0022). 번호 1.16은 `feat/many-desks`가 먼저 적어 둔 그 개정이고, 이 판에서 v1.17과 합쳐 v1.18로 싣는다
+관련 스펙: [03-auth](docs/spec/03-auth.md) · [01-domain-model](docs/spec/01-domain-model.md) · [ADR-0005](docs/adr/0005-multi-division-tenancy.md) · [ADR-0007](docs/adr/0007-submission-deletion.md) · [ADR-0008](docs/adr/0008-head-principal.md) · [ADR-0012](docs/adr/0012-upward-submission.md) · [ADR-0015](docs/adr/0015-approval-is-handoff.md) · [ADR-0016](docs/adr/0016-division-status-visibility.md) · [ADR-0017](docs/adr/0017-foreign-read-chip.md) · [ADR-0018](docs/adr/0018-manage-settings-trim.md) · [ADR-0019](docs/adr/0019-merge-queue.md) · [ADR-0020](docs/adr/0020-public-password-paths.md) · [ADR-0023](docs/adr/0023-late-entry.md) · [ADR-0022](docs/adr/0022-one-person-many-desks.md)
 
 변경 이력:
 - v1.1 — `delete` Action 신설, TACP-8에 예외 하나(TACP-14) 추가
@@ -114,6 +114,15 @@
   새로 허용된 것: lead·head·operator의 대신 쓰기·맨 뒤에 붙이기(LE-T10~). 그대로 금지인 것: member·coordinator·타 부서 담당자의 대신 쓰기(LE-T11) · **자기 자신** 대신 쓰기(LE-T12)
   · 낸 사람 덮어쓰기(LE-T13) · 병합본이 바뀐 채로의 붙이기(LE-T24).
   같은 결정으로 TACP-22의 한 줄(「대신 내주는 것은 여전히 없다」)이 「낸 적 없는 사람은 TACP-18」로 바뀐다.
+- v1.16 (2026-10-20 v1.18로 합침 · 운영 미출시) — **TACP-21 개정: 본부 담당 지정** (2026-10-14 운영자 · [ADR-0022](docs/adr/0022-one-person-many-desks.md)). 게시판 제출자로 담당을 맞추다 보니
+  **실 담당이 그 본부의 담당을 겸하는** 사람이 있다(기획조정실 담당 = 기획경영본부 담당 · 연구 본부의 대표 실 담당). §10의 1·3·4·5:
+  ① 본부 단계 **쓰기**(순서·쪽 나누기·자기 문서·실패 때 [다시 시도])와 **본부 비상구**, 그 본부의 **산하 사본·본부본 읽기**는 본부 부서 소속 lead·head에 더해
+  **운영자가 지정한 본부 담당**(`HqDesk` — 소속은 실 그대로)에게도 열린다. 「어느 본부인가」는 신원이 정한다(TACP-6) — 요청 값(`?node=`)은 그 사람의 본부 중
+  고르기뿐이고, 지정 밖이면 404다. 소속 밖을 읽은 것은 `cross_division_read`로 남는다(TACP-10).
+  ② **승인은 지정으로 생기지 않는다** — `requireHqReviewer`는 **소속 본부**의 head만(실장을 다른 본부 담당으로 지정해도 그 본부본을 승인하지 못한다 — RU-T171).
+  ③ 지정은 operator만(`PUT /api/ops/roster` `hqDesk`) — 감사 `hq_desk`. 본부 알림(본부본 준비·다 모였어요·실패)도 지정된 담당에게 간다(권한이 아니라 알림).
+  새로 허용된 것: 지정된 본부 담당의 위 세 칸(RU-T171). 그대로 금지인 것: 지정된 사람의 본부본 승인(RU-T171) · 지정 없는 실 사람의 본부 화면(RU-T171).
+  같은 결정의 **소속 고정**(D1)은 권한이 바뀌지 않는다 — 소속은 여전히 하나이고 운영자가 옮길 뿐이다(감사 `roster_move`).
 
 ## 왜 헌법이 필요한가
 
@@ -303,12 +312,13 @@ URL·요청 본문·쿼리 파라미터가 Principal을 바꿀 수 없다. 세�
 | **승인 없이 올리기** — 비상구 (마감 뒤 병합본이 있으면 바로(v1.15) 「본부 → 총괄」 기한 + 24시간까지(v1.7.2), 승인 안 된 지금 판만 — RU-77 · RU-92) | — | **write** | — | — | — |
 | 내 부서가 보낸 사본·제출 상태 보기 | read | read | read | read | read |
 | **내 부서 사본의 행방** — 본부 도착·본부장 승인·총괄 도착 **시각만** (v1.7, RU-80) | — | **read** | **read** | read | read |
-| **산하 단위가 보낸 사본** 읽기 (내 부서가 본부일 때) | — | **read** | **read** | read | read |
-| 본부 순서·쪽 나누기·자기 문서 포함 (내 부서가 본부일 때) | — | **write** | **write** | — | — |
+| **산하 단위가 보낸 사본** 읽기 (내 부서가 본부일 때 · **지정된 본부 담당**(v1.16)은 그 본부의 것) | — | **read** | **read** | read | read |
+| 본부 순서·쪽 나누기·자기 문서 포함 (내 부서가 본부일 때 · **지정된 본부 담당**(v1.16)) | — | **write** | **write** | — | — |
 | ~~본부 [이어 붙이기]·[총괄에 제출]~~ (v1.7 — 자동, TACP-23) | — | ~~write~~ | ~~write~~ | — | — |
 | **본부본 승인 = 총괄로 제출** (본 판에만 — RU-55) | — | — | **write** | — | — |
-| 본부 **승인 없이 총괄로 보내기** — 비상구 (본부본이 있으면 바로(v1.15) 「본부 → 총괄」 기한 + 24시간까지 — v1.7.2) | — | **write** | — | — | — |
-| 본부본 조립 **[다시 시도]** — 실패했을 때만 (RU-76) | — | **write** | **write** | — | — |
+| 본부 **승인 없이 총괄로 보내기** — 비상구 (본부본이 있으면 바로(v1.15) 「본부 → 총괄」 기한 + 24시간까지 — v1.7.2 · 지정된 본부 담당도(v1.16)) | — | **write** | — | — | — |
+| 본부본 조립 **[다시 시도]** — 실패했을 때만 (RU-76 · 지정된 본부 담당도(v1.16)) | — | **write** | **write** | — | — |
+| **본부 담당 지정**(`HqDesk`) — 실 소속 사람에게 그 본부의 담당 칸을 연다(승인 제외, v1.16 · ADR-0022 D2) | — | — | — | — | **write** |
 | 산하 단위의 **다른 것** (제출물·병합본 원본·작성자) | — | — | — | (§3.3) | (§3.3) |
 | 전사 섹션 구성·본부 순서·섹션 파일 올리기 | — | — | — | **write** | **write** |
 | 전사본 조립 **[다시 시도]** — 실패했을 때만 (v1.7 — 평소에는 자동) | — | — | — | **write** | **write** |
@@ -729,9 +739,9 @@ DB·서버에 직접 접근할 수 있으므로, UI로 막아봐야 능력이 �
 | `requireOwnManager(headers)` | lead·head 또는 operator — **병합본 수정 전용** (§3.2, coordinator 제외) | **404** |
 | `requireOperator(headers)` | operator | **404** |
 | `requireScheduler(headers)` | coordinator·operator — **주차 마감 예외 쓰기 전용** (TACP-20) | **404** |
-| `requireHqManager(headers)` | 내 부서가 **본부 단계가 있는 본부**이고 lead·head — 순서·실패 때 [다시 시도] (TACP-21·23) | **404** |
-| `requireHqReviewer(headers)` | 위 + head(이면서 lead 아님) — **본부본 승인 = 총괄로 제출** 전용 (RU-55, v1.7). 라우트가 `isReviewer`를 따로 부르던 것을 대신한다 | **404** |
-| `requireHandoffEscape(headers, level)` | 3단계가 켜져 있고(RU-52) — `unit`: 내 부서가 기여 단위이고 **lead** · `hq`: 내 부서가 본부 단계가 있는 본부이고 **lead** — **승인 없이 올리기** 전용 (RU-77, v1.7). 시간 창·「이미 올라감」·「최종본 아님」은 게이트가 아니라 업무 규칙(409) | **404** |
+| `requireHqManager(headers, slug?)` | 내 부서가 **본부 단계가 있는 본부**이고 lead·head, 또는 그 본부의 **지정된 본부 담당**(v1.16) — 순서·실패 때 [다시 시도] (TACP-21·23). `slug`는 그 사람의 본부 중 고르기(`managedHqNodes`) | **404** |
+| `requireHqReviewer(headers)` | **소속 본부**의 head(이면서 lead 아님) — **본부본 승인 = 총괄로 제출** 전용 (RU-55, v1.7). 지정된 본부 담당은 지나지 못한다(v1.16) | **404** |
+| `requireHandoffEscape(headers, level, slug?)` | 3단계가 켜져 있고(RU-52) — `unit`: 내 부서가 기여 단위이고 **lead** · `hq`: 내 부서가 본부 단계가 있는 본부이고 **lead**, 또는 그 본부의 지정된 본부 담당(v1.16) — **승인 없이 올리기** 전용 (RU-77, v1.7). 시간 창·「이미 올라감」·「최종본 아님」은 게이트가 아니라 업무 규칙(409) | **404** |
 | ~~`requireReportSender(headers)`~~ | v1.7 폐지 — [제출]·취소가 없다 (TACP-23). 화면 판정 `canSendReport`도 함께 없앴다 | — |
 | `canSeeHandoff(scope)` | 화면 판정 — 「위로」 카드와 `GET /api/rollup/report`의 **행방**(시각만): 내 부서 lead·head (TACP-21 v1.7, v1.7.1) | 카드·행방 없음 |
 | `canUseHandoffEscape(scope)` | 화면 판정 — 비상구 링크: lead. `requireHandoffEscape`의 사람 부분과 같은 식 (v1.7.1) | 링크 없음 |

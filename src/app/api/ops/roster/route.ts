@@ -32,16 +32,24 @@ export const GET = handler(async (req: NextRequest) => {
       mustChangePassword: true,
       lastLoginAt: true,
       lockedUntil: true,
-      divisionPinned: true, // DM-26
+      divisionPinned: true, // ADR-0022 D1
+      hqDesks: { select: { divisionId: true } }, // ADR-0022 D2 — 이 사람이 소속과 따로 맡은 본부
     },
+  });
+  // ADR-0022 D2 — 이 부서(본부)를 소속과 따로 맡은 사람. 본부 줄을 열면 드로어 머리에 보인다
+  const desks = await prisma.hqDesk.findMany({
+    where: { divisionId },
+    select: { user: { select: { id: true, name: true, isActive: true, division: { select: { nameKo: true } } } } },
   });
   const now = new Date();
   return json({
-    users: users.map(({ passwordHash, lockedUntil, ...u }) => ({
+    users: users.map(({ passwordHash, lockedUntil, hqDesks, ...u }) => ({
       ...u,
       hasPassword: !!passwordHash,
       locked: !!lockedUntil && lockedUntil > now,
+      hqDeskIds: hqDesks.map((d) => d.divisionId),
     })),
+    desks: desks.filter((d) => d.user.isActive).map((d) => ({ userId: d.user.id, name: d.user.name, divisionName: d.user.division.nameKo })),
   });
 });
 
@@ -57,10 +65,12 @@ interface RosterUpdate {
   sortOrder?: number;
   divisionRole?: 'member' | 'lead' | 'head';
   isActive?: boolean;
-  /** API-67 · DM-26 — Tincase 소속 옮기기. 옮기면 고정된다(인원 최신화가 ERP 부서로 되돌리지 않는다) */
+  /** ADR-0022 D1 — Tincase 소속 옮기기. 옮기면 고정된다(인원 최신화가 ERP 부서로 되돌리지 않는다) */
   divisionId?: string;
-  /** API-67 — `false`면 고정을 푼다 — 다음 인원 최신화가 ERP 부서로 옮긴다. `true`는 받지 않는다(고정은 옮기면 생긴다) */
+  /** ADR-0022 D1 — `false`면 고정을 푼다 — 다음 인원 최신화가 ERP 부서로 옮긴다 */
   divisionPinned?: false;
+  /** ADR-0022 D2 — 소속과 따로 맡을 본부. `null`이면 모두 푼다 (한 사람에 하나 — 화면이 그렇게 고른다) */
+  hqDesk?: string | null;
 }
 
 export const PUT = handler(async (req: NextRequest) => {
@@ -88,10 +98,18 @@ export const PUT = handler(async (req: NextRequest) => {
       throw new HttpError(422, 'invalid_request', 'divisionPinned는 false(고정 풀기)만 받습니다 — 고정은 소속을 옮기면 생깁니다.');
     }
   }
-  const moveTo = [...new Set(body.updates.flatMap((u) => (u.divisionId !== undefined ? [u.divisionId] : [])))];
-  if (moveTo.length > 0) {
-    const known = await prisma.division.count({ where: { id: { in: moveTo.filter((id) => typeof id === 'string') } } });
-    if (known !== moveTo.length) throw new HttpError(422, 'invalid_request', '옮길 부서를 찾지 못했습니다.');
+  // ADR-0022 — 옮길 부서·맡을 본부가 있는가. 본부는 「산하가 있는 부서」(ERP 상위부서로 누군가 그 이름을 가리킨다)여야 한다
+  const divisions = await prisma.division.findMany({ select: { id: true, nameKo: true, parentKo: true } });
+  const divisionById = new Map(divisions.map((d) => [d.id, d]));
+  const parentNames = new Set(divisions.map((d) => d.parentKo));
+  for (const u of body.updates) {
+    if (u.divisionId !== undefined && !divisionById.has(u.divisionId)) {
+      throw new HttpError(422, 'invalid_request', '옮길 부서를 찾지 못했습니다.');
+    }
+    if (u.hqDesk) {
+      const hq = divisionById.get(u.hqDesk);
+      if (!hq || !parentNames.has(hq.nameKo)) throw new HttpError(422, 'invalid_request', '본부(산하가 있는 부서)만 맡길 수 있습니다.');
+    }
   }
 
   const updates = body.updates;
@@ -124,14 +142,19 @@ export const PUT = handler(async (req: NextRequest) => {
       if (Object.keys(data).length > 0) {
         await tx.user.update({ where: { id: u.userId }, data });
       }
+      if (u.hqDesk !== undefined) {
+        await tx.hqDesk.deleteMany({ where: { userId: u.userId } });
+        if (u.hqDesk) await tx.hqDesk.create({ data: { userId: u.userId, divisionId: u.hqDesk, createdBy: scope.user.email } });
+      }
     }
   });
 
   await audit(scope.user.email, 'rule_update', null, 'ops:roster', { count: body.updates.length });
-  // API-67 — 소속을 옮기는 것은 권한이 바뀌는 일이다 — 일괄 기록과 따로 사람마다 남긴다(누가 · 누구를 · 어디로)
-  for (const u of updates) {
+  // ADR-0022 — 소속을 옮기거나 본부를 맡기는 것은 권한이 바뀌는 일이다 — 따로 남긴다(누가 · 누구를 · 어디로)
+  for (const u of body.updates) {
     if (u.divisionId !== undefined) await audit(scope.user.email, 'roster_move', u.divisionId, `user:${u.userId}`, { pinned: true });
-    else if (u.divisionPinned === false) await audit(scope.user.email, 'roster_unpin', null, `user:${u.userId}`, {});
+    if (u.divisionPinned === false && u.divisionId === undefined) await audit(scope.user.email, 'roster_unpin', null, `user:${u.userId}`, {});
+    if (u.hqDesk !== undefined) await audit(scope.user.email, 'hq_desk', u.hqDesk, `user:${u.userId}`, { hq: u.hqDesk ? divisionById.get(u.hqDesk)?.nameKo : null });
   }
   return json({ ok: true, updated: body.updates.length });
 });

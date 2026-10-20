@@ -81,6 +81,8 @@ export function kindBase(kind: string): string {
 
 /** 수신함 화면의 종류 이름 — NotifyLog 종류 앞부분(kindBase) 기준. 모르는 종류는 코드값 그대로 보인다 */
 export const SINK_KIND_LABEL: Record<string, string> = {
+  // ADR-0022 D4 — 같은 사람에게 짧은 사이 여럿이라 한 통으로 묶은 쪽지(`batch:종류+종류`)
+  batch: '묶음',
   deadline_1d: '하루 전',
   deadline_1h: '1시간 전',
   deadline_10m: '10분 전',

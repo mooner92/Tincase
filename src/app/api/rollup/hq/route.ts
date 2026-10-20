@@ -23,10 +23,10 @@ export const GET = handler(async (req: NextRequest) => {
 });
 
 export const POST = handler(async (req: NextRequest) => {
-  const { scope, node } = await requireHqManager(req.headers);
-  // 입력 목록·본부·부서는 받지 않는다 — 실어 보내도 무시한다(입력은 나무와 받은 사본이 정한다)
-  const parsed = z.object({ isoKey: z.string().optional() }).passthrough().safeParse(await req.json().catch(() => ({})));
+  // 입력 목록·부서는 받지 않는다 — 실어 보내도 무시한다(입력은 나무와 받은 사본이 정한다). `node`는 맡은 본부 중 고르기뿐이다(ADR-0022 D2)
+  const parsed = z.object({ isoKey: z.string().optional(), node: z.string().max(80).optional() }).passthrough().safeParse(await req.json().catch(() => ({})));
   if (!parsed.success) throw new HttpError(422, 'invalid_request', '요청 형식이 맞지 않습니다.');
+  const { scope, node } = await requireHqManager(req.headers, parsed.data.node);
   const slot = await rollupSlot(parsed.data.isoKey);
   await syncHq(node, slot, { cause: 'retry', causedBy: scope.user.email, force: true });
   const board = await hqBoard(node, slot);
