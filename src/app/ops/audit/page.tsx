@@ -37,6 +37,7 @@ const ACTION_KO: Record<string, { label: string; tone: 'normal' | 'watch' | 'str
   // 2026-10-08(ADR-0015) — 본부본·전사본은 자동(`system`)으로 만들어진다. 본부장 승인도 같은 동작 이름(rollup · action approve)으로 남는다
   rollup: { label: '본부본·전사본', tone: 'normal' },
   rollup_order: { label: '순서 변경', tone: 'watch' },
+  erp_import: { label: 'ERP 보고서 읽기', tone: 'normal' },
   submission_revise: { label: '제출물 고침', tone: 'watch' },
   submission_proxy: { label: '제출물 대신 입력', tone: 'watch' },
   approve: { label: '승인', tone: 'normal' },

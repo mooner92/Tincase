@@ -30,8 +30,9 @@ ENV NODE_ENV=production \
     HOSTNAME=0.0.0.0 \
     PORT=3000
 WORKDIR /app
+# RH-90 — poppler-utils: ERP 주간업무보고 PDF에서 글자를 뽑는다(pdftotext). 파일은 임시 폴더에서 읽고 바로 지운다
 RUN groupadd -r app && useradd -r -g app -u 10001 app \
-    && apt-get update && apt-get install -y --no-install-recommends sqlite3 tini ca-certificates \
+    && apt-get update && apt-get install -y --no-install-recommends sqlite3 tini ca-certificates poppler-utils \
     && rm -rf /var/lib/apt/lists/*
 
 # standalone 출력 (+ Prisma 클라이언트 런타임 — CLI는 포함하지 않는다.

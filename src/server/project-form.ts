@@ -5,7 +5,7 @@ import { readStoredFile } from '@/server/storage';
 import { logger } from '@/server/logger';
 import { cleanCell } from '@/server/worklog-doc';
 import { normalizeEvaluation } from '@/lib/evaluation';
-import { evaluationLabels, fillHqForm, isProjectForm, parseHqForm, type HqFormData, type HqItem, type HqTask } from '@/lib/hwp/hq-form';
+import { consultLabels, evaluationLabels, fillHqForm, isProjectForm, parseHqForm, type HqFormData, type HqItem, type HqTask } from '@/lib/hwp/hq-form';
 import { unitAbbr } from '@/lib/unit-abbr';
 
 export type FormKind = 'unit' | 'project';
@@ -43,6 +43,8 @@ interface ItemIn {
   emphasis?: unknown;
 }
 interface TaskIn {
+  /** RH-96 — 구분(실 약칭). 본부·센터 담당·부서장만 — 그 밖은 서버가 부서에서 정한다 */
+  unit?: unknown;
   type?: unknown;
   title?: unknown;
   owner?: unknown;
@@ -57,6 +59,8 @@ export interface ProjectBody {
   consult?: unknown;
   /** RH-82 — 평가 실적 값(양식의 값 칸 순서). 본부·센터의 담당·부서장 것만 받는다 */
   evaluation?: unknown;
+  /** RH-97 — 자문회의 여러 줄 `{label, values[4]}` — 본부·센터 담당·부서장만, 이 본부와 산하 실 줄만 */
+  consultRows?: unknown;
 }
 
 const COUNT_MAX = 20;
@@ -85,7 +89,7 @@ function cleanItem(v: ItemIn, where: string): HqItem {
 }
 const hasText = (i: HqItem) => !!(i.content || i.date || i.place || i.people);
 
-function cleanTasks(raw: unknown, key: 'results' | 'plans', unit: string): HqTask[] {
+function cleanTasks(raw: unknown, key: 'results' | 'plans', unit: string, allowedUnits: readonly string[] = []): HqTask[] {
   if (raw === undefined || raw === null) return [];
   if (!Array.isArray(raw)) throw new HttpError(422, 'invalid_request', `${SECTION_KO[key]} 형식이 올바르지 않습니다.`);
   if (raw.length > LIMITS.tasks) throw new HttpError(422, 'too_many', `${SECTION_KO[key]} 과제는 ${LIMITS.tasks}개까지입니다.`);
@@ -96,8 +100,9 @@ function cleanTasks(raw: unknown, key: 'results' | 'plans', unit: string): HqTas
     if (items.length > LIMITS.items) throw new HttpError(422, 'too_many', `${where}의 항목은 ${LIMITS.items}개까지입니다.`);
     const type = cleanCell(t?.type, `${where} 유형`);
     if (type.length > LIMITS.type) throw new HttpError(422, 'cell_too_long', `${where}의 유형은 ${LIMITS.type}자까지입니다.`);
+    const asked = typeof t?.unit === 'string' ? t.unit.trim() : '';
     const task: HqTask = {
-      unit,
+      unit: asked && allowedUnits.includes(asked) ? asked : unit, // RH-96 — 고른 구분은 이 본부·산하 실 약칭일 때만
       type,
       title: cleanCell(t?.title, `${where} 과제명`),
       owner: cleanCell(t?.owner, `${where} 책임자`),
@@ -118,24 +123,38 @@ export function buildProjectHwp(
   templateBytes: Buffer,
   body: ProjectBody,
   divisionNameKo: string,
-  opts: { counts?: boolean } = {},
+  opts: { counts?: boolean; hq?: HqScope | null } = {},
 ): { bytes: Buffer; data: HqFormData } {
   const unit = unitAbbr(divisionNameKo);
+  const hq = opts.counts ? opts.hq ?? null : null; // RH-96 · RH-97 — 본부·센터 담당·부서장일 때만
+  const allowed = hq ? hq.units.map((u) => u.abbr) : [];
   const notesRaw = body.notes ?? [];
   if (!Array.isArray(notesRaw)) throw new HttpError(422, 'invalid_request', '특이사항 형식이 올바르지 않습니다.');
   if (notesRaw.length > LIMITS.notes) throw new HttpError(422, 'too_many', `특이사항은 ${LIMITS.notes}줄까지입니다.`);
   const data: HqFormData = {
-    results: cleanTasks(body.results, 'results', unit),
-    plans: cleanTasks(body.plans, 'plans', unit),
+    results: cleanTasks(body.results, 'results', unit, allowed),
+    plans: cleanTasks(body.plans, 'plans', unit, allowed),
     notes: (notesRaw as ItemIn[]).map((n, i) => cleanItem(n ?? {}, `특이사항 ${i + 1}번`)).filter(hasText),
   };
   const consult = opts.counts ? cleanCounts(body.consult, 4, '자문회의 실적') : undefined;
   const evaluation = opts.counts ? cleanCounts(body.evaluation, null, '평가 실적') : undefined;
   if (consult) data.consult = [{ label: divisionNameKo, values: consult }];
+  if (hq && body.consultRows !== undefined && body.consultRows !== null) {
+    if (!Array.isArray(body.consultRows) || body.consultRows.length > hq.units.length) throw new HttpError(422, 'invalid_request', '자문회의 실적 형식이 올바르지 않습니다.');
+    const names = new Map(hq.units.map((u) => [u.nameKo.replace(/\s+/g, ''), u.nameKo]));
+    const rows: { label: string; values: string[] }[] = [];
+    for (const r of body.consultRows as { label?: unknown; values?: unknown }[]) {
+      const label = typeof r?.label === 'string' ? names.get(r.label.replace(/\s+/g, '')) : undefined;
+      if (!label) throw new HttpError(422, 'invalid_request', '자문회의 실적에 이 본부 밖의 줄이 있습니다.');
+      const values = cleanCounts(r.values, 4, `자문회의 실적(${label})`);
+      if (values) rows.push({ label, values });
+    }
+    if (rows.length) data.consult = rows;
+  }
   // RH-89 — 「8」 → 「8건」 · 비워 둔 총 검토건수는 합으로(양식의 이름 칸 순서)
   if (evaluation) data.evaluation = normalizeEvaluation(evaluationLabels(templateBytes), evaluation);
   const items = (ts: HqTask[]) => ts.reduce((a, t) => a + t.items.length, 0);
-  if (items(data.results) + items(data.plans) + data.notes.length === 0 && !consult && !evaluation) {
+  if (items(data.results) + items(data.plans) + data.notes.length === 0 && !data.consult?.length && !evaluation) {
     throw new HttpError(422, 'empty_content', '항목을 하나 이상 적어 주세요.');
   }
   if (!isProjectForm(templateBytes)) {
@@ -234,7 +253,31 @@ export async function recentForDivision(divisionId: string, userId: string, curr
   };
 }
 
-// ── RH-82 작성 화면이 그릴 칸 ────────────────────────
+// ── RH-82 · RH-90 · RH-96 작성 화면이 그릴 칸 ──────────
+
+export interface HqScope {
+  /** 이 본부와 산하 실 — 자문회의 표 줄 순서(양식). 첫째가 본부 자신 */
+  units: { nameKo: string; abbr: string }[];
+}
+
+/**
+ * RH-96 · RH-97 — 본부·센터 부서(산하 실이 있고 양식이 연구실 것)면 그 본부와 산하 실의 이름·약칭, 아니면 null.
+ * 이름은 양식의 자문회의 줄에서 읽는다 — 화면·서버·병합이 같은 줄 이름을 쓴다.
+ */
+export async function hqScopeOf(division: { id: string; nameKo: string }): Promise<HqScope | null> {
+  if ((await prisma.division.count({ where: { parentKo: division.nameKo } })) === 0) return null;
+  const t = await prisma.template.findFirst({ where: { divisionId: division.id, isActive: true }, select: { sha256: true, filePath: true } });
+  if (!t || (await templateFormOf(t)) !== 'project') return null;
+  let labels: string[] = [];
+  try {
+    labels = consultLabels(await readStoredFile(t.filePath));
+  } catch {
+    labels = [];
+  }
+  const self = division.nameKo.replace(/\s+/g, '');
+  if (!labels.some((l) => l.replace(/\s+/g, '') === self)) labels = [division.nameKo, ...labels];
+  return { units: labels.map((l) => ({ nameKo: l, abbr: unitAbbr(l) })) };
+}
 
 export interface ProjectDesk {
   /** 담당·부서장 — 자문회의(·평가) 칸을 그린다 */
@@ -243,12 +286,14 @@ export interface ProjectDesk {
   consultLabel: string;
   /** 평가 실적 이름 칸들 — 본부·센터 부서이고 양식에 평가 실적 표가 있을 때만(실은 쓰지 않는다) */
   evaluationLabels: string[];
+  /** RH-90 — [ERP 보고서 가져오기] · RH-96 구분 고르기 · RH-97 자문회의 여러 줄: 본부·센터 담당·부서장에게만 */
+  hq?: HqScope;
 }
 
 export async function projectDesk(division: { id: string; nameKo: string }, canCount: boolean): Promise<ProjectDesk> {
-  const isHq = (await prisma.division.count({ where: { parentKo: division.nameKo } })) > 0;
+  const hq = canCount ? await hqScopeOf(division) : null;
   let labels: string[] = [];
-  if (canCount && isHq) {
+  if (hq) {
     const t = await prisma.template.findFirst({ where: { divisionId: division.id, isActive: true }, select: { filePath: true } });
     try {
       labels = t ? evaluationLabels(await readStoredFile(t.filePath)) : [];
@@ -256,5 +301,5 @@ export async function projectDesk(division: { id: string; nameKo: string }, canC
       labels = [];
     }
   }
-  return { canCount, consultLabel: division.nameKo, evaluationLabels: labels };
+  return { canCount, consultLabel: division.nameKo, evaluationLabels: labels, ...(hq ? { hq } : {}) };
 }

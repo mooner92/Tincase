@@ -72,3 +72,28 @@ describe('RH-84 — 본부 합치기', () => {
     expect(itemCounts(d)).toEqual({ achievements: 3, plans: 1, notes: 1 });
   });
 });
+
+describe('RH-97 — 자문회의 여러 줄', () => {
+  it('[RH-T33] 본부 담당이 적은 산하 실 줄은 실 병합에 남고 · 본부 합치기는 실 자신의 줄이 없을 때만 본부 판의 줄을 쓴다', () => {
+    const rows = [
+      { label: '가나본부', values: ['-', '1건', '-', '-'] },
+      { label: '가연구실', values: ['2건', '-', '-', '-'] },
+      { label: '나연구실', values: ['1건', '-', '-', '-'] },
+    ];
+    const m = mergeProjectDocs([{ name: '담당', isManager: true, data: doc({ notes: [it_('세미나')], consult: rows }) }], '가나본부');
+    expect(m.data.consult).toEqual(rows);
+    const d = combineHqDocs(
+      [
+        { nameKo: '가나본부', data: m.data },
+        { nameKo: '가연구실', data: doc({ consult: [{ label: '가연구실', values: ['3건', '-', '-', '-'] }] }) },
+        { nameKo: '나연구실', data: doc({}) },
+      ],
+      '가나본부',
+    );
+    expect(d.consult).toEqual([
+      { label: '가나본부', values: ['-', '1건', '-', '-'] },
+      { label: '가연구실', values: ['3건', '-', '-', '-'] }, // 실 자신의 줄이 먼저
+      { label: '나연구실', values: ['1건', '-', '-', '-'] }, // 없으니 본부 판의 줄
+    ]);
+  });
+});

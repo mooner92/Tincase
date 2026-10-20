@@ -329,6 +329,12 @@ export function parseHqForm(bytes: Buffer): HqFormData {
   };
 }
 
+/** RH-97 — 자문회의 표의 줄 이름(머리 줄 다음부터, 양식 순서 — 본부 다음 산하 실) */
+export function consultLabels(bytes: Buffer): string[] {
+  const rows = readHqTables(bytes).consult ?? [];
+  return rows.slice(1).map((row) => (row.find(([c]) => c === 0)?.[1] ?? '').trim()).filter(Boolean);
+}
+
 /** 평가 실적 표의 이름 칸(값 칸이 아닌 칸, 줄 우선) — 작성 화면이 값 칸 옆에 붙일 이름 */
 export function evaluationLabels(bytes: Buffer): string[] {
   const back = readHqTables(bytes);

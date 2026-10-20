@@ -11,7 +11,7 @@ import { handler, json } from '@/server/http';
 import { readStoredFile } from '@/server/storage';
 import { uploadSubmission, ensureCurrentSlot } from '@/server/worklog';
 import { buildWorklogHwp, type DocInput } from '@/server/worklog-doc';
-import { buildProjectHwp, templateFormOf, type ProjectBody } from '@/server/project-form';
+import { buildProjectHwp, hqScopeOf, templateFormOf, type ProjectBody } from '@/server/project-form';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,7 +38,13 @@ export const POST = handler(async (req: NextRequest) => {
   const templateBytes = await readStoredFile(template.filePath);
   const built =
     form === 'project'
-      ? { ...buildProjectHwp(templateBytes, body as unknown as ProjectBody, scope.division.nameKo, { counts: isDocumentManager(scope.user) }), rows: undefined }
+      ? {
+          ...buildProjectHwp(templateBytes, body as unknown as ProjectBody, scope.division.nameKo, {
+            counts: isDocumentManager(scope.user),
+            hq: isDocumentManager(scope.user) ? await hqScopeOf(scope.division) : null, // RH-96 · RH-97
+          }),
+          rows: undefined,
+        }
       : buildWorklogHwp(templateBytes, body, { division: scope.division.nameKo });
 
   const slot = await ensureCurrentSlot();

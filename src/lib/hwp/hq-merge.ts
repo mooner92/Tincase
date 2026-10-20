@@ -78,12 +78,21 @@ export function mergeProjectDocs(people: readonly PersonDoc[], unitNameKo: strin
   }
 
   // RH-82 — 담당·부서장 먼저, 그다음 누구든. 둘 이상이 서로 다르게 적었으면 알린다(고르는 것은 사람 몫이다)
+  // RH-97 — 줄마다 따로 고른다: 본부·센터 담당은 산하 실 줄도 적는다(서버가 그 본부의 줄만 받았다). 이 실 자신의 줄은 부서 이름으로
   const byPriority = [...people.filter((p) => p.isManager), ...people.filter((p) => !p.isManager)];
-  const consultOf = (p: PersonDoc) => p.data.consult?.find((c) => norm(c.label) === norm(unitNameKo))?.values;
-  const consultFrom = byPriority.find((p) => filled(consultOf(p)));
-  const evalFrom = byPriority.find((p) => filled(p.data.evaluation));
+  const labels: string[] = [];
+  for (const p of people) for (const c of p.data.consult ?? []) if (filled(c.values) && !labels.some((l) => norm(l) === norm(c.label))) labels.push(c.label);
+  labels.sort((a, b) => (norm(b) === norm(unitNameKo) ? 1 : 0) - (norm(a) === norm(unitNameKo) ? 1 : 0));
   const distinct = (vals: (readonly string[] | undefined)[]) => new Set(vals.filter(filled).map((v) => JSON.stringify(v))).size;
-  if (distinct(people.map(consultOf)) > 1) warnings.push(`자문회의 실적을 여러 사람이 다르게 적었습니다 — ${consultFrom!.name} 님 것을 넣었습니다`);
+  const consult: { label: string; values: readonly string[] }[] = [];
+  for (const label of labels) {
+    const rowOf = (p: PersonDoc) => p.data.consult?.find((c) => norm(c.label) === norm(label))?.values;
+    const from = byPriority.find((p) => filled(rowOf(p)))!;
+    const own = norm(label) === norm(unitNameKo);
+    consult.push({ label: own ? unitNameKo : label, values: rowOf(from)! });
+    if (distinct(people.map(rowOf)) > 1) warnings.push(`자문회의 실적${own ? '' : `(${label})`}을 여러 사람이 다르게 적었습니다 — ${from.name} 님 것을 넣었습니다`);
+  }
+  const evalFrom = byPriority.find((p) => filled(p.data.evaluation));
   if (distinct(people.map((p) => p.data.evaluation)) > 1) warnings.push(`평가 실적을 여러 사람이 다르게 적었습니다 — ${evalFrom!.name} 님 것을 넣었습니다`);
 
   return {
@@ -91,7 +100,7 @@ export function mergeProjectDocs(people: readonly PersonDoc[], unitNameKo: strin
       results: results.tasks,
       plans: plans.tasks,
       notes: notes.map((x) => x.item),
-      consult: consultFrom ? [{ label: unitNameKo, values: consultOf(consultFrom)! }] : [],
+      consult,
       ...(evalFrom ? { evaluation: evalFrom.data.evaluation } : {}),
     },
     authors: { results: results.authors, plans: plans.authors, notes: notes.map((x) => ({ content: x.item.content, authors: [...x.authors] })) },
@@ -112,11 +121,16 @@ export interface UnitDoc {
  * 번호는 표마다 처음부터 다시 매긴다(RH-32 — 쓸 때 매긴다).
  */
 export function combineHqDocs(units: readonly UnitDoc[], hqNameKo: string): HqFormData {
+  const hq = units.find((u) => norm(u.nameKo) === norm(hqNameKo));
   const consult = units.flatMap((u) => {
-    const row = u.data.consult?.find((c) => norm(c.label) === norm(u.nameKo));
+    const row = u.data.consult?.find((c) => norm(c.label) === norm(u.nameKo) && filled(c.values));
     return row ? [{ label: u.nameKo, values: row.values }] : [];
   });
-  const hq = units.find((u) => norm(u.nameKo) === norm(hqNameKo));
+  // RH-97 — 산하 실 자신의 줄이 없으면 본부 판의 그 줄(본부·센터 담당이 대신 적은 것). 다른 실 판에 적힌 남의 줄은 쓰지 않는다
+  for (const c of hq?.data.consult ?? []) {
+    if (norm(c.label) === norm(hqNameKo) || !filled(c.values) || consult.some((x) => norm(x.label) === norm(c.label))) continue;
+    consult.push({ label: c.label, values: c.values });
+  }
   return {
     results: units.flatMap((u) => u.data.results),
     plans: units.flatMap((u) => u.data.plans),

@@ -6,6 +6,9 @@ import { useRouter } from 'next/navigation';
 import { composerDraftKey } from '@/lib/composer';
 import { evaluationTotal, totalIndex } from '@/lib/evaluation';
 import { formatDays, parseDays, weekDayChips, type DayChip } from '@/lib/project-dates';
+import { unitAbbr } from '@/lib/unit-abbr';
+import type { ErpCandidate } from '@/lib/erp-report';
+import { ErpImport } from './ErpImport';
 
 export interface PItem {
   content: string;
@@ -15,6 +18,8 @@ export interface PItem {
   emphasis?: boolean;
 }
 export interface PTask {
+  /** RH-96 — 구분(실 약칭). 본부·센터 담당·부서장만 고른다 — 없으면 서버가 부서에서 정한다 */
+  unit?: string;
   type: string;
   title: string;
   owner: string;
@@ -42,7 +47,7 @@ interface Recent {
   places: string[];
   people: string[];
   lastWeekPlans: PTask[];
-  desk?: { canCount: boolean; consultLabel: string; evaluationLabels: string[] };
+  desk?: { canCount: boolean; consultLabel: string; evaluationLabels: string[]; hq?: { units: { nameKo: string; abbr: string }[] } };
 }
 
 /** RH-82 — 자문회의 표의 넷(양식 머리 그대로) */
@@ -57,20 +62,34 @@ const blankItem = (): PItem => ({ content: '', date: '', place: '', people: '', 
 const blankData = (): PData => ({ results: [], plans: [], notes: [] });
 const itemHas = (i: PItem) => !!(i.content.trim() || i.date.trim() || i.place.trim() || i.people.trim());
 const taskKey = (t: { title: string; owner: string }) => `${t.title.replace(/\s+/g, '')}|${t.owner.replace(/\s+/g, '')}`;
+const sq = (s: string) => s.replace(/\s+/g, '');
+/** RH-98 — 일자 글의 첫 날(월·일) — 날짜순 정렬용. 못 읽으면 맨 뒤 */
+const firstDay = (date: string) => {
+  const m = /(\d{1,2})\/(\d{1,2})/.exec(date);
+  return m ? Number(m[1]) * 100 + Number(m[2]) : 9999;
+};
+const taskDay = (t: PTask) => Math.min(9999, ...t.items.filter(itemHas).map((i) => firstDay(i.date)));
+/** RH-98 — 과제를 첫 항목 일자 순으로(같으면 그대로), 과제 안 항목도 일자 순 */
+const byDate = (ts: PTask[]) =>
+  ts
+    .map((t) => ({ ...t, items: [...t.items].sort((a, b) => firstDay(a.date) - firstDay(b.date)) }))
+    .map((t, i) => ({ t, i }))
+    .sort((a, b) => taskDay(a.t) - taskDay(b.t) || a.i - b.i)
+    .map((x) => x.t);
 
 /** 내용 비교용 — 빈 항목·항목 없는 과제·앞뒤 공백을 뺀 모양(WA-37 「바뀌었나」는 내용으로) */
 function normalize(d: PData) {
   const it = (i: PItem) => ({ c: i.content.trim(), d: i.date.trim(), p: i.place.trim(), a: i.people.trim(), e: !!i.emphasis });
   const tasks = (ts: PTask[]) =>
     ts
-      .map((t) => ({ y: t.type.trim(), t: t.title.trim(), o: t.owner.trim(), i: t.items.filter(itemHas).map(it) }))
+      .map((t) => ({ u: t.unit ?? '', y: t.type.trim(), t: t.title.trim(), o: t.owner.trim(), i: t.items.filter(itemHas).map(it) }))
       .filter((t) => t.i.length > 0);
   const counts = (v: string[] | undefined) => (v ?? []).map((x) => x.trim()).filter((x, _i, a) => a.some((y) => y && y !== '-')).join('|');
   return JSON.stringify({
     r: tasks(d.results),
     p: tasks(d.plans),
     n: d.notes.filter(itemHas).map(it),
-    c: counts(d.consult?.[0]?.values),
+    c: (d.consult ?? []).map((r) => `${sq(r.label)}:${counts(r.values)}`).join('/'),
     e: counts(d.evaluation),
   });
 }
@@ -136,6 +155,7 @@ export function ProjectComposer({
   const [data, setData] = useState<PData>(start.data);
   const [recent, setRecent] = useState<Recent | null>(null);
   const [picker, setPicker] = useState<TaskSection | null>(null);
+  const [erpOpen, setErpOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
@@ -191,7 +211,8 @@ export function ProjectComposer({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
-        if (picker) setPicker(null);
+        if (erpOpen) setErpOpen(false);
+        else if (picker) setPicker(null);
         else close();
         return;
       }
@@ -212,7 +233,7 @@ export function ProjectComposer({
     };
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [close, picker]);
+  }, [close, picker, erpOpen]);
 
   const restartFromSubmitted = () => {
     if (!initial || !confirm(`작성하던 임시본을 지우고 지금 낸 v${initialVersion}에서 다시 시작할까요?`)) return;
@@ -282,7 +303,13 @@ export function ProjectComposer({
         results: data.results,
         plans: data.plans,
         notes: data.notes,
-        ...(desk?.canCount ? { consult: consultVals, ...(desk.evaluationLabels.length ? { evaluation: evalVals } : {}) } : {}),
+        ...(desk?.canCount
+          ? {
+              // RH-97 — 본부·센터는 자문회의 여러 줄, 실은 자기 줄 하나
+              ...(desk.hq ? { consultRows: desk.hq.units.map((u) => ({ label: u.nameKo, values: rowVals(u.nameKo) })) } : { consult: consultVals }),
+              ...(desk.evaluationLabels.length ? { evaluation: evalVals } : {}),
+            }
+          : {}),
       }),
     })
       .then(async (r) => {
@@ -301,15 +328,21 @@ export function ProjectComposer({
       .finally(() => setBusy(false));
   };
 
-  // RH-82 — 자문회의·평가 칸(담당·부서장). 이 실의 줄 하나만 들고 다닌다
+  // RH-82 · RH-97 — 자문회의·평가 칸(담당·부서장). 실은 자기 줄 하나, 본부·센터는 본부와 산하 실 줄 모두
   const desk = recent?.desk;
-  const consultVals = data.consult?.[0]?.values ?? ['', '', '', ''];
-  const setConsult = (i: number, v: string) =>
+  const rowVals = (label: string) => data.consult?.find((c) => sq(c.label) === sq(label))?.values ?? ['', '', '', ''];
+  const setCell = (label: string, i: number, v: string) =>
     setData((d) => {
-      const vals = [...(d.consult?.[0]?.values ?? ['', '', '', ''])];
+      const rows = [...(d.consult ?? [])];
+      const at = rows.findIndex((c) => sq(c.label) === sq(label));
+      const vals = [...(at >= 0 ? rows[at].values : ['', '', '', ''])];
       vals[i] = v;
-      return { ...d, consult: [{ label: desk?.consultLabel ?? d.consult?.[0]?.label ?? '', values: vals }] };
+      if (at >= 0) rows[at] = { label: rows[at].label, values: vals };
+      else rows.push({ label, values: vals });
+      return { ...d, consult: rows };
     });
+  const consultVals = rowVals(desk?.consultLabel ?? data.consult?.[0]?.label ?? '');
+  const setConsult = (i: number, v: string) => setCell(desk?.consultLabel ?? data.consult?.[0]?.label ?? '', i, v);
   const evalVals = desk ? desk.evaluationLabels.map((_, i) => data.evaluation?.[i] ?? '') : [];
   const setEval = (i: number, v: string) =>
     setData((d) => {
@@ -320,7 +353,59 @@ export function ProjectComposer({
   // RH-89 — 합계 칸은 비워 두면 서버가 같은 식으로 채운다. 화면에는 그 값을 흐리게 미리 보인다
   const evalTotalAt = desk ? totalIndex(desk.evaluationLabels) : -1;
   const evalAuto = desk ? evaluationTotal(desk.evaluationLabels, evalVals) : null;
-  const countsFilled = consultVals.some((v) => v.trim() && v.trim() !== '-') || evalVals.some((v) => v.trim() && v.trim() !== '-');
+  const countsFilled = (data.consult ?? []).some((r) => r.values.some((v) => v.trim() && v.trim() !== '-')) || evalVals.some((v) => v.trim() && v.trim() !== '-');
+
+  /**
+   * RH-90 · RH-95 · RH-97 — 가져온 후보를 작성 화면으로. 실적·계획은 (구분 · 과제명 · 책임자) 과제 아래로 모으고 날짜순,
+   * 특이사항은 줄로. 이미 있는 항목(같은 과제 · 내용 · 일자)은 겹치지 않는다. 자문회의 줄은 고른 일을 실마다 종류별로 센 값으로 채운다
+   * — 이번에 센 실의 줄만(손으로 적어 둔 다른 줄은 그대로)
+   */
+  const importErp = (picked: ErpCandidate[]) => {
+    const same = (a: PItem, b: PItem) => sq(a.content) === sq(b.content) && sq(a.date) === sq(b.date);
+    setData((d) => {
+      const next: PData = {
+        ...d,
+        results: d.results.map((t) => ({ ...t, items: t.items.filter(itemHas) })),
+        plans: d.plans.map((t) => ({ ...t, items: t.items.filter(itemHas) })),
+        notes: d.notes.filter(itemHas),
+      };
+      const counted = new Map<string, number[]>();
+      for (const c of picked) {
+        const item: PItem = { content: c.content, date: c.date, place: c.place, people: c.people, emphasis: false };
+        if (c.section !== 'plans') {
+          const row = counted.get(c.unitKo) ?? [0, 0, 0, 0];
+          row[c.kind] += 1;
+          counted.set(c.unitKo, row);
+        }
+        if (c.section === 'notes') {
+          if (!next.notes.some((n) => same(n, item))) next.notes.push(item);
+          continue;
+        }
+        const t = { unit: unitAbbr(c.unitKo), type: c.task?.type ?? '', title: (c.task?.title || c.content).trim(), owner: c.task?.owner ?? '' };
+        const list = next[c.section];
+        const at = list.findIndex((x) => (x.unit ?? '') === t.unit && taskKey(x) === taskKey(t));
+        if (at < 0) list.push({ ...t, items: [item] });
+        else if (!list[at].items.some((i) => same(i, item))) list[at] = { ...list[at], items: [...list[at].items, item] };
+      }
+      next.results = byDate(next.results.filter((t) => t.items.length > 0));
+      next.plans = byDate(next.plans.filter((t) => t.items.length > 0));
+      next.notes = [...next.notes].sort((a, b) => firstDay(a.date) - firstDay(b.date));
+      if (desk?.hq) {
+        const rows = [...(d.consult ?? [])];
+        for (const [unitKo, n] of counted) {
+          const label = desk.hq.units.find((u) => sq(u.nameKo) === sq(unitKo))?.nameKo;
+          if (!label) continue;
+          const values = n.map((x) => (x > 0 ? `${x}건` : ''));
+          const at = rows.findIndex((r) => sq(r.label) === sq(label));
+          if (at >= 0) rows[at] = { label, values };
+          else rows.push({ label, values });
+        }
+        next.consult = rows;
+      }
+      return next;
+    });
+    setErpOpen(false);
+  };
 
   const blocked = busy || done || (total === 0 && !countsFilled) || (start.from !== 'draft' && unchanged);
 
@@ -357,6 +442,8 @@ export function ProjectComposer({
           ))}
         </datalist>
 
+        {erpOpen && desk?.hq && <ErpImport units={desk.hq.units} onImport={importErp} onClose={() => setErpOpen(false)} />}
+
         <div className="flex-1 overflow-y-auto px-3 py-4 sm:px-6">
           {start.from === 'draft' && (
             <p className="mb-3 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-body">
@@ -370,20 +457,73 @@ export function ProjectComposer({
           )}
           {start.from === 'blank' && initialFailed && <p className="mb-3 text-sm text-warning">지금 낸 판을 불러오지 못해 빈 화면으로 시작합니다.</p>}
 
+          {desk?.hq && (
+            <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-ink px-3 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-[15px] font-semibold text-ink">ERP 보고서 가져오기</p>
+                <p className="text-xs text-muted">본부·실 주간업무보고 PDF를 한 번에 올리면 넣을 것을 골라 드려요</p>
+              </div>
+              <button onClick={() => setErpOpen(true)} className="btn-primary h-11 shrink-0">
+                PDF 올리기
+              </button>
+            </div>
+          )}
+
           {desk?.canCount && (
             <section className="mb-7 rounded-lg border border-hairline p-3" aria-labelledby="pc-h-counts">
               <h3 id="pc-h-counts" className="text-[15px] font-semibold text-ink">
-                ※ 자문회의 실적 <span className="text-xs font-normal text-muted">· {desk.consultLabel} 줄 · 담당만 적어요</span>
+                ※ 자문회의 실적{' '}
+                <span className="text-xs font-normal text-muted">· {desk.hq ? '본부와 실 줄 모두' : `${desk.consultLabel} 줄`} · 담당만 적어요</span>
               </h3>
-              <p className="mt-0.5 text-xs text-muted">보이는 그대로 — 「1」 · 「2건(1건)」 · 없으면 비워 두세요(「-」로 나가요)</p>
-              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                {CONSULT_HEADS.map((h, i) => (
-                  <label key={h} className="text-xs text-muted">
-                    {h}
-                    <input value={consultVals[i] ?? ''} onChange={(e) => setConsult(i, e.target.value)} placeholder="-" maxLength={20} aria-label={`자문회의 실적 ${h}`} className={`${input} mt-1`} />
-                  </label>
-                ))}
-              </div>
+              <p className="mt-0.5 text-xs text-muted">
+                보이는 그대로 — 「1」 · 「2건(1건)」 · 없으면 비워 두세요(「-」로 나가요){desk.hq ? ' · ERP에서 가져오면 고른 일을 세어 채워요' : ''}
+              </p>
+              {desk.hq ? (
+                <div className="mt-2 overflow-x-auto">
+                  <table className="w-full min-w-[520px] border-separate border-spacing-1 text-xs">
+                    <thead>
+                      <tr className="text-left text-muted">
+                        <th className="w-32 font-medium">구분</th>
+                        {CONSULT_HEADS.map((h) => (
+                          <th key={h} className="font-medium">
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {desk.hq.units.map((u) => (
+                        <tr key={u.nameKo}>
+                          <th scope="row" className="pr-1 text-left font-medium whitespace-nowrap text-body">
+                            {u.nameKo}
+                          </th>
+                          {CONSULT_HEADS.map((h, i) => (
+                            <td key={h}>
+                              <input
+                                value={rowVals(u.nameKo)[i] ?? ''}
+                                onChange={(e) => setCell(u.nameKo, i, e.target.value)}
+                                placeholder="-"
+                                maxLength={20}
+                                aria-label={`자문회의 실적 ${u.nameKo} ${h}`}
+                                className="h-9 w-full rounded-md border border-border-strong bg-canvas px-2 text-[14px] text-ink focus:border-ink focus:ring-1 focus:ring-ink focus:outline-none"
+                              />
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              ) : (
+                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  {CONSULT_HEADS.map((h, i) => (
+                    <label key={h} className="text-xs text-muted">
+                      {h}
+                      <input value={consultVals[i] ?? ''} onChange={(e) => setConsult(i, e.target.value)} placeholder="-" maxLength={20} aria-label={`자문회의 실적 ${h}`} className={`${input} mt-1`} />
+                    </label>
+                  ))}
+                </div>
+              )}
               {desk.evaluationLabels.length > 0 && (
                 <>
                   <h3 className="mt-4 text-[15px] font-semibold text-ink">※ 평가 실적</h3>
@@ -409,6 +549,11 @@ export function ProjectComposer({
                 </h3>
                 <span className="text-xs text-muted">{s === 'results' ? '이번 주에 한 일' : '다음 주에 할 일'}</span>
                 <span className="ml-auto text-xs font-medium text-muted tabular-nums">항목 {counts[s]}개</span>
+                {data[s].length > 1 && (
+                  <button onClick={() => setTasks(s, byDate)} title="과제를 첫 항목 일자 순으로" className="text-xs font-medium text-muted underline hover:text-ink">
+                    날짜순
+                  </button>
+                )}
               </div>
 
               {s === 'results' && pendingCount > 0 && (
@@ -421,6 +566,21 @@ export function ProjectComposer({
                 {data[s].map((t, ti) => (
                   <div key={ti} className="overflow-hidden rounded-lg border border-hairline">
                     <div className="flex items-start gap-2 bg-info-soft px-3 py-2">
+                      {desk?.hq && (
+                        <select
+                          value={t.unit ?? desk.hq.units[0]?.abbr ?? ''}
+                          onChange={(e) => setTasks(s, (ts) => ts.map((x, i) => (i === ti ? { ...x, unit: e.target.value } : x)))}
+                          aria-label={`${t.title} 구분(실)`}
+                          title="구분 — 표의 첫 칸에 나가는 실"
+                          className="h-7 shrink-0 rounded-md border border-border-strong bg-canvas px-1 text-xs font-semibold text-ink"
+                        >
+                          {desk.hq.units.map((u) => (
+                            <option key={u.abbr} value={u.abbr}>
+                              {u.abbr}
+                            </option>
+                          ))}
+                        </select>
+                      )}
                       <span className="chip chip-info mt-0.5 shrink-0">{t.type || '유형 없음'}</span>
                       <div className="min-w-0 flex-1">
                         <p className="text-[14px] leading-5 font-semibold text-ink">{t.title}</p>
