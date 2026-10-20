@@ -11,6 +11,7 @@ import { readWorklog, TABLE_TITLES, TABLE_COLUMNS } from '@/lib/hwp/reader';
 import { isProjectForm, parseHqForm, type HqFormData } from '@/lib/hwp/hq-form';
 import { projectTables, type ViewTable } from '@/lib/hwp/hq-view';
 import { unitEachTask } from '@/lib/unit-abbr';
+import { hqScopeOf } from '@/server/project-form';
 import { tableGrid } from '@/lib/hwp/model';
 import { toKstIso } from '@/lib/week';
 
@@ -32,11 +33,16 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
     if (isProjectForm(bytes)) {
       // RH-76 · RH-82 — 이 실의 자문회의 줄만 작성 화면에 되돌린다(표의 다른 줄은 이 사람이 적은 것이 아니다)
       const d = parseHqForm(bytes);
-      const own = await prisma.division.findUnique({ where: { id: sub.divisionId }, select: { nameKo: true, parentKo: true } });
-      const mine = d.consult?.find((c) => c.label.replace(/\s+/g, '') === (own?.nameKo ?? '').replace(/\s+/g, ''))?.values;
-      project = { ...d, consult: mine ? [{ label: own!.nameKo, values: mine }] : [] };
-      // RH-88 — 열람 드로어도 두 층 표 그대로(실형 5칸으로 읽으면 칸이 엇갈린다). 자문회의는 이 실의 줄만
-      projectView = projectTables(bytes, { onlyConsultOf: own?.nameKo ?? '', unitEachTask: unitEachTask(own?.nameKo, own?.parentKo) });
+      const own = await prisma.division.findUnique({ where: { id: sub.divisionId }, select: { id: true, nameKo: true, parentKo: true } });
+      const sq = (s: string) => s.replace(/\s+/g, '');
+      // RH-97 — 본부·센터 판은 본부와 산하 실 줄 모두(담당이 다 적었다 — 하나만 돌려주면 다시 낼 때 나머지가 지워진다)
+      const hq = own ? await hqScopeOf(own) : null;
+      const rows = hq
+        ? (d.consult ?? []).filter((c) => hq.units.some((u) => sq(u.nameKo) === sq(c.label)) && c.values.some((v) => v.trim() && v.trim() !== '-'))
+        : (d.consult ?? []).filter((c) => sq(c.label) === sq(own?.nameKo ?? '')).map((c) => ({ label: own!.nameKo, values: c.values }));
+      project = { ...d, consult: rows };
+      // RH-88 — 열람 드로어도 두 층 표 그대로(실형 5칸으로 읽으면 칸이 엇갈린다). 자문회의는 이 실의 줄만(본부·센터는 모두)
+      projectView = projectTables(bytes, { ...(hq ? {} : { onlyConsultOf: own?.nameKo ?? '' }), unitEachTask: unitEachTask(own?.nameKo, own?.parentKo) });
     }
   } catch (e) {
     logger.error({ submissionId: sub.id, err: String(e) }, 'CRITICAL: preview parse failed for validated file');
