@@ -52,6 +52,16 @@ describe('RH-32 · RH-33 — 과제·항목을 표 줄로', () => {
     expect(rows.find((r) => r.texts[2] === '항목 없는 과제')).toBeUndefined();
   });
 
+  it('[RH-T06] 구분을 과제 줄마다 쓰는 본부(RH-99) — 같은 실이 이어져도 과제 줄마다 첫 줄 원형과 약칭 · 표는 본부 이름으로 정한다', async () => {
+    const rows = projectRows(tasks, 1, '-', true);
+    expect(rows.filter((r) => r.proto === PROJECT_PROTO.taskFirst).map((r) => r.texts[0])).toEqual(['가실', '가실', '나실']);
+    expect(rows.some((r) => r.proto === PROJECT_PROTO.taskCont)).toBe(false);
+    const { unitEachTask } = await import('@/lib/unit-abbr');
+    expect(unitEachTask('환경평가본부')).toBe(true);
+    expect(unitEachTask('사회기반평가실', '환경평가 본부')).toBe(true); // 산하 실은 상위 본부 이름으로
+    expect(unitEachTask('국토관리연구실', '국토환경연구본부')).toBe(false);
+  });
+
   it('[RH-T02] 계획은 2-n · 강조 항목은 내용 칸 · 마지막 줄은 마지막 항목 원형', () => {
     const rows = projectRows(tasks, 2);
     expect(rows[1].texts[1]).toBe('2-1');

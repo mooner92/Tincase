@@ -26,3 +26,13 @@ const ABBR: Record<string, string> = {
 export function unitAbbr(divisionNameKo: string): string {
   return ABBR[divisionNameKo.replace(/\s+/g, '')] ?? divisionNameKo;
 }
+
+/**
+ * RH-99 — 과제 줄마다 구분을 쓰는 본부(제출본 실측 — 날짜순이라 실이 섞인다: 환경평가본부 2026-08~10 아홉 판 모두).
+ * 그 밖은 실이 바뀔 때만 쓴다(국토환경 · 적응센터 원본은 실 덩어리를 칸 병합으로 묶는다). 본부 자신이나 그 산하 실 이름을 준다
+ */
+const UNIT_EACH_TASK = new Set(['환경평가본부']);
+
+export function unitEachTask(...names: (string | null | undefined)[]): boolean {
+  return names.some((n) => !!n && UNIT_EACH_TASK.has(n.replace(/\s+/g, '')));
+}

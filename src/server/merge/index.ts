@@ -3,6 +3,7 @@
 // 순서: 제출물 수집 → 규칙 적용 → (모델) 중복 묶기 → 조립 → 자체 점검 → (저장은 부르는 쪽 — run.ts, 잠금 안에서 기록과 함께)
 // 어느 단계가 실패해도 **병합본은 나온다** (HM-21 부분 실패 허용, HM-24 폴백).
 
+import { unitEachTask } from '@/lib/unit-abbr';
 import path from 'node:path';
 import { prisma } from '../db';
 import { readStoredFile, sanitizeSegment } from '../storage';
@@ -467,7 +468,7 @@ export async function runMerge(
 
 /** RH-80~83 — 연구실 병합. 결과의 모양(MergeOutcome)은 실형과 같다 — 기록·승인·위로 올리기가 그대로 쓴다 */
 async function runProjectMerge(
-  division: { id: string; slug: string; nameKo: string },
+  division: { id: string; slug: string; nameKo: string; parentKo: string },
   slot: { year: number; label: string },
   templateBytes: Buffer,
   ordered: { id: string; filePath: string; user: { name: string; divisionRole: string } }[],
@@ -489,7 +490,7 @@ async function runProjectMerge(
   if (counts.achievements + counts.plans + counts.notes === 0) throw new MergeUnavailable('제출물에서 항목을 찾지 못했습니다.');
   warnings.push(...m.warnings);
 
-  const out = fillHqForm(templateBytes, m.data);
+  const out = fillHqForm(templateBytes, m.data, { unitEachTask: unitEachTask(division.nameKo, division.parentKo) }); // RH-99
   // RH-36 — 다시 읽어 넣은 수와 같은지(HM-22와 같은 원칙)
   const got = itemCounts(parseHqForm(out));
   if (got.achievements !== counts.achievements || got.plans !== counts.plans || got.notes !== counts.notes) {

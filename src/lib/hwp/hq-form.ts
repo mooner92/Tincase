@@ -88,14 +88,14 @@ const has = (s: string | undefined) => !!s && s.trim() !== '';
 const itemHasText = (i: HqItem) => has(i.content) || has(i.date) || has(i.place) || has(i.people);
 
 /** RH-32 · RH-33 — 과제·항목을 6칸 표의 줄로. `section`은 번호 머리(실적 1 · 계획 2) */
-export function projectRows(tasks: readonly HqTask[], section: number, empty = '-'): ProtoRow[] {
+export function projectRows(tasks: readonly HqTask[], section: number, empty = '-', unitEachTask = false): ProtoRow[] {
   const rows: ProtoRow[] = [];
   let n = 0;
   let prevUnit: string | null = null;
   for (const t of tasks) {
     const items = t.items.filter(itemHasText);
     if (items.length === 0) continue;
-    const first = t.unit !== prevUnit;
+    const first = unitEachTask || t.unit !== prevUnit; // RH-99 — 본부에 따라 과제 줄마다
     prevUnit = t.unit;
     rows.push({
       proto: first ? PROJECT_PROTO.taskFirst : PROJECT_PROTO.taskCont,
@@ -140,6 +140,8 @@ export interface FillHqOptions {
   empty?: string;
   /** 강조 항목의 글자색 — 기본 파랑(HM-37과 같은 규칙). 원래 서식을 복제해 색만 바꾼다 */
   emphasisColor?: number;
+  /** RH-99 — 과제 줄마다 구분(실)을 쓴다(환경평가본부). 기본은 실이 바뀔 때만 */
+  unitEachTask?: boolean;
 }
 
 /** 그 표 (줄, 칸)의 첫 글자 서식 번호 */
@@ -200,8 +202,8 @@ export function fillHqForm(template: Buffer, data: HqFormData, opts: FillHqOptio
     return rows;
   };
   const noteRowsOut = fit(at.notes!, noteRows(data.notes, empty), 1, emph.notes);
-  const planRowsOut = fit(at.plans!, projectRows(data.plans, 2, empty), 2, emph.project);
-  const resultRowsOut = fit(at.results!, projectRows(data.results, 1, empty), 2, emph.project);
+  const planRowsOut = fit(at.plans!, projectRows(data.plans, 2, empty, opts.unitEachTask), 2, emph.project);
+  const resultRowsOut = fit(at.results!, projectRows(data.results, 1, empty, opts.unitEachTask), 2, emph.project);
   const docInfoOut = diChanged ? serializeRecords(di) : undefined;
 
   // 순번이 바뀌지 않으므로(표 수는 그대로) 어느 순서로 고쳐도 된다 — 뒤 표부터

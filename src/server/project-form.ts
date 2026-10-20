@@ -123,7 +123,7 @@ export function buildProjectHwp(
   templateBytes: Buffer,
   body: ProjectBody,
   divisionNameKo: string,
-  opts: { counts?: boolean; hq?: HqScope | null } = {},
+  opts: { counts?: boolean; hq?: HqScope | null; unitEachTask?: boolean } = {},
 ): { bytes: Buffer; data: HqFormData } {
   const unit = unitAbbr(divisionNameKo);
   const hq = opts.counts ? opts.hq ?? null : null; // RH-96 · RH-97 — 본부·센터 담당·부서장일 때만
@@ -160,7 +160,7 @@ export function buildProjectHwp(
   if (!isProjectForm(templateBytes)) {
     throw new HttpError(409, 'form_mismatch', '부서 양식이 연구실 양식이 아닙니다 — 화면을 새로 고쳐 주세요.');
   }
-  const bytes = fillHqForm(templateBytes, data);
+  const bytes = fillHqForm(templateBytes, data, { unitEachTask: opts.unitEachTask });
   // RH-36 — 만든 것을 다시 읽어 넣은 대로인지
   const back = parseHqForm(bytes);
   if (items(back.results) !== items(data.results) || items(back.plans) !== items(data.plans) || back.notes.length !== data.notes.length) {

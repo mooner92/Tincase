@@ -14,6 +14,8 @@ interface FileResult {
 const SECTION_KO: Record<CandidateSection, string> = { results: '1. 실적', plans: '2. 계획', notes: '3. 특이사항' };
 export const KIND_KO = ['자문회의', '전문가 세미나', '포럼·워크샵 등', '기타 회의'] as const;
 const sq = (s: string) => s.replace(/\s+/g, '');
+/** 규칙이 처음 고른 것(`suggested`) — 체크를 바꿔도 줄이 목록 사이를 옮겨 다니지 않게 자리는 이것으로 정한다 */
+type Cand = ErpCandidate & { suggested: boolean };
 
 export function ErpImport({
   units,
@@ -27,7 +29,7 @@ export function ErpImport({
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [files, setFiles] = useState<FileResult[] | null>(null);
-  const [cands, setCands] = useState<ErpCandidate[] | null>(null);
+  const [cands, setCands] = useState<Cand[] | null>(null);
   const [showLeft, setShowLeft] = useState<Set<string>>(new Set());
   const [showRaw, setShowRaw] = useState<Set<number>>(new Set());
   const [drag, setDrag] = useState(false);
@@ -51,7 +53,7 @@ export function ErpImport({
         return;
       }
       setFiles(b.files ?? []);
-      setCands(b.candidates ?? []);
+      setCands((b.candidates ?? []).map((c) => ({ ...c, suggested: c.pick })));
     } catch {
       setErr('네트워크 오류로 읽지 못했습니다.');
     } finally {
@@ -71,10 +73,10 @@ export function ErpImport({
   const groups = useMemo(() => {
     if (!cands) return [];
     const order = units.map((u) => sq(u.nameKo));
-    const by = new Map<string, ErpCandidate[]>();
+    const by = new Map<string, Cand[]>();
     for (const c of cands) by.set(c.unitKo, [...(by.get(c.unitKo) ?? []), c]);
     const rank = (ko: string) => (order.indexOf(sq(ko)) < 0 ? 999 : order.indexOf(sq(ko)));
-    const day = (c: ErpCandidate) => (c.first ? c.first[0] * 100 + c.first[1] : 9999);
+    const day = (c: Cand) => (c.first ? c.first[0] * 100 + c.first[1] : 9999);
     return [...by.entries()]
       .sort((a, b) => rank(a[0]) - rank(b[0]))
       .map(([unitKo, list]) => ({ unitKo, abbr: units.find((u) => sq(u.nameKo) === sq(unitKo))?.abbr ?? unitKo, list: [...list].sort((a, b) => day(a) - day(b)) }));
@@ -82,7 +84,7 @@ export function ErpImport({
   const picked = (cands ?? []).filter((c) => c.pick);
 
   // 화면 안에서 만든 컴포넌트는 그릴 때마다 새로 붙는다(고르던 칸이 풀린다) — 함수로 그린다
-  const row = (c: ErpCandidate) => (
+  const row = (c: Cand) => (
     <li key={c.id} className={`px-3 py-2.5 ${c.pick ? '' : 'bg-surface-soft/60'}`}>
       <label className="flex cursor-pointer items-start gap-2.5">
         <input type="checkbox" checked={c.pick} onChange={(e) => patch(c.id, { pick: e.target.checked })} className="mt-1 h-4 w-4 shrink-0 accent-ink" aria-label={`${c.content} 넣기`} />
@@ -191,15 +193,15 @@ export function ErpImport({
             </div>
 
             {groups.map((g) => {
-              const on = g.list.filter((c) => c.pick);
-              const off = g.list.filter((c) => !c.pick);
+              const on = g.list.filter((c) => c.suggested);
+              const off = g.list.filter((c) => !c.suggested);
               return (
                 <section key={g.unitKo} className="mb-5">
                   <h3 className="mb-1.5 flex items-baseline gap-2 px-1 text-[15px] font-semibold text-ink">
                     {g.unitKo}
                     <span className="chip chip-muted">{g.abbr}</span>
                     <span className="ml-auto text-xs font-medium text-muted tabular-nums">
-                      고른 {on.length} / {g.list.length}
+                      고른 {g.list.filter((c) => c.pick).length} / {g.list.length}
                     </span>
                   </h3>
                   <ul className="divide-y divide-hairline-soft overflow-hidden rounded-lg border border-hairline">

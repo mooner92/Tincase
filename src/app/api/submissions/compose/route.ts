@@ -12,6 +12,7 @@ import { readStoredFile } from '@/server/storage';
 import { uploadSubmission, ensureCurrentSlot } from '@/server/worklog';
 import { buildWorklogHwp, type DocInput } from '@/server/worklog-doc';
 import { buildProjectHwp, hqScopeOf, templateFormOf, type ProjectBody } from '@/server/project-form';
+import { unitEachTask } from '@/lib/unit-abbr';
 
 export const dynamic = 'force-dynamic';
 
@@ -42,6 +43,7 @@ export const POST = handler(async (req: NextRequest) => {
           ...buildProjectHwp(templateBytes, body as unknown as ProjectBody, scope.division.nameKo, {
             counts: isDocumentManager(scope.user),
             hq: isDocumentManager(scope.user) ? await hqScopeOf(scope.division) : null, // RH-96 · RH-97
+            unitEachTask: unitEachTask(scope.division.nameKo, scope.division.parentKo), // RH-99
           }),
           rows: undefined,
         }

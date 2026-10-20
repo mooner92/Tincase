@@ -5,6 +5,7 @@
 //
 // 조립은 전사 취합과 **같은 엔진**(orgdoc.ts — RU-62)이다. 사본 하나가 섹션 하나가 되어 원래 꼴 그대로 들어간다.
 // 2026-10-08(ADR-0015)부터 조립은 사람이 누르지 않는다 — 산하 사본이 바뀌면 `system`이 다시 이어 붙인다(auto.ts).
+import { unitEachTask } from '@/lib/unit-abbr';
 import path from 'node:path';
 import type { ReportSubmission, RollupRun, WeekSlot } from '@prisma/client';
 import { prisma } from '../db';
@@ -210,7 +211,7 @@ export async function composeHq(node: RollupNode, slot: WeekSlot, inputs: readon
           outcomes.push({ title: p.title, status: 'failed', dropped: [], error: (e as Error).message });
         }
       }
-      out = { bytes: fillHqForm(template, combineHqDocs(units, node.node.nameKo)), outcomes, warnings: [] };
+      out = { bytes: fillHqForm(template, combineHqDocs(units, node.node.nameKo), { unitEachTask: unitEachTask(node.node.nameKo) }), outcomes, warnings: [] }; // RH-99
     } else {
       // RU-10 — 사본 하나 = 섹션 하나. 원래 꼴 그대로(RU-62), 정규화(RU-63)도 전사와 같다 — 본부장이 본 것이 최종본에 들어간다
       out = composeOrgDocument(
