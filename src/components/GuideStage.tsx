@@ -26,7 +26,8 @@
 //   여러 장 건너뛰기      겹치지 않고 바로 바꾼다 — 목차·번호로 뛰는 중간 화면은 볼 이유가 없다
 // 새 그림이 다 받아진 뒤에 바꾼다. 빈 무대가 한 번이라도 비치면 프로젝터에서는 번쩍임이 된다.
 import { Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
-import { chapterHeadline, roleChapters, type GuideChapter, type GuideStep, type Slide } from '@/lib/guide/deck';
+import { chapterHeadline, roleChapters, type DeckKey, type GuideChapter, type GuideStep, type Slide } from '@/lib/guide/deck';
+import { DECKS } from '@/lib/guide/decks';
 import { APP_HEADER, cropAround, fitCamera, overviewCamera, union, type Camera, type Rect, type Size } from '@/lib/guide/camera';
 import {
   coachLayout,
@@ -79,13 +80,13 @@ export function targetOf(step: GuideStep | null): CoachTarget {
 
 /** 키·프레젠터로 넘길 때 눌린 모양을 보일 단계인가 — 누르는 버튼이 구멍인 그림 단계 */
 export function pressable(slide: Slide | undefined): boolean {
-  return slide?.step?.kind === 'shot' && slide.step.target === 'button' && !!shotOf(slide.step.id);
+  return slide?.step?.kind === 'shot' && slide.step.target === 'button' && !!shotOf(slide.step.id, slide.deck);
 }
 
 /** 장의 첫 그림 — 알림 카드의 흐린 배경(다음에 나올 화면으로 이어지게). 발표에서 빼는 단계는 건너뛴다 */
-function chapterShot(chapter: GuideChapter) {
+function chapterShot(chapter: GuideChapter, deck: DeckKey) {
   const step = chapter.steps.find((s) => s.kind === 'shot' && !s.selfOnly);
-  return step ? shotOf(step.id) : null;
+  return step ? shotOf(step.id, deck) : null;
 }
 
 /** 그림 단계의 카메라 + 구멍 + 말풍선 자리 (말풍선 크기는 어림 — 그린 뒤 높이를 다시 재서 놓는다) */
@@ -98,7 +99,7 @@ function planOf(
 ): (CoachPlan & { bubbleW: number; avoid: Rect[]; radius: number }) | null {
   const step = slide.step;
   if (!step || step.kind !== 'shot' || view.w <= 0) return null;
-  const shot = shotOf(step.id);
+  const shot = shotOf(step.id, slide.deck);
   if (!shot) return null;
   const pill = withPill ? pillOf(slide) : null;
   const avoid = pill ? [pillRect(view, pill, k)] : [];
@@ -411,7 +412,7 @@ function LayerView({
 }) {
   const { slide, opacity, id, swap } = layer;
   const step = slide.step;
-  const shot = step?.kind === 'shot' ? shotOf(step.id) : null;
+  const shot = step?.kind === 'shot' ? shotOf(step.id, slide.deck) : null;
   const isShot = !!shot;
   const tf = shot && cam ? `translate(${cam.x}px, ${cam.y}px) scale(${cam.scale})` : '';
 
@@ -601,7 +602,7 @@ export function CoachCursor({ hand }: { hand: HandBox }) {
  */
 export function StaticSlide({ slide }: { slide: Slide }) {
   const step = slide.step;
-  const shot = step?.kind === 'shot' ? shotOf(step.id) : null;
+  const shot = step?.kind === 'shot' ? shotOf(step.id, slide.deck) : null;
   if (!shot) return null;
   // 구멍 둘레 여백 — 그림 px로 6px (잘라 낸 그림이 작아도 버튼 테두리가 구멍 끝에 붙지 않게)
   const p = 6;
@@ -654,7 +655,7 @@ function TextSlide({ slide, view, overlay }: { slide: Slide; view: Size; overlay
   // 검은 무대에서는 흐린 그림 위 흰 카드였다(검정 위에 카드만 있으면 다음 화면과 끊겨서). 무대가 흰 앱 화면과 같은 바탕이 되면서
   // 끊김이 없어졌다 — 상자·그림을 걷고 글만 둔다
   if (!step) {
-    const roles = roleChapters();
+    const roles = roleChapters(DECKS[slide.deck].chapters);
     const at = roles.findIndex((c) => c.id === chapter.id);
     return (
       <div className="flex h-full flex-col items-center justify-center px-[6cqw] text-center">
@@ -713,7 +714,7 @@ function TextSlide({ slide, view, overlay }: { slide: Slide; view: Size; overlay
         <p className={`mt-[1.2cqw] text-[2cqw] ${muted}`}>{step.say}</p>
         <ol className="mt-[3.4cqw] flex items-stretch justify-center gap-[0.6cqw]">
           {step.flow.map((f, i) => (
-            <li key={f.who} className="flex items-stretch gap-[0.6cqw]">
+            <li key={`${i}-${f.who}`} className="flex items-stretch gap-[0.6cqw]">
               {i > 0 && (
                 <span aria-hidden className={`self-center text-[1.6cqw] ${muted}`}>
                   →
@@ -816,7 +817,7 @@ function MessageSlide({ slide, view, overlay }: { slide: Slide; view: Size; over
   const est = estimateBubble(step.label, step.say, null, view, k);
   const avoid = overlay?.pillText ? [pillRect(view, overlay.pillText, k)] : [];
   const layout = hole && coachLayout(view, hole, { w: est.w, h: measuredH ?? est.h }, { avoid });
-  const bg = chapterShot(slide.chapter);
+  const bg = chapterShot(slide.chapter, slide.deck);
   return (
     <div className="relative h-full">
       {bg && (
@@ -840,10 +841,10 @@ function MessageSlide({ slide, view, overlay }: { slide: Slide; view: Size; over
           <img src="/brand/tincase-icon-sm.svg" alt="" className="h-[2cqw] w-[2cqw]" />
           <span className="text-stage-muted">사내 메신저 · {step.message.from}</span>
         </p>
-        <p className="mt-[1cqw] text-[2.1cqw] leading-snug font-semibold">{fillWeek(step.message.subject)}</p>
+        <p className="mt-[1cqw] text-[2.1cqw] leading-snug font-semibold">{fillWeek(step.message.subject, slide.deck)}</p>
         {step.message.lines.map((l) => (
           <p key={l} className="mt-[0.5cqw] text-[1.7cqw] leading-snug text-body">
-            {fillWeek(l)}
+            {fillWeek(l, slide.deck)}
           </p>
         ))}
       </div>

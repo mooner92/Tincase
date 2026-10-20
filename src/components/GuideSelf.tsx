@@ -13,7 +13,8 @@
 // 640px 미만과 인쇄에서는 무대 대신 단계를 세로로 늘어놓는다 — 휴대폰에서 줌·팬은 손가락과 싸운다.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { isCoachStep, selfChapters, type GuideCap, type GuideStep, type Slide } from '@/lib/guide/deck';
+import { isCoachStep, selfChapters, type DeckKey, type GuideCap, type GuideStep, type Slide } from '@/lib/guide/deck';
+import { DECKS } from '@/lib/guide/decks';
 import { stageClick, type StageTarget } from '@/lib/guide/nav';
 import { SELF_K } from '@/lib/guide/coach';
 import { fillWeek } from '@/lib/guide/manifest';
@@ -22,8 +23,17 @@ import { GuideStage, StaticSlide } from './GuideStage';
 import { PresentFrame } from './GuidePresent';
 import { CoachDock } from './CoachParts';
 
-export function GuideSelf({ caps, tour }: { caps: GuideCap[]; tour?: { slug: string; chapters: TourChapterId[] } | null }) {
-  const chapters = useMemo(() => selfChapters(caps), [caps]);
+export function GuideSelf({
+  caps,
+  tour,
+  deck = 'unit',
+}: {
+  caps: GuideCap[];
+  tour?: { slug: string; chapters: TourChapterId[] } | null;
+  /** PG-100 — 갈래(실형 · 연구 본부 · 평가본부). 바꾸려면 다시 그린다(`key`) */
+  deck?: DeckKey;
+}) {
+  const chapters = useMemo(() => selfChapters(caps, DECKS[deck].chapters, deck), [caps, deck]);
   const slides = useMemo(() => chapters.flatMap((c) => c.slides), [chapters]);
   const [index, setIndex] = useState(0);
   const [big, setBig] = useState(false);
@@ -315,7 +325,7 @@ function ListStep({ slide, first }: { slide: Slide; first: boolean }) {
               )}
             </p>
           )}
-          {step && step.kind !== 'shot' && <StepExtras step={step} />}
+          {step && step.kind !== 'shot' && <StepExtras step={step} deck={slide.deck} />}
           {/* 더 알 것 한 줄 — 휴대폰은 「자세히」를 눌러야 펼치고(글이 먼저 보이면 그림을 안 본다), 인쇄는 펼친 채 */}
           {step?.more && (
             <>
@@ -333,15 +343,15 @@ function ListStep({ slide, first }: { slide: Slide; first: boolean }) {
 }
 
 /** 글자 슬라이드의 내용을 글로 — 휴대폰·인쇄용 (무대의 큰 글자 대신). 체험하기에는 알림 카드만 남았다(PG-83) */
-function StepExtras({ step }: { step: Exclude<GuideStep, { kind: 'shot' }> }) {
+function StepExtras({ step, deck }: { step: Exclude<GuideStep, { kind: 'shot' }>; deck: DeckKey }) {
   if (step.kind === 'message') {
     return (
       <div className="mt-2.5 rounded-lg border border-hairline bg-surface-soft px-3 py-2.5 text-sm">
         <p className="text-xs text-muted">사내 메신저 · {step.message.from}</p>
-        <p className="mt-1 font-semibold text-ink">{fillWeek(step.message.subject)}</p>
+        <p className="mt-1 font-semibold text-ink">{fillWeek(step.message.subject, deck)}</p>
         {step.message.lines.map((l) => (
           <p key={l} className="text-body">
-            {fillWeek(l)}
+            {fillWeek(l, deck)}
           </p>
         ))}
       </div>

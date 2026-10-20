@@ -32,6 +32,7 @@ import { settleLater } from '../src/server/after';
 import { loadSections, uploadSectionFile } from '../src/server/rollup/sections';
 import { hwpUploadOpen } from '../src/server/submit-mode';
 import { CLOCK_COLS, UNIT_HEADS, approveAs, createFakeOrg, delegate, foreignUserCount, hwpBuilder, scopeOf } from './fake-org';
+import { seedResearch, type ResearchSeed } from './fake-research';
 
 const MARK_ACTOR = 'guide-seed@example.invalid';
 const MARK_ACTION = 'guide_seed';
@@ -115,7 +116,8 @@ async function seed() {
   const lastWeek = new Date(now.getTime() - 7 * 86400_000);
 
   // ── 부서 · 사람 · 양식 ── (scripts/fake-org.ts — 시연 데이터와 같은 사람들)
-  const org = await createFakeOrg(template, await hashPassword(randomBytes(18).toString('base64url')));
+  const pwHash = await hashPassword(randomBytes(18).toString('base64url'));
+  const org = await createFakeOrg(template, pwHash);
   const { div, roles, ai, pco, rmo, ca } = org;
 
   // ── 제출물 ── (지어낸 업무 — scripts/fake-org.ts)
@@ -181,6 +183,14 @@ async function seed() {
     }
   }
 
+  // ── PG-101 · PG-102 갈래 ── 연구 본부형(국토환경연구본부 + 세 실) · 평가본부형(환경평가본부 혼자). 실형(기본)이면 아무것도 더하지 않는다
+  const variant = process.env.GUIDE_VARIANT ?? 'unit';
+  let research: ResearchSeed | null = null;
+  if (variant === 'project' || variant === 'erp') {
+    research = await seedResearch(variant, div, template, pwHash, now, work, stamps);
+    await settleLater();
+  }
+
   // ── 시각 ── 엔진이 채운 시각을 가짜 시계에 맞춘 **뒤에** 제출 시각을 넣는다 — 넣은 시각이 다시 옮겨지지 않게(장부에 이미 있다)
   const fixed = await fixClock();
   for (const [id, when] of stamps) await prisma.submission.update({ where: { id }, data: { uploadedAt: when } });
@@ -189,9 +199,12 @@ async function seed() {
   // ── 표식 · 세션 ──
   await prisma.auditLog.create({ data: { actor: MARK_ACTOR, action: MARK_ACTION, target: nonce, detail: '사용 안내 그림용 가짜 DB (PG-62)' } });
   const sessions: Record<string, string> = {};
-  for (const [k, u] of Object.entries(roles)) sessions[k] = (await createSession(u.id)).token;
+  for (const [k, u] of Object.entries({ ...roles, ...(research?.roles ?? {}) })) sessions[k] = (await createSession(u.id)).token;
   const out = path.join(work, 'sessions.json');
-  writeFileSync(out, JSON.stringify({ week: slot.label, slugs: { ai: div['AI홍보전략실'].slug }, sessions }, null, 2));
+  writeFileSync(
+    out,
+    JSON.stringify({ week: slot.label, slugs: { ai: div['AI홍보전략실'].slug, ...(research?.slugs ?? {}) }, sessions, erpPdfs: research?.erpPdfs ?? [] }, null, 2),
+  );
   console.log(`guide-seed: ${slot.label} · 세션 → ${out}`);
 }
 

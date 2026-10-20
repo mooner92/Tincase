@@ -3,7 +3,10 @@
 // 사각형은 **그림 좌표(CSS px)** 다. 그림은 1600×900 창을 배율 2로 찍은 것이라 실제 픽셀은 3200×1800이지만,
 // 무대는 그림을 CSS px 크기의 판 위에 놓고 그 판을 옮기므로 사각형도 CSS px로 둔다(CP-101).
 import raw from '../../../public/guide/deck/manifest.json';
+import rawProject from '../../../public/guide/project/manifest.json';
+import rawErp from '../../../public/guide/erp/manifest.json';
 import type { Rect } from './camera';
+import type { DeckKey } from './deck';
 
 export interface ShotInfo {
   /** `public/guide/deck/` 아래 파일 이름 */
@@ -51,11 +54,20 @@ export interface DeckManifest {
 
 export const MANIFEST = raw as DeckManifest;
 
+/** PG-100 — 갈래마다 그림 목록 · 그림 폴더. 실형(`unit`)은 처음부터 있던 `public/guide/deck` 그대로다(옛 안내 /guide/old와 같은 그림) */
+export const MANIFESTS: Record<DeckKey, DeckManifest> = {
+  unit: MANIFEST,
+  project: rawProject as DeckManifest,
+  erp: rawErp as DeckManifest,
+};
+const DIRS: Record<DeckKey, string> = { unit: '/guide/deck', project: '/guide/project', erp: '/guide/erp' };
+
 /** 그림 주소. 없으면 null — 아직 안 찍은 단계(새로 넣은 단계)는 글자로만 그린다 */
-export function shotOf(id: string): (ShotInfo & { src: string }) | null {
-  const s = MANIFEST.shots[id];
+export function shotOf(id: string, deck: DeckKey = 'unit'): (ShotInfo & { src: string }) | null {
+  const m = MANIFESTS[deck];
+  const s = m.shots[id];
   if (!s) return null;
-  return { ...s, src: `/guide/deck/${s.file}${MANIFEST.version ? `?v=${MANIFEST.version}` : ''}` };
+  return { ...s, src: `${DIRS[deck]}/${s.file}${m.version ? `?v=${m.version}` : ''}` };
 }
 
 /** 바닥색을 CSS 배경으로 — 한 색이면 그 색, 여럿이면 경계가 딱 떨어지는 가로 띠 */
@@ -76,6 +88,6 @@ export function groundAt(ground: readonly GroundStop[] | undefined, fx: number):
 }
 
 /** `{week}` → 찍은 주차. 찍기 전이면 「이번 주」 */
-export function fillWeek(text: string): string {
-  return text.replaceAll('{week}', MANIFEST.week || '이번 주');
+export function fillWeek(text: string, deck: DeckKey = 'unit'): string {
+  return text.replaceAll('{week}', MANIFESTS[deck].week || '이번 주');
 }

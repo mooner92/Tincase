@@ -34,6 +34,12 @@ export type GuideCap =
   | 'schedule'; // 주차 마감 바꾸기 (canScheduleDeadlines, TACP-20)
 
 export type ChapterId = 'intro' | 'why' | 'member' | 'lead' | 'head' | 'hq' | 'org' | 'outro';
+
+/**
+ * PG-100 — 안내의 **갈래**. 부서마다 작성·취합 화면이 달라(실형 5칸 표 · 연구 본부 과제 카드 · 환경평가본부 ERP 가져오기) 그림과 단계가 따로다.
+ * `unit`이 이 파일의 `DECK`(처음부터 있던 안내 — `/guide/old`가 그대로 보인다), 나머지는 `deck-project.ts` · `deck-erp.ts`
+ */
+export type DeckKey = 'unit' | 'project' | 'erp';
 /** 역할 장 — 체험하기·둘러보기가 쌓는 장. 이야기 순서다 (PG-83) */
 export type RoleChapterId = 'member' | 'lead' | 'head' | 'hq' | 'org';
 
@@ -648,6 +654,8 @@ export const isCoachStep = (s: GuideStep) => s.kind === 'shot' || s.kind === 'me
 
 /** 발표·체험하기가 공통으로 쓰는 한 장 */
 export interface Slide {
+  /** PG-100 — 어느 갈래의 단계인가 — 그림 목록(manifest)을 고른다 */
+  deck: DeckKey;
   /** 주소 조각 — 장 카드는 `lead`, 단계는 `lead-3` (이야기 순서의 장 안 **전체** 순번 — 사람·방식마다 같다) */
   key: string;
   chapter: GuideChapter;
@@ -679,12 +687,12 @@ export function stackedChapters(caps: Iterable<GuideCap>, deck: readonly GuideCh
 }
 
 /** 발표 모드 — **모든 장**, 역할 장 앞에 장 카드 (PG-59). 체험하기 전용 단계(`selfOnly`)는 뺀다 */
-export function presentSlides(deck: readonly GuideChapter[] = DECK): Slide[] {
+export function presentSlides(deck: readonly GuideChapter[] = DECK, key: DeckKey = 'unit'): Slide[] {
   return deck.flatMap((c) => {
     const shown = c.steps.map((s, i) => ({ s, i })).filter(({ s }) => !s.selfOnly);
     return [
-      ...(c.lede ? [{ key: c.id, chapter: c, step: null, n: 0, of: shown.length }] : []),
-      ...shown.map(({ s, i }, k) => ({ key: `${c.id}-${i + 1}`, chapter: c, step: s, n: k + 1, of: shown.length })),
+      ...(c.lede ? [{ deck: key, key: c.id, chapter: c, step: null, n: 0, of: shown.length }] : []),
+      ...shown.map(({ s, i }, k) => ({ deck: key, key: `${c.id}-${i + 1}`, chapter: c, step: s, n: k + 1, of: shown.length })),
     ];
   });
 }
@@ -699,7 +707,7 @@ export interface SelfChapter {
  * PG-83 — 체험하기의 장 목록. **가진 역할 장만, 이야기 순서 그대로 쌓는다**(TACP-9). 장 안에서도 이 사람이 쓰는 단계만
  * (`who`) — 「위로」 상태(`report`)·전사본(`orgDesk`)·일정(`schedule`). 발표 전용(표지·왜·로그인·마무리·주소)은 없다.
  */
-export function selfChapters(caps: Iterable<GuideCap>, deck: readonly GuideChapter[] = DECK): SelfChapter[] {
+export function selfChapters(caps: Iterable<GuideCap>, deck: readonly GuideChapter[] = DECK, key: DeckKey = 'unit'): SelfChapter[] {
   const has = new Set<GuideCap>(caps);
   has.add('all');
   const mine = new Set<ChapterId>(stackedChapters(has, deck));
@@ -707,7 +715,7 @@ export function selfChapters(caps: Iterable<GuideCap>, deck: readonly GuideChapt
     .filter((c) => mine.has(c.id))
     .map((c) => {
       const list = c.steps.map((s, i) => ({ s, i })).filter(({ s }) => !s.presentOnly && has.has(whoOf(c, s)));
-      return { chapter: c, slides: list.map(({ s, i }, k) => ({ key: `${c.id}-${i + 1}`, chapter: c, step: s, n: k + 1, of: list.length })) };
+      return { chapter: c, slides: list.map(({ s, i }, k) => ({ deck: key, key: `${c.id}-${i + 1}`, chapter: c, step: s, n: k + 1, of: list.length })) };
     })
     .filter((c) => c.slides.length > 0);
 }

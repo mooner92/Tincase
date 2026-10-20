@@ -458,19 +458,19 @@ export function ProjectComposer({
           {start.from === 'blank' && initialFailed && <p className="mb-3 text-sm text-warning">지금 낸 판을 불러오지 못해 빈 화면으로 시작합니다.</p>}
 
           {desk?.hq && (
-            <div className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-ink px-3 py-3">
+            <div data-guide="erp-box" className="mb-5 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-lg border border-ink px-3 py-3">
               <div className="min-w-0 flex-1">
                 <p className="text-[15px] font-semibold text-ink">ERP 보고서 가져오기</p>
                 <p className="text-xs text-muted">본부·실 주간업무보고 PDF를 한 번에 올리면 넣을 것을 골라 드려요</p>
               </div>
-              <button onClick={() => setErpOpen(true)} className="btn-primary h-11 shrink-0">
+              <button data-guide="erp-open" onClick={() => setErpOpen(true)} className="btn-primary h-11 shrink-0">
                 PDF 올리기
               </button>
             </div>
           )}
 
           {desk?.canCount && (
-            <section className="mb-7 rounded-lg border border-hairline p-3" aria-labelledby="pc-h-counts">
+            <section data-guide="pc-counts" className="mb-7 rounded-lg border border-hairline p-3" aria-labelledby="pc-h-counts">
               <h3 id="pc-h-counts" className="text-[15px] font-semibold text-ink">
                 ※ 자문회의 실적{' '}
                 <span className="text-xs font-normal text-muted">· {desk.hq ? '본부와 실 줄 모두' : `${desk.consultLabel} 줄`} · 담당만 적어요</span>
@@ -479,7 +479,7 @@ export function ProjectComposer({
                 보이는 그대로 — 「1」 · 「2건(1건)」 · 없으면 비워 두세요(「-」로 나가요){desk.hq ? ' · ERP에서 가져오면 고른 일을 세어 채워요' : ''}
               </p>
               {desk.hq ? (
-                <div className="mt-2 overflow-x-auto">
+                <div data-guide="pc-consult" className="mt-2 overflow-x-auto">
                   <table className="w-full min-w-[520px] border-separate border-spacing-1 text-xs">
                     <thead>
                       <tr className="text-left text-muted">
@@ -515,7 +515,7 @@ export function ProjectComposer({
                   </table>
                 </div>
               ) : (
-                <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                <div data-guide="pc-consult" className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
                   {CONSULT_HEADS.map((h, i) => (
                     <label key={h} className="text-xs text-muted">
                       {h}
@@ -528,9 +528,9 @@ export function ProjectComposer({
                 <>
                   <h3 className="mt-4 text-[15px] font-semibold text-ink">※ 평가 실적</h3>
                   <p className="mt-0.5 text-xs text-muted">숫자만 적으면 「건」이 붙어요{evalTotalAt >= 0 ? ` · ${desk.evaluationLabels[evalTotalAt]}는 비워 두면 합계로 들어가요` : ''}</p>
-                  <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <div data-guide="pc-eval" className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
                     {desk.evaluationLabels.map((l, i) => (
-                      <label key={l} className="text-xs text-muted">
+                      <label key={l} data-guide={i === evalTotalAt ? 'pc-eval-total' : undefined} className="text-xs text-muted">
                         {l}
                         <input value={evalVals[i] ?? ''} onChange={(e) => setEval(i, e.target.value)} placeholder={i === evalTotalAt && evalAuto ? `${evalAuto} (합계)` : '-'} maxLength={20} aria-label={`평가 실적 ${l}`} className={`${input} mt-1`} />
                       </label>
@@ -542,7 +542,7 @@ export function ProjectComposer({
           )}
 
           {(['results', 'plans'] as const).map((s, si) => (
-            <section key={s} className="mb-7" aria-labelledby={`pc-h-${s}`}>
+            <section key={s} data-guide={s === 'results' ? 'pc-results' : undefined} className="mb-7" aria-labelledby={`pc-h-${s}`}>
               <div className="mb-2 flex flex-wrap items-baseline gap-x-2 gap-y-1 px-1">
                 <h3 id={`pc-h-${s}`} className="text-[16px] font-semibold text-ink">
                   {si + 1}. {s === 'results' ? '주요 업무실적' : '주요 업무계획'}
@@ -557,17 +557,18 @@ export function ProjectComposer({
               </div>
 
               {s === 'results' && pendingCount > 0 && (
-                <button onClick={importLastPlans} className="btn-secondary btn-sm mb-3 w-full sm:w-auto">
+                <button data-guide="pc-last-plans" onClick={importLastPlans} className="btn-secondary btn-sm mb-3 w-full sm:w-auto">
                   지난주 계획 가져오기 · 항목 {pendingCount}개
                 </button>
               )}
 
               <div className="space-y-3">
                 {data[s].map((t, ti) => (
-                  <div key={ti} className="overflow-hidden rounded-lg border border-hairline">
+                  <div key={ti} data-guide={s === 'results' && ti === 0 ? 'pc-task-card' : undefined} className="overflow-hidden rounded-lg border border-hairline">
                     <div className="flex items-start gap-2 bg-info-soft px-3 py-2">
                       {desk?.hq && (
                         <select
+                          data-guide={s === 'results' && ti === 0 ? 'pc-unit' : undefined}
                           value={t.unit ?? desk.hq.units[0]?.abbr ?? ''}
                           onChange={(e) => setTasks(s, (ts) => ts.map((x, i) => (i === ti ? { ...x, unit: e.target.value } : x)))}
                           aria-label={`${t.title} 구분(실)`}
@@ -598,6 +599,7 @@ export function ProjectComposer({
                     {t.items.map((it, ii) => (
                       <ItemCard
                         key={ii}
+                        guide={s === 'results' && ti === 0 && ii === 0}
                         item={it}
                         chips={chips[s]}
                         label={`${t.title} ${ii + 1}번째 항목`}
@@ -614,20 +616,25 @@ export function ProjectComposer({
 
               {picker === s ? (
                 <TaskPicker
+                  guide={s === 'results'}
                   recent={recent?.tasks ?? null}
                   taken={new Set(data[s].map(taskKey))}
                   onPick={(t) => addTask(s, t)}
                   onClose={() => setPicker(null)}
                 />
               ) : (
-                <button onClick={() => setPicker(s)} className="mt-3 h-11 w-full rounded-lg border-2 border-dashed border-border-strong text-sm font-semibold text-body hover:border-ink hover:text-ink">
+                <button
+                  data-guide={s === 'results' ? 'pc-add-task' : undefined}
+                  onClick={() => setPicker(s)}
+                  className="mt-3 h-11 w-full rounded-lg border-2 border-dashed border-border-strong text-sm font-semibold text-body hover:border-ink hover:text-ink"
+                >
                   + 과제 추가
                 </button>
               )}
             </section>
           ))}
 
-          <section className="mb-4" aria-labelledby="pc-h-notes">
+          <section data-guide="pc-notes" className="mb-4" aria-labelledby="pc-h-notes">
             <div className="mb-2 flex flex-wrap items-baseline gap-x-2 px-1">
               <h3 id="pc-h-notes" className="text-[16px] font-semibold text-ink">
                 3. 기타 특이사항
@@ -651,6 +658,7 @@ export function ProjectComposer({
               </div>
             )}
             <button
+              data-guide="pc-add-note"
               onClick={() => setData((d) => (d.notes.length >= 30 ? d : { ...d, notes: [...d.notes, blankItem()] }))}
               className="mt-3 h-11 w-full rounded-lg border-2 border-dashed border-border-strong text-sm font-semibold text-body hover:border-ink hover:text-ink"
             >
@@ -659,11 +667,11 @@ export function ProjectComposer({
           </section>
         </div>
 
-        <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-hairline bg-canvas px-4 py-3 sm:px-6">
+        <div data-guide="pc-footer" className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-hairline bg-canvas px-4 py-3 sm:px-6">
           <span aria-live="polite" className={`text-sm font-medium ${msg?.ok ? 'text-success' : 'text-error'}`}>
             {msg?.text}
           </span>
-          <button onClick={submit} disabled={blocked} className="btn-primary ml-auto h-11 min-w-28">
+          <button data-guide="compose-submit" onClick={submit} disabled={blocked} className="btn-primary ml-auto h-11 min-w-28">
             {busy ? '제출 중…' : '제출'}
           </button>
         </div>
@@ -678,9 +686,12 @@ function ItemCard({
   chips,
   label,
   first = false,
+  guide = false,
   onChange,
   onRemove,
 }: {
+  /** 사용 안내 그림이 짚는 첫 항목(PG-101) */
+  guide?: boolean;
   item: PItem;
   chips: DayChip[];
   label: string;
@@ -691,6 +702,7 @@ function ItemCard({
   return (
     <div className={`space-y-2 px-3 py-3 ${first ? '' : 'border-t border-hairline-soft'}`}>
       <textarea
+        data-guide={guide ? 'pc-item' : undefined}
         value={item.content}
         onChange={(e) => onChange({ content: e.target.value })}
         rows={2}
@@ -698,7 +710,7 @@ function ItemCard({
         aria-label={`${label} 내용`}
         className="w-full resize-y rounded-md border border-border-strong bg-canvas px-2.5 py-2 text-[14px] leading-5 text-ink focus:border-ink focus:ring-1 focus:ring-ink focus:outline-none"
       />
-      <DateChips value={item.date} chips={chips} label={label} onChange={(date) => onChange({ date })} />
+      <DateChips guide={guide} value={item.date} chips={chips} label={label} onChange={(date) => onChange({ date })} />
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
         <input value={item.place} onChange={(e) => onChange({ place: e.target.value })} list="pc-places" placeholder="장소" aria-label={`${label} 장소`} className={input} />
         <input value={item.people} onChange={(e) => onChange({ people: e.target.value })} list="pc-people" placeholder="참석자 (예: 홍길동 외 2인)" aria-label={`${label} 참석자`} className={input} />
@@ -724,7 +736,7 @@ function ItemCard({
 }
 
 /** RH-73 — 그 주 월~금 칩. 하나 = 하루 · 이어진 날 = 기간 · 떨어진 날 = 쉼표. [직접]은 글자 그대로 */
-function DateChips({ value, chips, label, onChange }: { value: string; chips: DayChip[]; label: string; onChange: (v: string) => void }) {
+function DateChips({ value, chips, label, onChange, guide = false }: { value: string; chips: DayChip[]; label: string; onChange: (v: string) => void; guide?: boolean }) {
   const parsed = useMemo(() => parseDays(value, chips), [value, chips]);
   const [custom, setCustom] = useState(() => parsed === null);
   const chosen = new Set((parsed ?? []).map((c) => c.md));
@@ -735,7 +747,7 @@ function DateChips({ value, chips, label, onChange }: { value: string; chips: Da
   return (
     <div>
       {/* 400px 폰에서 월~금 + [직접] 여섯이 한 줄에 — 가로 스크롤로 [직접]이 잘리지 않게 6칸 격자 */}
-      <div className="grid grid-cols-6 gap-1" role="group" aria-label={`${label} 일자`}>
+      <div data-guide={guide ? 'pc-days' : undefined} className="grid grid-cols-6 gap-1" role="group" aria-label={`${label} 일자`}>
         {chips.map((c) => {
           const on = !custom && chosen.has(c.md);
           return (
@@ -780,7 +792,10 @@ function TaskPicker({
   taken,
   onPick,
   onClose,
+  guide = false,
 }: {
+  /** 사용 안내 그림이 짚는 고르기(PG-101) */
+  guide?: boolean;
   recent: RecentTask[] | null;
   taken: Set<string>;
   onPick: (t: { type: string; title: string; owner: string }) => void;
@@ -798,7 +813,7 @@ function TaskPicker({
   });
   const finalType = type === '직접' ? custom.trim() : type;
   return (
-    <div className="mt-3 rounded-lg border border-ink p-3">
+    <div data-guide={guide ? 'pc-picker' : undefined} className="mt-3 rounded-lg border border-ink p-3">
       <div className="mb-2 flex items-center justify-between">
         <p className="text-sm font-semibold text-ink">과제 고르기</p>
         <button onClick={onClose} className="btn-ghost h-9 px-2 text-sm text-muted">
@@ -806,7 +821,7 @@ function TaskPicker({
         </button>
       </div>
       <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="과제명·책임자로 찾기" aria-label="과제 찾기" className={input} autoFocus />
-      <ul className="mt-2 max-h-72 divide-y divide-hairline-soft overflow-y-auto rounded-md border border-hairline">
+      <ul data-guide={guide ? 'pc-picker-list' : undefined} className="mt-2 max-h-72 divide-y divide-hairline-soft overflow-y-auto rounded-md border border-hairline">
         {recent === null && <li className="px-3 py-3 text-sm text-muted">우리 실 과제를 불러오는 중…</li>}
         {recent !== null && shown.length === 0 && <li className="px-3 py-3 text-sm text-muted">{q ? '찾는 과제가 없습니다 — 아래에서 새로 적어 주세요' : '고를 과제가 없습니다 — 아래에서 새로 적어 주세요'}</li>}
         {shown.map((t) => (

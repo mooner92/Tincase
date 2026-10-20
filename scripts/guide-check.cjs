@@ -111,7 +111,8 @@ const hashChanged = { read: (p) => p.evaluate(() => location.hash), test: (h) =>
 async function main() {
   const { chromium } = loadPlaywright();
   const app = await startFakeApp({ port: PORT });
-  const browser = await chromium.launch();
+  // GUIDE_CHROMIUM — guide-capture.cjs와 같다(설치된 Playwright와 판이 다른 브라우저)
+  const browser = await chromium.launch(process.env.GUIDE_CHROMIUM ? { executablePath: process.env.GUIDE_CHROMIUM } : {});
   try {
     const { base, sessions, slugs, cookie } = app;
     const ctxFor = async (role, opts = {}) => {

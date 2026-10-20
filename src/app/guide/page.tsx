@@ -21,19 +21,27 @@ import { AppHeader } from '@/components/AppHeader';
 import { AppFooter } from '@/components/AppFooter';
 import { GuideSelf } from '@/components/GuideSelf';
 import { getTour } from '@/server/tour';
+import { guideDeckOf } from '@/server/project-form';
+import { DECK_KEYS, DECKS, isDeckKey } from '@/lib/guide/decks';
+import { selfChapters, type DeckKey, type GuideCap } from '@/lib/guide/deck';
+
+const ALL_CAPS: GuideCap[] = ['all', 'manager', 'head', 'report', 'hq', 'org', 'orgDesk', 'schedule'];
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: '사용 안내' };
 
-export default async function GuidePage({ searchParams }: { searchParams: Promise<{ mode?: string }> }) {
+export default async function GuidePage({ searchParams }: { searchParams: Promise<{ mode?: string; v?: string }> }) {
   // AU-22 — 표준 진입점. 미인증·초기 비밀번호 미변경은 여기서 내보낸다
   const ps = await requirePageScope();
   if (!ps.ok) return noticeFor(ps.code, ps.message);
   const { scope } = ps;
   // PG-59 — `?mode=present`도 발표 모드로 (회의 공지에 적기 쉬운 주소)
-  if ((await searchParams).mode === 'present') redirect('/guide/present');
+  const sp = await searchParams;
+  if (sp.mode === 'present') redirect('/guide/present');
 
-  const [caps, rnav, tour] = await Promise.all([guideCaps(scope), rollupNav(scope), getTour(scope, false)]);
+  const [caps, rnav, tour, mine] = await Promise.all([guideCaps(scope), rollupNav(scope), getTour(scope, false), guideDeckOf(scope.division)]);
+  // PG-100 — 갈래: 주소(`?v=`)가 있으면 그것, 없으면 내 부서의 방식
+  const deck: DeckKey = isDeckKey(sp.v) ? sp.v : mine;
   return (
     <div className="flex min-h-screen flex-col">
       <div className="print:hidden">
@@ -57,12 +65,37 @@ export default async function GuidePage({ searchParams }: { searchParams: Promis
           </div>
           {/* PG-59 — 발표는 새 탭에서: 이 화면(목차)을 띄워 둔 채 발표 화면을 프로젝터로 보낸다 */}
           {/* 휴대폰에서 발표할 일은 없다 — 640px 이상에서만 */}
-          <Link href="/guide/present" target="_blank" className="btn-ghost hidden sm:inline-flex">
+          <Link href={deck === 'unit' ? '/guide/present' : `/guide/present?v=${deck}`} target="_blank" className="btn-ghost hidden sm:inline-flex">
             발표 모드로 보기 <span aria-hidden>↗</span>
           </Link>
         </div>
 
-        <GuideSelf caps={caps} tour={{ slug: tour.slug, chapters: tour.chapters }} />
+        {/* PG-100 — 부서 방식별 갈래. 내 부서 방식이 기본이고 「우리 부서」가 붙는다 · 다른 방식도 볼 수 있다 */}
+        <nav aria-label="부서 방식" className="mb-5 flex flex-wrap gap-2 print:hidden">
+          {DECK_KEYS.map((k) => (
+            <Link
+              key={k}
+              href={`/guide?v=${k}`}
+              aria-current={k === deck ? 'page' : undefined}
+              className={`rounded-xl border px-3.5 py-2 text-left ${k === deck ? 'border-ink bg-ink text-canvas' : 'border-hairline bg-canvas text-body hover:border-ink'}`}
+            >
+              <span className="block text-sm font-semibold">
+                {DECKS[k].tab}
+                {k === mine && <span className={`ml-1.5 text-xs font-medium ${k === deck ? 'text-canvas/80' : 'text-brand'}`}>우리 부서</span>}
+              </span>
+              <span className={`block text-xs ${k === deck ? 'text-canvas/80' : 'text-muted'}`}>{DECKS[k].who}</span>
+            </Link>
+          ))}
+        </nav>
+        {/* 다른 부서의 방식은 모든 장을 보인다 — 그림과 글일 뿐이라(발표 모드와 같다 · PG-59) 내 역할로 거르면 볼 게 없다 */}
+        <GuideSelf key={deck} deck={deck} caps={deck === mine && selfChapters(caps, DECKS[deck].chapters, deck).length > 0 ? caps : ALL_CAPS} tour={deck === mine ? { slug: tour.slug, chapters: tour.chapters } : null} />
+        <p className="mt-6 text-xs text-muted print:hidden">
+          예전 안내는{' '}
+          <Link href="/guide/old" className="underline underline-offset-2 hover:text-ink">
+            여기
+          </Link>
+          에 그대로 있어요.
+        </p>
       </main>
       <div className="print:hidden">
         <AppFooter />

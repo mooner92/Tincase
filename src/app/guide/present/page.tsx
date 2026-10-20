@@ -8,13 +8,16 @@
 import { requirePageScope } from '@/server/page-scope';
 import { noticeFor } from '@/components/Notice';
 import { GuidePresent } from '@/components/GuidePresent';
+import { isDeckKey } from '@/lib/guide/decks';
 
 export const dynamic = 'force-dynamic';
 export const metadata = { title: '사용 안내 · 발표' };
 
-export default async function GuidePresentPage({ searchParams }: { searchParams: Promise<{ view?: string }> }) {
+export default async function GuidePresentPage({ searchParams }: { searchParams: Promise<{ view?: string; v?: string }> }) {
   const ps = await requirePageScope();
   if (!ps.ok) return noticeFor(ps.code, ps.message);
-  const { view } = await searchParams;
-  return <GuidePresent view={view === 'notes' ? 'notes' : 'stage'} />;
+  const { view, v } = await searchParams;
+  // PG-100 — 갈래(`?v=project` · `?v=erp`). 없으면 실·팀 — 강당에서는 시작 화면에서 갈래를 고른다
+  const deck = isDeckKey(v) ? v : 'unit';
+  return <GuidePresent key={deck} view={view === 'notes' ? 'notes' : 'stage'} deck={deck} />;
 }

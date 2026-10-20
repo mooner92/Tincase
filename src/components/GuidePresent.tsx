@@ -20,7 +20,8 @@
 // 발표 화면의 마우스 묶음 `[←] [→] [발표자 창] [전체 화면]`은 칸 폭 고정, 발표자 창은 창 높이에 맞춘 격자라 메모 길이가 바닥 줄을
 // 밀지 않는다(예전에는 메모가 긴 장에서 [다음 →]이 창 밖으로 밀려났다).
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
-import { DECK, presentSlides, type Slide } from '@/lib/guide/deck';
+import { presentSlides, type DeckKey, type Slide } from '@/lib/guide/deck';
+import { DECK_KEYS, DECKS } from '@/lib/guide/decks';
 import { deckNav, isDeckKey, keyPressMs, type DeckNavAction, type DeckNavState, type StageTarget } from '@/lib/guide/nav';
 import { shotOf } from '@/lib/guide/manifest';
 import { GuideStage, pressable } from './GuideStage';
@@ -46,7 +47,7 @@ function usePreload(slides: Slide[], index: number) {
     for (const i of [index + 1, index + 2, index - 1]) {
       const step = slides[i]?.step;
       if (step?.kind !== 'shot') continue;
-      const shot = shotOf(step.id);
+      const shot = shotOf(step.id, slides[i].deck);
       if (!shot || keep.current.has(shot.src)) continue;
       const img = new Image();
       img.decoding = 'async';
@@ -58,7 +59,7 @@ function usePreload(slides: Slide[], index: number) {
 }
 
 /** 두 창 동기화 — 바뀐 쪽이 알리고, 받은 쪽은 다시 알리지 않는다. 돌려주는 함수는 눌린 모양을 상대 창에 알린다 */
-function useDeckSync(state: DeckNavState, dispatch: (a: DeckNavAction) => void, onPress: (index: number) => void) {
+function useDeckSync(state: DeckNavState, dispatch: (a: DeckNavAction) => void, onPress: (index: number) => void, channel = CHANNEL) {
   // 내 창의 이름 — 내가 보낸 것을 내가 다시 받지 않게. 그릴 때 만들지 않고 채널을 열 때 만든다
   const me = useRef('');
   const chan = useRef<BroadcastChannel | null>(null);
@@ -79,7 +80,7 @@ function useDeckSync(state: DeckNavState, dispatch: (a: DeckNavAction) => void, 
     if (typeof BroadcastChannel === 'undefined') return;
     me.current ||= Math.random().toString(36).slice(2);
     const from = me.current;
-    const c = new BroadcastChannel(CHANNEL);
+    const c = new BroadcastChannel(channel);
     chan.current = c;
     c.onmessage = (e: MessageEvent<Msg>) => {
       const m = e.data;
@@ -100,7 +101,7 @@ function useDeckSync(state: DeckNavState, dispatch: (a: DeckNavAction) => void, 
       c.close();
       chan.current = null;
     };
-  }, [dispatch]);
+  }, [dispatch, channel]);
 
   useEffect(() => {
     const k = known.current;
@@ -138,8 +139,10 @@ function toggleFullscreen() {
   else document.documentElement.requestFullscreen().catch(() => {});
 }
 
-export function GuidePresent({ view }: { view: 'stage' | 'notes' }) {
-  const slides = useMemo(() => presentSlides(), []);
+/** PG-100 — `deck` 갈래(실형 · 연구 본부 · 평가본부), `base` 이 발표 화면의 주소(`/guide/present` · 옛 안내 `/guide/old/present`) */
+export function GuidePresent({ view, deck = 'unit', base = '/guide/present' }: { view: 'stage' | 'notes'; deck?: DeckKey; base?: string }) {
+  const slides = useMemo(() => presentSlides(DECKS[deck].chapters, deck), [deck]);
+  const notesHref = `${base}?view=notes${deck !== 'unit' ? `&v=${deck}` : ''}`;
   const total = slides.length;
   const [state, dispatch] = useReducer(
     (s: DeckNavState, a: DeckNavAction) => deckNav(s, a, total),
@@ -184,7 +187,7 @@ export function GuidePresent({ view }: { view: 'stage' | 'notes' }) {
   const onRemotePress = useCallback((index: number) => {
     if (index === latest.current.index) setPress((p) => p + 1);
   }, []);
-  const sendPress = useDeckSync(state, dispatch, onRemotePress);
+  const sendPress = useDeckSync(state, dispatch, onRemotePress, `${CHANNEL}:${base}:${deck}`); // 갈래가 다른 두 창은 따로 넘긴다
   usePreload(slides, state.index);
 
   /*
@@ -309,7 +312,7 @@ export function GuidePresent({ view }: { view: 'stage' | 'notes' }) {
           <button data-dock="next" aria-label="다음" onClick={() => go('ArrowRight')} disabled={state.index >= total - 1} className={`${PRESENT_BTN} px-0`}>
             →
           </button>
-          <button onClick={openNotes} className={PRESENT_BTN}>
+          <button onClick={() => openNotes(notesHref)} className={PRESENT_BTN}>
             발표자 창
           </button>
           <button onClick={toggleFullscreen} className={PRESENT_BTN}>
@@ -327,6 +330,9 @@ export function GuidePresent({ view }: { view: 'stage' | 'notes' }) {
           onClose={() => setStarted(true)}
           slide={slide}
           index={state.index}
+          notesHref={notesHref}
+          deck={deck}
+          base={base}
         />
       )}
 
@@ -341,8 +347,8 @@ export function GuidePresent({ view }: { view: 'stage' | 'notes' }) {
 const PRESENT_BTN =
   'inline-flex h-11 w-full items-center justify-center rounded-lg border border-stage-line bg-canvas px-2 text-stage-ink shadow-[0_1px_2px_rgb(0_0_0/0.06)] hover:border-stage-muted disabled:text-stage-muted disabled:opacity-60';
 
-function openNotes() {
-  window.open('/guide/present?view=notes', 'tincase-guide-notes', 'width=1280,height=800');
+function openNotes(href: string) {
+  window.open(href, 'tincase-guide-notes', 'width=1280,height=800');
 }
 
 /** 시작 화면의 키 표 — 「+」는 키가 아니라 「함께」 */
@@ -355,12 +361,43 @@ const KEYS: [string, string[]][] = [
   ['처음·끝', ['Home', 'End']],
 ];
 
-function StartPanel({ onStart, onClose, slide, index }: { onStart: () => void; onClose: () => void; slide: Slide; index: number }) {
+function StartPanel({
+  onStart,
+  onClose,
+  slide,
+  index,
+  notesHref,
+  deck,
+  base,
+}: {
+  onStart: () => void;
+  onClose: () => void;
+  slide: Slide;
+  index: number;
+  notesHref: string;
+  deck: DeckKey;
+  base: string;
+}) {
   // 바탕을 92%로 덮는다 — 80%면 뒤의 표지 로고가 패널 위로 비쳐 두 겹으로 보였다
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-stage/92 p-6">
       <div className="w-full max-w-xl rounded-2xl border border-stage-line bg-stage-soft p-8">
-        <p className="text-sm font-semibold text-brand">사용 안내 · 발표 모드</p>
+        <p className="text-sm font-semibold text-brand">사용 안내 · 발표 모드{base === '/guide/present' ? ` · ${DECKS[deck].tab}` : ' · 예전 안내'}</p>
+        {/* PG-100 — 갈래 고르기. 운영회의에서 실형 → 연구 본부 → 평가본부를 차례로 넘길 수 있게(옛 안내에는 갈래가 없다) */}
+        {base === '/guide/present' && (
+          <nav aria-label="갈래" className="mt-3 flex flex-wrap gap-1.5">
+            {DECK_KEYS.map((k) => (
+              <a
+                key={k}
+                href={k === 'unit' ? base : `${base}?v=${k}`}
+                aria-current={k === deck ? 'page' : undefined}
+                className={`rounded-full border px-3 py-1 text-[13px] ${k === deck ? 'border-stage-ink bg-stage-ink text-canvas' : 'border-stage-line text-stage-muted hover:text-stage-ink'}`}
+              >
+                {DECKS[k].tab}
+              </a>
+            ))}
+          </nav>
+        )}
         <h1 className="mt-1 text-[26px] leading-tight font-semibold">
           {index === 0 ? '처음부터' : `${index + 1}번째 장(${slide.chapter.title})부터`} 발표합니다
         </h1>
@@ -391,7 +428,7 @@ function StartPanel({ onStart, onClose, slide, index }: { onStart: () => void; o
           </tbody>
         </table>
         <div className="mt-7 flex flex-wrap items-center gap-2">
-          <button onClick={openNotes} className="btn-secondary">
+          <button onClick={() => openNotes(notesHref)} className="btn-secondary">
             발표자 창
           </button>
           <button onClick={onStart} className="btn-primary">
@@ -504,7 +541,7 @@ function NotesView({
   const bubble = slide.step ? `${slide.step.label}: ${slide.step.say}` : slide.chapter.lede ?? '';
   const left = target * 60 - secs;
   // 질의응답 때 「담당자 화면 다시 보여 주세요」에 바로 가도록 — 장마다 첫 장(역할 장이면 장 제목)으로
-  const starts = DECK.map((c) => ({ c, i: slides.findIndex((s) => s.chapter.id === c.id) })).filter((x) => x.i >= 0);
+  const starts = DECKS[slide.deck].chapters.map((c) => ({ c, i: slides.findIndex((s) => s.chapter.id === c.id) })).filter((x) => x.i >= 0);
   const btn =
     'inline-flex h-12 w-full items-center justify-center rounded-lg border border-stage-line bg-canvas px-3 text-[16px] font-medium text-stage-ink whitespace-nowrap hover:border-stage-muted disabled:text-stage-muted';
 

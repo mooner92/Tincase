@@ -38,7 +38,10 @@ const fs = require('node:fs');
 const crypto = require('node:crypto');
 const { REPO, DAY, kst, mondayOf, log, loadPlaywright, startFakeApp, tsx } = require('./lib/fake-app.cjs');
 
-const OUT = path.resolve(process.env.GUIDE_OUT || path.join(REPO, 'public/guide/deck'));
+// PG-100 — 갈래(GUIDE_VARIANT): unit(기본 · 실형 — 옛 안내와 같은 그림) · project(연구 본부형) · erp(평가본부형). 갈래마다 그림 폴더가 따로다
+const VARIANT = process.env.GUIDE_VARIANT || 'unit';
+if (!['unit', 'project', 'erp'].includes(VARIANT)) throw new Error(`GUIDE_VARIANT를 모릅니다: ${VARIANT}`);
+const OUT = path.resolve(process.env.GUIDE_OUT || path.join(REPO, VARIANT === 'unit' ? 'public/guide/deck' : `public/guide/${VARIANT}`));
 const PORT = Number(process.env.GUIDE_PORT || 3199);
 const VIEW = { width: 1600, height: 900 };
 const SCALE = 2;
@@ -102,16 +105,26 @@ async function bringIntoView(page, anchor, frame, clip) {
         const k = clipRect({ x: r.left, y: r.top, width: r.width, height: r.height }, c);
         return { top: k.y, bottom: k.y + k.height, height: k.height };
       };
-      const top = 80; // 머리(64px) + 여유
-      const bottom = window.innerHeight - 8;
+      // 서랍(작성 화면 · 병합본)은 제 안에서 스크롤한다 — 창을 굴려서는 움직이지 않는다. 앵커의 가장 가까운 스크롤 상자를 굴린다
+      const box = (() => {
+        for (let n = A.parentElement; n && n !== document.body; n = n.parentElement) {
+          if (/(auto|scroll)/.test(getComputedStyle(n).overflowY) && n.scrollHeight > n.clientHeight + 1) return n;
+        }
+        return null;
+      })();
+      const by = (dy) => (box ? box.scrollBy(0, dy) : window.scrollBy(0, dy));
+      const view = box ? box.getBoundingClientRect() : null;
+      const top = view ? view.top + 12 : 80; // 머리(64px) + 여유
+      const bottom = view ? view.bottom - 8 : window.innerHeight - 8;
       const avail = bottom - top;
+      const at = (k) => (view ? view.top + view.height * k : window.innerHeight * k);
       const fits = (r) => r.top >= top && r.bottom <= bottom;
       let ar = A.getBoundingClientRect();
-      const needs = ar.height <= avail ? !fits(ar) : ar.top < top || ar.top > window.innerHeight * 0.5;
+      const needs = ar.height <= avail ? !fits(ar) : ar.top < top || ar.top > at(0.5);
       if (needs) {
         A.scrollIntoView({ block: ar.height <= avail ? 'nearest' : 'start' });
         ar = A.getBoundingClientRect();
-        if (ar.top < top) window.scrollBy(0, ar.top - top - 8); // 붙어 있는 머리 밑으로 숨지 않게
+        if (ar.top < top) by(ar.top - top - 8); // 붙어 있는 머리 밑으로 숨지 않게
       }
       ar = A.getBoundingClientRect();
       let fr = frameRect();
@@ -119,15 +132,15 @@ async function bringIntoView(page, anchor, frame, clip) {
         let dy = fr.top < top ? fr.top - top : fr.bottom - bottom;
         if (ar.top - dy < top) dy = ar.top - top;
         if (ar.bottom - dy > bottom) dy = ar.bottom - bottom;
-        window.scrollBy(0, dy);
+        by(dy);
       }
-      // 카메라 사각형 가운데를 창 높이 45%로 — 위끝·앵커가 머리 밑으로 들어가지 않는 만큼만
+      // 카메라 사각형 가운데를 창(서랍) 높이 45%로 — 위끝·앵커가 머리 밑으로 들어가지 않는 만큼만
       ar = A.getBoundingClientRect();
       fr = frameRect();
-      let dy = (fr.top + fr.bottom) / 2 - window.innerHeight * 0.45;
+      let dy = (fr.top + fr.bottom) / 2 - at(0.45);
       dy = Math.min(dy, fr.top - top, ar.top - top);
       if (ar.height <= avail) dy = Math.max(dy, ar.bottom - bottom); // 창보다 큰 앵커(전사 표)는 위끝만 지킨다
-      if (Math.abs(dy) >= 1) window.scrollBy(0, dy);
+      if (Math.abs(dy) >= 1) by(dy);
     },
     [sel(anchor), frame ? sel(frame) : null, clip ?? null],
   );
@@ -424,6 +437,249 @@ function plan(ai, notice) {
   ];
 }
 
+/**
+ * PG-101 — 연구 본부형(국토환경연구본부 · 국토관리연구실). 부서원이 과제 카드로 내고 → 실 담당 → 실장 승인 → 본부.
+ * 물관리·자연환경 두 실과 본부 자신은 시드가 병합·승인해 두었다 — 국토실 실장이 승인하면 본부본이 셋으로 모인다
+ */
+function planProject(land) {
+  const away = (p) => p.mouse.move(2, VIEW.height - 2);
+  const click = (id) => async (p) => {
+    await p.locator(sel(id)).first().click();
+    await away(p);
+    await settle(p);
+  };
+  const clickFor = (id, path) => async (p) => {
+    const done = p.waitForResponse((r) => r.url().includes(path) && r.request().method() !== 'GET', { timeout: 120_000 });
+    await p.locator(sel(id)).first().click();
+    await away(p);
+    const r = await done;
+    if (!r.ok()) throw new Error(`${id}: ${path} → HTTP ${r.status()}`);
+    await settle(p, 1500);
+  };
+  return [
+    { id: 'p-member-week', role: 'pMember', path: `/${land}` },
+    {
+      id: 'p-member-task',
+      role: 'pMember',
+      act: async (p) => {
+        await click('compose-open')(p);
+        await p.locator(sel('pc-add-task')).waitFor();
+        await p.locator(sel('pc-last-plans')).waitFor({ timeout: 30_000 }); // 우리 실 최근 과제·지난주 계획을 받은 뒤
+      },
+    },
+    { id: 'p-member-pick', role: 'pMember', act: click('pc-add-task') },
+    {
+      id: 'p-member-item',
+      role: 'pMember',
+      act: async (p) => {
+        await p.locator(`${sel('pc-picker-list')} button`).first().click();
+        await p.locator(sel('pc-item')).fill('연구진 착수 회의');
+        await p.getByLabel(/1번째 항목 장소$/).first().fill('943호');
+        await p.getByLabel(/1번째 항목 참석자$/).first().fill('홍가온 외');
+        await away(p);
+        await settle(p, 300);
+      },
+    },
+    {
+      id: 'p-member-days',
+      role: 'pMember',
+      act: async (p) => {
+        await p.locator(`${sel('pc-days')} button`).first().click(); // 월요일
+        await away(p);
+        await p.waitForTimeout(300);
+      },
+    },
+    {
+      id: 'p-member-lastplans',
+      role: 'pMember',
+      after: async (p) => {
+        await click('pc-last-plans')(p);
+      },
+    },
+    {
+      id: 'p-member-submit',
+      role: 'pMember',
+      after: async (p, fix) => {
+        await p.locator(sel('compose-submit')).click();
+        await p.getByText('제출되었습니다').waitFor({ timeout: 30_000 });
+        await settle(p, 1200);
+        await fix();
+      },
+    },
+    {
+      id: 'p-lead-consult',
+      role: 'pLead',
+      path: `/${land}`,
+      act: async (p) => {
+        await click('compose-open')(p);
+        await p.locator(sel('pc-consult')).waitFor({ timeout: 30_000 });
+      },
+      after: async (p) => {
+        await p.keyboard.press('Escape');
+        await settle(p, 300);
+      },
+    },
+    {
+      id: 'p-lead-merge',
+      role: 'pLead',
+      path: `/${land}/manage`,
+      act: async (p, fix) => {
+        await clickFor('merge-run', '/api/division/merge')(p);
+        await fix();
+        await p.reload();
+        await settle(p);
+      },
+    },
+    { id: 'p-lead-merged', role: 'pLead', act: click('merged-open') },
+    { id: 'p-lead-handoff', role: 'pLead', path: `/${land}/manage` },
+    { id: 'p-head-open', role: 'pHead', path: `/${land}/manage` },
+    {
+      id: 'p-head-approve',
+      role: 'pHead',
+      after: async (p, fix) => {
+        await clickFor('merged-approve', '/api/division/merged/approve')(p);
+        await fix();
+      },
+    },
+    {
+      id: 'p-head-sent',
+      role: 'pLead',
+      path: `/${land}/manage`,
+      act: async (p) => {
+        await p.locator(`${sel('report-unit')} >> text=올라감`).first().waitFor({ timeout: 30_000 });
+      },
+    },
+    { id: 'p-hq-units', role: 'pHqLead', path: '/hq' },
+    {
+      id: 'p-hq-run',
+      role: 'pHqLead',
+      act: async (p, fix) => {
+        await p.locator(sel('hq-download')).waitFor({ timeout: 60_000 });
+        await fix();
+      },
+    },
+    { id: 'p-hq-download', role: 'pHqLead', path: '/hq' },
+    { id: 'p-hq-approve', role: 'pHqHead', path: '/hq' },
+  ];
+}
+
+/**
+ * PG-102 — 평가본부형(환경평가본부 혼자). 본부 담당이 가짜 ERP PDF 다섯 개를 올려 고르고 → 보태고 → 제출 → 병합 → 본부장 승인(본부 단계 없음)
+ */
+function planErp(evalSlug, pdfs) {
+  const away = (p) => p.mouse.move(2, VIEW.height - 2);
+  const click = (id) => async (p) => {
+    await p.locator(sel(id)).first().click();
+    await away(p);
+    await settle(p);
+  };
+  const clickFor = (id, path) => async (p) => {
+    const done = p.waitForResponse((r) => r.url().includes(path) && r.request().method() !== 'GET', { timeout: 120_000 });
+    await p.locator(sel(id)).first().click();
+    await away(p);
+    const r = await done;
+    if (!r.ok()) throw new Error(`${id}: ${path} → HTTP ${r.status()}`);
+    await settle(p, 1500);
+  };
+  if (pdfs.length !== 5) throw new Error(`가짜 ERP PDF가 다섯 개가 아닙니다(${pdfs.length})`);
+  return [
+    { id: 'e-lead-week', role: 'eLead', path: `/${evalSlug}` },
+    {
+      id: 'e-lead-open',
+      role: 'eLead',
+      act: async (p) => {
+        await click('compose-open')(p);
+        await p.locator(sel('erp-open')).waitFor({ timeout: 30_000 });
+      },
+    },
+    { id: 'e-lead-drop', role: 'eLead', act: click('erp-open') },
+    {
+      id: 'e-lead-list',
+      role: 'eLead',
+      act: async (p) => {
+        await p.locator(`${sel('erp-drop')} input[type=file]`).setInputFiles(pdfs);
+        await p.locator(sel('erp-first')).waitFor({ timeout: 60_000 });
+        await away(p);
+        await settle(p, 300);
+      },
+    },
+    { id: 'e-lead-left', role: 'eLead', after: click('erp-left') },
+    {
+      id: 'e-lead-put',
+      role: 'eLead',
+      after: async (p) => {
+        await click('erp-put')(p);
+        await p.locator(sel('pc-unit')).waitFor({ timeout: 30_000 });
+      },
+    },
+    { id: 'e-lead-unit', role: 'eLead' },
+    {
+      id: 'e-lead-note',
+      role: 'eLead',
+      after: async (p) => {
+        await click('pc-add-note')(p);
+        const n = p.getByLabel(/^특이사항 \d+번째 내용$/).last();
+        await n.fill('환경영향평가 정책협의회');
+        await p.getByRole('button', { name: '직접', exact: true }).last().click();
+        await p.getByLabel(/^특이사항 \d+번째 일자 직접 입력$/).last().fill('10/23');
+        await p.getByLabel(/^특이사항 \d+번째 장소$/).last().fill('서울역');
+        await p.getByLabel(/^특이사항 \d+번째 참석자$/).last().fill('함승주 외');
+        await away(p);
+      },
+    },
+    {
+      id: 'e-lead-eval',
+      role: 'eLead',
+      act: async (p) => {
+        const vals = ['6', '2', '9', '5', '11', '4'];
+        const inputs = p.locator(`${sel('pc-eval')} input`);
+        for (let i = 0; i < vals.length; i++) await inputs.nth(i).fill(vals[i]);
+        await away(p);
+        await p.waitForTimeout(300);
+      },
+    },
+    {
+      id: 'e-lead-submit',
+      role: 'eLead',
+      after: async (p, fix) => {
+        await p.locator(sel('compose-submit')).click();
+        await p.getByText('제출되었습니다').waitFor({ timeout: 30_000 });
+        await settle(p, 1200);
+        await fix();
+      },
+    },
+    {
+      id: 'e-lead-merge',
+      role: 'eLead',
+      path: `/${evalSlug}/manage`,
+      after: async (p, fix) => {
+        await clickFor('merge-run', '/api/division/merge')(p);
+        await fix();
+        await p.reload();
+        await settle(p);
+      },
+    },
+    { id: 'e-lead-merged', role: 'eLead', act: click('merged-open') },
+    {
+      id: 'e-head-approve',
+      role: 'eHead',
+      path: `/${evalSlug}/manage`,
+      after: async (p, fix) => {
+        await clickFor('merged-approve', '/api/division/merged/approve')(p);
+        await fix();
+      },
+    },
+    {
+      id: 'e-head-sent',
+      role: 'eLead',
+      path: `/${evalSlug}/manage`,
+      act: async (p) => {
+        await p.locator(`${sel('report-unit')} >> text=올라감`).first().waitFor({ timeout: 30_000 });
+      },
+    },
+  ];
+}
+
 /** 다음 주 수요일 15:00 대외 마감 공지 — 「연휴로 마감 당기기」의 예 (WS-19) */
 function noticeFor(nowMs) {
   const wed = kst(mondayOf(nowMs) + 9 * DAY);
@@ -452,12 +708,20 @@ async function main() {
   const { chromium } = loadPlaywright();
   const app = await startFakeApp({ port: PORT });
   try {
-    const { base, sessions, slugs, week, fake, fix, cookie } = app;
+    const { base, sessions, slugs, week, fake, fix, cookie, erpPdfs } = app;
     const deck = JSON.parse(
-      tsx(['-e', "import('./src/lib/guide/deck.ts').then((m) => process.stdout.write(JSON.stringify(m.shotSteps())))"], app.env, '단계 목록'),
+      tsx(
+        [
+          '-e',
+          `Promise.all([import('./src/lib/guide/deck.ts'), import('./src/lib/guide/decks.ts')]).then(([d, r]) => process.stdout.write(JSON.stringify(d.shotSteps(r.DECKS['${VARIANT}'].chapters))))`,
+        ],
+        app.env,
+        '단계 목록',
+      ),
     );
 
-    const browser = await chromium.launch();
+    // GUIDE_CHROMIUM — 설치된 Playwright와 판이 다른 브라우저를 쓸 때(이 서버: headless_shell)
+    const browser = await chromium.launch(process.env.GUIDE_CHROMIUM ? { executablePath: process.env.GUIDE_CHROMIUM } : {});
     const pages = new Map();
     const pageFor = async (role) => {
       const key = role ?? 'anon';
@@ -484,7 +748,7 @@ async function main() {
       return p;
     };
 
-    const steps = plan(slugs.ai, noticeFor(fake));
+    const steps = VARIANT === 'project' ? planProject(slugs.land) : VARIANT === 'erp' ? planErp(slugs.eval, erpPdfs ?? []) : plan(slugs.ai, noticeFor(fake));
     const byId = new Map(deck.map((s) => [s.id, s]));
     const missing = deck.filter((s) => !steps.some((p) => p.id === s.id)).map((s) => s.id);
     const extra = steps.filter((p) => !byId.has(p.id)).map((p) => p.id);

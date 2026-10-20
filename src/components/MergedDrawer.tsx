@@ -499,7 +499,7 @@ export function MergedDrawer({
           {data?.tables.map((t, ti) => {
             const rows = bodyRows(t);
             return (
-              <section key={t.key} className="mb-7">
+              <section key={t.key} data-guide={data.readOnly && t.key === 'achievements' ? 'merged-results' : undefined} className="mb-7">
                 <h3 className="mb-2 text-[15px] font-semibold text-ink">
                   {t.title} <span className="text-sm font-normal text-muted">{rows.length}행</span>
                 </h3>
@@ -617,6 +617,8 @@ export function MergedDrawer({
                                   />
                                 ) : (
                                   <span
+                                    // PG-101 — 사용 안내 그림이 짚는 첫 과제 줄(연구실 병합본)
+                                    data-guide={data.readOnly && t.key === 'achievements' && ri === 0 && ci === 2 ? 'merged-task' : undefined}
                                     // RH-88 — 읽기 전용(연구실)은 긴 내용이 줄을 바꾼다 · 과제 줄은 굵게
                                     className={`block px-2 py-1.5 tabular-nums ${
                                       data.readOnly && ci > 0 ? 'whitespace-pre-line' : 'whitespace-nowrap'

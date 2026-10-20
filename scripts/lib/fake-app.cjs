@@ -194,7 +194,7 @@ async function startFakeApp({ port }) {
     run(process.execPath, [require.resolve('prisma/build/index.js', { paths: [REPO] }), 'db', 'push', '--skip-generate'], env, 'prisma db push');
     log(tsx(['scripts/guide-seed.ts'], env, '시드').trim());
     log(tsx(['scripts/guide-seed.ts', '--verify'], env, '표식 확인').trim());
-    const { sessions, slugs, week } = JSON.parse(fs.readFileSync(path.join(work, 'sessions.json'), 'utf8'));
+    const { sessions, slugs, week, erpPdfs } = JSON.parse(fs.readFileSync(path.join(work, 'sessions.json'), 'utf8'));
 
     const logFile = path.join(work, 'next-dev.log');
     const fd = fs.openSync(logFile, 'w');
@@ -212,7 +212,7 @@ async function startFakeApp({ port }) {
     if (probe.status !== 200) throw new Error(`시드 세션으로 들어가지지 않습니다 (HTTP ${probe.status}) — 다른 서버가 ${port}를 쓰고 있지 않은지 확인하세요`);
 
     const fix = () => (shift ? Promise.resolve(tsx(['scripts/guide-seed.ts', '--fix-clock'], env, '시각 맞추기')) : Promise.resolve());
-    return { base: BASE, sessions, slugs, week, fake, realNow, env, fix, tsx: (args, what) => tsx(args, env, what), stop, cookie: COOKIE };
+    return { base: BASE, sessions, slugs, week, erpPdfs, fake, realNow, env, fix, tsx: (args, what) => tsx(args, env, what), stop, cookie: COOKIE };
   } catch (e) {
     stop();
     throw e;

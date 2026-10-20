@@ -332,7 +332,7 @@ export function RunCard({
         {(run || (failed && canRetry)) && (
           <div className="mt-5 flex flex-wrap items-center gap-2">
             {run && (
-              <a href={`/api/rollup/run/${run.id}`} className="btn-secondary">
+              <a data-guide="hq-download" href={`/api/rollup/run/${run.id}`} className="btn-secondary">
                 본부본 받기
               </a>
             )}

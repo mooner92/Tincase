@@ -82,10 +82,13 @@ export function ErpImport({
       .map(([unitKo, list]) => ({ unitKo, abbr: units.find((u) => sq(u.nameKo) === sq(unitKo))?.abbr ?? unitKo, list: [...list].sort((a, b) => day(a) - day(b)) }));
   }, [cands, units]);
   const picked = (cands ?? []).filter((c) => c.pick);
+  // 사용 안내 그림이 짚는 실(PG-102) — 미리 고른 것이 있는 첫 실
+  const guideUnit = groups.find((g) => g.list.some((c) => c.suggested))?.unitKo ?? null;
+  const guideRow = groups.find((g) => g.unitKo === guideUnit)?.list.find((c) => c.suggested)?.id ?? null;
 
   // 화면 안에서 만든 컴포넌트는 그릴 때마다 새로 붙는다(고르던 칸이 풀린다) — 함수로 그린다
   const row = (c: Cand) => (
-    <li key={c.id} className={`px-3 py-2.5 ${c.pick ? '' : 'bg-surface-soft/60'}`}>
+    <li key={c.id} data-guide={c.id === guideRow ? 'erp-first' : undefined} className={`px-3 py-2.5 ${c.pick ? '' : 'bg-surface-soft/60'}`}>
       <label className="flex cursor-pointer items-start gap-2.5">
         <input type="checkbox" checked={c.pick} onChange={(e) => patch(c.id, { pick: e.target.checked })} className="mt-1 h-4 w-4 shrink-0 accent-ink" aria-label={`${c.content} 넣기`} />
         <span className="min-w-0 flex-1">
@@ -148,6 +151,7 @@ export function ErpImport({
 
         {!cands ? (
           <div
+            data-guide="erp-drop"
             onDragOver={(e) => {
               e.preventDefault();
               setDrag(true);
@@ -166,7 +170,7 @@ export function ErpImport({
             </p>
             <p className="mt-1 text-xs text-muted">올린 파일은 저장하지 않아요 · 한 번에 10개까지</p>
             <input ref={inputRef} type="file" accept="application/pdf,.pdf" multiple hidden onChange={(e) => e.target.files && void upload(e.target.files)} />
-            <button type="button" disabled={busy} onClick={() => inputRef.current?.click()} className="btn-primary mt-5 h-11 min-w-36">
+            <button data-guide="erp-pick" type="button" disabled={busy} onClick={() => inputRef.current?.click()} className="btn-primary mt-5 h-11 min-w-36">
               PDF 고르기
             </button>
           </div>
@@ -196,7 +200,7 @@ export function ErpImport({
               const on = g.list.filter((c) => c.suggested);
               const off = g.list.filter((c) => !c.suggested);
               return (
-                <section key={g.unitKo} className="mb-5">
+                <section key={g.unitKo} data-guide={g.unitKo === guideUnit ? 'erp-group' : undefined} className="mb-5">
                   <h3 className="mb-1.5 flex items-baseline gap-2 px-1 text-[15px] font-semibold text-ink">
                     {g.unitKo}
                     <span className="chip chip-muted">{g.abbr}</span>
@@ -209,7 +213,11 @@ export function ErpImport({
                     {on.length === 0 && <li className="px-3 py-2.5 text-sm text-muted">미리 고른 것이 없어요</li>}
                     {off.length > 0 && (
                       <li>
-                        <button type="button" onClick={() => toggle(showLeft, setShowLeft as never, g.unitKo)} className="w-full px-3 py-2 text-left text-xs font-medium text-muted hover:bg-surface-soft hover:text-ink">
+                        <button
+                          type="button"
+                          data-guide={g.unitKo === guideUnit ? 'erp-left' : undefined}
+                          onClick={() => toggle(showLeft, setShowLeft as never, g.unitKo)}
+                          className="w-full px-3 py-2 text-left text-xs font-medium text-muted hover:bg-surface-soft hover:text-ink">
                           {showLeft.has(g.unitKo) ? '뺀 것 접기' : `뺀 것 ${off.length}건 보기`} —{' '}
                           {[...new Set(off.map((c) => c.reason))].join(' · ')}
                         </button>
@@ -224,7 +232,7 @@ export function ErpImport({
         )}
       </div>
 
-      <div className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-hairline bg-canvas px-4 py-3 sm:px-6">
+      <div data-guide="erp-footer" className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2 border-t border-hairline bg-canvas px-4 py-3 sm:px-6">
         {cands ? (
           <button
             type="button"
@@ -240,7 +248,7 @@ export function ErpImport({
         ) : (
           <span />
         )}
-        <button type="button" disabled={!cands || picked.length === 0} onClick={() => onImport(picked)} className="btn-primary ml-auto h-11 min-w-36">
+        <button data-guide="erp-put" type="button" disabled={!cands || picked.length === 0} onClick={() => onImport(picked)} className="btn-primary ml-auto h-11 min-w-36">
           고른 {picked.length}건 넣기
         </button>
       </div>

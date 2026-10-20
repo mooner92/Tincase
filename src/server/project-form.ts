@@ -32,6 +32,16 @@ export async function divisionFormOf(divisionId: string): Promise<FormKind> {
   return t ? templateFormOf(t) : 'unit';
 }
 
+/**
+ * PG-100 — 사용 안내의 기본 갈래: 양식이 실형이면 `unit`, 연구실 양식이면 `project`, 그 가운데 **산하 실이 있는데 하나도 켜지 않은 본부**
+ * (혼자 ERP 보고서로 만드는 본부 — 환경평가본부, RH-90)는 `erp`. 안내만 고르는 값이다 — 권한과 상관없다
+ */
+export async function guideDeckOf(division: { id: string; nameKo: string }): Promise<'unit' | 'project' | 'erp'> {
+  if ((await divisionFormOf(division.id)) !== 'project') return 'unit';
+  const kids = await prisma.division.findMany({ where: { parentKo: division.nameKo }, select: { isActive: true } });
+  return kids.length > 0 && !kids.some((k) => k.isActive) ? 'erp' : 'project';
+}
+
 /** RH-112 — 실형 양식에 「※ 자문회의 실적」 표가 있나(양식 ② 지속센터). 같은 sha256이면 같은 답 */
 const consultCache = new Map<string, boolean>();
 
