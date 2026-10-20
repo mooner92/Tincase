@@ -17,14 +17,14 @@ const PROJECT_COLS = ['구분', '유형 · 번호', '과제명 · 내용', '일�
 const CONSULT_COLS = ['구분', '자문회의', '전문가 세미나', '포럼, 워크샵 등', '기타 회의'];
 const NOTE_COLS = ['구분', '업무실적 내용', '일자', '장소', '참석자'];
 
-function grid(tasks: HqTask[], prefix: number) {
+function grid(tasks: HqTask[], prefix: number, unitEachTask = false) {
   const rows: string[][] = [];
   const emphasis: boolean[] = [];
   const taskRows: boolean[] = [];
   let n = 0;
   let prev: string | null = null;
   for (const t of tasks) {
-    rows.push([t.unit !== prev ? t.unit : '', t.type, t.title, '', '', t.owner]);
+    rows.push([unitEachTask || t.unit !== prev ? t.unit : '', t.type, t.title, '', '', t.owner]); // RH-99
     emphasis.push(false);
     taskRows.push(true);
     prev = t.unit;
@@ -39,10 +39,10 @@ function grid(tasks: HqTask[], prefix: number) {
 }
 
 /** 연구실 hwp → 화면 표들(자문회의 · 평가 실적 · 1 · 2 · 3). 빈 표는 머리만 */
-export function projectTables(bytes: Buffer, opts: { onlyConsultOf?: string } = {}): ViewTable[] {
+export function projectTables(bytes: Buffer, opts: { onlyConsultOf?: string; unitEachTask?: boolean } = {}): ViewTable[] {
   const d = parseHqForm(bytes);
-  const r = grid(d.results, 1);
-  const p = grid(d.plans, 2);
+  const r = grid(d.results, 1, opts.unitEachTask);
+  const p = grid(d.plans, 2, opts.unitEachTask);
   const evalNames = evaluationLabels(bytes);
   const squash = (s: string) => s.replace(/\s+/g, '');
   const consult = (d.consult ?? []).filter((c) => !opts.onlyConsultOf || squash(c.label) === squash(opts.onlyConsultOf));

@@ -12,6 +12,7 @@ import { readStoredFile, sha256, writeFileAtomic } from '@/server/storage';
 import { readWorklog, TABLE_TITLES, TABLE_COLUMNS } from '@/lib/hwp/reader';
 import { isProjectForm } from '@/lib/hwp/hq-form';
 import { projectTables } from '@/lib/hwp/hq-view';
+import { unitEachTask } from '@/lib/unit-abbr';
 import { tableGrid, columnWidths } from '@/lib/hwp/model';
 import { composeMergedHwp } from '@/server/merge';
 import { boardTitle } from '@/lib/docname';
@@ -122,7 +123,7 @@ export const GET = handler(async (req: NextRequest) => {
    * 항목 줄(번호·내용·일자·장소·참석자)을 한 격자에. 고치기(PUT)는 아직 없다 — 승인은 판(sha)으로 하므로 그대로 된다
    */
   if (isProjectForm(bytes)) {
-    return json({ ...common, readOnly: true, tables: projectTables(bytes) });
+    return json({ ...common, readOnly: true, tables: projectTables(bytes, { unitEachTask: unitEachTask(division.nameKo, division.parentKo) }) });
   }
   const parsed = readWorklog(bytes);
 

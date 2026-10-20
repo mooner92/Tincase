@@ -10,6 +10,7 @@ import { logger } from '@/server/logger';
 import { readWorklog, TABLE_TITLES, TABLE_COLUMNS } from '@/lib/hwp/reader';
 import { isProjectForm, parseHqForm, type HqFormData } from '@/lib/hwp/hq-form';
 import { projectTables, type ViewTable } from '@/lib/hwp/hq-view';
+import { unitEachTask } from '@/lib/unit-abbr';
 import { tableGrid } from '@/lib/hwp/model';
 import { toKstIso } from '@/lib/week';
 
@@ -31,11 +32,11 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
     if (isProjectForm(bytes)) {
       // RH-76 · RH-82 — 이 실의 자문회의 줄만 작성 화면에 되돌린다(표의 다른 줄은 이 사람이 적은 것이 아니다)
       const d = parseHqForm(bytes);
-      const own = await prisma.division.findUnique({ where: { id: sub.divisionId }, select: { nameKo: true } });
+      const own = await prisma.division.findUnique({ where: { id: sub.divisionId }, select: { nameKo: true, parentKo: true } });
       const mine = d.consult?.find((c) => c.label.replace(/\s+/g, '') === (own?.nameKo ?? '').replace(/\s+/g, ''))?.values;
       project = { ...d, consult: mine ? [{ label: own!.nameKo, values: mine }] : [] };
       // RH-88 — 열람 드로어도 두 층 표 그대로(실형 5칸으로 읽으면 칸이 엇갈린다). 자문회의는 이 실의 줄만
-      projectView = projectTables(bytes, { onlyConsultOf: own?.nameKo ?? '' });
+      projectView = projectTables(bytes, { onlyConsultOf: own?.nameKo ?? '', unitEachTask: unitEachTask(own?.nameKo, own?.parentKo) });
     }
   } catch (e) {
     logger.error({ submissionId: sub.id, err: String(e) }, 'CRITICAL: preview parse failed for validated file');

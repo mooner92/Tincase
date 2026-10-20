@@ -484,7 +484,10 @@ export function MergedDrawer({
                               key={c}
                               // 구분 열은 두 자리 번호(1-10)에서 줄바꿈이 난다 — 폭을 잡아 준다
                               className={`px-3 py-2 font-medium ${
-                                ['w-14 whitespace-nowrap', 'w-[38%]', 'w-[11%]', 'w-[22%]', 'w-[22%]'][i] ?? ''
+                                // RH-88 — 연구실 두 층 표(6칸)는 과제명·내용 칸을 넓게
+                                (t.columns.length === 6
+                                  ? ['w-14 whitespace-nowrap', 'w-20 whitespace-nowrap', 'w-[36%]', 'w-20', 'w-[14%]', 'w-[16%]']
+                                  : ['w-14 whitespace-nowrap', 'w-[38%]', 'w-[11%]', 'w-[22%]', 'w-[22%]'])[i] ?? ''
                               }`}
                             >
                               {c}
