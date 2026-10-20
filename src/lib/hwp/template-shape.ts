@@ -6,6 +6,7 @@
 // (2026-10-10 점검에서 실측). 그래서 양식은 받을 때 이 모양을 본다 — 판정은 여기 하나다(등록 검사와 작성 경로가 같이 쓴다).
 import type { HwpRecord } from './record';
 import { locateTables } from './writer';
+import { worklogOrdinals } from './worklog-tables';
 
 /** 양식 표의 칸 수 — 구분 · 업무실적 내용 · 일자 · 장소 · 참석자 (reader `TABLE_COLUMNS`) */
 export const WORKLOG_TABLE_COLS = 5;
@@ -17,7 +18,9 @@ export const WORKLOG_TABLE_COUNT = 3;
  * 표가 셋보다 많은 것은 막지 않는다 — 앞의 셋만 채우고 나머지는 그대로 둔다(병합·작성이 원래 그렇게 한다).
  */
 export function worklogShapeProblem(section0: readonly HwpRecord[]): string | null {
-  const tables = locateTables(section0);
+  // RH-111 — 자문회의 집계표(양식 ② 지속센터)는 업무 표가 아니다 — 건너뛰고 센다
+  const all = locateTables(section0);
+  const tables = worklogOrdinals(section0).map((i) => all[i]);
   if (tables.length < WORKLOG_TABLE_COUNT) {
     return `양식에 표 셋(1. 실적 · 2. 계획 · 3. 특이사항)이 모두 있어야 합니다 — 이 파일은 ${tables.length}개입니다.`;
   }

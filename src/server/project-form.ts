@@ -7,6 +7,7 @@ import { cleanCell } from '@/server/worklog-doc';
 import { normalizeEvaluation } from '@/lib/evaluation';
 import { consultLabels, evaluationLabels, fillHqForm, isProjectForm, parseHqForm, type HqFormData, type HqItem, type HqTask } from '@/lib/hwp/hq-form';
 import { unitAbbr } from '@/lib/unit-abbr';
+import { readWorklog } from '@/lib/hwp/reader';
 
 export type FormKind = 'unit' | 'project';
 
@@ -29,6 +30,25 @@ export async function templateFormOf(template: { sha256: string; filePath: strin
 export async function divisionFormOf(divisionId: string): Promise<FormKind> {
   const t = await prisma.template.findFirst({ where: { divisionId, isActive: true }, select: { sha256: true, filePath: true } });
   return t ? templateFormOf(t) : 'unit';
+}
+
+/** RH-112 — 실형 양식에 「※ 자문회의 실적」 표가 있나(양식 ② 지속센터). 같은 sha256이면 같은 답 */
+const consultCache = new Map<string, boolean>();
+
+export async function divisionHasConsult(divisionId: string): Promise<boolean> {
+  const t = await prisma.template.findFirst({ where: { divisionId, isActive: true }, select: { sha256: true, filePath: true } });
+  if (!t) return false;
+  const hit = consultCache.get(t.sha256);
+  if (hit !== undefined) return hit;
+  let has = false;
+  try {
+    const bytes = await readStoredFile(t.filePath);
+    has = !isProjectForm(bytes) && (readWorklog(bytes).consult?.length ?? 0) > 0;
+  } catch {
+    has = false;
+  }
+  consultCache.set(t.sha256, has);
+  return has;
 }
 
 // ── RH-75 · RH-77 입력 검사 ────────────────────────────

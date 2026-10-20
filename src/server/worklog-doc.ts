@@ -2,6 +2,7 @@
 //
 // 두 곳이 각자 만들면 「웹으로 낸 것」과 「담당자가 고친 것」의 꼴이 미묘하게 달라진다 —
 // 빈 표 처리·채번·강조 서식 같은 것들이. 그래서 여기 하나로 모은다 (HM-27과 같은 이유).
+import { worklogOrdinals, writeConsultRow } from '@/lib/hwp/worklog-tables';
 import { HttpError } from './authz';
 import { logger } from './logger';
 import { openHwp } from '@/lib/hwp/ole';
@@ -85,7 +86,28 @@ function toRows(list: DocRowInput[] | undefined, prefix: number): { cells: strin
  * 양식 + 표 내용 → hwp. 만든 뒤 **다시 읽어 세 표의 행 수를 확인한다** (WA-05) —
  * 우리가 만든 것이라고 봐주지 않는다. 비어 있으면 422, 검증 실패면 500.
  */
-export function buildWorklogHwp(templateBytes: Buffer, body: DocInput, logContext: Record<string, unknown> = {}) {
+/**
+ * RH-113 — 「※ 자문회의 실적」 값 넷(자문회의 · 전문가 세미나 · 포럼·워크샵 · 기타 회의). 칸마다 20자까지, 넷이 아니면 거절.
+ * 모두 비었거나 「-」면 null — 표는 「-」로 나간다
+ */
+export function cleanConsult(raw: unknown): string[] | null {
+  if (raw === undefined || raw === null) return null;
+  if (!Array.isArray(raw) || raw.length !== 4) throw new HttpError(422, 'invalid_request', '자문회의 실적 형식이 올바르지 않습니다.');
+  const vals = raw.map((v, i) => {
+    const c = cleanCell(v, `자문회의 실적 ${i + 1}번째 칸`);
+    if (c.length > 20) throw new HttpError(422, 'cell_too_long', '자문회의 실적은 칸마다 20자까지입니다.');
+    return c;
+  });
+  return vals.some((v) => v && v !== '-') ? vals : null;
+}
+
+export function buildWorklogHwp(
+  templateBytes: Buffer,
+  body: DocInput,
+  logContext: Record<string, unknown> = {},
+  /** RH-113 — 양식에 자문회의 표가 있으면 그 줄(`consultLabel`)에 쓸 값. 담당·부서장 것만 부르는 쪽이 넘긴다 */
+  opts: { consult?: readonly string[] | null; consultLabel?: string } = {},
+) {
   const ach = toRows(body.achievements, 1);
   const plans = toRows(body.plans, 2);
   const notes = toRows(body.notes, 3);
@@ -101,6 +123,8 @@ export function buildWorklogHwp(templateBytes: Buffer, body: DocInput, logContex
    * 「일시적인 오류입니다」(500)만 받아 무엇을 고쳐야 하는지 아무도 몰랐다.
    */
   const shape = worklogShapeProblem(recs);
+  // RH-111 — 업무 표 셋의 순번(자문회의 집계표를 건너뛴다 — 없으면 0·1·2)
+  const ords = worklogOrdinals(recs);
   if (shape) {
     logger.error({ ...logContext, shape }, '[웹작성] 부서 양식 모양이 맞지 않음');
     throw new HttpError(409, 'template_broken', `부서 양식을 쓸 수 없습니다 — ${shape} 담당자에게 알려 주세요.`);
@@ -124,14 +148,16 @@ export function buildWorklogHwp(templateBytes: Buffer, body: DocInput, logContex
   let blueShapeId: number | null = null;
   if (wantEmphasis) {
     const diRecs = parseRecords(file.docInfo);
-    const plain = plainShapeIdOf(recs, 0);
+    const plain = plainShapeIdOf(recs, ords[0]);
     blueShapeId = plain === null ? null : ensureColorShape(diRecs, plain, BLUE);
     if (blueShapeId !== null) docInfoOut = serializeRecords(diRecs);
   }
 
   [ach, plans, notes].forEach((t, i) =>
-    fillTable(recs, i, t.cells, { emphasis: t.emphasis, emphasisShapeId: blueShapeId }),
+    fillTable(recs, ords[i], t.cells, { emphasis: t.emphasis, emphasisShapeId: blueShapeId }),
   );
+  // RH-113 — 자문회의 표(양식 ②)는 담당·부서장이 적은 값으로. 안 적었으면 양식의 빈 칸 그대로
+  if (opts.consult) writeConsultRow(recs, opts.consult, opts.consultLabel);
   const bytes = packHwp(templateBytes, [serializeRecords(recs)], docInfoOut);
 
   // WA-05 — 생성물도 자체 검증을 통과해야 한다. **세 표를 다 본다** — 실적만 보면 계획·특이사항이 어긋나도 통과한다

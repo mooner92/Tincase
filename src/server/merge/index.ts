@@ -3,6 +3,7 @@
 // 순서: 제출물 수집 → 규칙 적용 → (모델) 중복 묶기 → 조립 → 자체 점검 → (저장은 부르는 쪽 — run.ts, 잠금 안에서 기록과 함께)
 // 어느 단계가 실패해도 **병합본은 나온다** (HM-21 부분 실패 허용, HM-24 폴백).
 
+import { worklogOrdinals, writeConsultRow } from '@/lib/hwp/worklog-tables';
 import { unitEachTask } from '@/lib/unit-abbr';
 import path from 'node:path';
 import { prisma } from '../db';
@@ -141,6 +142,8 @@ export function composeMergedHwp(
   emphasis?: Partial<Record<Bucket, boolean[]>>,
   /** HM-46 — 맨 위에 둘 부서명. 안 주면 양식 그대로 */
   title?: string,
+  /** RH-113 — 양식 ②의 자문회의 줄 값(부서명 줄). 없으면 양식의 빈 칸 그대로 */
+  consult?: readonly string[] | null,
 ): {
   bytes: Buffer;
   tableCount: number;
@@ -149,7 +152,9 @@ export function composeMergedHwp(
   const warnings: string[] = [];
   const file = openHwp(templateBytes);
   const recs = parseRecords(file.sections[0]);
-  const tableCount = countTables(recs);
+  // RH-111 — 업무 표 셋의 순번. 자문회의 집계표(양식 ②)는 건너뛴다 — 없으면 0·1·2로 지금과 같다
+  const ords = worklogOrdinals(recs);
+  const tableCount = ords.length;
 
   /*
    * HM-37 — 강조 서식은 **필요할 때만** 만든다.
@@ -163,7 +168,7 @@ export function composeMergedHwp(
   let blueShapeId: number | null = null;
   if (wantEmphasis) {
     const diRecs = parseRecords(file.docInfo);
-    const plain = plainShapeIdOf(recs, 0);
+    const plain = plainShapeIdOf(recs, ords[0]);
     blueShapeId = plain === null ? null : ensureColorShape(diRecs, plain, BLUE);
     if (blueShapeId === null) {
       warnings.push('강조(파란색) 서식을 만들지 못해 강조 없이 병합했습니다.');
@@ -189,11 +194,12 @@ export function composeMergedHwp(
      *
      * `fillTable(recs, i, [])`는 머리행만 남기고 본문을 지운다 (2026-08-26 실측).
      */
-    fillTable(recs, i, tableRows[bucket], {
+    fillTable(recs, ords[i], tableRows[bucket], {
       emphasis: emphasis?.[bucket],
       emphasisShapeId: blueShapeId,
     });
   });
+  if (consult) writeConsultRow(recs, consult, title); // RH-113
 
   /*
    * HM-46 — 맨 위에 부서명. **표를 다 채운 뒤에** 넣는다 — 표 편집은 표 순번으로 자리를
@@ -266,6 +272,8 @@ export async function runMerge(
   // ── 1. 수집 — 한 명이 깨져도 나머지로 계속한다 (HM-21) ──
   const rows: Tagged[] = [];
   const usedIds: string[] = [];
+  // RH-113 — 양식 ②(지속센터)의 자문회의 줄: 사람마다 적은 값(이 부서 줄 — 없으면 첫 줄)
+  const consultBy: { name: string; isManager: boolean; values: string[] }[] = [];
   let nextId = 1;
   for (const sub of ordered) {
     let parsed;
@@ -276,6 +284,11 @@ export async function runMerge(
       continue;
     }
     usedIds.push(sub.id);
+    {
+      const sqz = (s: string) => s.replace(/\s+/g, '');
+      const own = parsed.consult?.find((c) => sqz(c.label) === sqz(division.nameKo)) ?? parsed.consult?.[0];
+      if (own && own.values.some((v) => v && v !== '-')) consultBy.push({ name: sub.user.name, isManager: isDocumentManager(sub.user), values: own.values });
+    }
     for (const bucket of BUCKETS) {
       for (const raw of parsed.worklog[bucket]) {
         /*
@@ -415,7 +428,12 @@ export async function runMerge(
   // 특이사항이 비면 3번 표는 머리행만 남는다 — `tableRows.notes`가 이미 비어 있고 fillTable이 늘 비운다(HM-32).
   // 이걸 끄던 설정(`mergeDropNotes`)은 HM-51로 고정했다 — 꺼도 문서는 같았다
 
-  const composed = composeMergedHwp(src, tableRows, rowEmphasis, division.nameKo);
+  // RH-113 — 담당·부서장 것을 먼저(RH-82와 같은 원칙), 여럿이 다르게 적었으면 알린다
+  const consultFrom = [...consultBy.filter((c) => c.isManager), ...consultBy.filter((c) => !c.isManager)][0];
+  if (new Set(consultBy.map((c) => JSON.stringify(c.values))).size > 1) {
+    warnings.push(`자문회의 실적을 여러 사람이 다르게 적었습니다 — ${consultFrom.name} 님 것을 넣었습니다`);
+  }
+  const composed = composeMergedHwp(src, tableRows, rowEmphasis, division.nameKo, consultFrom?.values ?? null);
   warnings.push(...composed.warnings);
   const out = composed.bytes;
   const tableCount = composed.tableCount;
@@ -527,12 +545,6 @@ export class MergeFailed extends Error {
     super(message);
     this.name = 'MergeFailed';
   }
-}
-
-
-function countTables(recs: ReturnType<typeof parseRecords>): number {
-  // locateTables를 쓰지 않고 세는 이유: 여기서는 개수만 필요하고, 편집 전후로 불린다
-  return recs.filter((r) => r.tag === 77).length;
 }
 
 /**

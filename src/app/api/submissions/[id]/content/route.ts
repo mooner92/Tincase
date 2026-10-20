@@ -2,6 +2,7 @@
 //
 // 부서원 제출물을 고쳐 **그 사람의 새 판**으로 저장한다. 원래 판은 그대로 남고, 누가 고쳤는지가 붙는다.
 // 문서는 웹 작성과 같은 길(`buildWorklogHwp`)로 만든다 — 부서 양식 + 같은 자체 검증.
+import { readWorklog } from '@/lib/hwp/reader';
 import { NextRequest } from 'next/server';
 import { prisma } from '@/server/db';
 import { requireScope, requireRevisableSubmission, HttpError } from '@/server/authz';
@@ -25,10 +26,14 @@ export const PUT = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
   const template = await prisma.template.findFirst({ where: { divisionId: target.divisionId, isActive: true } });
   if (!template) throw new HttpError(409, 'no_template', '등록된 부서 양식이 없습니다. 부서 설정에서 양식을 먼저 등록하세요.');
 
-  const built = buildWorklogHwp(await readStoredFile(template.filePath), body, {
-    division: target.division.nameKo,
-    revise: target.id,
-  });
+  // RH-113 — 낸 판의 자문회의 줄(양식 ②)은 고쳐도 그대로 — 고치기 화면은 업무 표만 다룬다
+  const consultNow = readWorklog(await readStoredFile(target.filePath)).consult?.[0]?.values ?? null;
+  const built = buildWorklogHwp(
+    await readStoredFile(template.filePath),
+    body,
+    { division: target.division.nameKo, revise: target.id },
+    { consult: consultNow, consultLabel: target.division.nameKo },
+  );
   const created = await reviseSubmission({
     editor: scope.user,
     target,

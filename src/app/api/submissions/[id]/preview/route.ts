@@ -83,7 +83,12 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
       plans: parsed.worklog.plans,
       notes: parsed.worklog.notes,
     },
-    tables: projectView ?? parsed.tables.slice(0, 3).map((t, i) => {
+    tables: projectView ?? [
+      // RH-114 — 양식 ②(지속센터)는 맨 위에 자문회의 표
+      ...(parsed.consult?.length
+        ? [{ title: '※ 자문회의 실적', columns: ['구분', '자문회의', '전문가 세미나', '포럼·워크샵 등', '기타 회의'], rows: [['구분', '자문회의', '전문가 세미나', '포럼·워크샵 등', '기타 회의'], ...parsed.consult.map((c) => [c.label, ...c.values])] }]
+        : []),
+      ...parsed.tables.slice(0, 3).map((t, i) => {
       /*
        * API-57 — 본문 칸이 모두 빈 행(양식의 빈 번호 줄 3-1~3-4)은 뺀다. 병합본 보기(UX-03)와 같은 조건이다.
        * 거르지 않으면 부서원이 「빈 번호가 생겼네, 잘못 냈나?」 하고 묻는다. 글자는 건드리지 않는다(API-25).
@@ -95,9 +100,12 @@ export const GET = handler(async (req: NextRequest, ctx: { params: Promise<{ id:
         columns: [...TABLE_COLUMNS],
         rows: [full[0] ?? [], ...full.slice(1).filter((r) => r.slice(1).some((c) => c.trim()))],
       };
-    }),
+      }),
+    ],
     // RH-88 — 표 수·열 경고는 실형 양식 기준이라 연구실 판에는 맞지 않는다(「표가 4개입니다」)
     warnings: projectView ? [] : parsed.warnings,
     project,
+    // RH-113 — 양식 ②(지속센터)의 자문회의 줄 값 — 작성 화면이 다시 열 때 채운다
+    consult: projectView ? null : (parsed.consult?.[0]?.values ?? null),
   });
 });

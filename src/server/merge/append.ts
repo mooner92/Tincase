@@ -161,7 +161,9 @@ export async function appendLate(scope: Scope, slot: WeekSlot, viewed: { runId?:
       tableRows[b] = work[b].map((r, i) => [rowNo(b, i), r.content, r.date, r.place, r.attendee]);
       rowEmphasis[b] = work[b].map((r) => r.emphasis);
     }
-    const composed = composeMergedHwp(await readStoredFile(template.filePath), tableRows, rowEmphasis, division.nameKo);
+    // RH-113 — 지금 병합본의 자문회의 줄(양식 ②)은 그대로 옮긴다
+    const consultNow = readWorklog(current).consult?.[0]?.values ?? null;
+    const composed = composeMergedHwp(await readStoredFile(template.filePath), tableRows, rowEmphasis, division.nameKo, consultNow);
 
     // LE-25 — 쓰기 전에 다시 읽어 확인한다: 앞부분은 기존 행 그대로, 전체는 기존 + 새 행. 아니면 쓰지 않는다
     const back = worklogRows(composed.bytes);

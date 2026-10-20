@@ -39,6 +39,8 @@ export interface ThisWeekCardProps {
   noTemplate: boolean;
   /** RH-70 — 부서 양식이 연구실(6칸 두 층) 것이면 'project' — 작성 화면이 과제 카드다 */
   form?: 'unit' | 'project';
+  /** RH-112 — 양식 ②(지속센터)이고 담당·부서장이면 자문회의 줄 이름. 아니면 null */
+  consult?: { label: string } | null;
   /** PG-67c — 잠긴 뒤 마감 이벤트 뒤에 만든 성공 병합본이 있다 */
   doc: boolean;
   divisionSlug: string;
@@ -66,10 +68,18 @@ export function ThisWeekCard({
   me,
   emptyWordsRaw,
   form = 'unit',
+  consult = null,
   layout,
 }: ThisWeekCardProps) {
   const router = useRouter();
-  const [composing, setComposing] = useState<{ initial: Rows | null; project?: PData | null; failed: boolean; editedNote: string | null } | null>(null);
+  const [composing, setComposing] = useState<{
+    initial: Rows | null;
+    project?: PData | null;
+    /** RH-113 — 낸 판의 자문회의 줄 값(양식 ②) */
+    consult?: string[] | null;
+    failed: boolean;
+    editedNote: string | null;
+  } | null>(null);
   const [loading, setLoading] = useState(false);
   const [viewId, setViewId] = useState<string | null>(null);
   const [docOpen, setDocOpen] = useState(false);
@@ -121,6 +131,7 @@ export function ThisWeekCard({
         ? ((await r.json()) as {
             rowsByTable?: Rows;
             project?: PData | null;
+            consult?: string[] | null;
             submission?: { editedBy?: string | null; editedAt?: string | null; proxied?: boolean };
           })
         : null;
@@ -129,6 +140,7 @@ export function ThisWeekCard({
       setComposing({
         initial: b?.rowsByTable ?? null,
         project: b?.project ?? null,
+        consult: b?.consult ?? null,
         // RH-76 — 연구실 화면은 낸 판의 과제·항목(`project`)으로 연다
         failed: form === 'project' ? !b?.project : !b?.rowsByTable,
         // LE-44 — 담당자가 대신 입력한 판이면 「○○ 입력」
@@ -281,6 +293,8 @@ export function ThisWeekCard({
           initial={composing.initial}
           initialVersion={mine?.version}
           initialFailed={composing.failed}
+          consultLabel={consult?.label ?? null}
+          initialConsult={composing.consult ?? null}
           weekStartMs={week.weekStartMs}
           onClose={() => {
             setComposing(null);

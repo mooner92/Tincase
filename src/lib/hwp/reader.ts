@@ -27,7 +27,10 @@ export interface WorklogData {
 
 export interface ParsedHwp {
   version: string;
+  /** 업무 표(실적 · 계획 · 특이사항) — 자문회의 집계표는 빠진다(RH-111) */
   tables: HwpTable[];
+  /** RH-113 — 양식 ②(지속센터)의 「※ 자문회의 실적」 줄들. 없으면 빈 배열 */
+  consult: { label: string; values: string[] }[];
   worklog: WorklogData;
   warnings: string[];
 }
@@ -86,10 +89,21 @@ export function readWorklog(buf: Buffer): ParsedHwp {
   const file = openHwp(buf);
   const warnings: string[] = [];
 
-  const tables: HwpTable[] = [];
+  const all: HwpTable[] = [];
   for (const section of file.sections) {
-    tables.push(...extractTables(parseRecords(section)));
+    all.push(...extractTables(parseRecords(section)));
   }
+  // RH-111 — 자문회의 집계표(머리 「구분 | 자문회의 | …」)는 업무 표가 아니다. 따로 읽는다
+  const head = (t: HwpTable) => (tableGrid(t)[0] ?? []).map((s) => s.replace(/\s+/g, ''));
+  const isConsult = (t: HwpTable) => head(t)[0] === '구분' && head(t)[1] === '자문회의';
+  const tables = all.filter((t) => !isConsult(t));
+  const consultTable = all.find(isConsult);
+  const consult = consultTable
+    ? tableGrid(consultTable)
+        .slice(1)
+        .map((r) => ({ label: (r[0] ?? '').trim(), values: [1, 2, 3, 4].map((c) => (r[c] ?? '').trim()) }))
+        .filter((r) => r.label)
+    : [];
   // HM-37 — 색은 DocInfo에 있다. 못 읽어도 본문은 읽혀야 하므로 실패하면 색 없는 것으로 간다
   let colors: number[] = [];
   try {
@@ -108,7 +122,7 @@ export function readWorklog(buf: Buffer): ParsedHwp {
   if (tables.length === 2) warnings.push('3번 표(기타 특이사항) 없음 — 관례상 정상');
   if (tables.length > 3) warnings.push(`표가 ${tables.length}개입니다 — 양식과 다른 구조`);
 
-  return { version: file.version, tables, worklog, warnings };
+  return { version: file.version, tables, consult, worklog, warnings };
 }
 
 // ── 업로드 검증 (ST-07) ────────────────────────────────────────

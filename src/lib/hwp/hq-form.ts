@@ -5,11 +5,12 @@
 import * as CFB from 'cfb';
 import { openHwp } from './ole';
 import { parseRecords, serializeRecords, type HwpRecord } from './record';
-import { HwpWriteError, locateTables, normalizeCharShape, ownControls, ownText, packHwp, setParagraphText, stripCfbSentinel, topParagraphs, type TableSpan } from './writer';
+import { HwpWriteError, fillTable, locateTables, normalizeCharShape, ownControls, ownText, packHwp, setParagraphText, stripCfbSentinel, topParagraphs, type TableSpan } from './writer';
 import { TAG } from './record';
 import { BLUE, charShapeColors, ensureColorShape, ensureSpacingShape, isEmphasis, shapeMetrics } from './charshape';
 import { fitSpacing } from './fit';
 import { fixLastFlags, renumberTables } from './orgdoc';
+import { worklogOrdinals, writeConsultRow } from './worklog-tables';
 import { applyColumnWidths, cellBox, cellText, fitHeaderRow, rebuildRows, setCellsAt, type ProtoRow } from './proto-rows';
 
 export type HqTableKind = 'consult' | 'evaluation' | 'results' | 'plans' | 'notes';
@@ -546,6 +547,34 @@ export function buildHqTemplate(source: Buffer, spec: HqTemplateSpec, summaryDon
     setCellsAt(out, at.evaluation, vals);
   }
 
+  return scrubContainer(packHwp(source, [serializeRecords(out)]), previewText(out), summaryDonor);
+}
+
+/**
+ * RH-110 — 양식 ②(실형 + 자문회의 표, 국가지속가능발전연구센터): 원본 취합본에서 그 섹션의 네 표(자문회의 · 실적 · 계획 · 특이사항)를
+ * 모양 그대로 떼어 한 벌로. 업무 표는 머리 줄 + 빈 번호 줄 하나(쓰기·병합이 줄 수를 맞춘다 — `fillTable`), 자문회의 값은 「-」.
+ * 글자 서식·칸 너비는 그 센터가 실제로 내던 것이다 — 기조실 양식과 표 모양은 같고 자문회의 표만 더 있다
+ */
+export function buildConsultUnitTemplate(source: Buffer, name: string, summaryDonor: Buffer): Buffer {
+  const recs = parseRecords(openHwp(source).sections[0]);
+  const sec = sectionBlocks(recs, name);
+  const first = topParagraphs(recs)[0];
+  const pieces = (['consult', 'results', 'plans', 'notes'] as const).map((k) => pieceOf(recs, sec, k));
+  const copy = (p: Piece) => recs.slice(p.start, p.end).map((r) => ({ ...r, data: Buffer.from(r.data) }));
+  const out: HwpRecord[] = [...copy(first)];
+  for (const p of pieces) out.push(...copy(p));
+  setParagraphText(out, topParagraphs(out)[0], name);
+  for (let tail = topParagraphs(out); tail.length > 1; tail = topParagraphs(out)) {
+    const b = tail[tail.length - 1];
+    if (ownText(out, b).trim() !== '' || ownControls(out, b).length > 0) break;
+    out.splice(b.start, b.end - b.start);
+  }
+  renumberTables(out);
+  fixLastFlags(out);
+  const ords = worklogOrdinals(out);
+  if (ords.length < 3) throw new HwpWriteError(`「${name}」 섹션에서 업무 표 셋을 찾지 못했습니다`);
+  ords.slice(0, 3).forEach((ord, i) => fillTable(out, ord, [[`${i + 1}-1`, '', '', '', '']]));
+  if (!writeConsultRow(out, ['', '', '', ''], name)) throw new HwpWriteError(`「${name}」 섹션에 자문회의 표가 없습니다`);
   return scrubContainer(packHwp(source, [serializeRecords(out)]), previewText(out), summaryDonor);
 }
 

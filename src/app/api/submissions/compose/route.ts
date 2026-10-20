@@ -10,7 +10,7 @@ import { submissionName } from '@/lib/docname';
 import { handler, json } from '@/server/http';
 import { readStoredFile } from '@/server/storage';
 import { uploadSubmission, ensureCurrentSlot } from '@/server/worklog';
-import { buildWorklogHwp, type DocInput } from '@/server/worklog-doc';
+import { buildWorklogHwp, cleanConsult, type DocInput } from '@/server/worklog-doc';
 import { buildProjectHwp, hqScopeOf, templateFormOf, type ProjectBody } from '@/server/project-form';
 import { unitEachTask } from '@/lib/unit-abbr';
 
@@ -47,7 +47,13 @@ export const POST = handler(async (req: NextRequest) => {
           }),
           rows: undefined,
         }
-      : buildWorklogHwp(templateBytes, body, { division: scope.division.nameKo });
+      : buildWorklogHwp(
+          templateBytes,
+          body,
+          { division: scope.division.nameKo },
+          // RH-113 — 양식 ②(지속센터)의 자문회의 줄은 담당·부서장 것만 받는다(RH-82와 같은 원칙)
+          { consult: isDocumentManager(scope.user) ? cleanConsult((body as { consult?: unknown }).consult) : null, consultLabel: scope.division.nameKo },
+        );
 
   const slot = await ensureCurrentSlot();
   const result = await uploadSubmission({

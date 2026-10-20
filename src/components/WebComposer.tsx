@@ -80,6 +80,8 @@ export function WebComposer({
   weekStartMs,
   onClose,
   emptyWordsRaw = '',
+  consultLabel = null,
+  initialConsult = null,
 }: {
   /** WA-35d — 임시본 열쇠의 사람(세션의 사람 — 홈 카드의 `me.id`). 주차만으로 열쇠를 만들면 같은 브라우저의 다음 사람이 앞사람 임시본을 연다 */
   userId: string;
@@ -99,6 +101,10 @@ export function WebComposer({
   onClose: () => void;
   /** HM-33 — 부서가 적어 둔 「내용 없음」 낱말 (`Division.emptyWords`). 비면 전사 기본값으로 검사한다(S7 · HM-51 — `parseFlagWords`) */
   emptyWordsRaw?: string;
+  /** RH-112 — 양식 ②(지속센터)의 자문회의 줄 이름. 담당·부서장일 때만 온다 — 없으면 칸을 그리지 않는다 */
+  consultLabel?: string | null;
+  /** RH-113 — 낸 판의 자문회의 값 넷 */
+  initialConsult?: string[] | null;
 }) {
   const emptyWords = useMemo(() => parseFlagWords(emptyWordsRaw), [emptyWordsRaw]);
   /*
@@ -123,6 +129,10 @@ export function WebComposer({
    * 실수로 새 판을 만들지 않게(S1: [열어보기]를 [열기] 하나로 합친 대가).
    */
   const unchanged = useMemo(() => sameRows(start.data, data), [start, data]);
+  // RH-113 — 자문회의 넷(양식 ②). 임시본에는 넣지 않는다 — 넷뿐이고 낸 판에서 다시 읽는다
+  const consultStart = useMemo(() => [0, 1, 2, 3].map((i) => initialConsult?.[i] ?? ''), [initialConsult]);
+  const [consult, setConsult] = useState<string[]>(consultStart);
+  const consultChanged = consult.some((v, i) => v.trim() !== consultStart[i].trim());
 
   // 임시 보관은 **제출 전까지만**. 제출 후에도 남아 있으면 다음에 열었을 때
   // 낸 건지 안 낸 건지 헷갈린다 (지연 저장이 뒤늦게 되살리는 것도 막는다)
@@ -269,7 +279,7 @@ export function WebComposer({
     fetch('/api/submissions/compose', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+      body: JSON.stringify(consultLabel ? { ...data, consult } : data),
     })
       .then(async (r) => {
         const body = (await r.json()) as { message?: string; version?: number };
@@ -357,6 +367,29 @@ export function WebComposer({
             머리 영역에 두면 그 높이만큼 쓸 칸이 영영 밀리므로, 본문 첫 자리에 둔다 —
             열자마자 제일 먼저 보이고, 쓰기 시작하면 스크롤로 비켜난다.
           */}
+          {consultLabel && (
+            <section className="mb-6 rounded-lg border border-hairline p-3" aria-labelledby="wc-h-consult">
+              <h3 id="wc-h-consult" className="text-[15px] font-semibold text-ink">
+                ※ 자문회의 실적 <span className="text-xs font-normal text-muted">· {consultLabel} · 담당만 적어요</span>
+              </h3>
+              <p className="mt-0.5 text-xs text-muted">보이는 그대로 — 「1」 · 「2건」 · 없으면 비워 두세요(「-」로 나가요)</p>
+              <div className="mt-2 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                {['자문회의', '전문가 세미나', '포럼·워크샵 등', '기타 회의'].map((h, i) => (
+                  <label key={h} className="text-xs text-muted">
+                    {h}
+                    <input
+                      value={consult[i]}
+                      onChange={(e) => setConsult((v) => v.map((x, k) => (k === i ? e.target.value : x)))}
+                      placeholder="-"
+                      maxLength={20}
+                      aria-label={`자문회의 실적 ${h}`}
+                      className="mt-1 h-10 w-full rounded-md border border-border-strong bg-canvas px-2.5 text-[14px] text-ink focus:border-ink focus:ring-1 focus:ring-ink focus:outline-none"
+                    />
+                  </label>
+                ))}
+              </div>
+            </section>
+          )}
           <PreviousWeekPanel
             isoKey={isoKey}
             onCopyRow={(bucket, row) => appendRows(bucket, [row])}
@@ -517,7 +550,7 @@ export function WebComposer({
             <button
               data-guide="compose-submit"
               onClick={submit}
-              disabled={submitBlocked({ busy, done, filled: total, from, unchanged })}
+              disabled={submitBlocked({ busy, done, filled: total, from, unchanged: unchanged && !consultChanged })}
               className="btn-primary"
             >
               {busy ? '제출 중…' : '제출'}

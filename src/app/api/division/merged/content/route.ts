@@ -130,6 +130,8 @@ export const GET = handler(async (req: NextRequest) => {
   return json({
     // HM-47 — 지금 보는 **판**. 저장·승인할 때 그대로 돌려보낸다 — 그 사이 바뀌었으면 409 (requireViewedVersion)
     runId: run.id,
+    // RH-114 — 양식 ②(지속센터)의 자문회의 줄 — 보기만(고치는 표가 아니다 · 고쳐 저장해도 그대로 옮겨 간다)
+    consult: parsed.consult ?? [],
     sha256: sha256(bytes),
     // HM-47 — 승인 상태와 [승인] 버튼. 버튼은 이 부서의 head에게만 (TACP-16).
     // API-58 — 승인자 이름·바뀐 줄은 작성자(TACP-17)와 같은 사람에게만 담는다. 부서원 홈의 읽기 전용 드로어는 어차피 그리지 않는다
@@ -259,6 +261,7 @@ export const PUT = handler(async (req: NextRequest) => {
       tableRows,
       rowEmphasis,
       division.nameKo,
+      readWorklog(current).consult?.[0]?.values ?? null, // RH-113 — 자문회의 줄(양식 ②)은 고치는 동안 그대로
     );
     const savedSha = sha256(composed.bytes);
     // HM-47 — 바뀐 것 없이 다시 저장했고 이 판은 이미 승인했다 — 승인·알림을 또 만들지 않는다

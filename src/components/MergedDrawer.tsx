@@ -64,6 +64,8 @@ interface Content {
   handoffAuto?: boolean;
   /** RH-85 — 연구실 병합본: 보기·승인만(고치기는 다음 단계). 서버가 정한다 */
   readOnly?: boolean;
+  /** RH-114 — 양식 ②(지속센터)의 자문회의 줄. 보기만 */
+  consult?: { label: string; values: string[] }[];
 }
 
 /** 헤더 행을 뺀 본문만. 서버가 준 격자는 첫 줄이 열 이름이다 */
@@ -460,6 +462,38 @@ export function MergedDrawer({
 
         <div ref={bodyRef} data-guide="merged-body" className="flex-1 overflow-y-auto px-4 py-5 sm:px-6">
           {err && <p className="callout callout-error mb-4">{err}</p>}
+          {data?.consult && data.consult.length > 0 && (
+            <section className="mb-7">
+              <h3 className="mb-2 text-[15px] font-semibold text-ink">
+                ※ 자문회의 실적 <span className="text-sm font-normal text-muted">담당·부서장이 낸 값 · 고치려면 제출물을 고쳐 다시 병합</span>
+              </h3>
+              <div className="overflow-x-auto rounded-lg border border-hairline">
+                <table className="w-full min-w-[520px] text-sm">
+                  <thead>
+                    <tr className="table-head border-b border-hairline bg-surface-soft">
+                      {['구분', '자문회의', '전문가 세미나', '포럼·워크샵 등', '기타 회의'].map((h) => (
+                        <th key={h} className="px-3 py-2 text-left font-medium">
+                          {h}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.consult.map((r) => (
+                      <tr key={r.label} className="border-b border-hairline-soft last:border-0">
+                        <td className="px-3 py-2 text-body">{r.label}</td>
+                        {r.values.map((v, i) => (
+                          <td key={i} className="px-3 py-2 text-body tabular-nums">
+                            {v || '-'}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          )}
           {!data && !err && <p className="text-sm text-muted">불러오는 중…</p>}
 
           {data?.tables.map((t, ti) => {
