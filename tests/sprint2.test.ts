@@ -207,6 +207,29 @@ d('template 교체 (API-40/41, ST-19)', () => {
     const active = await prisma.template.findFirst({ where: { isActive: true, division: { slug: A.slug } } });
     expect(active?.version).toBe(1);
   });
+  it('[ST-T19c] 파일을 못 쓰면 DB를 되돌린다 — 앞 판이 그대로 켜져 있고 새 판 행이 없다(「새 해시인데 옛 파일」을 남기지 않는다)', async () => {
+    const { POST } = await import('@/app/api/division/template/route');
+    const { prisma } = await import('@/server/db');
+    const { packHwp } = await import('@/lib/hwp/writer');
+    const { openHwp } = await import('@/lib/hwp/ole');
+    const { parseRecords, serializeRecords } = await import('@/lib/hwp/record');
+    const { mkdirSync } = await import('node:fs');
+    const other = packHwp(hwp, [serializeRecords(parseRecords(openHwp(hwp).sections[0]))]); // 같은 내용 · 다른 바이트
+    const before = await prisma.template.findFirst({ where: { isActive: true, division: { slug: A.slug } } });
+    const blocker = path.join(TMP_STORAGE, 'divisions', A.slug, 'template', `v${before!.version + 1}.hwp`);
+    mkdirSync(path.join(blocker, 'x'), { recursive: true }); // 이력 보관본 자리에 폴더 — 쓰기가 실패한다
+    try {
+      const fd = new FormData();
+      fd.set('file', new File([new Uint8Array(other)], '양식2.hwp'));
+      const res = await POST(nx('/api/division/template', ID.lead, { method: 'POST', body: fd }));
+      expect(res.status).toBe(500);
+      const after = await prisma.template.findFirst({ where: { isActive: true, division: { slug: A.slug } } });
+      expect(after?.id).toBe(before?.id);
+      expect(await prisma.template.count({ where: { division: { slug: A.slug }, version: before!.version + 1 } })).toBe(0);
+    } finally {
+      rmSync(blocker, { recursive: true, force: true });
+    }
+  });
   it('동일 파일 재등록 → 409', async () => {
     const { POST } = await import('@/app/api/division/template/route');
     const fd = new FormData();

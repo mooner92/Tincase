@@ -60,6 +60,7 @@ export const POST = handler(async (req: NextRequest) => {
       throw new HttpError(409, 'conflict', '현재 양식과 동일한 파일입니다.');
     }
     const version = (last?.version ?? 0) + 1;
+    const prev = await tx.template.findFirst({ where: { divisionId: scope.division.id, isActive: true }, select: { id: true } });
     await tx.template.updateMany({
       where: { divisionId: scope.division.id, isActive: true },
       data: { isActive: false },
@@ -75,12 +76,25 @@ export const POST = handler(async (req: NextRequest) => {
         uploadedBy: scope.user.id,
       },
     });
-    return { created, version };
+    return { created, version, prevId: prev?.id ?? null };
   });
 
   // 이력 보관본 + active 갱신 (DM-14 / ST-19)
-  await writeFileAtomic(templateRelPath(scope.division.slug, result.version, false), bytes);
-  await writeFileAtomic(templateRelPath(scope.division.slug, result.version, true), bytes);
+  try {
+    await writeFileAtomic(templateRelPath(scope.division.slug, result.version, false), bytes);
+    await writeFileAtomic(templateRelPath(scope.division.slug, result.version, true), bytes);
+  } catch (e) {
+    /*
+     * ST-19c (2026-10-20) — 파일을 못 쓰면 DB를 되돌린다(새 판 지우고 앞 판을 다시 켠다). 안 되돌리면 「새 양식이 켜졌다(새 해시)」인데
+     * active.hwp는 옛 파일인 채로 남아, 그 뒤 작성·병합이 아무 말 없이 옛 양식으로 만들어진다(테스트 서버 실측 — 폴더 권한 오류).
+     * active.hwp는 원자적으로 바뀌므로(쓰기 실패면 옛 파일 그대로) 되돌린 DB와 맞는다
+     */
+    await prisma.$transaction(async (tx) => {
+      await tx.template.delete({ where: { id: result.created.id } });
+      if (result.prevId) await tx.template.update({ where: { id: result.prevId }, data: { isActive: true } });
+    });
+    throw e;
+  }
 
   await audit(scope.user.email, 'template_update', scope.division.id, `template:v${result.version}`, {
     bytes: bytes.length,
