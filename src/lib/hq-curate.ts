@@ -201,6 +201,8 @@ export interface CurateItem {
 
 export interface CurateConsult {
   label: string;
+  /** 그 줄의 사본이 올라왔나(본부 줄은 본부 자신의 판) */
+  copy: boolean;
   /** 실(또는 본부 담당이 그 실 줄에) 적은 값 — 비었으면 null */
   reported: string[] | null;
   /** 실적 항목으로 센 값(규칙이 있는 본부만) */
@@ -290,7 +292,7 @@ export function curateView(units: readonly UnitDoc[], ctx: CurateContext, saved:
     const counted = rules && doc ? countConsult(rules, doc.data, monday) : null;
     const override = saved?.consult[label] ?? null;
     const values = override ?? reported ?? (counted ? counted.map(shown) : ['-', '-', '-', '-']);
-    return { label, reported, counted, override, values };
+    return { label, copy: !!doc, reported, counted, override, values };
   });
   return { items, consult };
 }

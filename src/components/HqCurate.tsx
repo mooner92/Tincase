@@ -9,6 +9,7 @@ import { estimatePages } from '@/lib/hq-pages';
 
 interface Board {
   slot: { isoKey: string; label: string };
+  hq: string;
   rules: { source: string; summary: readonly string[] } | null;
   items: CurateItem[];
   consult: CurateConsult[];
@@ -208,7 +209,9 @@ export function HqCurate({ isoKey, node, onClose, onSaved }: { isoKey: string; n
                         <tr key={c.label} className="border-b border-hairline-soft last:border-0">
                           <td className="px-3 py-1.5 align-middle">
                             <span className="text-ink">{c.label}</span>
-                            <span className="ml-1.5 text-xs text-muted">{c.override ? '고친 값' : c.reported ? '실이 적음' : c.counted ? '항목으로 셈' : ''}</span>
+                            <span className="ml-1.5 text-xs text-muted">
+                              {c.override ? '고친 값' : c.reported ? (c.label === data.hq ? '본부가 적음' : '실이 적음') : c.counted ? '항목으로 셈' : c.copy ? '' : '아직 안 옴'}
+                            </span>
                           </td>
                           {[0, 1, 2, 3].map((k) => (
                             <td key={k} className="px-1 py-1">

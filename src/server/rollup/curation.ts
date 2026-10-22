@@ -16,6 +16,8 @@ import { curateContext, loadCuration } from './curation-store';
 
 export interface CurateBoard {
   slot: { isoKey: string; label: string };
+  /** 본부 이름 — 자문회의 표의 본부 줄 */
+  hq: string;
   rules: { source: string; summary: readonly string[] } | null;
   items: CurateItem[];
   consult: CurateConsult[];
@@ -58,6 +60,7 @@ export async function curateBoard(node: RollupNode, slot: WeekSlot): Promise<Cur
   const pages = estimatePages(curateHq(units, ctx, saved), { consultRows: consultLabels(template).length || 4 });
   return {
     slot: { isoKey: slot.isoKey, label: slot.label },
+    hq: node.node.nameKo,
     rules: ctx.rules ? { source: ctx.rules.source, summary: ctx.rules.summary } : null,
     items: view.items,
     consult: view.consult,
