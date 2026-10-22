@@ -5,6 +5,7 @@
 // 대신 **상태**가 보인다(언제·무엇 때문에·산하 몇 곳). 사람이 누르는 것은 본부장의 [승인] 하나다(HqApprovalCard).
 import { useMemo, useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
+import { HqCurate } from './HqCurate';
 
 export interface StatusChip {
   /**
@@ -239,6 +240,7 @@ export function RunCard({
   canRetry,
   isoKey,
   node,
+  curate,
   children,
 }: {
   /** 가장 최근 성공한 본부본 — 본부장이 보는 판 */
@@ -252,11 +254,14 @@ export function RunCard({
   isoKey: string;
   /** ADR-0022 D2 — 지정된 본부 담당이 연 본부면 그 본부(slug). 맡은 본부가 여럿이어도 이 본부에 [다시 시도] */
   node?: string;
+  /** RH-120 — [다듬기]: 연구 본부 양식의 본부 · 쓰기 권한(TACP-21)일 때만 */
+  curate?: boolean;
   /** 같은 카드의 아래 구역 — 본부장 승인 · 총괄로 간 것 (각자 `card-section`을 그린다) */
   children?: ReactNode;
 }) {
   const router = useRouter();
   const [busy, setBusy] = useState(false);
+  const [curating, setCurating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const run = current;
 
@@ -336,6 +341,11 @@ export function RunCard({
                 본부본 받기
               </a>
             )}
+            {run && curate && (
+              <button data-guide="hq-curate-open" onClick={() => setCurating(true)} className="btn-secondary">
+                다듬기
+              </button>
+            )}
             {failed && canRetry && (
               <button onClick={retry} disabled={busy} className="btn-secondary">
                 {busy ? '이어 붙이는 중…' : '다시 시도'}
@@ -377,6 +387,7 @@ export function RunCard({
       */}
       {err && <p className="callout callout-error mt-4">{err}</p>}
       {children}
+      {curating && <HqCurate isoKey={isoKey} node={node} onClose={() => setCurating(false)} onSaved={() => router.refresh()} />}
     </section>
   );
 }

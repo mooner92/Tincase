@@ -23,7 +23,9 @@ import { currentReport, fileSha } from './report';
 import { sectionTitles } from './sections';
 import { type RollupNode, type TreeDivision } from './tree';
 import { fillHqForm, isProjectForm, parseHqForm } from '@/lib/hwp/hq-form';
-import { combineHqDocs, itemCounts } from '@/lib/hwp/hq-merge';
+import { itemCounts } from '@/lib/hwp/hq-merge';
+import { curateHq } from '@/lib/hq-curate';
+import { curateContext, curationRef, loadCuration } from './curation-store';
 
 /** RU-78 — 자동(`system`)이 한 일의 기록 — 일으킨 사건과 사람 (handoff.ts와 같은 모양, 고리를 피해 여기 다시 적는다) */
 export interface BuildCause {
@@ -126,8 +128,25 @@ export async function hqTemplateRef(node: RollupNode): Promise<string> {
   return std ? `std:${std.id}:${std.version}` : 'none';
 }
 
+const projectFormCache = new Map<string, boolean>();
+
+/** RH-120 — 본부 양식이 연구 본부 양식(과제 표)인가 — [다듬기]를 그릴지. 양식 판(id·판·해시)이 같으면 같은 답 */
+export async function hqIsProjectForm(node: RollupNode): Promise<boolean> {
+  const ref = await hqTemplateRef(node);
+  const hit = projectFormCache.get(ref);
+  if (hit !== undefined) return hit;
+  let yes = false;
+  try {
+    yes = isProjectForm(await templateFor(node));
+  } catch {
+    yes = false;
+  }
+  projectFormCache.set(ref, yes);
+  return yes;
+}
+
 /** 양식 — 본부의 양식. 없으면 기여 단위의 것, 그다음 전사 표준 */
-async function templateFor(node: RollupNode): Promise<Buffer> {
+export async function templateFor(node: RollupNode): Promise<Buffer> {
   for (const id of templateOrder(node)) {
     const t = await prisma.template.findFirst({ where: { divisionId: id, isActive: true } });
     if (t) {
@@ -148,7 +167,9 @@ async function templateFor(node: RollupNode): Promise<Buffer> {
  * **섹션 제목은 넣지 않는다** — 넣으면 총괄이 섹션 제목을 고칠 때마다 모든 본부본이 다시 만들어지고 본부장 승인이 풀린다(내용은 그대로인데).
  * 같은 이유로 본부 메모(RU-21)도 넣지 않는다. 최종본은 언제나 지금 제목으로 만들어진다(전사는 본부본을 다시 읽지 않는다).
  */
-export async function hqInputKey(node: RollupNode, inputs: readonly HqInput[]): Promise<string> {
+export async function hqInputKey(node: RollupNode, inputs: readonly HqInput[], slot: Pick<WeekSlot, 'id'>): Promise<string> {
+  // RH-124 — 다듬기(저장값 · 본부 규칙 판)는 있을 때만 넣는다. 없는 본부의 열쇠는 다듬기 전과 같다 — 배포만으로 본부본이 다시 만들어져 승인이 풀리지 않게
+  const curation = await curationRef(node.node, slot);
   return sha256(
     Buffer.from(
       JSON.stringify({
@@ -157,6 +178,7 @@ export async function hqInputKey(node: RollupNode, inputs: readonly HqInput[]): 
         units: inputs.map((i) => [i.division.id, i.report?.id ?? null]),
         pageBreak: node.node.rollupPageBreak,
         template: await hqTemplateRef(node),
+        ...(curation ? { curation } : {}),
       }),
     ),
   );
@@ -211,7 +233,9 @@ export async function composeHq(node: RollupNode, slot: WeekSlot, inputs: readon
           outcomes.push({ title: p.title, status: 'failed', dropped: [], error: (e as Error).message });
         }
       }
-      out = { bytes: fillHqForm(template, combineHqDocs(units, node.node.nameKo), { unitEachTask: unitEachTask(node.node.nameKo) }), outcomes, warnings: [] }; // RH-99
+      // RH-124 — 본부 다듬기(규칙 · 본부 담당이 뺀 항목). 규칙도 다듬기도 없으면 합치기 그대로
+      const data = curateHq(units, curateContext(node.node.nameKo, slot), await loadCuration(node.node.id, slot.id));
+      out = { bytes: fillHqForm(template, data, { unitEachTask: unitEachTask(node.node.nameKo) }), outcomes, warnings: [] }; // RH-99
     } else {
       // RU-10 — 사본 하나 = 섹션 하나. 원래 꼴 그대로(RU-62), 정규화(RU-63)도 전사와 같다 — 본부장이 본 것이 최종본에 들어간다
       out = composeOrgDocument(
@@ -363,6 +387,7 @@ export async function causeLabel(cause: string | null): Promise<string> {
       upload: '섹션 파일이 바뀌어서',
       // 「다시 시도」만 쓰면 성공한 상태 줄에 버튼 이름이 남아 아직 누를 것이 있는 것처럼 읽힌다 — 다른 사건처럼 「~해서」
       retry: '다시 시도해서',
+      curate: '본부 담당이 다듬어서',
       rollup_enabled: '3단계를 켜서',
     } as Record<string, string>
   )[kind] ?? '';
@@ -492,7 +517,7 @@ export async function hqBoard(node: RollupNode, slot: WeekSlot): Promise<HqBoard
     }),
     currentReport(node.node.id, slot.id, 'hq'),
     prisma.division.findUnique({ where: { id: node.node.id }, select: { rollupNote: true } }),
-    hqInputKey(node, inputs),
+    hqInputKey(node, inputs, slot),
     // RU-93 — 꺼진 본부의 본부장은 없는 것과 같다(handoff.ts `hasHead`)
     prisma.user.count({ where: { divisionId: node.node.id, isActive: true, divisionRole: 'head', division: { isActive: true } } }),
   ]);

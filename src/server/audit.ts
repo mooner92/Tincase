@@ -45,7 +45,9 @@ export type AuditAction =
   | 'roster_move'
   | 'roster_unpin'
   /** ADR-0022 D2 · TACP-21 — 운영자가 본부 담당을 지정·해제했다 */
-  | 'hq_desk';
+  | 'hq_desk'
+  // RH-120 — 본부 다듬기 저장(본부 담당 · 본부장). detail: 뺀 항목 수 · 사람이 바꾼 수 · 고친 자문회의 줄
+  | 'hq_curate';
 
 export async function audit(
   actor: string,

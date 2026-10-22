@@ -595,6 +595,12 @@ model User {
 | **본부 담당 지정** | `HqDesk { userId, divisionId(본부) }` | 실 소속 사람이 그 본부의 **담당**을 겸한다 — 본부 화면 담당 권한 · 본부 비상구 · 산하 사본·본부본 읽기 · 본부 알림(TACP-21). 승인(본부장)은 생기지 않는다. 한 사람에 하나(화면) · 운영자만 · 감사 `hq_desk`. 지정된 사람이 꺼지거나 소속이 바뀌면 인원 최신화가 알린다(RS-18) |
 | **보낼 함** | `NotifyOutbox { recvId, subject, contents, url, kind, sentAt, attempts, batchId }` | 알림 묶기(NT-63) — 같은 사람에게 창(`NOTIFY_BATCH_MS`) 안에 둘 이상이면 한 통. 설정 링크·비밀번호 찾기는 지나지 않는다 |
 
+### DM-28 — 본부 다듬기 `HqCuration` (2026-10-22 · ADR-0024 · RH-120) — 더하기만
+
+| 무엇 | 저장 | 뜻 |
+|---|---|---|
+| **본부 다듬기** | `HqCuration { divisionId(본부), weekSlotId, decisions, consult, updatedBy, updatedAt }` — 본부 × 주차에 하나 | 본부본에 넣을 항목 고르기. `decisions`는 **사람이 규칙 답과 다르게 정한 항목**(항목 열쇠 → 넣음/뺌)만, `consult`는 고친 자문회의 줄만. 남는 것이 없으면 행이 없다(= 규칙대로). 본부본 입력 열쇠에 들어간다(RH-124) |
+
 ### DM-20 — 인원 최신화는 **계획하고 승인한다** (RS-01~18)
 
 ERP에 API가 없어 주 1회 운영자가 「부서별 인원 현황」 엑셀을 올린다.

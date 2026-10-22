@@ -86,6 +86,8 @@ model Division {
   rollupRuns        RollupRun[]
   /// ADR-0022 D2 — 이 본부를 맡은 본부 담당(소속과 따로 지정한 사람) — 관계 필드만
   hqDesks         HqDesk[]
+  /// RH-120 — 본부 다듬기(본부 × 주차)
+  hqCurations     HqCuration[]
 }
 
 model User {
@@ -188,6 +190,7 @@ model WeekSlot {
   slotOpenings SlotOpening[]
   reportSubmissions ReportSubmission[]
   rollupRuns        RollupRun[]
+  hqCurations       HqCuration[]
 
   @@index([opensAt])
 }
@@ -626,4 +629,25 @@ model NotifyOutbox {
   batchId   String?
 
   @@index([sentAt, recvId])
+}
+
+/// RH-120~124 · ADR-0024 — 본부 다듬기. 본부 담당이 본부본에서 **뺀(또는 다시 넣은) 항목**과 고친 자문회의 줄만 남긴다.
+/// 본부 × 주차에 하나. 항목은 내용으로 만든 열쇠라 산하 사본이 다시 와도 같은 항목이면 같은 결정이 붙는다(새 항목은 규칙의 답)
+model HqCuration {
+  id         String   @id @default(cuid())
+  /// 본부
+  divisionId String
+  weekSlotId String
+  /// {열쇠: true(넣음) | false(뺌)} — 사람이 규칙 답과 다르게 정한 것만 (JSON)
+  decisions  String   @default("{}")
+  /// {자문회의 줄 이름: [네 값]} — 사람이 고친 줄만 (JSON)
+  consult    String   @default("{}")
+  /// User.email
+  updatedBy  String
+  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @default(now())
+  division   Division @relation(fields: [divisionId], references: [id])
+  weekSlot   WeekSlot @relation(fields: [weekSlotId], references: [id])
+
+  @@unique([divisionId, weekSlotId])
 }

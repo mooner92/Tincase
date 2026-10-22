@@ -10,7 +10,7 @@ import { getTour } from '@/server/tour';
 import { OrderList, RunCard } from '@/components/RollupDesk';
 import { WeekPicker } from '@/components/WeekPicker';
 import { HqApprovalCard } from '@/components/HqApprovalCard';
-import { hqBoard } from '@/server/rollup/run';
+import { hqBoard, hqIsProjectForm } from '@/server/rollup/run';
 import { readRepairHq } from '@/server/rollup/auto';
 import { escapeClosesAt } from '@/server/rollup/handoff';
 import { rollupSlot } from '@/server/rollup/slot';
@@ -40,7 +40,14 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
   const slot = await rollupSlot(sp.isoKey ?? null);
   // RU-72 — 그리기 **전에** 맞춘다(읽기 수리). 스케줄러가 꺼진 테스트 서버에서도 본부장은 연 순간 지금까지 온 것이 이어 붙은 판을 본다
   await readRepairHq(node, slot);
-  const [board, weeks, nav, stages, times] = await Promise.all([hqBoard(node, slot), weekOptions(slot), rollupNav(scope), stageLabels(slot), stageTimes(slot)]);
+  const [board, weeks, nav, stages, times, projectForm] = await Promise.all([
+    hqBoard(node, slot),
+    weekOptions(slot),
+    rollupNav(scope),
+    stageLabels(slot),
+    stageTimes(slot),
+    hqIsProjectForm(node),
+  ]);
   const sent = board.units.filter((u) => u.report).length;
   const missing = board.units.filter((u) => !u.report).map((u) => u.division.nameKo);
   const baseHref = canWrite && !desk ? '/hq' : `/hq?node=${encodeURIComponent(node.node.slug)}`;
@@ -112,6 +119,7 @@ export default async function HqPage({ searchParams }: { searchParams: Promise<{
             canRetry={canWrite}
             isoKey={slot.isoKey}
             node={desk ? node.node.slug : undefined}
+            curate={canWrite && projectForm}
           >
             {current && (
               <HqApprovalCard

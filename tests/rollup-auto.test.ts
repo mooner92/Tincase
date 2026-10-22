@@ -824,7 +824,7 @@ describe('RU-72·83 전사 · 읽기 수리 · 죽은 조립', () => {
     await merged('u2', '실둘 죽은 조립');
     await syncUnit(divId.u2, await slot(), opts);
     const nd = await node('hq');
-    const key = await hqInputKey(nd, await hqInputs(nd, await slot()));
+    const key = await hqInputKey(nd, await hqInputs(nd, await slot()), await slot());
     const dead = await prisma.rollupRun.create({
       data: { level: 'hq', divisionId: divId.hq, weekSlotId: (await slot()).id, status: 'running', inputIds: '[]', createdBy: 'system', inputKey: key, startedAt: new Date(Date.now() - 11 * 60_000) },
     });

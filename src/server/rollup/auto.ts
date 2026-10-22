@@ -80,7 +80,7 @@ async function buildHq(nodeId: string, slot: WeekSlot, opts: SyncOptions): Promi
     await failStaleRunning('hq', nodeId, slot);
     const inputs = await hqInputs(node, slot);
     if (inputs.some((i) => i.report)) {
-      const key = await hqInputKey(node, inputs);
+      const key = await hqInputKey(node, inputs, slot);
       const ok = await lastSucceeded('hq', nodeId, slot);
       if (ok?.inputKey !== key && (opts.force || !(await inBackoff('hq', nodeId, slot, key)))) {
         built = await composeHq(node, slot, inputs, key, opts);
