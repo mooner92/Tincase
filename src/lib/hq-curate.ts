@@ -25,16 +25,18 @@ export interface CurateRules {
 
 // 2026-10-22 국토환경연구본부 본부 담당이 보낸 취합 규칙(§20). 9월 4주 · 10월 3주 제출본으로 대조함
 const LAND_RULES: CurateRules = {
-  version: 'land-2026-10-22',
+  version: 'land-2026-10-26',
   source: '국토환경연구본부 취합 규칙(2026-10-22)',
-  instituteTypes: ['기본', '수시', '일반', '연적금'],
+  // 2026-08 월간본의 본부 안내 「출연금 과제 착수/중간/최종 자문회의는 실적·계획에 쓰지 말고 개최건수로만」 — 연구원 사업 = 출연금 과제.
+  // 제출본 11주에 나온 유형: 수탁 · 정부지원 · 역무대행 · 연적금(연구개발적립금) · 기본 · 수시 · 일반
+  instituteTypes: ['기본', '수시', '일반', '연적금', '연구개발적립금'],
   summary: [
-    '실적은 이번 주 월~일, 계획은 다음 주 월~일 — 기간 밖은 빼요',
-    '연구원 사업(기본·수시·일반·연적금)의 착수·중간·최종 보고회는 목록에 적지 않고 자문회의로만 세요',
+    '실적은 이번 주 월~일, 계획은 다음 주 월~일(월간은 이번 달 · 다음 달) — 기간 밖은 빼요',
+    '출연금 과제(기본·수시·일반·연적금)의 착수·중간·최종 보고회·자문회의는 목록에 적지 않고 자문회의로만 세요',
     '수탁·R&D 과제는 보고회까지 목록에 적어요',
     '자문회의 건수: 실이 적은 값이 먼저 · 비어 있으면 실적 항목으로 세요(출장은 세지 않아요)',
     '특이사항: 이번 주 실적 중 기관평가에 들어갈 것만 — 다음 주 일은 빼요',
-    '넣는 것: 국회·관계부처·위원회 회의, 포럼·협의체 발제·토론, 학회 특별세션',
+    '넣는 것: 국회·관계부처·위원회 회의, 포럼·협의체 발제·발표·토론, 학회 특별세션',
     '빼는 것: 강의·교육, 연수, 시연 참관, 내부 논의, 개인 사업 자문 · 애매하면 기본은 빼요',
   ],
 };
@@ -88,6 +90,28 @@ export function dateSpan(text: string, monday: number): [number, number] | null 
 
 const overlaps = (s: [number, number], from: number, to: number) => s[0] <= to && s[1] >= from;
 
+/** 그 주 — 월요일(일 번호)과 월간 주인가(WS-14 — 그 달 말일이 든 주) */
+export interface CurateWeek {
+  monday: number;
+  monthly?: boolean;
+}
+
+/**
+ * RH-121 — 기간. 주간: 실적 이번 주 월~일 · 계획 다음 주 월~일 · 특이사항 이번 주.
+ * 월간(2026-08·09 월간본 실측 — 실적은 그 달 일과 이번 주, 계획은 다음 달 일): 실적·특이사항 그 달 1일~이번 주 일요일 · 계획 다음 달 1일~말일
+ */
+export function periodsOf(week: CurateWeek): Record<'results' | 'plans' | 'notes', [number, number]> {
+  const { monday } = week;
+  if (!week.monthly) return { results: [monday, monday + 6], plans: [monday + 7, monday + 13], notes: [monday, monday + 6] };
+  const d = new Date(monday * DAY);
+  const y = d.getUTCFullYear();
+  const m = d.getUTCMonth() + 1;
+  const first = dayOf(y, m, 1);
+  const nextFirst = dayOf(y, m + 1, 1);
+  const nextLast = dayOf(y, m + 2, 1) - 1;
+  return { results: [first, monday + 6], plans: [nextFirst, nextLast], notes: [first, monday + 6] };
+}
+
 // ── 판정 ────────────────────────────────────────────────
 
 const MILESTONE = (c: string) => (/착수|중간|최종/.test(c) && /보고|자문/.test(c)) || /보고회/.test(c);
@@ -117,7 +141,8 @@ export function consultColOf(rules: CurateRules, type: string, content: string):
 const NOTE_OUT: [RegExp, string][] = [
   [/강의|강연|교육/, '강의·교육은'],
   [/연수/, '연수는'],
-  [/시연|참관/, '시연 참관은'],
+  // 「도시연구단」의 「시연」을 잡지 않게(2026-10-26 11주 대조에서 발견)
+  [/시연(?!구)|참관/, '시연 참관은'],
   [/내부(논의|회의|검토|세미나|워크숍)|사전논의|준비회의|점검회의/, '내부 논의는'],
   [/(개인|개별)(사업)?자문/, '개인 사업 자문은'],
 ];
@@ -126,7 +151,7 @@ const NOTE_IN: [RegExp, string][] = [
   [/관계부처|관계기관|기후부|환경부|국토부|국토교통부|해수부|해양수산부|농식품부|농림|산림청|국무조정실|기재부|기획재정부|행안부|산업부|과기정통부|대통령|총리/, '관계부처'],
   [/위원회/, '위원회'],
   [/협의체|협의회/, '협의체'],
-  [/발제|토론|패널/, '발제·토론'],
+  [/발제|발표|토론|패널/, '발제·토론'],
   [/포럼/, '포럼'],
   [/특별세션|학회|학술대회|심포지엄|컨퍼런스|콘퍼런스/, '학회'],
 ];
@@ -138,22 +163,26 @@ export interface Verdict {
 }
 
 /** RH-121 — 목록(실적·계획) 항목 하나의 규칙 답 */
-export function judgeListItem(rules: CurateRules, section: 'results' | 'plans', type: string, item: HqItem, monday: number): Verdict {
-  const span = dateSpan(item.date, monday);
+export function judgeListItem(rules: CurateRules, section: 'results' | 'plans', type: string, item: HqItem, week: CurateWeek): Verdict {
+  const span = dateSpan(item.date, week.monday);
   if (span) {
-    const [from, to] = section === 'results' ? [monday, monday + 6] : [monday + 7, monday + 13];
-    if (!overlaps(span, from, to)) return { suggested: false, reason: section === 'results' ? '기간 밖 — 실적은 이번 주 월~일' : '기간 밖 — 계획은 다음 주 월~일' };
+    const [from, to] = periodsOf(week)[section];
+    if (!overlaps(span, from, to)) {
+      const when = section === 'results' ? (week.monthly ? '실적은 이번 달' : '실적은 이번 주 월~일') : week.monthly ? '계획은 다음 달' : '계획은 다음 주 월~일';
+      return { suggested: false, reason: `기간 밖 — ${when}` };
+    }
   }
-  if (isInstitute(rules, type) && MILESTONE(norm(item.content))) return { suggested: false, reason: '연구원 사업 보고회 — 자문회의 건수로만' };
+  if (isInstitute(rules, type) && MILESTONE(norm(item.content))) return { suggested: false, reason: '출연금 과제 보고회 — 자문회의 건수로만' };
   return { suggested: true };
 }
 
 /** RH-121 — 특이사항 하나의 규칙 답. 기간 → 빼는 말 → 넣는 말 → 애매하면 뺌 */
-export function judgeNote(rules: CurateRules, item: HqItem, monday: number): Verdict {
+export function judgeNote(rules: CurateRules, item: HqItem, week: CurateWeek): Verdict {
   void rules;
-  const span = dateSpan(item.date, monday);
-  if (span && span[0] > monday + 6) return { suggested: false, reason: '다음 주 일 — 특이사항은 이번 주 실적만' };
-  if (span && span[1] < monday) return { suggested: false, reason: '지난주 일' };
+  const span = dateSpan(item.date, week.monday);
+  const [from, to] = periodsOf(week).notes;
+  if (span && span[0] > to) return { suggested: false, reason: week.monthly ? '다음 달 일 — 특이사항은 이번 달 실적만' : '다음 주 일 — 특이사항은 이번 주 실적만' };
+  if (span && span[1] < from) return { suggested: false, reason: week.monthly ? '지난달 일' : '지난주 일' };
   const c = norm(`${item.content} ${item.place}`);
   for (const [re, why] of NOTE_OUT) if (re.test(c)) return { suggested: false, reason: `${why} 빼요` };
   for (const [re, why] of NOTE_IN) if (re.test(c)) return { suggested: true, reason: why };
@@ -217,19 +246,22 @@ export interface CurateContext {
   hqNameKo: string;
   /** 그 주 월요일(KST) 일 번호 — `mondayDay(slot.opensAt)` */
   monday: number;
+  /** 월간 주(WS-14) — 기간이 달 단위가 된다 */
+  monthly?: boolean;
   rules: CurateRules | null;
 }
 
 const filled = (vals: readonly string[] | undefined | null): vals is readonly string[] => !!vals && vals.some((v) => v.trim() !== '' && v.trim() !== '-');
 const shown = (n: number) => (n > 0 ? String(n) : '-');
 
-/** RH-122 — 실 하나의 실적으로 자문회의 네 칸을 센다(이번 주 안의 항목 · 날짜 없는 항목) */
-export function countConsult(rules: CurateRules, data: Pick<HqFormData, 'results'>, monday: number): number[] {
+/** RH-122 — 실 하나의 실적으로 자문회의 네 칸을 센다(실적 기간 안의 항목 · 날짜 없는 항목) */
+export function countConsult(rules: CurateRules, data: Pick<HqFormData, 'results'>, week: CurateWeek): number[] {
   const out = [0, 0, 0, 0];
+  const [from, to] = periodsOf(week).results;
   for (const t of data.results) {
     for (const it of t.items) {
-      const span = dateSpan(it.date, monday);
-      if (span && !overlaps(span, monday, monday + 6)) continue;
+      const span = dateSpan(it.date, week.monday);
+      if (span && !overlaps(span, from, to)) continue;
       const col = consultColOf(rules, t.type, it.content);
       if (col !== null) out[col] += 1;
     }
@@ -248,7 +280,8 @@ function reportedRow(units: readonly UnitDoc[], label: string, hqNameKo: string)
 
 /** 다듬기 화면의 목록 — 사본 순서(본부가 정한 순서) 그대로 */
 export function curateView(units: readonly UnitDoc[], ctx: CurateContext, saved: SavedCuration | null): { items: CurateItem[]; consult: CurateConsult[] } {
-  const { rules, monday } = ctx;
+  const { rules } = ctx;
+  const week: CurateWeek = { monday: ctx.monday, monthly: ctx.monthly };
   const items: CurateItem[] = [];
   const seen = new Map<string, number>();
   const keyed = (k: string) => {
@@ -274,11 +307,11 @@ export function curateView(units: readonly UnitDoc[], ctx: CurateContext, saved:
   for (const u of units) {
     for (const section of ['results', 'plans'] as const) {
       for (const t of u.data[section]) {
-        for (const it of t.items) push(section, u.nameKo, t, it, rules ? judgeListItem(rules, section, t.type, it, monday) : { suggested: true });
+        for (const it of t.items) push(section, u.nameKo, t, it, rules ? judgeListItem(rules, section, t.type, it, week) : { suggested: true });
       }
     }
   }
-  for (const u of units) for (const it of u.data.notes) push('notes', u.nameKo, null, it, rules ? judgeNote(rules, it, monday) : { suggested: true });
+  for (const u of units) for (const it of u.data.notes) push('notes', u.nameKo, null, it, rules ? judgeNote(rules, it, week) : { suggested: true });
 
   const labels: string[] = [];
   const add = (l: string) => {
@@ -289,7 +322,7 @@ export function curateView(units: readonly UnitDoc[], ctx: CurateContext, saved:
   const consult = labels.map((label): CurateConsult => {
     const reported = reportedRow(units, label, ctx.hqNameKo);
     const doc = units.find((u) => norm(u.nameKo) === norm(label));
-    const counted = rules && doc ? countConsult(rules, doc.data, monday) : null;
+    const counted = rules && doc ? countConsult(rules, doc.data, week) : null;
     const override = saved?.consult[label] ?? null;
     const values = override ?? reported ?? (counted ? counted.map(shown) : ['-', '-', '-', '-']);
     return { label, copy: !!doc, reported, counted, override, values };

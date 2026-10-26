@@ -3,6 +3,7 @@
 import type { WeekSlot } from '@prisma/client';
 import { prisma } from '../db';
 import { curateRulesOf, curationFingerprint, mondayDay, type CurateContext, type SavedCuration } from '@/lib/hq-curate';
+import { isMonthlyWeek } from '@/lib/week';
 
 function parseJson<T>(s: string | null | undefined, fallback: T): T {
   try {
@@ -29,7 +30,7 @@ export async function loadCuration(divisionId: string, weekSlotId: string): Prom
 }
 
 export function curateContext(hqNameKo: string, slot: Pick<WeekSlot, 'opensAt'>): CurateContext {
-  return { hqNameKo, monday: mondayDay(slot.opensAt), rules: curateRulesOf(hqNameKo) };
+  return { hqNameKo, monday: mondayDay(slot.opensAt), monthly: isMonthlyWeek(slot.opensAt), rules: curateRulesOf(hqNameKo) };
 }
 
 /** RH-124 — 본부본 입력 열쇠의 몫. 규칙도 다듬기도 없으면 null — 그때는 열쇠가 다듬기 전과 같다(다른 본부의 판이 다시 만들어지지 않게) */

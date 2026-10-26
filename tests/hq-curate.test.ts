@@ -17,6 +17,7 @@ import {
   judgeListItem,
   judgeNote,
   mondayDay,
+  periodsOf,
   type CurateContext,
 } from '@/lib/hq-curate';
 import { estimatePages, linesOf, pageLimit } from '@/lib/hq-pages';
@@ -26,6 +27,7 @@ const RULES = curateRulesOf(HQ)!;
 // 2026-10-12(월) KST 00:00 — 슬롯의 opensAt은 그 순간(UTC 전날 15:00)
 const MON = mondayDay(new Date('2026-10-11T15:00:00Z'));
 const ctx: CurateContext = { hqNameKo: HQ, monday: MON, rules: RULES };
+const W = { monday: MON };
 const day = (m: number, d: number) => Math.round(Date.UTC(2026, m - 1, d) / 86_400_000);
 
 const it_ = (content: string, date = '10/14', place = '서울역', people = '가나다 외'): HqItem => ({ content, date, place, people });
@@ -55,20 +57,34 @@ describe('RH-121 — 일자 읽기', () => {
 
 describe('RH-121 — 목록 미리 고르기', () => {
   it('[RH-T121] 기간 밖 · 연구원 사업 보고회는 뺌 · 수탁 보고회 · 연구원 사업의 다른 일은 넣음', () => {
-    expect(judgeListItem(RULES, 'results', '수탁', it_('중간보고회', '10/14'), MON)).toEqual({ suggested: true });
-    expect(judgeListItem(RULES, 'results', '기본', it_('착수보고회', '10/14'), MON)).toMatchObject({ suggested: false, reason: expect.stringContaining('연구원 사업') });
-    expect(judgeListItem(RULES, 'results', '일반사업', it_('최종 자문회의', '10/14'), MON).suggested).toBe(false);
+    expect(judgeListItem(RULES, 'results', '수탁', it_('중간보고회', '10/14'), W)).toEqual({ suggested: true });
+    expect(judgeListItem(RULES, 'results', '기본', it_('착수보고회', '10/14'), W)).toMatchObject({ suggested: false, reason: expect.stringContaining('출연금 과제') });
+    expect(judgeListItem(RULES, 'results', '일반사업', it_('최종 자문회의', '10/14'), W).suggested).toBe(false);
     // 10월 3주 제출본의 모양 — 기본 과제의 정책실무협의회 · 전문가 포럼은 목록에 있다
-    expect(judgeListItem(RULES, 'results', '기본', it_('정책실무협의회(가 부처)', '10/12'), MON).suggested).toBe(true);
-    expect(judgeListItem(RULES, 'results', '기본', it_('제9차 전문가 포럼 개최', '10/13'), MON).suggested).toBe(true);
+    expect(judgeListItem(RULES, 'results', '기본', it_('정책실무협의회(가 부처)', '10/12'), W).suggested).toBe(true);
+    expect(judgeListItem(RULES, 'results', '기본', it_('제9차 전문가 포럼 개최', '10/13'), W).suggested).toBe(true);
     // 기간 — 실적은 이번 주 월~일, 계획은 다음 주 월~일, 겹치면 넣음
-    expect(judgeListItem(RULES, 'results', '수탁', it_('현장 회의', '10/9'), MON)).toMatchObject({ suggested: false, reason: expect.stringContaining('기간 밖') });
-    expect(judgeListItem(RULES, 'results', '수탁', it_('현장 회의', '10/18'), MON).suggested).toBe(true);
-    expect(judgeListItem(RULES, 'plans', '수탁', it_('현장 조사', '10/10-10/19'), MON).suggested).toBe(true);
-    expect(judgeListItem(RULES, 'plans', '정부지원', it_('국외출장: 국제회의 참석', '10/17~10/26'), MON).suggested).toBe(true);
-    expect(judgeListItem(RULES, 'plans', '수탁', it_('워크숍', '10/16'), MON).suggested).toBe(false);
-    expect(judgeListItem(RULES, 'plans', '수탁', it_('워크숍', '11/3'), MON).suggested).toBe(false);
-    expect(judgeListItem(RULES, 'plans', '수탁', it_('워크숍', '미정'), MON).suggested).toBe(true);
+    expect(judgeListItem(RULES, 'results', '수탁', it_('현장 회의', '10/9'), W)).toMatchObject({ suggested: false, reason: expect.stringContaining('기간 밖') });
+    expect(judgeListItem(RULES, 'results', '수탁', it_('현장 회의', '10/18'), W).suggested).toBe(true);
+    expect(judgeListItem(RULES, 'plans', '수탁', it_('현장 조사', '10/10-10/19'), W).suggested).toBe(true);
+    expect(judgeListItem(RULES, 'plans', '정부지원', it_('국외출장: 국제회의 참석', '10/17~10/26'), W).suggested).toBe(true);
+    expect(judgeListItem(RULES, 'plans', '수탁', it_('워크숍', '10/16'), W).suggested).toBe(false);
+    expect(judgeListItem(RULES, 'plans', '수탁', it_('워크숍', '11/3'), W).suggested).toBe(false);
+    expect(judgeListItem(RULES, 'plans', '수탁', it_('워크숍', '미정'), W).suggested).toBe(true);
+  });
+
+  it('[RH-T121] 월간 주 — 실적은 그 달 1일~이번 주, 계획은 다음 달 (2026-08·09 월간본 모양)', () => {
+    const aug = { monday: Math.round(Date.UTC(2026, 7, 31) / 86_400_000), monthly: true }; // 8/31(월) — 8월 말일이 든 주
+    expect(periodsOf(aug)).toEqual({ results: [day(8, 1), day(9, 6)], plans: [day(9, 1), day(9, 30)], notes: [day(8, 1), day(9, 6)] });
+    expect(judgeListItem(RULES, 'results', '정부지원', it_('정부대표단 참석', '8/2~8/14'), aug).suggested).toBe(true);
+    expect(judgeListItem(RULES, 'results', '수탁', it_('현장 훈련', '9/1-9/4'), aug).suggested).toBe(true);
+    expect(judgeListItem(RULES, 'plans', '역무대행', it_('설명회 - 중부권역', '9/1'), aug).suggested).toBe(true);
+    expect(judgeListItem(RULES, 'plans', '수탁', it_('2차 포럼', '9/29'), aug).suggested).toBe(true);
+    expect(judgeListItem(RULES, 'results', '수탁', it_('포럼', '7/30'), aug)).toMatchObject({ suggested: false, reason: '기간 밖 — 실적은 이번 달' });
+    expect(judgeNote(RULES, it_('국회 포럼 토론', '8/13'), aug).suggested).toBe(true);
+    expect(judgeNote(RULES, it_('국회 포럼 토론', '9/8'), aug)).toMatchObject({ suggested: false, reason: expect.stringContaining('다음 달') });
+    // 연구원 사업(출연금 과제) — 연구개발적립금은 연적금의 긴 이름
+    expect(judgeListItem(RULES, 'plans', '연구개발적립금', it_('최종자문회의 개최', '9/14'), aug).suggested).toBe(false);
   });
 
   it('[RH-T121] 규칙이 없는 본부는 모두 넣음', () => {
@@ -82,21 +98,24 @@ describe('RH-121 — 목록 미리 고르기', () => {
 
 describe('RH-121 — 특이사항 미리 고르기', () => {
   it('[RH-T122] 다음 주 · 지난주 · 빼는 말 · 넣는 말 · 애매', () => {
-    expect(judgeNote(RULES, it_('관계기관 회의 참석', '10/21'), MON)).toMatchObject({ suggested: false, reason: expect.stringContaining('다음 주') });
-    expect(judgeNote(RULES, it_('협의체 발제', '10/5'), MON)).toMatchObject({ suggested: false, reason: '지난주 일' });
-    expect(judgeNote(RULES, it_('가상 기준 마련 협의체 발제', '10/13'), MON)).toMatchObject({ suggested: true, reason: '협의체' });
-    expect(judgeNote(RULES, it_('가상학회 특별세션 개최 및 발표', '10/16'), MON).suggested).toBe(true);
-    expect(judgeNote(RULES, it_('국회 토론회 발표', '10/15'), MON)).toMatchObject({ suggested: true, reason: '국회' });
-    expect(judgeNote(RULES, it_('기후부 정책 간담회', '10/15'), MON)).toMatchObject({ suggested: true, reason: '관계부처' });
-    expect(judgeNote(RULES, it_('대학 특강 강의', '10/15'), MON)).toMatchObject({ suggested: false, reason: '강의·교육은 빼요' });
-    expect(judgeNote(RULES, it_('신규 직원 연수', '10/15'), MON)).toMatchObject({ suggested: false, reason: '연수는 빼요' });
-    expect(judgeNote(RULES, it_('장비 시연 참관', '10/15'), MON).suggested).toBe(false);
-    expect(judgeNote(RULES, it_('본부 내부 논의', '10/15'), MON)).toMatchObject({ suggested: false, reason: '내부 논의는 빼요' });
-    expect(judgeNote(RULES, it_('타 기관 개별 사업 자문', '10/15'), MON).suggested).toBe(false);
+    expect(judgeNote(RULES, it_('관계기관 회의 참석', '10/21'), W)).toMatchObject({ suggested: false, reason: expect.stringContaining('다음 주') });
+    expect(judgeNote(RULES, it_('협의체 발제', '10/5'), W)).toMatchObject({ suggested: false, reason: '지난주 일' });
+    expect(judgeNote(RULES, it_('가상 기준 마련 협의체 발제', '10/13'), W)).toMatchObject({ suggested: true, reason: '협의체' });
+    expect(judgeNote(RULES, it_('가상학회 특별세션 개최 및 발표', '10/16'), W).suggested).toBe(true);
+    expect(judgeNote(RULES, it_('국회 토론회 발표', '10/15'), W)).toMatchObject({ suggested: true, reason: '국회' });
+    expect(judgeNote(RULES, it_('기후부 정책 간담회', '10/15'), W)).toMatchObject({ suggested: true, reason: '관계부처' });
+    expect(judgeNote(RULES, it_('대학 특강 강의', '10/15'), W)).toMatchObject({ suggested: false, reason: '강의·교육은 빼요' });
+    expect(judgeNote(RULES, it_('신규 직원 연수', '10/15'), W)).toMatchObject({ suggested: false, reason: '연수는 빼요' });
+    expect(judgeNote(RULES, it_('장비 시연 참관', '10/15'), W).suggested).toBe(false);
+    // 「도시연구단」은 시연이 아니다 — 애매(세미나)로 남는다
+    expect(judgeNote(RULES, it_('가상 탄소중립도시연구단 세미나', '10/15'), W).reason).toContain('애매');
+    expect(judgeNote(RULES, it_('기후대응 전환 발표 및 논의', '10/15'), W)).toMatchObject({ suggested: true, reason: '발제·토론' });
+    expect(judgeNote(RULES, it_('본부 내부 논의', '10/15'), W)).toMatchObject({ suggested: false, reason: '내부 논의는 빼요' });
+    expect(judgeNote(RULES, it_('타 기관 개별 사업 자문', '10/15'), W).suggested).toBe(false);
     // 빼는 말이 넣는 말보다 먼저 — 위원회 교육은 교육
-    expect(judgeNote(RULES, it_('위원회 위원 교육', '10/15'), MON).suggested).toBe(false);
-    expect(judgeNote(RULES, it_('본부 수요세미나 개최', '10/15'), MON)).toMatchObject({ suggested: false, reason: expect.stringContaining('애매') });
-    expect(judgeNote(RULES, it_('협의체 발제', ''), MON).suggested).toBe(true);
+    expect(judgeNote(RULES, it_('위원회 위원 교육', '10/15'), W).suggested).toBe(false);
+    expect(judgeNote(RULES, it_('본부 수요세미나 개최', '10/15'), W)).toMatchObject({ suggested: false, reason: expect.stringContaining('애매') });
+    expect(judgeNote(RULES, it_('협의체 발제', ''), W).suggested).toBe(true);
   });
 });
 
@@ -121,8 +140,8 @@ describe('RH-122 — 자문회의 세기', () => {
       task('자연실', '수탁', '가 연구', [it_('제8차 전문가 포럼 개최', '9/22')]),
       task('자연실', '기본', '나 연구', [it_('제9차 전문가 포럼 개최', '9/22'), it_('착수보고회', '9/14')]),
     ]);
-    expect(countConsult(RULES, nature, mon)).toEqual([0, 0, 2, 0]);
-    expect(countConsult(RULES, doc([task('국토실', '수탁', '다 연구', [it_('과제 실무자 회의', '9/21')])]), mon)).toEqual([0, 0, 0, 1]);
+    expect(countConsult(RULES, nature, { monday: mon })).toEqual([0, 0, 2, 0]);
+    expect(countConsult(RULES, doc([task('국토실', '수탁', '다 연구', [it_('과제 실무자 회의', '9/21')])]), { monday: mon })).toEqual([0, 0, 0, 1]);
   });
 
   it('[RH-T123] 줄 값 — 고친 값 → 실이 적은 값 → 본부 판의 그 실 줄 → 센 값(0은 「-」) · 뺀 항목도 센다', () => {
