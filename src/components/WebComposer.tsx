@@ -11,6 +11,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { parseClipboardTable } from '@/lib/paste-table';
 import { composerDraftKey, composerStart, dateHint, sameRows, submitBlocked, type ComposerFrom } from '@/lib/composer';
+import { isMonthlyWeek } from '@/lib/week';
 import { PreviousWeekPanel, type PrevRow } from './PreviousWeekPanel';
 
 export interface ComposerRow {
@@ -31,10 +32,11 @@ export interface ComposerRow {
 
 type Bucket = 'achievements' | 'plans' | 'notes';
 
-const SECTIONS: { key: Bucket; no: number; title: string; hint: string }[] = [
-  { key: 'achievements', no: 1, title: '주요 업무실적', hint: '이번 주에 한 일' },
-  { key: 'plans', no: 2, title: '주요 업무계획', hint: '다음 주에 할 일' },
-  { key: 'notes', no: 3, title: '기타 특이사항', hint: '휴가·출장 등 · 없으면 비워 두세요' },
+// WA-38a — 표 머리의 안내. 월간 주(WS-14)는 한 달치를 정리한다 — 「이번 달에 한 일」·「다음 달에 할 일」 (2026-10-28 AI홍보전략실 요청)
+const SECTIONS: { key: Bucket; no: number; title: string; hint: string; monthlyHint: string }[] = [
+  { key: 'achievements', no: 1, title: '주요 업무실적', hint: '이번 주에 한 일', monthlyHint: '이번 달에 한 일' },
+  { key: 'plans', no: 2, title: '주요 업무계획', hint: '다음 주에 할 일', monthlyHint: '다음 달에 할 일' },
+  { key: 'notes', no: 3, title: '기타 특이사항', hint: '휴가·출장 등 · 없으면 비워 두세요', monthlyHint: '휴가·출장 등 · 없으면 비워 두세요' },
 ];
 
 const blank = (): ComposerRow => ({ content: '', date: '', place: '', attendee: '', emphasis: false });
@@ -186,6 +188,8 @@ export function WebComposer({
     setStart(next);
     setData(next.data);
   };
+
+  const monthly = useMemo(() => isMonthlyWeek(new Date(weekStartMs)), [weekStartMs]);
 
   // WA-36a — 일자 예시는 이번 주 날짜에서. 계획 표는 다음 주 일이다
   const hints = useMemo(
@@ -369,7 +373,7 @@ export function WebComposer({
                 <h3 className="text-[15px] font-semibold text-ink">
                   {s.no}. {s.title}
                 </h3>
-                <span className="text-xs text-muted">{s.hint}</span>
+                <span className="text-xs text-muted">{monthly ? s.monthlyHint : s.hint}</span>
                 <span className="ml-auto text-xs font-medium text-muted tabular-nums">{filled[s.key]}줄</span>
               </div>
 

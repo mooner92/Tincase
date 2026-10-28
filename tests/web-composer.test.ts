@@ -79,6 +79,19 @@ describe('WA-37·38 — 낸 판으로 연 화면 · 제목 · 군더더기 (2026
     expect(render({ initial, initialVersion: 2 })).not.toContain('고침');
   });
 
+  it('[WA-T52a] 표 머리 안내 — 주간은 「이번 주에 한 일」·「다음 주에 할 일」, 월간 주는 「이번 달에 한 일」·「다음 달에 할 일」 (WA-38a)', () => {
+    const weekly = render();
+    expect(weekly).toContain('이번 주에 한 일');
+    expect(weekly).toContain('다음 주에 할 일');
+    expect(weekly).not.toContain('이번 달에 한 일');
+    // 2026-10-26(월) — 10월 말일이 든 주(월간)
+    const monthly = render({ title: '10월 월간 업무일지', isoKey: '2026-W44', weekStartMs: Date.UTC(2026, 9, 25, 15) });
+    expect(monthly).toContain('이번 달에 한 일');
+    expect(monthly).toContain('다음 달에 할 일');
+    expect(monthly).not.toContain('이번 주에 한 일');
+    expect(monthly).not.toContain('다음 주에 할 일');
+  });
+
   it('[WA-T52] 「지금 낸 vN에서 시작합니다」·작성 안내 접힘·[비우기]·[전체 지우기]·합계가 없다 (R5 · R15)', () => {
     const html = render({ initial, initialVersion: 2 });
     for (const gone of ['에서 시작합니다', '부서 작성 안내', '비우기', '전체 지우기', '실적 1 · 계획 1']) expect(html, gone).not.toContain(gone);
