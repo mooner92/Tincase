@@ -9,6 +9,7 @@ import { formatDays, parseDays, weekDayChips, type DayChip } from '@/lib/project
 import { unitAbbr } from '@/lib/unit-abbr';
 import type { ErpCandidate } from '@/lib/erp-report';
 import { ErpImport } from './ErpImport';
+import { isMonthlyWeek } from '@/lib/week';
 
 export interface PItem {
   content: string;
@@ -170,6 +171,7 @@ export function ProjectComposer({
   }, [data]);
   const total = counts.results + counts.plans + counts.notes;
 
+  const monthly = useMemo(() => isMonthlyWeek(new Date(weekStartMs)), [weekStartMs]);
   const chips = useMemo(
     () => ({ results: weekDayChips(weekStartMs), plans: weekDayChips(weekStartMs, 1), notes: weekDayChips(weekStartMs) }),
     [weekStartMs],
@@ -547,7 +549,8 @@ export function ProjectComposer({
                 <h3 id={`pc-h-${s}`} className="text-[16px] font-semibold text-ink">
                   {si + 1}. {s === 'results' ? '주요 업무실적' : '주요 업무계획'}
                 </h3>
-                <span className="text-xs text-muted">{s === 'results' ? '이번 주에 한 일' : '다음 주에 할 일'}</span>
+                {/* WA-38a — 월간 주는 「이번 달에 한 일」·「다음 달에 할 일」 */}
+                <span className="text-xs text-muted">{s === 'results' ? (monthly ? '이번 달에 한 일' : '이번 주에 한 일') : monthly ? '다음 달에 할 일' : '다음 주에 할 일'}</span>
                 <span className="ml-auto text-xs font-medium text-muted tabular-nums">항목 {counts[s]}개</span>
                 {data[s].length > 1 && (
                   <button onClick={() => setTasks(s, byDate)} title="과제를 첫 항목 일자 순으로" className="text-xs font-medium text-muted underline hover:text-ink">
