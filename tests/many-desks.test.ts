@@ -1,7 +1,7 @@
 // ADR-0022 — 한 사람이 여러 자리: 소속 고정(D1) · 본부 담당 지정(D2) · 알림 묶기(D4).
 // 운영자(2026-10-14): 「지속센터 담당은 기획경영본부 소속 · 기획조정실 담당이 기획경영본부 담당 겸임 — 두 번 알림 가지 않게」.
 // 메신저는 시험 안의 가짜 서버로 받는다. 사람·부서 이름은 지어낸 것이다.
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { execSync } from 'node:child_process';
 import { createServer, type Server } from 'node:http';
 import { mkdtempSync, rmSync } from 'node:fs';
@@ -274,6 +274,29 @@ describe('ADR-0022 D4 — 알림 묶기', () => {
       expect(one[0].contents).toContain('■ 2. 본부가 본부본이 준비됐어요');
       expect(got.filter((g) => g.subject === '[Tincase] 마감 1시간 전').map((g) => g.to).sort()).toEqual(['9102', '9103']);
       expect(await prisma.notifyOutbox.count({ where: { sentAt: null } })).toBe(0);
+    } finally {
+      delete process.env.NOTIFY_BATCH_MS;
+    }
+  });
+
+  it('[NT-T99] 보낼 함도 먼저 적고 보낸다 — 「보냄」을 적지 못하면(쓰기 실패) 한 통도 나가지 않고, 풀리면 한 번 나간다 (OPS-52)', async () => {
+    process.env.NOTIFY_BATCH_MS = '60000';
+    try {
+      const prisma = await db();
+      const { flushOutbox } = await import('@/server/notify/outbox');
+      take();
+      await prisma.notifyOutbox.deleteMany({});
+      await send('9501', '[Tincase] 마감이 내일이에요', 'deadline_1d');
+      const later = () => new Date(Date.now() + 61_000);
+      const spy = vi.spyOn(prisma.notifyOutbox, 'updateMany').mockRejectedValue(new Error('attempt to write a readonly database') as never);
+      for (let k = 0; k < 3; k++) await expect(flushOutbox(later())).rejects.toThrow(/readonly/);
+      expect(take()).toEqual([]); // 그날은 비울 때마다 다시 나갔을 것이다
+      spy.mockRestore();
+      const f = await flushOutbox(later());
+      expect([f.sent, f.failed]).toEqual([1, 0]);
+      expect(take().map((g) => g.to)).toEqual(['9501']);
+      expect((await flushOutbox(later())).sent).toBe(0);
+      expect(take()).toEqual([]);
     } finally {
       delete process.env.NOTIFY_BATCH_MS;
     }

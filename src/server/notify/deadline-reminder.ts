@@ -18,13 +18,14 @@
 // 회의 중이면 못 쓴다. 전날 알림은 «지금 쓰라»가 아니라 «오늘 중에 시간을 잡으라»다.
 //
 // 왜 각각 딱 한 번인가: 같은 말을 여러 번 하면 다음부터 안 읽는다.
-// 보낸 사실을 `NotifyLog`에 남기고, 같은 (부서, 주차, 종류)로는 다시 보내지 않는다.
+// `NotifyLog`에 (부서, 주차, 종류)를 **먼저 잡고** 보낸다(NT-12 · claim.ts) — 기록할 수 없으면 보내지 않는다.
 import { prisma } from '../db';
 import { logger } from '../logger';
 import { env } from '../env';
 import { messengerStatus } from '../messenger';
 // ADR-0022 D4 — 알림은 보낼 함을 지난다(같은 사람에게 짧은 사이 여럿이면 한 통). 창이 0이면 바로 보낸다
 import { sendOrQueue } from './outbox';
+import { claimNotice, settleNotice } from './claim';
 import { effectiveDeadline, ensureCurrentSlot } from '../worklog';
 import { dayBeforeAt, formatDeadlineKo, slotKind } from '@/lib/week';
 
@@ -233,7 +234,7 @@ export async function runDueReminders(now = new Date()): Promise<ReminderOutcome
     for (const stage of STAGES) {
       if (!due.has(stage.kind)) continue;
 
-      // NT-12 — 같은 (부서, 주차, 종류)로는 한 번만. 유니크 제약이 중복 발송을 구조적으로 막는다
+      // NT-12 — 같은 (부서, 주차, 종류)로는 한 번만. 여기서는 싸게 걸러 낼 뿐이고, 막는 것은 아래의 「먼저 잡기」다
       const already = await prisma.notifyLog.findFirst({
         where: { divisionId: division.id, weekSlotId: slot.id, kind: stage.kind },
       });
@@ -268,39 +269,39 @@ export async function runDueReminders(now = new Date()): Promise<ReminderOutcome
        * 한 통을 여러 명이 받아 남의 이름이 보인다 — 그건 알림이 아니라 명단 공개다.
        * 미제출자는 많아야 부서당 수십 명이라 요청 수는 문제되지 않는다.
        */
+      /*
+       * NT-12 (2026-11-25 개정) — **기록을 먼저 잡고, 잡은 쪽만 보낸다.** 예전에는 「보내고 → 기록」이었다. 2026-11-25 데이터 폴더의 주인이
+       * 바뀌어 DB 쓰기가 막히자 기록이 실패했고, 다음 주기가 「아직 안 보냄」을 보고 또 보냈다 — 「마감이 내일이에요」가 1분마다 8번(9명에게 72통).
+       * 이제 기록을 못 잡으면(쓰기 실패 — 던진다) 한 통도 나가지 않는다. 이미 누가 잡았으면(null) 건너뛴다.
+       * 아무에게도 못 보냈으면 잡은 줄을 놓는다(`settleNotice`) — 창 안의 다음 주기가 다시 시도한다(메신저가 잠깐 죽은 경우).
+       */
+      const claim = await claimNotice(division.id, slot.id, stage.kind, { targets: withNo.length });
+      if (!claim) continue;
+
       const sent: string[] = [];
       const blocked: string[] = [];
       const errors: string[] = [];
-      for (const u of withNo) {
-        const r = await sendOrQueue({
-          recvIds: [u.employeeNo!],
-          ...buildMessage(
-            stage.kind,
-            { name: u.name, employeeNo: u.employeeNo! },
-            slot.label,
-            monthly,
-            deadline,
-          ),
-          url,
-          kind: stage.kind, // NT-56 — 가짜 수신함이 종류를 안다
-        });
-        sent.push(...r.sent);
-        blocked.push(...r.blocked);
-        errors.push(...r.errors);
-      }
-
-      // 보낸 뒤에 기록한다 — 실패했는데 «보냈음»으로 남으면 다음 주기에 재시도할 길이 막힌다.
-      // 반대로 한 명이라도 나갔으면 기록한다: 재시도가 그 사람에게 두 번 가는 것보다 낫다
-      if (sent.length > 0) {
-        await prisma.notifyLog.create({
-          data: {
-            divisionId: division.id,
-            weekSlotId: slot.id,
-            kind: stage.kind,
-            recipients: JSON.stringify(sent),
-            detail: JSON.stringify({ blocked, errors, targets: withNo.length }),
-          },
-        });
+      try {
+        for (const u of withNo) {
+          const r = await sendOrQueue({
+            recvIds: [u.employeeNo!],
+            ...buildMessage(
+              stage.kind,
+              { name: u.name, employeeNo: u.employeeNo! },
+              slot.label,
+              monthly,
+              deadline,
+            ),
+            url,
+            kind: stage.kind, // NT-56 — 가짜 수신함이 종류를 안다
+          });
+          sent.push(...r.sent);
+          blocked.push(...r.blocked);
+          errors.push(...r.errors);
+        }
+      } finally {
+        // 보내다 던져도 나간 만큼은 적는다 — 한 명이라도 나갔으면 그 줄이 남아 다시 보내지 않는다
+        await settleNotice(claim, sent, { blocked, errors, targets: withNo.length });
       }
 
       out.push({

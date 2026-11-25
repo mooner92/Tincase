@@ -18,6 +18,7 @@ import { kickMergeQueue, recoverMergeJobs, setMergeQueueHooks } from './merge/qu
 import { warmModelIfDue } from './merge/warmup';
 import { mergePauseState } from './merge/pause';
 import { batchWindowMs, flushOutbox } from './notify/outbox';
+import { guardWrites } from './write-guard';
 
 /** 알림이 실패해도 병합은 돌아야 한다 — 본업이 남의 사정에 멈추지 않게 따로 감싼다 */
 export async function runReminders(now: Date = new Date()): Promise<void> {
@@ -76,7 +77,7 @@ export function installMergeQueueHooks(): void {
 /**
  * 한 주기. 돌려준 함수는 겹쳐 돌지 않는다(앞 주기가 아직이면 이번 주기는 건너뛴다). 던지지 않는다 — 스케줄러는 절대 죽지 않는다.
  *
- * 순서: 마감 전 알림 → 3단계 맞추기 → 3단계 알림 → (일시정지면 여기서 끝) → 데우기 → 줄 회수 → 판정 · 넣기 → 병합 안내 · 점검 요약.
+ * 순서: 쓰기 확인(OPS-52 — 막혔으면 여기서 끝) → 마감 전 알림 → 3단계 맞추기 → 3단계 알림 → (일시정지면 여기서 끝) → 데우기 → 줄 회수 → 판정 · 넣기 → 병합 안내 · 점검 요약.
  * 어느 것도 병합을 기다리지 않는다 — 그래서 매분 제때 돈다(HM-60a).
  */
 export function makeSchedulerTick(): () => Promise<void> {
@@ -88,6 +89,9 @@ export function makeSchedulerTick(): () => Promise<void> {
     if (running) return;
     running = true;
     try {
+      // OPS-52 — 쓸 수 없는 서버는 아무것도 판정하지 않는다(알림을 보내고 「보냈음」을 못 적으면 1분마다 다시 나간다). 운영자에게 한 번 알린다
+      if (await guardWrites()) return;
+
       await runReminders();
 
       /*

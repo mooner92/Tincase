@@ -101,29 +101,26 @@ async function notifyLeads(review: MergeReview, reviewer: string, slot: WeekSlot
     select: { name: true, employeeNo: true },
   });
   const url = env.MESSENGER_LINK_BASE ? `${env.MESSENGER_LINK_BASE}/${division.slug}/manage` : undefined;
+  // 한 주에 여러 번 승인할 수 있다 — 종류에 승인 id를 붙여 (부서·주차·종류) 유니크를 피한다.
+  // NT-12 (2026-11-25) — 기록을 먼저 잡고 보낸다. 같은 승인으로 두 번 불려도(다시 시도) 한 번만 나간다
+  const kind = `merge_approved:${review.id}`;
+  const claim = await claimNotice(division.id, slot.id, kind, { targets: leads.length });
+  if (!claim) return { sent: 0, targets: leads.length };
   const sent: string[] = [];
   const blocked: string[] = [];
-  for (const l of leads) {
-    const r = await sendOrQueue({
-      recvIds: [l.employeeNo!],
-      ...approvalMessage({ name: l.name, employeeNo: l.employeeNo! }, reviewer, slot, review.createdAt, changes, handedOffTo),
-      url,
-      kind: `merge_approved:${review.id}`, // 아래 NotifyLog와 같은 종류 (NT-56)
-    });
-    sent.push(...r.sent);
-    blocked.push(...r.blocked);
-  }
-  if (sent.length) {
-    // 한 주에 여러 번 승인할 수 있다 — 종류에 승인 id를 붙여 (부서·주차·종류) 유니크를 피한다
-    await prisma.notifyLog.create({
-      data: {
-        divisionId: division.id,
-        weekSlotId: slot.id,
-        kind: `merge_approved:${review.id}`,
-        recipients: JSON.stringify(sent),
-        detail: JSON.stringify({ blocked, targets: leads.length }),
-      },
-    });
+  try {
+    for (const l of leads) {
+      const r = await sendOrQueue({
+        recvIds: [l.employeeNo!],
+        ...approvalMessage({ name: l.name, employeeNo: l.employeeNo! }, reviewer, slot, review.createdAt, changes, handedOffTo),
+        url,
+        kind, // NotifyLog와 같은 종류 (NT-56)
+      });
+      sent.push(...r.sent);
+      blocked.push(...r.blocked);
+    }
+  } finally {
+    await settleNotice(claim, sent, { blocked, targets: leads.length });
   }
   return { sent: sent.length, targets: leads.length };
 }

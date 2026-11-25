@@ -1,5 +1,6 @@
 // GET /api/health — 무인증 (API-31~33). 민감정보 노출 금지.
 import { prisma } from '@/server/db';
+import { probeDbWrite } from '@/server/db-write';
 import { storageWritable } from '@/server/storage';
 import { templateStates } from '@/server/template-state';
 import { currentWeek, toKstIso } from '@/lib/week';
@@ -22,6 +23,18 @@ export async function GET() {
   } catch {
     checks.db = 'fail';
     ok = false;
+  }
+
+  /*
+   * OPS-52 — DB에 **쓸 수 있나**. 위 `SELECT 1`은 열어 둔 파일로 읽기만 한다 — 2026-11-25처럼 데이터 폴더의 주인이 바뀌면
+   * 읽기는 되고 쓰기만 실패한다. 종류만 싣는다(원문은 로그에 — API-33). 다른 쓰기가 도는 중(잠김)은 고장이 아니다
+   */
+  if (checks.db === 'ok') {
+    const w = await probeDbWrite();
+    checks.dbWrite = w.ok ? 'ok' : `fail: ${w.kind}`;
+    if (!w.ok) ok = false;
+  } else {
+    checks.dbWrite = 'fail';
   }
 
   checks.storage = (await storageWritable()) ? 'ok' : 'fail';

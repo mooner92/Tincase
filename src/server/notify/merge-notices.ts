@@ -34,6 +34,7 @@ import { mergeStaleBefore } from '../merge/budget';
 import type { MergeEdits } from '../merge/edits';
 import { toKstIso } from '@/lib/week';
 import type { Division, WeekSlot } from '@prisma/client';
+import { claimNotice, settleNotice } from './claim';
 
 /** 스케줄러가 5분 주기이므로 창은 그보다 넉넉해야 반드시 한 번 걸린다 */
 const WINDOW_MINUTES = 12;
@@ -346,23 +347,19 @@ async function deliver(
     logger.info({ division: divisionName, kind }, '[알림] 받을 사람이 없어 건너뜀 (사번·알림설정 확인)');
     return null;
   }
+  // NT-12 (2026-11-25) — 기록을 먼저 잡고 보낸다. 기록할 수 없으면(쓰기 실패) 보내지 않는다 — 「보내고 → 기록」은 쓰기가 막힌 날 매 주기 다시 나간다
+  const claim = await claimNotice(divisionId, weekSlotId, kind, { targets: people.length });
+  if (!claim) return null;
   const sent: string[] = [];
   const blocked: string[] = [];
-  for (const p of people) {
-    const r = await sendOrQueue({ recvIds: [p.employeeNo], ...composeNotice(kind, p, slotLabel, monthly, facts), url, kind });
-    sent.push(...r.sent);
-    blocked.push(...r.blocked);
-  }
-  if (sent.length > 0) {
-    await prisma.notifyLog.create({
-      data: {
-        divisionId,
-        weekSlotId,
-        kind,
-        recipients: JSON.stringify(sent),
-        detail: JSON.stringify({ status: facts.ok ? 'succeeded' : 'missing', blocked, targets: people.length }),
-      },
-    });
+  try {
+    for (const p of people) {
+      const r = await sendOrQueue({ recvIds: [p.employeeNo], ...composeNotice(kind, p, slotLabel, monthly, facts), url, kind });
+      sent.push(...r.sent);
+      blocked.push(...r.blocked);
+    }
+  } finally {
+    await settleNotice(claim, sent, { status: facts.ok ? 'succeeded' : 'missing', blocked, targets: people.length });
   }
   return {
     division: divisionName,
@@ -607,23 +604,19 @@ export async function noticeMergeHeld(opts: {
   const facts: MergeFacts = { ok: true, sources: 0, counts: null, flagged: [], stale: late, approval: null, hasHead: false, edits };
   const url = env.MESSENGER_LINK_BASE ? `${env.MESSENGER_LINK_BASE}/${division.slug}/manage` : undefined;
   const monthly = slotKind(slot) === 'monthly';
+  // NT-12 (2026-11-25) — 먼저 잡고 보낸다(위 `deliver`와 같다)
+  const claim = await claimNotice(division.id, slot.id, logKind, { late, targets: people.length });
+  if (!claim) return null;
   const sent: string[] = [];
   const blocked: string[] = [];
-  for (const p of people) {
-    const r = await sendOrQueue({ recvIds: [p.employeeNo], ...composeNotice('merge_held', p, slot.label, monthly, facts), url, kind: logKind });
-    sent.push(...r.sent);
-    blocked.push(...r.blocked);
-  }
-  if (sent.length > 0) {
-    await prisma.notifyLog.create({
-      data: {
-        divisionId: division.id,
-        weekSlotId: slot.id,
-        kind: logKind,
-        recipients: JSON.stringify(sent),
-        detail: JSON.stringify({ late, places: edits.places, by: edits.by, blocked, targets: people.length }),
-      },
-    });
+  try {
+    for (const p of people) {
+      const r = await sendOrQueue({ recvIds: [p.employeeNo], ...composeNotice('merge_held', p, slot.label, monthly, facts), url, kind: logKind });
+      sent.push(...r.sent);
+      blocked.push(...r.blocked);
+    }
+  } finally {
+    await settleNotice(claim, sent, { late, places: edits.places, by: edits.by, blocked, targets: people.length });
   }
   return {
     division: division.nameKo,

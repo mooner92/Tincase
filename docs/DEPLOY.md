@@ -78,6 +78,14 @@ sudo chmod -R g+rwX,o-rwx /data/worklog
 sudo find /data/worklog -type d -exec chmod g+s {} +
 ```
 
+**호스트에 컨테이너 계정을 만들어 둔다 (OPS-52f).** uid 10001이 호스트 `/etc/passwd`에 없으면 데이터 폴더가 「소유자 없는 파일」로 잡혀,
+보안 취약점 조치(소유자 없는 파일 → root)가 주인을 바꿀 수 있다 — 2026-11-25에 운영 DB 쓰기가 3시간 막힌 것이 그 모양이었다(OPS-52). 로그인할 수 없는 계정 하나면 된다:
+
+```bash
+sudo useradd --system --uid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin \
+  --comment "Tincase container app (owner of /data/worklog*)" tincase
+```
+
 ⚠ **`chown -R 10001:10001`은 쓰지 않는다** — mhchoi는 그룹 10001이 아니어서 `/data/worklog`에 들어가지 못하고,
 03:00 백업이 매일 Permission denied로 조용히 실패한다 (OPS-15).
 
@@ -403,6 +411,21 @@ sudo systemctl daemon-reload && sudo mount -a && findmnt /mnt/backup
 > ※ 이번 주는 기존 이메일 제출도 병행합니다. 문제 있으면 저에게 바로 연락 주세요.
 
 비밀번호는 **개인별로 따로** 전달하세요 (단체 메시지 금지).
+
+## 쓰기가 막혔을 때 (OPS-52)
+
+운영자 메신저에 「지금 저장이 안 돼요」가 오거나 health가 `dbWrite: fail` · `storage: fail`이면 데이터 폴더의 주인·권한이 틀어진 것이다.
+앱은 스케줄러를 멈추고(알림·병합 판정 없음) 기다린다 — **재기동은 필요 없다.** 주인을 되돌리면 다음 주기(1분)에 저절로 잇는다.
+
+```bash
+stat -c '%U:%G %a %n' /data/worklog /data/worklog/db /data/worklog/db/worklog.db   # 10001(tincase):mhchoi · 2770 · 660 이어야 한다
+# 틀어졌으면 — 컨테이너 안에서 root로 (호스트 sudo 비밀번호 없이)
+G=$(id -g mhchoi); sudo docker exec -u root repman sh -c "chown 10001:$G /data /data/db /data/db/worklog.db; chown -R 10001:$G /data/divisions /data/tmp"
+curl -s 127.0.0.1:11111/api/health        # dbWrite · storage 가 ok
+```
+
+백업 파일(`worklog.db.bak-*` 등)은 root 것이어도 된다. 테스트 서버는 컨테이너 이름만 `repman-test`. 그다음 **누가 바꿨는지** 찾는다 —
+`find /data/worklog -newerct '<그 시각 앞>' ! -newerct '<뒤>'`로 바뀐 시각을 잡고 그 시각의 `journalctl`을 본다.
 
 ## 장애 시 (OPS-18)
 

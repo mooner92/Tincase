@@ -125,16 +125,25 @@ export async function flushOutbox(now = new Date()): Promise<{ batches: number; 
     let failed = 0;
     for (const g of groups.values()) {
       const batchId = `b${now.getTime().toString(36)}${Math.random().toString(36).slice(2, 7)}`;
-      const r = await sendAlert({ recvIds: g.recvIds, subject: g.msg.subject, contents: g.msg.contents, url: g.msg.url, kind: g.msg.kind });
+      /*
+       * NT-12 · OPS-52 (2026-11-25) — **먼저 「보냄」으로 적고 보낸다.** 「보내고 → 적기」는 DB 쓰기가 막힌 날 같은 통을 비울 때마다 다시 보낸다
+       * (마감 전 알림이 그렇게 1분마다 나갔다). 적을 수 없으면 여기서 던진다 — 한 통도 나가지 않는다. 못 보낸 줄은 아래에서 되돌린다.
+       */
+      await prisma.notifyOutbox.updateMany({ where: { id: { in: g.rowIds }, sentAt: null }, data: { sentAt: new Date(), batchId } });
+      let r: SendResult;
+      try {
+        r = await sendAlert({ recvIds: g.recvIds, subject: g.msg.subject, contents: g.msg.contents, url: g.msg.url, kind: g.msg.kind });
+      } catch (e) {
+        r = { requested: g.recvIds.length, sent: [], blocked: [], disabled: false, errors: [String((e as Error)?.message ?? e)] };
+      }
       const ok = new Set(r.sent);
       const okRows = rows.filter((x) => g.rowIds.includes(x.id) && ok.has(x.recvId)).map((x) => x.id);
       const badRows = g.rowIds.filter((id) => !okRows.includes(id));
-      if (okRows.length) await prisma.notifyOutbox.updateMany({ where: { id: { in: okRows } }, data: { sentAt: new Date(), batchId } });
       if (badRows.length) {
-        // 메신저가 꺼졌거나(허용 목록에서 빠짐 포함) 실패 — 횟수를 올리고 다음 비움에. 세 번이면 그만(오류로 남는다)
+        // 메신저가 꺼졌거나(허용 목록에서 빠짐 포함) 실패 — 「보냄」을 되돌리고 횟수를 올려 다음 비움에. 세 번이면 그만(오류로 남는다)
         await prisma.notifyOutbox.updateMany({
           where: { id: { in: badRows } },
-          data: { attempts: { increment: 1 }, error: (r.errors[0] ?? (r.disabled ? '메신저 꺼짐' : '보내지 못함')).slice(0, 300) },
+          data: { sentAt: null, batchId: null, attempts: { increment: 1 }, error: (r.errors[0] ?? (r.disabled ? '메신저 꺼짐' : '보내지 못함')).slice(0, 300) },
         });
       }
       sent += okRows.length;
